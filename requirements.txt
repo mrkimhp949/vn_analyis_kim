@@ -3,3 +3,7 @@ pandas
 ta
 python-telegram-bot==20.7
 schedule
+requests
+fastapi
+uvicorn
+
