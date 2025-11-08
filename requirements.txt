@@ -1,4 +1,4 @@
-vnstock
+vnstock2
 pandas
 ta
 python-telegram-bot==13.15
