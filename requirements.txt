@@ -1,5 +1,5 @@
-vnstock2
+vnstock==0.1.9.5
 pandas
 ta
-python-telegram-bot==13.15
+python-telegram-bot==20.7
 schedule
