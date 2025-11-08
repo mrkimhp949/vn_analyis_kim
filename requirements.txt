@@ -6,4 +6,5 @@ schedule
 requests
 fastapi
 uvicorn
+pytz
 
