@@ -24,14 +24,21 @@ def schedule_job():
 
 # Giám sát Web Service
 def self_monitor():
-    print("Bắt đầu giám sát Web Service...")
+    print("⏳ Chờ Web Service khởi động...")
+    startup_wait = True
+    
     while True:
         try:
             response = requests.get("http://localhost:8000", timeout=5)
+            if startup_wait:
+                print("✅ Web Service đã sẵn sàng!")
+                startup_wait = False
+            
             if response.status_code != 200:
                 print(f"⚠️ Web Service trả về mã {response.status_code}")
         except Exception as e:
-            print(f"❌ Web Service KHÔNG HOẠT ĐỘNG: {e}")
+            if not startup_wait:
+                print(f"❌ Web Service KHÔNG HOẠT ĐỘNG: {e}")
         time.sleep(300)
 
 # FastAPI app
@@ -52,10 +59,10 @@ def status():
 
 # Khởi chạy Web Service
 if __name__ == "__main__":
-    # ✅ Khởi động các thread nền TRƯỚC khi start FastAPI
+    # ✅ Khởi động các thread nền
     threading.Thread(target=schedule_job, daemon=True).start()
-    threading.Thread(target=self_monitor, daemon=True).start()
-    threading.Thread(target=start_bot_listener, daemon=True).start()  # ✅ Chạy trong thread
+    threading.Thread(target=self_monitor, daemon=True).start()  # Hoặc comment dòng này nếu không cần
+    threading.Thread(target=start_bot_listener, daemon=True).start()
     
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)

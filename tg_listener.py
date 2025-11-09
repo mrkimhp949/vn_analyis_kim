@@ -1,5 +1,5 @@
 import asyncio
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
 from config import TELEGRAM_TOKEN
 from bot_runner import run_bot_with_context
@@ -18,6 +18,32 @@ async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📈 Bot đang hoạt động!")
 
+async def run_bot_async():
+    """Hàm async chạy bot"""
+    print("✅ Telegram Bot đang khởi động...")
+    
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("run", run))
+    app.add_handler(CommandHandler("status", status))
+    
+    # ✅ Khởi tạo và chạy bot thủ công
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+    
+    print("✅ Telegram Bot đã sẵn sàng!")
+    
+    # Giữ bot chạy mãi mãi
+    try:
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        print("🛑 Đang dừng bot...")
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+
 def start_bot_listener():
     """Chạy Telegram bot trong thread riêng với event loop mới"""
     # ✅ Tạo event loop mới cho thread này
@@ -25,15 +51,10 @@ def start_bot_listener():
     asyncio.set_event_loop(loop)
     
     try:
-        print("✅ Telegram Bot đang khởi động...")
-        app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("run", run))
-        app.add_handler(CommandHandler("status", status))
-        
-        # ✅ Chạy polling trong event loop mới
-        app.run_polling()
+        loop.run_until_complete(run_bot_async())
     except Exception as e:
         print(f"❌ Lỗi Telegram Bot: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         loop.close()
