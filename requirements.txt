@@ -4,16 +4,8 @@ python-telegram-bot==20.7
 httpx==0.25.2
 requests==2.31.0
 pytz==2023.3
-vnstock==3.1.5
+vnstock==3.2.6
 pandas==2.1.3
 ta==0.11.0
 numpy<2.0.0
-```
-
-## 🔧 **Thêm vào Render Settings:**
-
-1. Vào **Render Dashboard** → Your Service → **Environment**
-2. Thêm biến môi trường:
-```
-PYTHON_VERSION=3.11.0
 
