@@ -27,23 +27,30 @@ def load_data(symbol, lookback=200):
         
         # Tạo DataFrame từ response
         df = pd.DataFrame(data['data'])
-        
-        # ✅ Đổi tên cột (TCBS dùng 'tradingDate' thay vì 't')
-        df = df.rename(columns={
-            'tradingDate': 'time',
-            'open': 'open',
-            'high': 'high',
-            'low': 'low',
-            'close': 'close',
-            'volume': 'volume'
-        })
-        
-        # Chọn cột cần thiết
+
+        # Normalize tên cột: API có thể trả 'tradingDate' (string) hoặc 't' (unix ts)
+        if 'tradingDate' in df.columns:
+            df = df.rename(columns={'tradingDate': 'time'})
+            df['time'] = pd.to_datetime(df['time'])
+        elif 't' in df.columns:
+            df = df.rename(columns={'t': 'time'})
+            # Nếu time là unix timestamp int/float
+            try:
+                df['time'] = pd.to_datetime(df['time'], unit='s')
+            except Exception:
+                df['time'] = pd.to_datetime(df['time'], errors='coerce')
+        else:
+            # fallback nếu đã có 'time' hoặc khác
+            if 'time' in df.columns:
+                df['time'] = pd.to_datetime(df['time'], errors='coerce')
+
+        # Chọn cột cần thiết (bảo đảm tồn tại)
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col not in df.columns:
+                df[col] = None
+
         df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
-        
-        # Chuyển đổi time
-        df['time'] = pd.to_datetime(df['time'])
-        
+
         # Loại bỏ NaN và sắp xếp
         df = df.dropna()
         df = df.sort_values('time')

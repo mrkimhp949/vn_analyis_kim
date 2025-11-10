@@ -17,6 +17,7 @@ class Backtester:
         """
         self.initial_capital = initial_capital
         self.commission = commission
+        # lazy init ML generator may load models inside its constructor
         self.ml_generator = MLSignalGenerator()
         
     def run_backtest(self, symbol, start_date=None, end_date=None, lookback=500, confidence_threshold=50):
@@ -39,9 +40,6 @@ class Backtester:
         print(f"{'='*60}")
         
         # Load data
-        from data_loader import load_data
-        from ml_signals import MLSignalGenerator
-        
         df = load_data(symbol, lookback=lookback)
         
         if start_date:
@@ -52,8 +50,8 @@ class Backtester:
         print(f"📅 Từ {df['time'].min().date()} đến {df['time'].max().date()}")
         print(f"📈 Tổng số ngày: {len(df)}")
         
-        # Initialize ML
-        ml_generator = MLSignalGenerator()
+        # Initialize ML (use lazy-initialized self.ml_generator)
+        ml_generator = self.ml_generator
         
         # Portfolio
         capital = self.initial_capital
@@ -66,20 +64,20 @@ class Backtester:
             current_data = df.iloc[:i+1].copy()
             current_row = df.iloc[i]
             
-            # ✅ ML Analysis (giống bot)
+            # ML Analysis
             try:
                 result = ml_generator.analyze(current_data)
-                signal = result['signal']
-                confidence = result['confidence']
+                signal = result.get('signal', 'HOLD')
+                confidence = result.get('confidence', 0)
                 price = current_row['close']
                 
-                # ✅ CHỈ VÀO LỆNH KHI CONFIDENCE >= THRESHOLD
+                # CHỈ VÀO LỆNH KHI CONFIDENCE >= THRESHOLD
                 if signal == 'BUY' and confidence >= confidence_threshold and position == 0:
                     # Mua
                     shares_to_buy = int(capital * 0.95 / price)  # Dùng 95% vốn
                     cost = shares_to_buy * price * (1 + self.commission)
                     
-                    if cost <= capital:
+                    if cost <= capital and shares_to_buy > 0:
                         position = shares_to_buy
                         capital -= cost
                         
@@ -90,7 +88,7 @@ class Backtester:
                             'shares': shares_to_buy,
                             'value': cost,
                             'confidence': confidence,
-                            'ml_score': result['ml_score']
+                            'ml_score': result.get('ml_score', 0)
                         })
                 
                 elif signal == 'SELL' and confidence >= confidence_threshold and position > 0:
@@ -105,7 +103,7 @@ class Backtester:
                         'shares': position,
                         'value': revenue,
                         'confidence': confidence,
-                        'ml_score': result['ml_score']
+                        'ml_score': result.get('ml_score', 0)
                     })
                     
                     position = 0
@@ -165,7 +163,7 @@ class Backtester:
         
         # Portfolio values
         portfolio_df = pd.DataFrame(portfolio_values)
-        max_drawdown = self._calculate_max_drawdown(portfolio_df['value'].values)
+        max_drawdown = self._calculate_max_drawdown(portfolio_df['value'].values) if not portfolio_df.empty else 0
         
         # Sharpe Ratio
         returns = portfolio_df['value'].pct_change().dropna()
@@ -316,13 +314,14 @@ class Backtester:
             import traceback
             traceback.print_exc()
     
-    def run_multiple_backtest(self, symbols, lookback=500):
-        """Chạy backtest cho nhiều cổ phiếu"""
+    def run_multiple_backtest(self, symbols, lookback=500, confidence_threshold=50):
+        """Chạy backtest cho nhiều cổ phiếu
+        Thêm tham số confidence_threshold để đồng bộ với giao diện gọi."""
         all_results = []
         
         for symbol in symbols:
             try:
-                result = self.run_backtest(symbol, lookback=lookback)
+                result = self.run_backtest(symbol, lookback=lookback, confidence_threshold=confidence_threshold)
                 all_results.append(result)
             except Exception as e:
                 print(f"❌ Lỗi backtest {symbol}: {e}")

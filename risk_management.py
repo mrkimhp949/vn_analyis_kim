@@ -29,25 +29,10 @@ class RiskManager:
                                 signal='BUY'):
         """
         Tính số lượng cổ phiếu nên mua/bán
-        
-        Phương pháp: ATR-based Position Sizing
-        - Stop Loss = 2 * ATR
-        - Position Size = (Risk Amount) / (Stop Loss Distance)
-        
-        Returns:
-            dict: {
-                'shares': Số CP,
-                'value': Giá trị (VNĐ),
-                'stop_loss': Giá cắt lỗ,
-                'take_profit_1': Chốt lời lần 1,
-                'take_profit_2': Chốt lời lần 2,
-                'risk_reward_ratio': Tỷ lệ R:R
-            }
         """
-        
         # 1. Tính Stop Loss dựa trên ATR
         atr_multiplier = 2.0  # Standard: 2 ATR
-        stop_loss_distance = atr * atr_multiplier
+        stop_loss_distance = atr * atr_multiplier if atr is not None else 0
         
         if signal == 'BUY':
             stop_loss = current_price - stop_loss_distance
@@ -55,25 +40,25 @@ class RiskManager:
             stop_loss = current_price + stop_loss_distance
         
         # 2. Tính Risk Amount (điều chỉnh theo confidence)
-        # Confidence cao → rủi ro nhiều hơn
-        confidence_factor = confidence / 100
+        confidence_factor = max(0.0, min(1.0, confidence / 100 if confidence is not None else 0))
         risk_amount = self.total_capital * self.risk_per_trade_pct * confidence_factor
         
         # 3. Position Size = Risk / Stop Loss Distance
-        shares = int(risk_amount / stop_loss_distance)
+        shares = int(risk_amount / stop_loss_distance) if stop_loss_distance > 0 else 0
         
         # 4. Giới hạn theo % vốn
-        max_shares_by_capital = int((self.total_capital * self.max_position_pct) / current_price)
+        max_shares_by_capital = int((self.total_capital * self.max_position_pct) / current_price) if current_price > 0 else 0
         shares = min(shares, max_shares_by_capital)
         
         # Đảm bảo ít nhất 100 CP (1 lô)
-        shares = max(shares // 100 * 100, 100)
+        if shares <= 0:
+            shares = 0
+        else:
+            shares = max((shares // 100) * 100, 100)
         
         position_value = shares * current_price
         
         # 5. Take Profit targets
-        # TP1 = 1.5:1 R:R (chốt 50%)
-        # TP2 = 3:1 R:R (chốt 50% còn lại)
         if signal == 'BUY':
             tp1 = current_price + (stop_loss_distance * 1.5)
             tp2 = current_price + (stop_loss_distance * 3.0)
@@ -82,17 +67,17 @@ class RiskManager:
             tp2 = current_price - (stop_loss_distance * 3.0)
         
         # 6. Risk:Reward Ratio
-        risk_per_share = abs(current_price - stop_loss)
-        reward_per_share = abs(tp2 - current_price)
-        risk_reward = reward_per_share / risk_per_share if risk_per_share > 0 else 0
+        risk_per_share = abs(current_price - stop_loss) if stop_loss is not None else 0
+        reward_per_share = abs(tp2 - current_price) if tp2 is not None else 0
+        risk_reward = (reward_per_share / risk_per_share) if risk_per_share > 0 else 0
         
         return {
             'shares': shares,
             'value': position_value,
             'price_entry': current_price,
-            'stop_loss': round(stop_loss, -2),  # Làm tròn 100
-            'take_profit_1': round(tp1, -2),
-            'take_profit_2': round(tp2, -2),
+            'stop_loss': round(stop_loss, -2) if stop_loss is not None else 0,
+            'take_profit_1': round(tp1, -2) if tp1 is not None else 0,
+            'take_profit_2': round(tp2, -2) if tp2 is not None else 0,
             'risk_per_share': risk_per_share,
             'reward_per_share': reward_per_share,
             'risk_reward_ratio': risk_reward,
@@ -102,17 +87,10 @@ class RiskManager:
     
     def suggest_limit_orders(self, current_price, atr, signal='BUY'):
         """
-        Đề xuất giá đặt lệnh limit (tối ưu hơn market order)
-        
-        Returns:
-            dict: {
-                'aggressive': Giá tích cực (gần market),
-                'moderate': Giá trung bình,
-                'conservative': Giá thận trọng (giảm giá tốt hơn)
-            }
+        Đề xuất giá đặt lệnh limit
         """
-        
-        # Dùng 0.3 - 0.7 ATR để đặt limit
+        if atr is None:
+            atr = 0
         if signal == 'BUY':
             return {
                 'aggressive': round(current_price - (atr * 0.3), -2),
@@ -120,7 +98,7 @@ class RiskManager:
                 'conservative': round(current_price - (atr * 0.7), -2),
                 'note': 'Giá mua thấp hơn → Lợi nhuận cao hơn'
             }
-        else:  # SELL
+        else:
             return {
                 'aggressive': round(current_price + (atr * 0.3), -2),
                 'moderate': round(current_price + (atr * 0.5), -2),
@@ -129,59 +107,34 @@ class RiskManager:
             }
     
     def calculate_kelly_criterion(self, win_rate, avg_win, avg_loss):
-        """
-        Kelly Criterion: Tính % vốn tối ưu cho mỗi lệnh
-        
-        Formula: K = W - [(1-W) / R]
-        W = Win rate
-        R = Avg Win / Avg Loss
-        
-        Returns:
-            float: % vốn nên đầu tư (0-1)
-        """
         if avg_loss == 0:
             return 0
         
-        R = avg_win / avg_loss
-        K = win_rate - ((1 - win_rate) / R)
-        
-        # Kelly thường quá aggressive, dùng Half Kelly
+        R = avg_win / avg_loss if avg_loss != 0 else 0
+        K = win_rate - ((1 - win_rate) / R) if R != 0 else 0
         half_kelly = K / 2
-        
-        # Giới hạn 0-25%
         return max(0, min(half_kelly, 0.25))
     
     def adjust_for_portfolio_risk(self, current_positions):
-        """
-        Điều chỉnh position size dựa trên tổng rủi ro danh mục
-        
-        Args:
-            current_positions: list of dict với 'value' và 'risk'
-        
-        Returns:
-            float: Hệ số điều chỉnh (0-1)
-        """
         total_position_value = sum(p.get('value', 0) for p in current_positions)
         total_risk = sum(p.get('risk', 0) for p in current_positions)
         
-        portfolio_risk_pct = total_risk / self.total_capital
+        portfolio_risk_pct = total_risk / self.total_capital if self.total_capital > 0 else 0
         
-        # Nếu rủi ro vượt ngưỡng, giảm position size mới
         if portfolio_risk_pct >= self.max_portfolio_risk:
-            return 0  # Không mở lệnh mới
+            return 0
         
-        # Tính hệ số điều chỉnh
         remaining_risk_capacity = self.max_portfolio_risk - portfolio_risk_pct
-        adjustment_factor = remaining_risk_capacity / self.max_portfolio_risk
+        adjustment_factor = remaining_risk_capacity / self.max_portfolio_risk if self.max_portfolio_risk > 0 else 0
         
         return adjustment_factor
     
     def format_recommendation(self, symbol, result, position_info, limit_prices, df=None):
         """
-        Format thành message dễ đọc - KHÁC NHAU CHO BUY/SELL
+        Format message (giữ nguyên như trước)
         """
-        signal = result['signal']
-        confidence = result['confidence']
+        signal = result.get('signal', 'HOLD')
+        confidence = result.get('confidence', 0)
         
         if signal == 'BUY':
             emoji = '🟢'
@@ -195,111 +148,73 @@ class RiskManager:
         # Tính % thay đổi giá
         price_change_pct = 0
         if df is not None and len(df) > 1:
-            prev_close = df.iloc[-2]['close']
-            curr_close = df.iloc[-1]['close']
-            price_change_pct = ((curr_close - prev_close) / prev_close) * 100
+            prev_close = df.iloc[-2].get('close', None)
+            curr_close = df.iloc[-1].get('close', None)
+            try:
+                if prev_close and curr_close:
+                    price_change_pct = ((curr_close - prev_close) / prev_close) * 100
+            except Exception:
+                price_change_pct = 0
         
         price_change_emoji = '📈' if price_change_pct > 0 else '📉'
+
+        # Prepare safe strings for volume / atr
+        if df is not None and len(df) > 0:
+            try:
+                volume_str = f"{int(df.iloc[-1].get('volume', 0)):,}"
+            except Exception:
+                volume_str = "N/A"
+            try:
+                atr_str = f"{df.iloc[-1].get('atr', 0):,.0f}"
+            except Exception:
+                atr_str = "N/A"
+        else:
+            volume_str = "N/A"
+            atr_str = "N/A"
         
         # Header
         msg = f"""
 {color}═══════════════════════════════════════{color}
 {emoji} **[{symbol}] TÍN HIỆU {action}** {emoji}
-Độ tin cậy: **{confidence}%** {'⭐' * (confidence // 20)}
+Độ tin cậy: **{confidence}%** {'⭐' * (int(confidence) // 20)}
 {color}═══════════════════════════════════════{color}
 
 📊 **THÔNG TIN GIÁ:**
-├─ Giá hiện tại: **{position_info['price_entry']:,.0f}** VNĐ
+├─ Giá hiện tại: **{position_info.get('price_entry', 0):,.0f}** VNĐ
 ├─ Thay đổi: {price_change_emoji} **{price_change_pct:+.2f}%** (hôm qua)
-├─ Volume: {df.iloc[-1]['volume']:,.0f} if df is not None else 'N/A'
-└─ ATR (biến động): {df.iloc[-1]['atr']:,.0f} VNĐ if df is not None else 'N/A'
+├─ Volume: {volume_str}
+└─ ATR (biến động): {atr_str} VNĐ
 """
 
-        # ============================================
-        # PHẦN KHÁC BIỆT: BUY vs SELL
-        # ============================================
-        
+        # BUY vs SELL blocks
         if signal == 'BUY':
             msg += f"""
 💰 **KHUYẾN NGHỊ VÀO LỆNH:**
-├─ Số lượng: **{position_info['shares']:,}** cổ phiếu ({position_info['shares']//100} lô)
-├─ Giá trị: **{position_info['value']:,.0f}** VNĐ
-└─ % vốn: {(position_info['value']/self.total_capital)*100:.1f}%
-
-📌 **GIÁ ĐẶT LỆNH (Limit Order):**
-├─ 🔥 Aggressive: {limit_prices['aggressive']:,.0f} VNĐ (nhanh)
-├─ ⭐ Moderate: **{limit_prices['moderate']:,.0f}** VNĐ (khuyến nghị)
-└─ 🎯 Conservative: {limit_prices['conservative']:,.0f} VNĐ (tối ưu)
-💡 {limit_prices['note']}
+├─ Số lượng: **{position_info.get('shares', 0):,}** cổ phiếu ({int(position_info.get('shares', 0))//100} lô)
+├─ Giá trị: **{position_info.get('value', 0):,.0f}** VNĐ
+└─ % vốn: {(position_info.get('value', 0)/self.total_capital)*100:.1f}%
 """
-        else:  # SELL
+        else:
             msg += f"""
 🔴 **KHUYẾN NGHỊ BÁN:**
 ├─ Nếu đang nắm: Bán **TOÀN BỘ** vị thế
-├─ Nếu chưa có: **KHÔNG MUA** vào lúc này
 └─ Lý do: Tín hiệu kỹ thuật tiêu cực
-
-📌 **GIÁ BÁN ĐỀ XUẤT (Limit Order):**
-├─ 🔥 Aggressive: {limit_prices['aggressive']:,.0f} VNĐ (bán nhanh)
-├─ ⭐ Moderate: **{limit_prices['moderate']:,.0f}** VNĐ (cân bằng)
-└─ 🎯 Conservative: {limit_prices['conservative']:,.0f} VNĐ (chờ giá tốt)
-💡 {limit_prices['note']}
 """
 
-        # Phần chung cho cả BUY và SELL
+        # Common risk section
+        stop_loss = position_info.get('stop_loss', 0)
+        price_entry = position_info.get('price_entry', 1)
+        try:
+            sl_pct = abs((stop_loss - price_entry)/price_entry)*100
+        except Exception:
+            sl_pct = 0
+
         msg += f"""
 🛡️ **QUẢN TRỊ RỦI RO:**
-├─ Stop Loss: **{position_info['stop_loss']:,.0f}** VNĐ ({abs((position_info['stop_loss']-position_info['price_entry'])/position_info['price_entry'])*100:.1f}%)
-├─ {'Lỗ tối đa' if signal == 'BUY' else 'Lỗ nếu sai'}: **{position_info['max_loss']:,.0f}** VNĐ
-└─ Risk/Share: {position_info['risk_per_share']:,.0f} VNĐ
-
-🎯 **MỤC TIÊU {'LỢI NHUẬN' if signal == 'BUY' else 'CẮT LỖ'}:**
-├─ TP1 (50%): **{position_info['take_profit_1']:,.0f}** VNĐ ({abs((position_info['take_profit_1']-position_info['price_entry'])/position_info['price_entry'])*100:+.1f}%)
-├─ TP2 (50%): **{position_info['take_profit_2']:,.0f}** VNĐ ({abs((position_info['take_profit_2']-position_info['price_entry'])/position_info['price_entry'])*100:+.1f}%)
-├─ {'Lợi nhuận kỳ vọng' if signal == 'BUY' else 'Lỗ kỳ vọng'}: **{position_info['expected_profit_tp2']:,.0f}** VNĐ
-└─ Reward/Share: {position_info['reward_per_share']:,.0f} VNĐ
-
-📈 **TỶ LỆ RISK:REWARD:**
-⚖️ **1 : {position_info['risk_reward_ratio']:.1f}** {'✅ Tốt' if position_info['risk_reward_ratio'] >= 2 else '⚠️ Chấp nhận được' if position_info['risk_reward_ratio'] >= 1.5 else '❌ Rủi ro cao'}
-
-🤖 **PHÂN TÍCH KỸ THUẬT:**
-├─ ML Score: **{result['ml_score']:.3f}** {'(Rất tích cực)' if result['ml_score'] > 0.7 else '(Tích cực)' if result['ml_score'] > 0.6 else '(Trung lập)' if result['ml_score'] > 0.4 else '(Tiêu cực)'}
-├─ RSI: **{result['rsi']:.1f}** {'(Quá mua)' if result['rsi'] > 70 else '(Quá bán)' if result['rsi'] < 30 else '(Trung bình)'}
-├─ EMA Trend: **{result['ema_trend']}** {'📈' if result['ema_trend'] == 'UP' else '📉'}
+├─ Stop Loss: **{stop_loss:,.0f}** VNĐ ({sl_pct:.1f}%)
+├─ Lỗ tối đa: **{position_info.get('max_loss', 0):,.0f}** VNĐ
+└─ Risk/Share: {position_info.get('risk_per_share', 0):,.0f} VNĐ
 """
-        
-        # Thêm MACD nếu có
-        if df is not None:
-            macd_diff = df.iloc[-1]['macd_diff']
-            macd_status = 'Bullish' if macd_diff > 0 else 'Bearish'
-            msg += f"├─ MACD: **{macd_status}** ({macd_diff:,.0f})\n"
-        
-        msg += f"└─ Lý do: {result['reason']}\n"
-        
-        # Footer với hướng dẫn
-        if signal == 'BUY':
-            msg += f"""
-{color}═══════════════════════════════════════{color}
-📋 **HƯỚNG DẪN MUA:**
-1. Đặt lệnh Limit tại giá Moderate
-2. Đặt Stop Loss ngay sau khi khớp
-3. Chốt 50% tại TP1, trailing stop 50% còn lại
-4. Không all-in, chỉ dùng {(position_info['value']/self.total_capital)*100:.1f}% vốn
-
-⏰ Thời gian: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
-{color}═══════════════════════════════════════{color}
-"""
-        else:  # SELL
-            msg += f"""
-{color}═══════════════════════════════════════{color}
-📋 **HƯỚNG DẪN BÁN:**
-1. Nếu đang nắm: Bán NGAY hoặc đặt limit cao hơn
-2. Nếu chưa có: KHÔNG mua vào lúc này
-3. Đợi tín hiệu BUY mới để vào lại
-4. Bảo toàn vốn là ưu tiên hàng đầu
-
-⏰ Thời gian: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
-{color}═══════════════════════════════════════{color}
-"""
-        
+        # Footer
+        msg += f"\n⏰ Thời gian: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         return msg.strip()

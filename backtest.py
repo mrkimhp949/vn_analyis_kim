@@ -6,7 +6,8 @@ import sys
 import os
 import pandas as pd
 from datetime import datetime
-from backtest import Backtester
+# Sửa import sang run_backtest để tránh import vòng
+from run_backtest import Backtester
 from config import TICKERS
 
 # Force unbuffered output
@@ -17,6 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 def main():
     # === Chuẩn bị thư mục kết quả ===
     os.makedirs('backtest_results', exist_ok=True)
+    os.makedirs('models', exist_ok=True)
 
     print("""
     ╔════════════════════════════════════════════════╗
@@ -109,6 +111,7 @@ def main():
         print(f"\n🚀 Bắt đầu backtest {len(TICKERS)} cổ phiếu với threshold {threshold}%...\n")
 
         try:
+            # run_multiple_backtest đã được cập nhật để nhận confidence_threshold
             results = backtester.run_multiple_backtest(TICKERS[:5], lookback=lookback, confidence_threshold=threshold)
             print(f"\n✅ Kết quả đã lưu trong thư mục: backtest_results/")
         except Exception as e:
