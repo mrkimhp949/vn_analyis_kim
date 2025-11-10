@@ -1,0 +1,64 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Test imports
+        run: |
+          python -c "
+          try:
+              import pandas as pd
+              import numpy as np
+              from fastapi import FastAPI
+              import uvicorn
+              print('✅ All imports successful')
+          except ImportError as e:
+              print(f'❌ Import error: {e}')
+              exit(1)
+          "
+
+      - name: Test data loader
+        run: |
+          python -c "
+          try:
+              from data_loader import load_data
+              df = load_data('VNM', 5)
+              print(f'✅ Data loader test passed: {len(df)} rows')
+          except Exception as e:
+              print(f'⚠️ Data loader warning: {e}')
+          "
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy to Render
+        uses: johnbeynon/reploy-action@v0.0.1
+        with:
+          service-id: ${{ secrets.RENDER_SERVICE_ID }}
+          api-key: ${{ secrets.RENDER_API_KEY }}

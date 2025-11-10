@@ -6,7 +6,6 @@ import sys
 import os
 import pandas as pd
 from datetime import datetime
-# Sửa import sang run_backtest để tránh import vòng
 from run_backtest import Backtester
 from config import TICKERS
 
@@ -71,29 +70,32 @@ def main():
         try:
             result = backtester.run_backtest(symbol, lookback=lookback, confidence_threshold=threshold)
 
-            print("\n" + "=" * 60)
-            print("✅ HOÀN THÀNH!")
-            print(f"📊 Return: {result['total_return']:.2f}%")
-            print(f"🔄 Trades: {result['total_trades']}")
-            print(f"🎯 Win Rate: {result['win_rate']:.2f}%")
-            print(f"⚖️ Sharpe Ratio: {result.get('sharpe_ratio', 0):.2f}")
-            print("=" * 60)
+            if result['total_trades'] == 0:
+                print("❌ Không có giao dịch nào được thực hiện!")
+            else:
+                print("\n" + "=" * 60)
+                print("✅ HOÀN THÀNH!")
+                print(f"📊 Return: {result['total_return']:.2f}%")
+                print(f"🔄 Trades: {result['total_trades']}")
+                print(f"🎯 Win Rate: {result['win_rate']:.2f}%")
+                print(f"⚖️ Sharpe Ratio: {result.get('sharpe_ratio', 0):.2f}")
+                print("=" * 60)
 
-            # Biểu đồ
-            if input("\nVẽ biểu đồ? (y/n): ").strip().lower() == 'y':
-                backtester.plot_results(result)
-                print("✅ Đã vẽ biểu đồ!")
+                # Biểu đồ
+                if input("\nVẽ biểu đồ? (y/n): ").strip().lower() == 'y':
+                    backtester.plot_results(result)
+                    print("✅ Đã vẽ biểu đồ!")
 
-            # Giao dịch chi tiết
-            if input("\nHiển thị chi tiết giao dịch? (y/n): ").strip().lower() == 'y' and len(result['trades']) > 0:
-                print("\n📋 CHI TIẾT GIAO DỊCH:")
-                print(result['trades'].to_string(index=False))
+                # Giao dịch chi tiết
+                if input("\nHiển thị chi tiết giao dịch? (y/n): ").strip().lower() == 'y' and len(result['trades']) > 0:
+                    print("\n📋 CHI TIẾT GIAO DỊCH:")
+                    print(result['trades'].to_string(index=False))
 
-                if input("\nLưu giao dịch vào CSV? (y/n): ").strip().lower() == 'y':
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    file = f'backtest_results/{symbol}_trades_{timestamp}.csv'
-                    result['trades'].to_csv(file, index=False, encoding='utf-8-sig')
-                    print(f"💾 Đã lưu: {file}")
+                    if input("\nLưu giao dịch vào CSV? (y/n): ").strip().lower() == 'y':
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        file = f'backtest_results/{symbol}_trades_{timestamp}.csv'
+                        result['trades'].to_csv(file, index=False, encoding='utf-8-sig')
+                        print(f"💾 Đã lưu: {file}")
 
         except Exception as e:
             print(f"\n❌ Lỗi backtest: {e}")

@@ -5,20 +5,70 @@ Backtesting Engine - Kiểm tra hiệu suất chiến lược
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import matplotlib
+matplotlib.use('Agg')  # Sử dụng backend không cần GUI
 import matplotlib.pyplot as plt
 from data_loader import load_data
 from ml_signals import MLSignalGenerator
+import concurrent.futures
+import os
+
+# Fallback progress bar nếu không có tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    print("⚠️ Tqdm not installed, using simple progress indicator")
+    
+    class tqdm:
+        def __init__(self, iterable=None, total=None, desc=None):
+            self.iterable = iterable
+            self.total = total or len(iterable) if iterable else 0
+            self.desc = desc or ""
+            self.n = 0
+        
+        def __iter__(self):
+            if self.iterable:
+                for i, item in enumerate(self.iterable):
+                    self.n = i + 1
+                    if i % max(1, self.total // 10) == 0:  # Update every 10%
+                        print(f"{self.desc}: {self.n}/{self.total} ({self.n/self.total*100:.1f}%)")
+                    yield item
+            else:
+                for i in range(self.total):
+                    self.n = i + 1
+                    if i % max(1, self.total // 10) == 0:
+                        print(f"{self.desc}: {self.n}/{self.total} ({self.n/self.total*100:.1f}%)")
+                    yield i
+        
+        def update(self, n=1):
+            self.n += n
+        
+        def close(self):
+            pass
+        
+        def __enter__(self):
+            return self
+        
+        def __exit__(self, *args):
+            pass
 
 class Backtester:
-    def __init__(self, initial_capital=100_000_000, commission=0.0015):
+    def __init__(self, initial_capital=100_000_000, commission=0.0015, slippage=0.001):
         """
         initial_capital: Vốn ban đầu (VNĐ)
         commission: Phí giao dịch (0.15% mỗi chiều)
+        slippage: Trượt giá 0.1%
         """
         self.initial_capital = initial_capital
         self.commission = commission
+        self.slippage = slippage
         # lazy init ML generator may load models inside its constructor
         self.ml_generator = MLSignalGenerator()
+    
+    def _apply_slippage(self, price, signal):
+        """Áp dụng slippage cho giá"""
+        slippage_factor = 1 + (self.slippage if signal == 'BUY' else -self.slippage)
+        return price * slippage_factor
         
     def run_backtest(self, symbol, start_date=None, end_date=None, lookback=500, confidence_threshold=50):
         """
@@ -39,13 +89,55 @@ class Backtester:
         print(f"💡 Confidence Threshold: {confidence_threshold}%")
         print(f"{'='*60}")
         
-        # Load data
-        df = load_data(symbol, lookback=lookback)
+        # Load data - SỬA: thêm try-catch
+        try:
+            df = load_data(symbol, lookback=lookback)
+            if df.empty:
+                raise ValueError(f"Không có dữ liệu cho {symbol}")
+        except Exception as e:
+            print(f"❌ Lỗi load data {symbol}: {e}")
+            return {
+                'symbol': symbol,
+                'initial_capital': self.initial_capital,
+                'final_capital': self.initial_capital,
+                'total_return': 0,
+                'buy_hold_return': 0,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'max_drawdown': 0,
+                'sharpe_ratio': 0,
+                'avg_confidence': 0,
+                'confidence_threshold': confidence_threshold,
+                'trades': pd.DataFrame(),
+                'portfolio_values': pd.DataFrame()
+            }
         
         if start_date:
             df = df[df['time'] >= start_date]
         if end_date:
             df = df[df['time'] <= end_date]
+        
+        if df.empty:
+            print(f"❌ Không có dữ liệu sau filter cho {symbol}")
+            return {
+                'symbol': symbol,
+                'initial_capital': self.initial_capital,
+                'final_capital': self.initial_capital,
+                'total_return': 0,
+                'buy_hold_return': 0,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'max_drawdown': 0,
+                'sharpe_ratio': 0,
+                'avg_confidence': 0,
+                'confidence_threshold': confidence_threshold,
+                'trades': pd.DataFrame(),
+                'portfolio_values': pd.DataFrame()
+            }
         
         print(f"📅 Từ {df['time'].min().date()} đến {df['time'].max().date()}")
         print(f"📈 Tổng số ngày: {len(df)}")
@@ -59,10 +151,38 @@ class Backtester:
         trades = []
         portfolio_values = []
         
-        # Simulate trading
+        # Simulate trading với progress indicator
+        total_days = len(df) - 50
+        if total_days <= 0:
+            print(f"❌ Không đủ dữ liệu để backtest (cần >50 ngày)")
+            return {
+                'symbol': symbol,
+                'initial_capital': self.initial_capital,
+                'final_capital': self.initial_capital,
+                'total_return': 0,
+                'buy_hold_return': 0,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'max_drawdown': 0,
+                'sharpe_ratio': 0,
+                'avg_confidence': 0,
+                'confidence_threshold': confidence_threshold,
+                'trades': pd.DataFrame(),
+                'portfolio_values': pd.DataFrame()
+            }
+            
+        print(f"⏳ Đang mô phỏng {total_days} ngày giao dịch...")
+        
         for i in range(50, len(df)):  # Skip first 50 days for indicators
             current_data = df.iloc[:i+1].copy()
             current_row = df.iloc[i]
+            
+            # Hiển thị progress mỗi 10%
+            if (i - 50) % max(1, total_days // 10) == 0:
+                progress = (i - 50) / total_days * 100
+                print(f"  📊 Đang xử lý: {progress:.1f}%")
             
             # ML Analysis
             try:
@@ -71,11 +191,14 @@ class Backtester:
                 confidence = result.get('confidence', 0)
                 price = current_row['close']
                 
+                # Áp dụng slippage
+                execution_price = self._apply_slippage(price, signal)
+                
                 # CHỈ VÀO LỆNH KHI CONFIDENCE >= THRESHOLD
                 if signal == 'BUY' and confidence >= confidence_threshold and position == 0:
                     # Mua
-                    shares_to_buy = int(capital * 0.95 / price)  # Dùng 95% vốn
-                    cost = shares_to_buy * price * (1 + self.commission)
+                    shares_to_buy = int(capital * 0.95 / execution_price)  # Dùng 95% vốn
+                    cost = shares_to_buy * execution_price * (1 + self.commission)
                     
                     if cost <= capital and shares_to_buy > 0:
                         position = shares_to_buy
@@ -84,7 +207,7 @@ class Backtester:
                         trades.append({
                             'date': current_row['time'],
                             'type': 'BUY',
-                            'price': price,
+                            'price': execution_price,
                             'shares': shares_to_buy,
                             'value': cost,
                             'confidence': confidence,
@@ -93,13 +216,13 @@ class Backtester:
                 
                 elif signal == 'SELL' and confidence >= confidence_threshold and position > 0:
                     # Bán
-                    revenue = position * price * (1 - self.commission)
+                    revenue = position * execution_price * (1 - self.commission)
                     capital += revenue
                     
                     trades.append({
                         'date': current_row['time'],
                         'type': 'SELL',
-                        'price': price,
+                        'price': execution_price,
                         'shares': position,
                         'value': revenue,
                         'confidence': confidence,
@@ -122,13 +245,14 @@ class Backtester:
         # Close any open position
         if position > 0:
             final_price = df.iloc[-1]['close']
-            capital += position * final_price * (1 - self.commission)
+            final_execution_price = self._apply_slippage(final_price, 'SELL')
+            capital += position * final_execution_price * (1 - self.commission)
             trades.append({
                 'date': df.iloc[-1]['time'],
                 'type': 'SELL',
-                'price': final_price,
+                'price': final_execution_price,
                 'shares': position,
-                'value': position * final_price,
+                'value': position * final_execution_price,
                 'confidence': 0,
                 'ml_score': 0
             })
@@ -194,8 +318,35 @@ class Backtester:
         
         return results
     
+    def run_multiple_backtest_parallel(self, symbols, lookback=500, confidence_threshold=50, max_workers=3):
+        """Chạy backtest song song cho nhiều cổ phiếu"""
+        print(f"🚀 Chạy backtest song song {len(symbols)} mã (workers: {max_workers})")
+        
+        def run_single(symbol):
+            try:
+                return self.run_backtest(symbol, lookback=lookback, confidence_threshold=confidence_threshold)
+            except Exception as e:
+                print(f"❌ Lỗi {symbol}: {e}")
+                return None
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(tqdm(
+                executor.map(run_single, symbols),
+                total=len(symbols),
+                desc="Backtesting"
+            ))
+        
+        # Lọc kết quả None
+        valid_results = [r for r in results if r is not None]
+        self._print_summary(valid_results)
+        
+        return valid_results
+
     def _calculate_max_drawdown(self, values):
         """Tính Max Drawdown"""
+        if len(values) == 0:
+            return 0
+            
         peak = values[0]
         max_dd = 0
         
@@ -247,6 +398,10 @@ class Backtester:
         portfolio_df = results['portfolio_values']
         trades_df = results['trades']
         
+        if portfolio_df.empty:
+            print("❌ Không có dữ liệu portfolio để vẽ biểu đồ")
+            return
+            
         fig, axes = plt.subplots(2, 1, figsize=(14, 10))
         
         # Portfolio value
@@ -331,6 +486,7 @@ class Backtester:
         
         return all_results
     
+    # Trong method _print_summary, sửa phần export CSV:
     def _print_summary(self, all_results):
         """Tổng kết backtest nhiều cổ phiếu"""
         import os
@@ -340,6 +496,10 @@ class Backtester:
         print(f"📊 TỔNG KẾT BACKTEST")
         print(f"{'='*60}")
         
+        if not all_results:
+            print("❌ Không có kết quả nào để tổng kết")
+            return
+            
         summary_df = pd.DataFrame([{
             'Symbol': r['symbol'],
             'Return (%)': f"{r['total_return']:.2f}",
@@ -432,16 +592,23 @@ class Backtester:
                 file_size = os.path.getsize(excel_filename)
                 print(f"✅ Đã xuất Excel: {excel_filename} ({file_size:,} bytes)")
             
-            # Cũng export CSV đơn giản
+            # Cũng export CSV đơn giản - SỬA LỖI ENCODING
             csv_filename = f'backtest_results/summary_{timestamp}.csv'
-            detailed_summary.to_csv(csv_filename, index=False, encoding='utf-8-sig')
+            try:
+                detailed_summary.to_csv(csv_filename, index=False, encoding='utf-8-sig')
+            except UnicodeEncodeError:
+                # Fallback cho Windows
+                detailed_summary.to_csv(csv_filename, index=False, encoding='cp1252')
             print(f"✅ Đã xuất CSV: {csv_filename}\n")
                 
         except ImportError:
             # Fallback nếu không có openpyxl
             print("⚠️ Cài đặt openpyxl để xuất Excel đẹp: pip install openpyxl")
             csv_filename = f'backtest_results/summary_{timestamp}.csv'
-            detailed_summary.to_csv(csv_filename, index=False, encoding='utf-8-sig')
+            try:
+                detailed_summary.to_csv(csv_filename, index=False, encoding='utf-8-sig')
+            except UnicodeEncodeError:
+                detailed_summary.to_csv(csv_filename, index=False, encoding='cp1252')
             print(f"✅ Đã xuất CSV: {csv_filename}\n")
             
         except Exception as e:

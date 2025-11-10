@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  trading-bot:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - CHAT_ID=${CHAT_ID}
+      - PORT=8000
+    volumes:
+      - ./logs:/app/logs
+      - ./backtest_results:/app/backtest_results
+      - ./models:/app/models
+      - ./data_cache:/app/data_cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

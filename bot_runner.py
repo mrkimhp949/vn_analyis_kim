@@ -47,6 +47,9 @@ def run_sector_analysis():
         for symbol in tickers:
             try:
                 df = load_data(symbol, LOOKBACK)
+                if df.empty:
+                    continue
+                    
                 result = ml_generator.analyze(df)
 
                 if result['signal'] == 'BUY':
@@ -89,13 +92,24 @@ def run_sector_analysis():
 
     selected_tickers = sorted(list(set(selected_tickers)))
 
-    with open(SELECTED_TICKERS_FILE, 'w') as f:
-        json.dump({
-            'selected_at': pd.Timestamp.now().isoformat(),
-            'top_sectors': top_sectors,
-            'tickers': selected_tickers,
-            'sector_results': sector_results
-        }, f, indent=2)
+    # Sửa lỗi encoding khi ghi JSON
+    try:
+        with open(SELECTED_TICKERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump({
+                'selected_at': pd.Timestamp.now().isoformat(),
+                'top_sectors': top_sectors,
+                'tickers': selected_tickers,
+                'sector_results': sector_results
+            }, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ Lỗi ghi file JSON: {e}")
+        # Fallback: ghi không unicode
+        with open(SELECTED_TICKERS_FILE, 'w') as f:
+            json.dump({
+                'selected_at': pd.Timestamp.now().isoformat(),
+                'top_sectors': top_sectors,
+                'tickers': selected_tickers
+            }, f, indent=2)
 
     print(f"\n✅ ĐÃ CHỌN TOP 3 NGÀNH: {', '.join(top_sectors)}")
     print(f"📋 Tổng {len(selected_tickers)} mã sẽ được quét tuần này\n")
@@ -117,12 +131,20 @@ async def send_sector_summary(top_sectors, tickers, results):
 def load_selected_tickers():
     if os.path.exists(SELECTED_TICKERS_FILE):
         try:
-            with open(SELECTED_TICKERS_FILE, 'r') as f:
-                data = json.load(f)
-                print(f"✅ Loaded {len(data['tickers'])} mã đã chọn ({data['selected_at']})")
-                return data['tickers']
+            # Thử nhiều encoding
+            for encoding in ['utf-8', 'utf-8-sig', 'cp1252']:
+                try:
+                    with open(SELECTED_TICKERS_FILE, 'r', encoding=encoding) as f:
+                        data = json.load(f)
+                    print(f"✅ Loaded {len(data['tickers'])} mã đã chọn ({data['selected_at']})")
+                    return data['tickers']
+                except UnicodeDecodeError:
+                    continue
+                except json.JSONDecodeError:
+                    continue
         except Exception as e:
-            log_error(f"⚠️ Load selected_tickers lỗi: {e}")
+            print(f"⚠️ Load selected_tickers lỗi: {e}")
+    
     print(f"⚠️ Chưa có tickers tuần này → dùng mặc định ({len(TICKERS)} mã)")
     return TICKERS
 
@@ -137,16 +159,24 @@ async def run_bot_with_context(bot_instance, chat_id):
     signal_count = 0
     sent_cache = load_signal_cache()
 
-    await bot_instance.send_message(chat_id=chat_id,
-        text=f"🔍 Đang quét {len(current_tickers)} mã cổ phiếu...\n⏳ Vui lòng đợi...")
+    try:
+        await bot_instance.send_message(chat_id=chat_id,
+            text=f"🔍 Đang quét {len(current_tickers)} mã cổ phiếu...\n⏳ Vui lòng đợi...")
+    except Exception as e:
+        print(f"⚠️ Lỗi gửi tin nhắn Telegram: {e}")
 
     for symbol in current_tickers:
         try:
             df = load_data(symbol, LOOKBACK)
+            if df.empty:
+                continue
+                
             result = ml_generator.analyze(df)
             latest = df.iloc[-1]
             price = latest['close']
-            atr = latest['atr']
+            
+            # SỬA: Kiểm tra atr có tồn tại không
+            atr = latest.get('atr', price * 0.02)  # Default 2% nếu không có ATR
 
             # Bỏ qua nếu tín hiệu yếu
             if result['confidence'] < CONFIDENCE_THRESHOLD or result['signal'] == 'HOLD':
@@ -193,23 +223,38 @@ async def run_bot_with_context(bot_instance, chat_id):
 def load_signal_cache():
     if os.path.exists(SIGNAL_CACHE_FILE):
         try:
-            with open(SIGNAL_CACHE_FILE, 'r') as f:
-                return json.load(f)
+            # Sửa lỗi encoding khi đọc cache
+            for encoding in ['utf-8', 'utf-8-sig', 'cp1252']:
+                try:
+                    with open(SIGNAL_CACHE_FILE, 'r', encoding=encoding) as f:
+                        return json.load(f)
+                except UnicodeDecodeError:
+                    continue
+                except json.JSONDecodeError:
+                    continue
         except:
             return {}
     return {}
 
 def save_signal_cache(data):
     try:
-        with open(SIGNAL_CACHE_FILE, 'w') as f:
-            json.dump(data, f)
+        # Sửa lỗi encoding khi ghi cache
+        with open(SIGNAL_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
     except Exception as e:
         log_error(f"Lỗi ghi signal cache: {e}")
 
 def log_error(msg):
-    """Ghi lỗi vào file"""
-    with open(os.path.join(LOGS_DIR, 'bot_errors.log'), 'a', encoding='utf-8') as f:
-        f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    """Ghi lỗi vào file với encoding utf-8"""
+    try:
+        with open(os.path.join(LOGS_DIR, 'bot_errors.log'), 'a', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except UnicodeEncodeError:
+        # Fallback cho Windows
+        with open(os.path.join(LOGS_DIR, 'bot_errors.log'), 'a', encoding='cp1252') as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except Exception as e:
+        print(f"❌ Lỗi ghi log: {e}")
     print(msg)
 
 # ================ RUNNER ====================

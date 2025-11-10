@@ -1,9 +1,30 @@
 import pandas as pd
 from datetime import datetime, timedelta
 import requests
+import hashlib
+import pickle
+import os
 
-def load_data(symbol, lookback=200):
-    """Load dữ liệu từ TCBS API (Ổn định và nhanh)"""
+DATA_CACHE_DIR = 'data_cache'
+os.makedirs(DATA_CACHE_DIR, exist_ok=True)
+
+def load_data(symbol, lookback=200, use_cache=True):
+    """Load dữ liệu từ TCBS API với cache"""
+    # Tạo cache key
+    cache_key = f"{symbol}_{lookback}_{datetime.today().strftime('%Y%m%d')}"
+    cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
+    cache_file = os.path.join(DATA_CACHE_DIR, f"{cache_hash}.pkl")
+    
+    # Kiểm tra cache
+    if use_cache and os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'rb') as f:
+                print(f"📁 Load {symbol} từ cache")
+                return pickle.load(f)
+        except Exception as e:
+            print(f"⚠️ Lỗi load cache: {e}")
+    
+    # Load từ API
     end = datetime.today()
     start = end - timedelta(days=lookback*2)
     
@@ -57,6 +78,14 @@ def load_data(symbol, lookback=200):
         df = df.tail(lookback)
         
         print(f"✅ Tải thành công {len(df)} nến")
+        
+        # Lưu cache
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(df, f)
+            print(f"💾 Đã lưu cache {symbol}")
+        except Exception as e:
+            print(f"⚠️ Lỗi lưu cache: {e}")
         
         return df
         

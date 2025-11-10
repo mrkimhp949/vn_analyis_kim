@@ -8,48 +8,118 @@ class MLSignalGenerator:
         self.predictor.load_models()
         
     def analyze(self, df):
-        """
-        Phân tích và tạo tín hiệu từ ML + Technical Analysis
-        
-        Returns:
-            dict: {
-                'signal': 'BUY'|'SELL'|'HOLD',
-                'confidence': 0-100,
-                'ml_score': 0-1,
-                'technical_score': dict,
-                'reason': str
+        """Phân tích và tạo tín hiệu từ ML + Technical Analysis"""
+        try:
+            # Thêm ML features
+            df = add_ml_features(df)
+            
+            # Kiểm tra xem có đủ data không
+            if len(df) < 50:
+                return self._fallback_technical_analysis(df)
+                
+            # Lấy data gần nhất
+            latest = df.iloc[-1]
+            
+            # Chuẩn bị features cho ML - SỬA: kiểm tra features tồn tại
+            feature_cols = get_feature_columns()
+            available_features = [col for col in feature_cols if col in df.columns]
+            
+            if len(available_features) < len(feature_cols) * 0.8:  # Nếu thiếu >20% features
+                print(f"⚠️ Thiếu features cho ML, dùng technical analysis")
+                return self._fallback_technical_analysis(df)
+                
+            X = df[available_features].values
+            
+            # ML Prediction (chỉ dùng RF)
+            ml_scores = self.predictor.predict(X)
+            ml_score = ml_scores[-1] if len(ml_scores) > 0 else 0.5
+            
+            # Technical Analysis Score
+            tech_score = self._calculate_technical_score(latest)
+            
+            # Ensemble Decision
+            signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
+            
+            return {
+                'signal': signal,
+                'confidence': confidence,
+                'ml_score': ml_score,
+                'technical_score': tech_score,
+                'reason': reason,
+                'price': latest['close'],
+                'rsi': latest.get('rsi', 50),
+                'ema_trend': 'UP' if latest.get('ema20', 0) > latest.get('ema50', 0) else 'DOWN'
             }
-        """
-        # Thêm ML features
-        df = add_ml_features(df)
-        
-        # Lấy data gần nhất
-        latest = df.iloc[-1]
-        
-        # Chuẩn bị features cho ML
-        feature_cols = get_feature_columns()
-        X = df[feature_cols].values
-        
-        # ML Prediction
-        ml_scores = self.predictor.predict(X)
-        ml_score = ml_scores[-1]  # Score cho ngày cuối
-        
-        # Technical Analysis Score
-        tech_score = self._calculate_technical_score(latest)
-        
-        # Ensemble Decision
-        signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
-        
-        return {
-            'signal': signal,
-            'confidence': confidence,
-            'ml_score': ml_score,
-            'technical_score': tech_score,
-            'reason': reason,
-            'price': latest['close'],
-            'rsi': latest['rsi'],
-            'ema_trend': 'UP' if latest['ema20'] > latest['ema50'] else 'DOWN'
-        }
+        except Exception as e:
+            print(f"⚠️ Lỗi ML analysis: {e}")
+            return self._fallback_technical_analysis(df)
+    
+    def _fallback_technical_analysis(self, df):
+        """Phân tích kỹ thuật khi ML không khả dụng"""
+        try:
+            df = add_ml_features(df)
+            latest = df.iloc[-1]
+            
+            # Simple technical signals
+            signal = 'HOLD'
+            confidence = 0
+            reasons = []
+            
+            # EMA crossover
+            ema20 = latest.get('ema20', 0)
+            ema50 = latest.get('ema50', 0)
+            if ema20 > ema50:
+                signal = 'BUY'
+                confidence += 30
+                reasons.append("EMA20 > EMA50")
+            else:
+                signal = 'SELL' 
+                confidence += 20
+                reasons.append("EMA20 < EMA50")
+            
+            # RSI
+            rsi = latest.get('rsi', 50)
+            if rsi < 30:
+                signal = 'BUY'
+                confidence += 40
+                reasons.append(f"RSI oversold ({rsi:.1f})")
+            elif rsi > 70:
+                signal = 'SELL'
+                confidence += 40
+                reasons.append(f"RSI overbought ({rsi:.1f})")
+            
+            # MACD
+            macd_diff = latest.get('macd_diff', 0)
+            if macd_diff > 0:
+                confidence += 10
+                reasons.append("MACD bullish")
+            else:
+                confidence -= 10
+                reasons.append("MACD bearish")
+            
+            return {
+                'signal': signal,
+                'confidence': min(confidence, 100),
+                'ml_score': 0.5,
+                'technical_score': {'trend': 0, 'momentum': 0, 'volatility': 0},
+                'reason': " | ".join(reasons),
+                'price': latest['close'],
+                'rsi': rsi,
+                'ema_trend': 'UP' if ema20 > ema50 else 'DOWN'
+            }
+        except Exception as e:
+            print(f"⚠️ Lỗi fallback analysis: {e}")
+            # Return default values
+            return {
+                'signal': 'HOLD',
+                'confidence': 0,
+                'ml_score': 0.5,
+                'technical_score': {'trend': 0, 'momentum': 0, 'volatility': 0},
+                'reason': "Lỗi phân tích",
+                'price': 0,
+                'rsi': 50,
+                'ema_trend': 'UNKNOWN'
+            }
     
     def _calculate_technical_score(self, latest):
         """Tính điểm Technical Analysis"""
@@ -59,23 +129,30 @@ class MLSignalGenerator:
             'volatility': 0  # 0 to 1
         }
         
-        # Trend Score (EMA)
-        if latest['ema20'] > latest['ema50']:
-            score['trend'] = (latest['ema20'] - latest['ema50']) / latest['ema50']
-        else:
-            score['trend'] = -(latest['ema50'] - latest['ema20']) / latest['ema50']
-        
-        # Momentum Score (RSI)
-        if latest['rsi'] < 30:
-            score['momentum'] = 1  # Oversold - bullish
-        elif latest['rsi'] > 70:
-            score['momentum'] = -1  # Overbought - bearish
-        else:
-            score['momentum'] = (50 - latest['rsi']) / 50  # Normalize
-        
-        # Volatility Score (ATR)
-        score['volatility'] = min(latest['volatility'] * 10, 1)  # Normalize
-        
+        try:
+            # Trend Score (EMA)
+            ema20 = latest.get('ema20', 0)
+            ema50 = latest.get('ema50', 0)
+            if ema20 > ema50:
+                score['trend'] = (ema20 - ema50) / ema50 if ema50 > 0 else 0
+            else:
+                score['trend'] = -(ema50 - ema20) / ema50 if ema50 > 0 else 0
+            
+            # Momentum Score (RSI)
+            rsi = latest.get('rsi', 50)
+            if rsi < 30:
+                score['momentum'] = 1  # Oversold - bullish
+            elif rsi > 70:
+                score['momentum'] = -1  # Overbought - bearish
+            else:
+                score['momentum'] = (50 - rsi) / 50  # Normalize
+            
+            # Volatility Score (ATR)
+            volatility = latest.get('volatility', 0)
+            score['volatility'] = min(volatility * 10, 1)  # Normalize
+        except Exception as e:
+            print(f"⚠️ Lỗi tính technical score: {e}")
+            
         return score
     
     def _make_decision(self, ml_score, tech_score, latest):
@@ -93,29 +170,34 @@ class MLSignalGenerator:
         # Technical Signal
         tech_signal = 0
         
-        # Trend
-        if tech_score['trend'] > 0.02:
-            tech_signal += 1
-            reasons.append(f"EMA20 > EMA50")
-        elif tech_score['trend'] < -0.02:
-            tech_signal -= 1
-            reasons.append(f"EMA20 < EMA50")
-        
-        # Momentum
-        if latest['rsi'] < 30:
-            tech_signal += 1
-            reasons.append(f"RSI oversold ({latest['rsi']:.1f})")
-        elif latest['rsi'] > 70:
-            tech_signal -= 1
-            reasons.append(f"RSI overbought ({latest['rsi']:.1f})")
-        
-        # MACD
-        if latest['macd_diff'] > 0:
-            tech_signal += 0.5
-            reasons.append("MACD bullish")
-        else:
-            tech_signal -= 0.5
-            reasons.append("MACD bearish")
+        try:
+            # Trend
+            if tech_score['trend'] > 0.02:
+                tech_signal += 1
+                reasons.append(f"EMA20 > EMA50")
+            elif tech_score['trend'] < -0.02:
+                tech_signal -= 1
+                reasons.append(f"EMA20 < EMA50")
+            
+            # Momentum
+            rsi = latest.get('rsi', 50)
+            if rsi < 30:
+                tech_signal += 1
+                reasons.append(f"RSI oversold ({rsi:.1f})")
+            elif rsi > 70:
+                tech_signal -= 1
+                reasons.append(f"RSI overbought ({rsi:.1f})")
+            
+            # MACD
+            macd_diff = latest.get('macd_diff', 0)
+            if macd_diff > 0:
+                tech_signal += 0.5
+                reasons.append("MACD bullish")
+            else:
+                tech_signal -= 0.5
+                reasons.append("MACD bearish")
+        except Exception as e:
+            print(f"⚠️ Lỗi tính tech signal: {e}")
         
         # Combined Signal
         combined_signal = ml_signal + tech_signal
@@ -140,24 +222,28 @@ class MLSignalGenerator:
         """Train models với historical data"""
         print("🎓 Bắt đầu training models...")
         
-        # Add features
-        df = add_ml_features(df)
-        
-        # Prepare data
-        feature_cols = get_feature_columns()
-        X = df[feature_cols].values
-        y = df['target'].values
-        
-        # Split train/test
-        split = int(len(X) * 0.8)
-        X_train, y_train = X[:split], y[:split]
-        
-        # Scale features
-        X_train = self.predictor.scaler.fit_transform(X_train)
-        self.predictor.save_scaler()
-        
-        # Train models
-        self.predictor.train_random_forest(X_train, y_train)
-        self.predictor.train_lstm(X_train, y_train)
-        
-        print("✅ Training hoàn tất!")
+        try:
+            # Add features
+            df = add_ml_features(df)
+            
+            # Prepare data
+            feature_cols = get_feature_columns()
+            available_features = [col for col in feature_cols if col in df.columns]
+            X = df[available_features].values
+            y = df['target'].values
+            
+            # Split train/test
+            split = int(len(X) * 0.8)
+            X_train, y_train = X[:split], y[:split]
+            
+            # Scale features
+            X_train = self.predictor.scaler.fit_transform(X_train)
+            self.predictor.save_scaler()
+            
+            # Train models
+            self.predictor.train_random_forest(X_train, y_train)
+            self.predictor.train_lstm(X_train, y_train)
+            
+            print("✅ Training hoàn tất!")
+        except Exception as e:
+            print(f"❌ Lỗi training models: {e}")
