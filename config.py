@@ -50,6 +50,6 @@ THUY_TICKERS = get_all_tickers(THUY_SECTOR)
 ALL_TICKERS = sorted(list(set(KIM_TICKERS + THUY_TICKERS)))
 
 # Có thể override tickers qua env (Render)
-TICKERS = get_env_list('TICKERS', ALL_TICKERS[:10])  # Giới hạn 10 mã trên Render
+TICKERS = get_env_list('TICKERS', ALL_TICKERS)  # Giới hạn 10 mã trên Render
 
 print(f"📊 Đang theo dõi {len(TICKERS)} mã cổ phiếu trên Render")

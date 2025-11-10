@@ -13,11 +13,13 @@ from ml_signals import MLSignalGenerator
 from risk_management import RiskManager
 from telegram import Bot
 import pandas as pd
+from enhanced_risk_management import EnhancedRiskManager
+from multi_timeframe import MultiTimeframeAnalyzer
 
 # =============== KHỞI TẠO ===============
 bot = Bot(token=TELEGRAM_TOKEN)
 ml_generator = MLSignalGenerator()
-risk_manager = RiskManager(
+risk_manager = EnhancedRiskManager(
     total_capital=100_000_000,
     max_position_pct=0.2,
     risk_per_trade_pct=0.02
@@ -31,6 +33,8 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 # ======================================================
 # 🎯 PHÂN TÍCH NGÀNH - AUTO SECTOR ANALYSIS
 # ======================================================
+
+multi_timeframe_analyzer = MultiTimeframeAnalyzer()
 
 def run_sector_analysis():
     print("🔍 Bắt đầu phân tích toàn bộ thị trường...")
@@ -154,8 +158,8 @@ def load_selected_tickers():
 
 async def run_bot_with_context(bot_instance, chat_id):
     current_tickers = load_selected_tickers()
-    print(f"🔍 Quét {len(current_tickers)} mã...")
-    CONFIDENCE_THRESHOLD = 50
+    print(f"🔍 Quét {len(current_tickers)} mã với Multi-timeframe Analysis...")
+    CONFIDENCE_THRESHOLD = 60  # Tăng ngưỡng confidence
     signal_count = 0
     sent_cache = load_signal_cache()
 
@@ -171,13 +175,19 @@ async def run_bot_with_context(bot_instance, chat_id):
             if df.empty:
                 continue
                 
-            result = ml_generator.analyze(df)
+            # SỬA: Thêm fallback nếu multi-timeframe fail
+            try:
+                result = multi_timeframe_analyzer.analyze_multi_timeframe(symbol)
+            except Exception as e:
+                print(f"⚠️ Multi-timeframe failed for {symbol}, using single timeframe: {e}")
+                result = ml_generator.analyze(df)
+            
             latest = df.iloc[-1]
             price = latest['close']
             
-            # SỬA: Kiểm tra atr có tồn tại không
-            atr = latest.get('atr', price * 0.02)  # Default 2% nếu không có ATR
-
+            # SỬA: Tính market_volatility thực tế
+            market_volatility = latest.get('atr', price * 0.02) / price  # Normalized volatility
+            
             # Bỏ qua nếu tín hiệu yếu
             if result['confidence'] < CONFIDENCE_THRESHOLD or result['signal'] == 'HOLD':
                 continue
@@ -189,23 +199,38 @@ async def run_bot_with_context(bot_instance, chat_id):
                 print(f"⚪ Đã gửi tín hiệu {symbol} hôm nay, bỏ qua.")
                 continue
 
-            # Position sizing + risk adjustment
-            position = risk_manager.calculate_position_size(price, atr, result['confidence'], signal=result['signal'])
-            adj_factor = risk_manager.adjust_for_portfolio_risk([])
-            position['shares'] = int(position['shares'] * adj_factor)
-            position['value'] = position['shares'] * price
-            position['max_loss'] = position['risk_per_share'] * position['shares']
+            # ENHANCED POSITION SIZING
+            position = risk_manager.calculate_enhanced_position_size(
+                symbol, 
+                price, 
+                latest.get('atr', price * 0.02), 
+                result['confidence'], 
+                result['signal'],
+                market_volatility=market_volatility
+            )
+            
+            # SỬA: Kiểm tra nếu position valid
+            if position['shares'] <= 0:
+                print(f"⚪ {symbol}: Position size = 0, bỏ qua")
+                continue
 
-            limit_prices = risk_manager.suggest_limit_orders(price, atr, result['signal'])
+            # ENHANCED LIMIT ORDERS
+            limit_prices = risk_manager.suggest_enhanced_limit_orders(
+                price, 
+                latest.get('atr', price * 0.02), 
+                result['signal'],
+                result['confidence']
+            )
+            
             msg = risk_manager.format_recommendation(symbol, result, position, limit_prices, df)
 
             await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
             sent_cache[cache_key] = True
             save_signal_cache(sent_cache)
-            print(f"✅ {symbol}: {result['signal']} ({result['confidence']}%)")
+            print(f"✅ {symbol}: {result['signal']} ({result['confidence']}%) - {position['shares']} shares")
 
             signal_count += 1
-            time.sleep(0.5)  # ✅ tránh gọi API liên tục
+            time.sleep(0.5)
 
         except Exception as e:
             log_error(f"❌ Lỗi {symbol}: {e}")
