@@ -178,7 +178,7 @@ class RiskManager:
     
     def format_recommendation(self, symbol, result, position_info, limit_prices, df=None):
         """
-        Format thành message dễ đọc với NHIỀU THÔNG TIN
+        Format thành message dễ đọc - KHÁC NHAU CHO BUY/SELL
         """
         signal = result['signal']
         confidence = result['confidence']
@@ -213,27 +213,50 @@ class RiskManager:
 ├─ Thay đổi: {price_change_emoji} **{price_change_pct:+.2f}%** (hôm qua)
 ├─ Volume: {df.iloc[-1]['volume']:,.0f} if df is not None else 'N/A'
 └─ ATR (biến động): {df.iloc[-1]['atr']:,.0f} VNĐ if df is not None else 'N/A'
+"""
 
+        # ============================================
+        # PHẦN KHÁC BIỆT: BUY vs SELL
+        # ============================================
+        
+        if signal == 'BUY':
+            msg += f"""
 💰 **KHUYẾN NGHỊ VÀO LỆNH:**
 ├─ Số lượng: **{position_info['shares']:,}** cổ phiếu ({position_info['shares']//100} lô)
 ├─ Giá trị: **{position_info['value']:,.0f}** VNĐ
 └─ % vốn: {(position_info['value']/self.total_capital)*100:.1f}%
 
 📌 **GIÁ ĐẶT LỆNH (Limit Order):**
-{'├─ 🔥 Aggressive:' if signal=='BUY' else '├─ 🔥 Aggressive:'} {limit_prices['aggressive']:,.0f} VNĐ (nhanh)
-{'├─ ⭐ Moderate:' if signal=='BUY' else '├─ ⭐ Moderate:'} **{limit_prices['moderate']:,.0f}** VNĐ (khuyến nghị)
-{'└─ 🎯 Conservative:' if signal=='BUY' else '└─ 🎯 Conservative:'} {limit_prices['conservative']:,.0f} VNĐ (tối ưu)
+├─ 🔥 Aggressive: {limit_prices['aggressive']:,.0f} VNĐ (nhanh)
+├─ ⭐ Moderate: **{limit_prices['moderate']:,.0f}** VNĐ (khuyến nghị)
+└─ 🎯 Conservative: {limit_prices['conservative']:,.0f} VNĐ (tối ưu)
 💡 {limit_prices['note']}
+"""
+        else:  # SELL
+            msg += f"""
+🔴 **KHUYẾN NGHỊ BÁN:**
+├─ Nếu đang nắm: Bán **TOÀN BỘ** vị thế
+├─ Nếu chưa có: **KHÔNG MUA** vào lúc này
+└─ Lý do: Tín hiệu kỹ thuật tiêu cực
 
+📌 **GIÁ BÁN ĐỀ XUẤT (Limit Order):**
+├─ 🔥 Aggressive: {limit_prices['aggressive']:,.0f} VNĐ (bán nhanh)
+├─ ⭐ Moderate: **{limit_prices['moderate']:,.0f}** VNĐ (cân bằng)
+└─ 🎯 Conservative: {limit_prices['conservative']:,.0f} VNĐ (chờ giá tốt)
+💡 {limit_prices['note']}
+"""
+
+        # Phần chung cho cả BUY và SELL
+        msg += f"""
 🛡️ **QUẢN TRỊ RỦI RO:**
 ├─ Stop Loss: **{position_info['stop_loss']:,.0f}** VNĐ ({abs((position_info['stop_loss']-position_info['price_entry'])/position_info['price_entry'])*100:.1f}%)
-├─ Lỗ tối đa: **{position_info['max_loss']:,.0f}** VNĐ
+├─ {'Lỗ tối đa' if signal == 'BUY' else 'Lỗ nếu sai'}: **{position_info['max_loss']:,.0f}** VNĐ
 └─ Risk/Share: {position_info['risk_per_share']:,.0f} VNĐ
 
-🎯 **MỤC TIÊU LỢI NHUẬN:**
-├─ TP1 (50%): **{position_info['take_profit_1']:,.0f}** VNĐ (+{abs((position_info['take_profit_1']-position_info['price_entry'])/position_info['price_entry'])*100:.1f}%)
-├─ TP2 (50%): **{position_info['take_profit_2']:,.0f}** VNĐ (+{abs((position_info['take_profit_2']-position_info['price_entry'])/position_info['price_entry'])*100:.1f}%)
-├─ Lợi nhuận kỳ vọng: **{position_info['expected_profit_tp2']:,.0f}** VNĐ
+🎯 **MỤC TIÊU {'LỢI NHUẬN' if signal == 'BUY' else 'CẮT LỖ'}:**
+├─ TP1 (50%): **{position_info['take_profit_1']:,.0f}** VNĐ ({abs((position_info['take_profit_1']-position_info['price_entry'])/position_info['price_entry'])*100:+.1f}%)
+├─ TP2 (50%): **{position_info['take_profit_2']:,.0f}** VNĐ ({abs((position_info['take_profit_2']-position_info['price_entry'])/position_info['price_entry'])*100:+.1f}%)
+├─ {'Lợi nhuận kỳ vọng' if signal == 'BUY' else 'Lỗ kỳ vọng'}: **{position_info['expected_profit_tp2']:,.0f}** VNĐ
 └─ Reward/Share: {position_info['reward_per_share']:,.0f} VNĐ
 
 📈 **TỶ LỆ RISK:REWARD:**
@@ -254,13 +277,26 @@ class RiskManager:
         msg += f"└─ Lý do: {result['reason']}\n"
         
         # Footer với hướng dẫn
-        msg += f"""
+        if signal == 'BUY':
+            msg += f"""
 {color}═══════════════════════════════════════{color}
-📋 **HƯỚNG DẪN:**
+📋 **HƯỚNG DẪN MUA:**
 1. Đặt lệnh Limit tại giá Moderate
 2. Đặt Stop Loss ngay sau khi khớp
 3. Chốt 50% tại TP1, trailing stop 50% còn lại
 4. Không all-in, chỉ dùng {(position_info['value']/self.total_capital)*100:.1f}% vốn
+
+⏰ Thời gian: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
+{color}═══════════════════════════════════════{color}
+"""
+        else:  # SELL
+            msg += f"""
+{color}═══════════════════════════════════════{color}
+📋 **HƯỚNG DẪN BÁN:**
+1. Nếu đang nắm: Bán NGAY hoặc đặt limit cao hơn
+2. Nếu chưa có: KHÔNG mua vào lúc này
+3. Đợi tín hiệu BUY mới để vào lại
+4. Bảo toàn vốn là ưu tiên hàng đầu
 
 ⏰ Thời gian: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
 {color}═══════════════════════════════════════{color}
