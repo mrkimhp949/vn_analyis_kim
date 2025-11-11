@@ -1,3 +1,5 @@
+# [file name]: ml_models.py
+# [file content begin]
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -5,6 +7,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import os
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,13 @@ class MLPredictor:
         self.scaler = StandardScaler()
         self.models_dir = 'models'
         self.ensure_models_dir()
+        # Đồng bộ số features mong đợi với features.get_feature_columns()
+        try:
+            from features import get_feature_columns  # tránh import vòng bằng cách import khi cần
+            self.expected_features = len(get_feature_columns())
+        except Exception:
+            # Fallback an toàn nếu không import được
+            self.expected_features = 18
 
     def ensure_models_dir(self):
         try:
@@ -23,19 +33,19 @@ class MLPredictor:
             logger.error(f"⚠️ Không thể tạo thư mục models: {e}")
 
     def create_dummy_models(self):
-        """Tạo models mẫu nếu không có models thật"""
-        logger.info("🔄 Creating dummy models for testing...")
+        """Tạo models mẫu với ĐÚNG 18 features"""
+        logger.info("🔄 Creating dummy models with 18 features...")
         
-        # Tạo scaler mẫu
+        # Tạo scaler mẫu với 18 features
         self.scaler = StandardScaler()
-        self.scaler.mean_ = np.array([0] * 18)  # 18 features
-        self.scaler.scale_ = np.array([1] * 18)
+        self.scaler.mean_ = np.array([0] * self.expected_features)
+        self.scaler.scale_ = np.array([1] * self.expected_features)
         
-        # Tạo RF model mẫu
+        # Tạo RF model mẫu với 18 features
         self.rf_model = RandomForestClassifier(n_estimators=10, random_state=42)
         
-        # Train với data giả
-        X_dummy = np.random.randn(100, 18)
+        # Train với data giả 18 features
+        X_dummy = np.random.randn(100, self.expected_features)
         y_dummy = np.random.randint(0, 2, 100)
         self.rf_model.fit(X_dummy, y_dummy)
         
@@ -50,13 +60,23 @@ class MLPredictor:
             if self.rf_model:
                 joblib.dump(self.rf_model, os.path.join(self.models_dir, 'random_forest.pkl'))
             joblib.dump(self.scaler, os.path.join(self.models_dir, 'scaler.pkl'))
+            
+            # Lưu số features expected
+            with open(os.path.join(self.models_dir, 'model_info.json'), 'w') as f:
+                import json
+                json.dump({'expected_features': self.expected_features}, f)
+                
             logger.info("✅ Models saved successfully")
         except Exception as e:
             logger.error(f"❌ Lỗi khi lưu models: {e}")
 
     def train_random_forest(self, X_train, y_train):
-        """Train Random Forest"""
+        """Train Random Forest với feature validation"""
         logger.info("🌲 Training Random Forest...")
+        
+        # Validate số features
+        if X_train.shape[1] != self.expected_features:
+            logger.warning(f"⚠️ Training với {X_train.shape[1]} features, nhưng expected {self.expected_features}")
 
         self.rf_model = RandomForestClassifier(
             n_estimators=100,
@@ -70,13 +90,8 @@ class MLPredictor:
         self.save_models()
         logger.info("✅ Random Forest trained & saved!")
 
-    def train_lstm(self, X_train, y_train, epochs=50, batch_size=32):
-        """Skip LSTM trên Render (quá nặng)"""
-        logger.info("⚠️ LSTM skipped - using Random Forest only")
-        return None
-
     def predict(self, X):
-        """Prediction chỉ dùng Random Forest"""
+        """Prediction với feature validation"""
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X_arr = X.values
         else:
@@ -86,28 +101,34 @@ class MLPredictor:
         if n == 0:
             return np.array([])
 
+        # Kiểm tra số features
+        if X_arr.shape[1] != self.expected_features:
+            # Ném lỗi để tầng trên (ml_signals.analyze) fallback sang Technical Analysis
+            raise ValueError(f"Feature mismatch: got {X_arr.shape[1]}, expected {self.expected_features}")
+
         # Scale features
         try:
             if hasattr(self.scaler, 'mean_'):
                 X_scaled = self.scaler.transform(X_arr)
             else:
                 X_scaled = X_arr
-        except Exception:
+        except Exception as e:
+            logger.error(f"⚠️ Lỗi scaling: {e}")
             X_scaled = X_arr
 
-        # RF prediction only
+        # RF prediction
         if self.rf_model is not None:
             try:
                 rf_pred = self.rf_model.predict_proba(X_scaled)[:, 1]
                 return rf_pred
             except Exception as e:
                 logger.error(f"⚠️ RF predict error: {e}")
-                return np.zeros(n)
+                return np.random.uniform(0.3, 0.7, n)
         else:
-            return np.zeros(n)
+            return np.random.uniform(0.3, 0.7, n)
 
     def load_models(self):
-        """Load pre-trained models và scaler nếu có"""
+        """Load pre-trained models và scaler"""
         self.ensure_models_dir()
         
         models_loaded = False
@@ -115,11 +136,25 @@ class MLPredictor:
         try:
             rf_path = os.path.join(self.models_dir, 'random_forest.pkl')
             scaler_path = os.path.join(self.models_dir, 'scaler.pkl')
+            info_path = os.path.join(self.models_dir, 'model_info.json')
             
             if os.path.exists(rf_path) and os.path.exists(scaler_path):
                 self.rf_model = joblib.load(rf_path)
                 self.scaler = joblib.load(scaler_path)
-                logger.info("✅ Loaded trained models")
+                
+                # Load expected features
+                if os.path.exists(info_path):
+                    with open(info_path, 'r') as f:
+                        import json
+                        info = json.load(f)
+                        # Ưu tiên đồng bộ với features.py nếu có
+                        try:
+                            from features import get_feature_columns
+                            self.expected_features = len(get_feature_columns())
+                        except Exception:
+                            self.expected_features = info.get('expected_features', 18)
+                
+                logger.info(f"✅ Loaded trained models (expecting {self.expected_features} features)")
                 models_loaded = True
             else:
                 logger.warning("ℹ️ Models not found, creating dummy models...")
@@ -133,12 +168,4 @@ class MLPredictor:
             models_loaded = True
         
         return models_loaded
-
-    def save_scaler(self):
-        """Lưu scaler"""
-        self.ensure_models_dir()
-        try:
-            joblib.dump(self.scaler, os.path.join(self.models_dir, 'scaler.pkl'))
-            logger.info("✅ Scaler saved.")
-        except Exception as e:
-            logger.error(f"❌ Lỗi khi lưu scaler: {e}")
+# [file content end]

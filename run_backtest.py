@@ -12,6 +12,8 @@ from data_loader import load_data
 from ml_signals import MLSignalGenerator
 import concurrent.futures
 import os
+from features import add_ml_features
+from improved_position_sizing import ConservativePositionSizer
 
 # Fallback progress bar nếu không có tqdm
 try:
@@ -64,6 +66,13 @@ class Backtester:
         self.slippage = slippage
         # lazy init ML generator may load models inside its constructor
         self.ml_generator = MLSignalGenerator()
+        # Position sizer thận trọng
+        self.position_sizer = ConservativePositionSizer(
+            total_capital=self.initial_capital,
+            max_risk_per_trade=0.02,
+            max_position_size=0.10,
+            max_total_exposure=0.60
+        )
     
     def _apply_slippage(self, price, signal):
         """Áp dụng slippage cho giá"""
@@ -196,8 +205,21 @@ class Backtester:
                 
                 # CHỈ VÀO LỆNH KHI CONFIDENCE >= THRESHOLD
                 if signal == 'BUY' and confidence >= confidence_threshold and position == 0:
-                    # Mua
-                    shares_to_buy = int(capital * 0.95 / execution_price)  # Dùng 95% vốn
+                    # Tính ATR và stop loss dựa trên features
+                    enriched = add_ml_features(current_data)
+                    latest_atr = float(enriched.iloc[-1].get('atr', 0)) if len(enriched) > 0 else 0
+                    stop_loss_price = max(0, execution_price - 2.0 * latest_atr)
+                    
+                    # Sizing an toàn bằng ConservativePositionSizer
+                    sized = self.position_sizer.calculate_position_size(
+                        symbol=symbol,
+                        entry_price=execution_price,
+                        stop_loss=stop_loss_price,
+                        confidence=int(confidence),
+                        signal_strength='VERY_STRONG' if confidence >= 80 else ('STRONG' if confidence >= 65 else 'MODERATE'),
+                        market_regime={'regime': 'SIDEWAYS', 'tradeable': True}
+                    )
+                    shares_to_buy = int(sized.shares)
                     cost = shares_to_buy * execution_price * (1 + self.commission)
                     
                     if cost <= capital and shares_to_buy > 0:
@@ -211,7 +233,9 @@ class Backtester:
                             'shares': shares_to_buy,
                             'value': cost,
                             'confidence': confidence,
-                            'ml_score': result.get('ml_score', 0)
+                            'ml_score': result.get('ml_score', 0),
+                            'atr': latest_atr,
+                            'stop_loss': stop_loss_price
                         })
                 
                 elif signal == 'SELL' and confidence >= confidence_threshold and position > 0:

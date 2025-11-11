@@ -1,3 +1,5 @@
+# [file name]: bot_runner_improved.py
+# [file content begin]
 # -*- coding: utf-8 -*-
 
 import asyncio
@@ -9,62 +11,105 @@ from telegram import Bot
 import pandas as pd
 
 # ===== CONFIG IMPORTS =====
-from config import (
-    TICKERS, LOOKBACK, CHAT_ID, TELEGRAM_TOKEN,
-    KIM_SECTOR, THUY_SECTOR, ALL_TICKERS
-)
+try:
+    from config import (
+        TICKERS, LOOKBACK, CHAT_ID, TELEGRAM_TOKEN,
+        KIM_SECTOR, THUY_SECTOR, ALL_TICKERS
+    )
+    print("✅ Import config thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import config: {e}")
+    # Fallback values
+    TICKERS = ['VNM', 'VCB', 'HPG', 'FPT', 'SSI']
+    LOOKBACK = 100
+    CHAT_ID = "5501113513"
+    TELEGRAM_TOKEN = "234790554:AAFbdwZ3zi0ocpELA0gav6qeYqDKXbDg-yI"
+    KIM_SECTOR = {}
+    THUY_SECTOR = {}
+    ALL_TICKERS = TICKERS
 
 # ===== ORIGINAL MODULES =====
-from data_loader import load_data
-from ml_signals import MLSignalGenerator
+try:
+    from data_loader import load_data
+    print("✅ Import data_loader thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import data_loader: {e}")
+    def load_data(symbol, lookback):
+        return pd.DataFrame()
+
+try:
+    from ml_signals import MLSignalGenerator
+    ml_generator = MLSignalGenerator()
+    print("✅ Import ml_signals thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import ml_signals: {e}")
+    class MLSignalGenerator:
+        def analyze(self, df):
+            return {'signal': 'HOLD', 'confidence': 0, 'reason': 'ML không khả dụng'}
+    ml_generator = MLSignalGenerator()
 
 # ===== NEW IMPROVED MODULES =====
 try:
-    # Try proxy version first (recommended)
     from market_regime_proxy import ProxyMarketRegimeAnalyzer as MarketAnalyzer
+    market_analyzer = MarketAnalyzer()
     print("✅ Using Proxy Market Analyzer (Blue-chip stocks)")
-except ImportError:
-    try:
-        # Fallback to original
-        from market_regime import MarketRegimeAnalyzer as MarketAnalyzer
-        print("✅ Using Original Market Analyzer (VNINDEX)")
-    except ImportError:
-        print("⚠️ No market analyzer available - will skip market checks")
-        MarketAnalyzer = None
+except ImportError as e:
+    print(f"⚠️ No market analyzer available: {e}")
+    market_analyzer = None
 
-from improved_sector_analysis import EnhancedSectorAnalyzer
-from improved_entry_logic import ImprovedEntryLogic
-from improved_position_sizing import ConservativePositionSizer
-from improved_exit_logic import ImprovedExitStrategy
+try:
+    from improved_sector_analysis import EnhancedSectorAnalyzer
+    sector_analyzer = EnhancedSectorAnalyzer(
+        min_volume=500_000,
+        min_price=10_000
+    )
+    print("✅ Import improved_sector_analysis thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import improved_sector_analysis: {e}")
+    sector_analyzer = None
 
-# =============== KHỞI TẠO ===============
-bot = Bot(token=TELEGRAM_TOKEN)
-ml_generator = MLSignalGenerator()
+try:
+    from improved_entry_logic import ImprovedEntryLogic
+    entry_logic = ImprovedEntryLogic(
+        min_confidence=60,
+        min_risk_reward=2.0,
+        require_trend_alignment=True,
+        require_volume_confirmation=False
+    )
+    print("✅ Import improved_entry_logic thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import improved_entry_logic: {e}")
+    entry_logic = None
 
-# Initialize improved modules
-market_analyzer = MarketAnalyzer() if MarketAnalyzer else None
+try:
+    from improved_position_sizing import ConservativePositionSizer
+    position_sizer = ConservativePositionSizer(
+        total_capital=100_000_000,
+        max_risk_per_trade=0.02,
+        max_position_size=0.10,
+        max_total_exposure=0.60,
+        min_positions=8
+    )
+    print("✅ Import improved_position_sizing thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import improved_position_sizing: {e}")
+    position_sizer = None
 
-sector_analyzer = EnhancedSectorAnalyzer(
-    min_volume=500_000,
-    min_price=10_000
-)
+try:
+    from improved_exit_logic import ImprovedExitStrategy
+    exit_strategy = ImprovedExitStrategy()
+    print("✅ Import improved_exit_logic thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import improved_exit_logic: {e}")
+    exit_strategy = None
 
-entry_logic = ImprovedEntryLogic(
-    min_confidence=60,
-    min_risk_reward=2.0,
-    require_trend_alignment=True,
-    require_volume_confirmation=False  # Relax for VN market
-)
-
-position_sizer = ConservativePositionSizer(
-    total_capital=100_000_000,
-    max_risk_per_trade=0.02,
-    max_position_size=0.10,
-    max_total_exposure=0.60,
-    min_positions=8
-)
-
-exit_strategy = ImprovedExitStrategy()
+# Initialize bot
+try:
+    bot = Bot(token=TELEGRAM_TOKEN)
+    print("✅ Telegram bot initialized")
+except Exception as e:
+    print(f"❌ Lỗi khởi tạo Telegram bot: {e}")
+    bot = None
 
 # Files
 SELECTED_TICKERS_FILE = 'selected_tickers.json'
@@ -74,18 +119,17 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 
 
 # ======================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS - IMPROVED WITH ERROR HANDLING
 # ======================================================
 
 def check_market_before_trading():
     """
-    Check market regime trước khi trade
+    Check market regime trước khi trade với error handling
     
     Returns:
         (can_trade: bool, message: str)
     """
     if not market_analyzer:
-        # No analyzer available - assume OK to trade cautiously
         return True, "⚠️ Không có market analyzer - trade thận trọng"
     
     try:
@@ -93,7 +137,6 @@ def check_market_before_trading():
         return result['tradeable'], result['message']
     except Exception as e:
         log_error(f"Lỗi check market: {e}")
-        # On error, assume OK to trade
         return True, f"⚠️ Lỗi check market - trade thận trọng"
 
 
@@ -102,16 +145,22 @@ def check_market_before_trading():
 # ======================================================
 
 def run_sector_analysis():
-    """Phân tích ngành với enhanced analyzer"""
+    """Phân tích ngành với enhanced analyzer và error handling"""
     print("🔍 Bắt đầu phân tích thị trường (Enhanced)...")
     
+    if not sector_analyzer:
+        print("❌ Sector analyzer không khả dụng")
+        return TICKERS[:10]
+    
     # Combine all sectors
-    all_sectors = {
-        f"Kim_{k}": v for k, v in KIM_SECTOR.items()
-    }
-    all_sectors.update({
-        f"Thuy_{k}": v for k, v in THUY_SECTOR.items()
-    })
+    all_sectors = {}
+    try:
+        all_sectors.update({f"Kim_{k}": v for k, v in KIM_SECTOR.items()})
+        all_sectors.update({f"Thuy_{k}": v for k, v in THUY_SECTOR.items()})
+    except Exception as e:
+        print(f"⚠️ Lỗi combine sectors: {e}")
+        # Fallback to basic sectors
+        all_sectors = {'Basic': TICKERS[:20]}
     
     # Run analysis
     try:
@@ -143,7 +192,11 @@ def run_sector_analysis():
 
 
 async def send_sector_summary_telegram(result):
-    """Gửi summary qua Telegram"""
+    """Gửi summary qua Telegram với error handling"""
+    if not bot:
+        print("❌ Bot không khả dụng, không gửi Telegram")
+        return
+        
     try:
         msg = "📊 *PHÂN TÍCH THỊ TRƯỜNG TUẦN MỚI*\n\n"
         
@@ -164,11 +217,47 @@ async def send_sector_summary_telegram(result):
 
 
 # ======================================================
-# BOT RUNNER - IMPROVED VERSION
+# BOT RUNNER - IMPROVED VERSION WITH ERROR HANDLING
 # ======================================================
+async def check_portfolio_and_recommend(bot_instance, chat_id):
+    """Kiểm tra portfolio và đề xuất mua/bán"""
+    print("\n🔍 Kiểm tra portfolio hiện tại...")
+    
+    if not bot_instance:
+        print("❌ Bot không khả dụng")
+        return
+    
+    try:
+        from portfolio_manager import PortfolioManager
+        
+        # Khởi tạo portfolio manager
+        manager = PortfolioManager()
+        
+        # Lấy phân tích chi tiết
+        analysis_report = manager.get_detailed_analysis()
+        
+        # Gửi qua Telegram
+        if len(analysis_report) > 4000:
+            # Chia nhỏ message nếu quá dài
+            parts = [analysis_report[i:i+4000] for i in range(0, len(analysis_report), 4000)]
+            for part in parts:
+                await bot_instance.send_message(chat_id, part, parse_mode='Markdown')
+        else:
+            await bot_instance.send_message(chat_id, analysis_report, parse_mode='Markdown')
+        
+        print("✅ Đã gửi phân tích portfolio")
+        
+    except Exception as e:
+        error_msg = f"❌ Lỗi kiểm tra portfolio: {e}"
+        print(error_msg)
+        await bot_instance.send_message(chat_id, error_msg)
 
 async def run_bot_with_context(bot_instance, chat_id):
-    """Bot runner với improved logic"""
+    """Bot runner với improved logic và error handling"""
+    
+    if not bot_instance:
+        print("❌ Bot instance không khả dụng")
+        return
     
     # ===== CHECK 1: MARKET REGIME =====
     print("📊 Kiểm tra tình trạng thị trường...")
@@ -216,12 +305,16 @@ async def run_bot_with_context(bot_instance, chat_id):
     for symbol in current_tickers:
         try:
             df = load_data(symbol, LOOKBACK)
-            if df.empty:
+            if df.empty or len(df) < 50:
                 continue
             
             # Get ML signal
             ml_signal = ml_generator.analyze(df)
             
+            # Skip nếu không có entry logic
+            if not entry_logic:
+                continue
+                
             # ===== IMPROVED ENTRY LOGIC =====
             entry_signal = entry_logic.analyze_entry(
                 df=df,
@@ -235,6 +328,10 @@ async def run_bot_with_context(bot_instance, chat_id):
             latest = df.iloc[-1]
             price = latest['close']
             
+            # Skip nếu không có position sizer
+            if not position_sizer:
+                continue
+                
             # ===== IMPROVED POSITION SIZING =====
             position = position_sizer.calculate_position_size(
                 symbol=symbol,
@@ -264,11 +361,14 @@ async def run_bot_with_context(bot_instance, chat_id):
             signal_count += 1
             print(f"✅ {symbol}: {entry_signal.signal_type} ({entry_signal.confidence}%)")
             
-            time.sleep(0.5)
+            time.sleep(0.5)  # Rate limiting
             
         except Exception as e:
             log_error(f"Lỗi quét {symbol}: {e}")
     
+    # ===== CHECK 5: PORTFOLIO ANALYSIS =====
+    print("\n📊 Kiểm tra portfolio...")
+    await check_portfolio_and_recommend(bot_instance, chat_id)
     # Summary
     regime_text = market_regime['regime'] if market_regime else 'UNKNOWN'
     summary = f"""
@@ -277,12 +377,18 @@ async def run_bot_with_context(bot_instance, chat_id):
 📊 Market: {regime_text}
 ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
-    await bot_instance.send_message(chat_id, text=summary)
+    try:
+        await bot_instance.send_message(chat_id, text=summary)
+    except Exception as e:
+        log_error(f"Lỗi gửi summary: {e}")
     print(summary)
 
 
 async def check_active_positions(bot_instance, chat_id, market_regime):
-    """Check các positions đang active"""
+    """Check các positions đang active với error handling"""
+    if not bot_instance or not exit_strategy:
+        return
+        
     positions = load_active_positions()
     
     if not positions:
@@ -322,7 +428,8 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
                 
                 # Update position
                 if exit_decision.exit_type == 'FULL':
-                    position_sizer.close_position(symbol, current_price)
+                    if position_sizer:
+                        position_sizer.close_position(symbol, current_price)
                     del positions[symbol]
                     print(f"🔴 Đã đóng {symbol}: {exit_decision.exit_reason.value}")
                 else:
@@ -332,7 +439,8 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
                 save_active_positions(positions)
             
             # Update price
-            position_sizer.update_position_price(symbol, current_price)
+            if position_sizer:
+                position_sizer.update_position_price(symbol, current_price)
             
         except Exception as e:
             log_error(f"Lỗi check exit {symbol}: {e}")
@@ -391,18 +499,8 @@ def format_entry_recommendation(symbol, entry_signal, position, market_regime):
 # ================ FILE I/O ====================
 
 def load_selected_tickers():
-    """Load tickers đã chọn"""
-    if os.path.exists(SELECTED_TICKERS_FILE):
-        try:
-            with open(SELECTED_TICKERS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data['tickers']
-        except Exception as e:
-            log_error(f"Lỗi load tickers: {e}")
-    
-    # Fallback
-    return TICKERS[:10] if len(TICKERS) >= 10 else TICKERS
-
+    print(f"Quet {len(TICKERS)} ma tu config")
+    return TICKERS  # ✅ LUÔN trả về tất cả mã từ config
 
 def load_active_positions():
     """Load active positions"""
@@ -460,8 +558,39 @@ async def run_bot():
 
 def run_bot_sync():
     """Sync wrapper"""
-    asyncio.run(run_bot())
+    try:
+        asyncio.run(run_bot())
+    except Exception as e:
+        log_error(f"Lỗi chạy bot: {e}")
 
+# Thêm vào bot_runner_improved.py
+
+def analyze_current_portfolio():
+    """Phân tích portfolio hiện tại"""
+    from portfolio_manager import PortfolioManager
+    
+    print("🔍 Phân tích portfolio hiện tại...")
+    manager = PortfolioManager()
+    
+    # Lấy phân tích
+    analysis_report = manager.get_detailed_analysis()
+    
+    # Gửi qua Telegram
+    try:
+        asyncio.run(send_telegram_message(analysis_report))
+    except Exception as e:
+        print(f"⚠️ Không gửi được Telegram: {e}")
+    
+    print(analysis_report)
+    return analysis_report
+
+async def send_telegram_message(message):
+    """Gửi message qua Telegram"""
+    if bot:
+        try:
+            await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode='Markdown')
+        except Exception as e:
+            print(f"❌ Lỗi gửi Telegram: {e}")
 
 # ================ MAIN ====================
 
@@ -487,3 +616,4 @@ if __name__ == "__main__":
     print("\nĐể chạy bot thực tế:")
     print("  python -c 'from bot_runner_improved import run_bot_sync; run_bot_sync()'")
     print("\nHoặc integrate vào main.py")
+# [file content end]

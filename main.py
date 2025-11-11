@@ -1,3 +1,5 @@
+# [file name]: main.py
+# [file content begin]
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -9,25 +11,48 @@ from datetime import datetime
 import pytz
 import asyncio
 
-# Import các module của bot
+# Import các module của bot - FIXED IMPORT
 try:
     from bot_runner_improved import run_bot_sync, run_sector_analysis
-    from tg_listener import start_bot_listener
-    from logging_config import setup_logging
+    print("✅ Import bot_runner_improved thành công")
 except ImportError as e:
-    print(f"⚠️ Import error: {e}")
+    print(f"❌ Lỗi import bot_runner_improved: {e}")
+    # Fallback functions
+    def run_bot_sync():
+        print("🤖 Bot runner không khả dụng")
+    
+    def run_sector_analysis():
+        print("📊 Sector analyzer không khả dụng")
+        return []
+
+try:
+    from tg_listener import start_bot_listener
+    print("✅ Import tg_listener thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import tg_listener: {e}")
+    def start_bot_listener():
+        print("📱 Telegram bot không khả dụng")
+
+try:
+    from logging_config import setup_logging
+    setup_logging()
+    print("✅ Import logging_config thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import logging_config: {e}")
 
 tz = pytz.timezone("Asia/Ho_Chi_Minh")
 
 # ═══════════════════════════════════════════════════════════
-# 📅 SCHEDULER VỚI AUTO SECTOR SELECTION
+# 📅 SCHEDULER VỚI AUTO SECTOR SELECTION - IMPROVED
 # ═══════════════════════════════════════════════════════════
 
-# main.py - UPDATE
-
 def schedule_job():
-    """Scheduler với improved logic"""
-    print("🤖 Bot khởi động với Improved Trading Logic!")
+    """Scheduler với improved logic và error handling"""
+    print("🤖 Bot khởi động với Portfolio Management!")
+    
+    last_sector_analysis = None
+    last_signal_scan = None
+    last_portfolio_check = None
     
     while True:
         try:
@@ -35,26 +60,51 @@ def schedule_job():
             current_hour = now.hour
             current_minute = now.minute
             current_weekday = now.weekday()
+            current_date = now.date()
             
-            # THỨ 7 20:00 - Phân tích ngành
-            if current_weekday == 5 and current_hour == 20 and current_minute == 0:
+            # THỨ 7 20:00 - Phân tích ngành (chỉ chạy 1 lần mỗi tuần)
+            if (current_weekday == 5 and current_hour == 20 and current_minute == 0 and 
+                last_sector_analysis != current_date):
                 print("\n📊 [THỨ 7] PHÂN TÍCH THỊ TRƯỜNG")
-                run_sector_analysis()  # Uses enhanced analyzer
-                time.sleep(60)
+                try:
+                    run_sector_analysis()
+                    last_sector_analysis = current_date
+                    print("✅ Đã hoàn thành phân tích ngành")
+                except Exception as e:
+                    print(f"❌ Lỗi phân tích ngành: {e}")
+                time.sleep(61)
             
-            # THỨ 2-6 8:30 - Quét tín hiệu
-            elif current_weekday < 5 and current_hour == 8 and current_minute == 30:
+            # THỨ 2-6 8:30 - Quét tín hiệu (chỉ chạy 1 lần mỗi ngày)
+            elif (current_weekday < 5 and current_hour == 8 and current_minute == 30 and 
+                  last_signal_scan != current_date):
                 print(f"\n🎯 [{now.strftime('%A').upper()}] QUÉT TÍN HIỆU")
-                run_bot_sync()  # Uses improved logic
-                time.sleep(60)
+                try:
+                    run_bot_sync()
+                    last_signal_scan = current_date
+                    print("✅ Đã hoàn thành quét tín hiệu")
+                except Exception as e:
+                    print(f"❌ Lỗi quét tín hiệu: {e}")
+                time.sleep(61)
+            
+            # THỨ 6 15:00 - Kiểm tra portfolio (1 lần/tuần)
+            elif (current_weekday == 4 and current_hour == 15 and current_minute == 0 and 
+                  last_portfolio_check != current_date):
+                print("\n💼 [THỨ 6] KIỂM TRA PORTFOLIO")
+                try:
+                    from portfolio_manager import send_portfolio_update_to_telegram
+                    send_portfolio_update_to_telegram()
+                    last_portfolio_check = current_date
+                    print("✅ Đã hoàn thành kiểm tra portfolio")
+                except Exception as e:
+                    print(f"❌ Lỗi kiểm tra portfolio: {e}")
+                time.sleep(61)
             
             time.sleep(30)
             
         except Exception as e:
             print(f"❌ Lỗi scheduler: {e}")
             time.sleep(60)
-
-# Lifespan manager thay thế @app.on_event
+# Lifespan manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -64,9 +114,12 @@ async def lifespan(app: FastAPI):
     print(f"🔧 Starting background services...")
     
     # Khởi động scheduler trong thread riêng
-    scheduler_thread = threading.Thread(target=schedule_job, daemon=True)
-    scheduler_thread.start()
-    print("✅ Scheduler started")
+    try:
+        scheduler_thread = threading.Thread(target=schedule_job, daemon=True)
+        scheduler_thread.start()
+        print("✅ Scheduler started")
+    except Exception as e:
+        print(f"❌ Lỗi khởi động scheduler: {e}")
     
     # Khởi động Telegram bot trong thread riêng
     try:
@@ -90,7 +143,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan  # Sử dụng lifespan thay vì on_event
+    lifespan=lifespan
 )
 
 @app.get("/")
@@ -170,6 +223,78 @@ async def analyze_sectors():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/portfolio")
+async def get_portfolio():
+    """Lấy thông tin portfolio hiện tại"""
+    try:
+        from portfolio_manager import PortfolioManager
+        manager = PortfolioManager()
+        
+        portfolio_data = {
+            'current_holdings': manager.get_current_holdings(),
+            'portfolio_summary': manager.get_portfolio_summary(),
+            'analyzed_at': datetime.now(tz).isoformat()
+        }
+        
+        return JSONResponse(portfolio_data)
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/portfolio/analysis")
+async def get_portfolio_analysis():
+    """Lấy phân tích portfolio chi tiết"""
+    try:
+        from portfolio_manager import PortfolioManager
+        manager = PortfolioManager()
+        
+        analysis = manager.analyze_portfolio()
+        return JSONResponse(analysis)
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/portfolio/add")
+async def add_to_portfolio(symbol: str, shares: int, price: float):
+    """Thêm cổ phiếu vào portfolio"""
+    try:
+        from portfolio_manager import PortfolioManager
+        manager = PortfolioManager()
+        
+        manager.add_stock(symbol, shares, price)
+        
+        return {
+            "status": "success", 
+            "message": f"Đã thêm {shares} CP {symbol} vào portfolio",
+            "symbol": symbol,
+            "shares": shares,
+            "price": price
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/portfolio/remove")
+async def remove_from_portfolio(symbol: str, shares: int = None):
+    """Bán cổ phiếu khỏi portfolio"""
+    try:
+        from portfolio_manager import PortfolioManager
+        manager = PortfolioManager()
+        
+        success = manager.remove_stock(symbol, shares)
+        
+        if success:
+            return {
+                "status": "success", 
+                "message": f"Đã bán {shares if shares else 'tất cả'} CP {symbol}",
+                "symbol": symbol
+            }
+        else:
+            return {"status": "error", "message": f"Không thể bán {symbol}"}
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # Khởi chạy Web Service
 if __name__ == "__main__":
     # Setup logging
@@ -195,3 +320,4 @@ if __name__ == "__main__":
         port=port,
         log_level="info"
     )
+# [file content end]
