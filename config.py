@@ -1,5 +1,15 @@
 import os
+import sys
 from typing import List
+
+# Fix encoding cho Windows console
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        # Python < 3.7
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
 
 def get_env_list(key: str, default: List[str]) -> List[str]:
     """Lấy list từ environment variable"""
