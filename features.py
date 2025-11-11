@@ -83,6 +83,31 @@ def add_ml_features(df):
         # Trong thực tế, cần so sánh với VNINDEX
         df['relative_strength'] = df['close'].pct_change(10) - df['close'].pct_change(10).mean()
         
+        # 8. FIBONACCI RETRACEMENT LEVELS
+        df['fib_236'] = df['high'].rolling(50).max() - (df['high'].rolling(50).max() - df['low'].rolling(50).min()) * 0.236
+        df['fib_382'] = df['high'].rolling(50).max() - (df['high'].rolling(50).max() - df['low'].rolling(50).min()) * 0.382
+        df['fib_618'] = df['high'].rolling(50).max() - (df['high'].rolling(50).max() - df['low'].rolling(50).min()) * 0.618
+        
+        # 9. ORDER FLOW IMBALANCE (dựa vào volume)
+        df['buy_volume'] = df['volume'] * (df['close'] > df['open']).astype(int)
+        df['sell_volume'] = df['volume'] * (df['close'] < df['open']).astype(int)
+        df['volume_imbalance'] = (df['buy_volume'] - df['sell_volume']) / df['volume']
+        
+        # 10. ICHIMOKU CLOUD
+        try:
+            high_9 = df['high'].rolling(9).max()
+            low_9 = df['low'].rolling(9).min()
+            df['tenkan_sen'] = (high_9 + low_9) / 2
+            
+            high_26 = df['high'].rolling(26).max()
+            low_26 = df['low'].rolling(26).min()
+            df['kijun_sen'] = (high_26 + low_26) / 2
+            
+            df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(26)
+        except Exception as e:
+            print(f"⚠️ Lỗi tính Ichimoku: {e}")
+        
+        return df
     except Exception as e:
         print(f"⚠️ Lỗi tính features nâng cao: {e}")
     
