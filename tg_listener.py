@@ -2,7 +2,7 @@ import asyncio
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
 from config import TELEGRAM_TOKEN
-from bot_runner import run_bot_with_context
+from bot_runner_improved import run_bot_with_context
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🤖 Bot sẵn sàng! Gõ /run để lấy tín hiệu ngay.")

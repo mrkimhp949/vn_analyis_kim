@@ -3,154 +3,114 @@ import numpy as np
 import ta
 
 def add_ml_features(df):
-    """Thêm features cho ML models - BẢN NÂNG CẤP"""
-    if df.empty:
+    """Thêm features cho ML models - ĐẢM BẢO ĐỦ 18 FEATURES"""
+    if df.empty or len(df) < 50:
+        print("⚠️ Không đủ dữ liệu để tính features")
         return df
         
     # Tạo bản copy để tránh warning
     df = df.copy()
     
-    # ==================== CÁC FEATURES CƠ BẢN ====================
-    # Technical Indicators với try-catch
-    try:
-        if len(df) < 50:
-            print("⚠️ Không đủ dữ liệu để tính indicators")
-            return df
-            
-        # Moving Averages
-        df['ema20'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
-        df['ema50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
-        df['sma20'] = ta.trend.SMAIndicator(df['close'], window=20).sma_indicator()
-        
-        # RSI
-        df['rsi'] = ta.momentum.RSIIndicator(df['close']).rsi()
-        df['rsi_signal'] = np.where(df['rsi'] < 30, 1, 
-                                  np.where(df['rsi'] > 70, -1, 0))
-        
-        # ATR
-        if all(col in df.columns for col in ['high', 'low', 'close']):
-            df['atr'] = ta.volatility.AverageTrueRange(
-                high=df['high'], low=df['low'], close=df['close']
-            ).average_true_range()
-        else:
-            df['atr'] = df['close'].rolling(14).std().fillna(0)
-            
-    except Exception as e:
-        print(f"⚠️ Lỗi tính indicators cơ bản: {e}")
+    # ==================== CÁC FEATURES CƠ BẢN - ĐẢM BẢO TÍNH ĐƯỢC ====================
     
-    # ==================== FEATURES NÂNG CAO ====================
-    try:
-        # 1. PRICE MOMENTUM FEATURES
-        df['momentum_5'] = df['close'].pct_change(5)
-        df['momentum_10'] = df['close'].pct_change(10) 
-        df['momentum_20'] = df['close'].pct_change(20)
-        
-        # 52-week high/low
-        df['price_vs_52w_high'] = df['close'] / df['high'].rolling(252).max()
-        df['price_vs_52w_low'] = df['close'] / df['low'].rolling(252).min()
-        
-        # 2. VOLUME-BASED FEATURES  
+    # 1. MOVING AVERAGES (Luôn tính được)
+    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    
+    # 2. RSI (Luôn tính được)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['rsi'] = 100 - (100 / (1 + rs))
+    df['rsi'] = df['rsi'].fillna(50)  # Default 50 nếu không tính được
+    
+    # 3. ATR (Cần high, low) - Fallback nếu thiếu
+    if all(col in df.columns for col in ['high', 'low', 'close']):
+        high_low = df['high'] - df['low']
+        high_close = np.abs(df['high'] - df['close'].shift())
+        low_close = np.abs(df['low'] - df['close'].shift())
+        true_range = np.maximum(np.maximum(high_low, high_close), low_close)
+        df['atr'] = true_range.rolling(window=14).mean()
+    else:
+        df['atr'] = df['close'].rolling(14).std()  # Fallback
+    
+    # 4. MACD (Luôn tính được từ close)
+    exp1 = df['close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd'] = exp1 - exp2
+    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['macd_diff'] = df['macd'] - df['macd_signal']
+    
+    # 5. BOLLINGER BANDS (Luôn tính được)
+    df['bb_mid'] = df['close'].rolling(20).mean()
+    bb_std = df['close'].rolling(20).std()
+    df['bb_high'] = df['bb_mid'] + (bb_std * 2)
+    df['bb_low'] = df['bb_mid'] - (bb_std * 2)
+    df['bb_width'] = (df['bb_high'] - df['bb_low']) / df['bb_mid']
+    df['bb_width'] = df['bb_width'].fillna(0)
+    
+    # 6. MOMENTUM (Luôn tính được)
+    df['momentum_5'] = df['close'].pct_change(5)
+    df['momentum_10'] = df['close'].pct_change(10)
+    df['momentum_20'] = df['close'].pct_change(20)
+    
+    # 7. VOLUME RATIO (Fallback nếu không có volume)
+    if 'volume' in df.columns:
         df['volume_ma20'] = df['volume'].rolling(20).mean()
         df['volume_ratio'] = df['volume'] / df['volume_ma20']
         df['volume_ratio'] = df['volume_ratio'].replace([np.inf, -np.inf], 1).fillna(1)
-        
-        # Volume surge detection
-        df['volume_surge'] = (df['volume'] > df['volume_ma20'] * 1.5).astype(int)
-        
-        # 3. SUPPORT/RESISTANCE FEATURES
-        df['support_level'] = df['low'].rolling(20).min()
-        df['resistance_level'] = df['high'].rolling(20).max()
-        df['distance_to_support'] = (df['close'] - df['support_level']) / df['support_level']
-        df['distance_to_resistance'] = (df['resistance_level'] - df['close']) / df['close']
-        
-        # 4. VOLATILITY FEATURES
-        df['volatility_20'] = df['close'].pct_change().rolling(20).std()
-        df['volatility_50'] = df['close'].pct_change().rolling(50).std()
-        df['volatility_ratio'] = df['volatility_20'] / df['volatility_50']
-        
-        # 5. TREND STRENGTH FEATURES
-        if all(col in df.columns for col in ['high', 'low', 'close']):
-            df['adx'] = ta.trend.ADXIndicator(df['high'], df['low'], df['close']).adx()
-        else:
-            df['adx'] = 0
-            
-        # 6. CANDLESTICK FEATURES
-        df['body_size'] = abs(df['close'] - df['open']) / (df['high'] - df['low']).replace(0, 0.001)
-        df['upper_shadow'] = (df['high'] - df[['open', 'close']].max(axis=1)) / (df['high'] - df['low']).replace(0, 0.001)
-        df['lower_shadow'] = (df[['open', 'close']].min(axis=1) - df['low']) / (df['high'] - df['low']).replace(0, 0.001)
-        
-        # 7. RELATIVE STRENGTH vs MARKET (giả lập)
-        # Trong thực tế, cần so sánh với VNINDEX
-        df['relative_strength'] = df['close'].pct_change(10) - df['close'].pct_change(10).mean()
-        
-        # 8. FIBONACCI RETRACEMENT LEVELS
-        df['fib_236'] = df['high'].rolling(50).max() - (df['high'].rolling(50).max() - df['low'].rolling(50).min()) * 0.236
-        df['fib_382'] = df['high'].rolling(50).max() - (df['high'].rolling(50).max() - df['low'].rolling(50).min()) * 0.382
-        df['fib_618'] = df['high'].rolling(50).max() - (df['high'].rolling(50).max() - df['low'].rolling(50).min()) * 0.618
-        
-        # 9. ORDER FLOW IMBALANCE (dựa vào volume)
-        df['buy_volume'] = df['volume'] * (df['close'] > df['open']).astype(int)
-        df['sell_volume'] = df['volume'] * (df['close'] < df['open']).astype(int)
-        df['volume_imbalance'] = (df['buy_volume'] - df['sell_volume']) / df['volume']
-        
-        # 10. ICHIMOKU CLOUD
+    else:
+        df['volume_ratio'] = 1.0  # Default
+    
+    # 8. PRICE POSITION (Cần high, low) - Fallback
+    if all(col in df.columns for col in ['high', 'low']):
+        high_low_range = df['high'] - df['low']
+        high_low_range = high_low_range.replace(0, 1)  # Tránh chia cho 0
+        df['price_position'] = (df['close'] - df['low']) / high_low_range
+    else:
+        df['price_position'] = 0.5  # Default middle
+    
+    # 9. VOLATILITY (Luôn tính được)
+    df['volatility'] = df['close'].pct_change().rolling(20).std()
+    df['volatility'] = df['volatility'].fillna(0)
+    
+    # 10. ADX (Cần high, low) - Fallback
+    if all(col in df.columns for col in ['high', 'low', 'close']):
         try:
-            high_9 = df['high'].rolling(9).max()
-            low_9 = df['low'].rolling(9).min()
-            df['tenkan_sen'] = (high_9 + low_9) / 2
+            # Tính ADX đơn giản
+            plus_dm = df['high'].diff()
+            minus_dm = -df['low'].diff()
+            tr = true_range  # Đã tính ở ATR
             
-            high_26 = df['high'].rolling(26).max()
-            low_26 = df['low'].rolling(26).min()
-            df['kijun_sen'] = (high_26 + low_26) / 2
-            
-            df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(26)
-        except Exception as e:
-            print(f"⚠️ Lỗi tính Ichimoku: {e}")
-        
-        return df
-    except Exception as e:
-        print(f"⚠️ Lỗi tính features nâng cao: {e}")
+            plus_di = 100 * (plus_dm.rolling(14).mean() / tr.rolling(14).mean())
+            minus_di = 100 * (minus_dm.rolling(14).mean() / tr.rolling(14).mean())
+            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+            df['adx'] = dx.rolling(14).mean()
+        except:
+            df['adx'] = 25  # Default neutral
+    else:
+        df['adx'] = 25  # Default neutral
     
-    # ==================== MACD & BOLLINGER BANDS ====================
-    try:
-        # MACD
-        macd = ta.trend.MACD(df['close'])
-        df['macd'] = macd.macd()
-        df['macd_signal'] = macd.macd_signal()
-        df['macd_diff'] = macd.macd_diff()
-        df['macd_signal_line'] = np.where(df['macd'] > df['macd_signal'], 1, -1)
-        
-        # Bollinger Bands
-        bb = ta.volatility.BollingerBands(df['close'])
-        df['bb_high'] = bb.bollinger_hband()
-        df['bb_mid'] = bb.bollinger_mavg()
-        df['bb_low'] = bb.bollinger_lband()
-        df['bb_width'] = (df['bb_high'] - df['bb_low']) / df['bb_mid']
-        df['bb_position'] = (df['close'] - df['bb_low']) / (df['bb_high'] - df['bb_low'])
-        
-    except Exception as e:
-        print(f"⚠️ Lỗi tính MACD & Bollinger: {e}")
+    # Target: Price direction next day
+    df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
     
-    # Target: Price direction next day (1 = up, 0 = down)
-    try:
-        df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
-    except Exception as e:
-        print(f"⚠️ Lỗi tính target: {e}")
-        df['target'] = 0
+    # Fill NaN values
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        if col != 'target':
+            df[col] = df[col].fillna(df[col].mean() if df[col].notna().any() else 0)
     
-    # Remove NaN - thay thế bằng giá trị trung bình hoặc 0
-    try:
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            if col != 'target':  # Giữ nguyên target
-                df[col] = df[col].fillna(df[col].mean() if df[col].notna().any() else 0)
-    except Exception as e:
-        print(f"⚠️ Lỗi xử lý NaN: {e}")
+    # KIỂM TRA FEATURES CUỐI CÙNG
+    feature_cols = get_feature_columns()
+    available_features = [col for col in feature_cols if col in df.columns]
+    missing_features = [col for col in feature_cols if col not in df.columns]
     
-    print(f"✅ Đã thêm {len([col for col in df.columns if col not in ['time', 'open', 'high', 'low', 'close', 'volume']])} features")
+    print(f"✅ Generated {len(available_features)}/{len(feature_cols)} features")
+    if missing_features:
+        print(f"⚠️ Still missing: {missing_features}")
     
     return df
-
 
 def get_feature_columns():
     """Danh sách features cho ML - BẢN NÂNG CẤP"""

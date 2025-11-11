@@ -11,7 +11,7 @@ import asyncio
 
 # Import các module của bot
 try:
-    from bot_runner import run_bot_sync, run_sector_analysis
+    from bot_runner_improved import run_bot_sync, run_sector_analysis
     from tg_listener import start_bot_listener
     from logging_config import setup_logging
 except ImportError as e:
@@ -23,53 +23,32 @@ tz = pytz.timezone("Asia/Ho_Chi_Minh")
 # 📅 SCHEDULER VỚI AUTO SECTOR SELECTION
 # ═══════════════════════════════════════════════════════════
 
+# main.py - UPDATE
+
 def schedule_job():
-    """Scheduler chạy trong background"""
-    print("🤖 Bot đã khởi động với Smart Sector Selection!")
-    print("📅 Lịch hoạt động:")
-    print("  • Thứ 7 20:00: Phân tích toàn bộ thị trường")
-    print("  • Thứ 2-6 8:30: Quét các mã đã chọn")
+    """Scheduler với improved logic"""
+    print("🤖 Bot khởi động với Improved Trading Logic!")
     
     while True:
         try:
             now = datetime.now(tz)
             current_hour = now.hour
             current_minute = now.minute
-            current_weekday = now.weekday()  # 0=Monday, 6=Sunday
+            current_weekday = now.weekday()
             
-            # ═══════════════════════════════════════════════════════════
-            # 📊 THỨ 7 - PHÂN TÍCH TOÀN THỊ TRƯỜNG
-            # ═══════════════════════════════════════════════════════════
+            # THỨ 7 20:00 - Phân tích ngành
             if current_weekday == 5 and current_hour == 20 and current_minute == 0:
-                print(f"\n{'='*70}")
-                print(f"📊 [THỨ 7 20:00] PHÂN TÍCH TOÀN BỘ THỊ TRƯỜNG")
-                print(f"{'='*70}\n")
-                
-                try:
-                    run_sector_analysis()
-                    print("\n✅ Đã phân tích xong! Đã chọn ngành tốt cho tuần tới.")
-                except Exception as e:
-                    print(f"❌ Lỗi phân tích: {e}")
-                
+                print("\n📊 [THỨ 7] PHÂN TÍCH THỊ TRƯỜNG")
+                run_sector_analysis()  # Uses enhanced analyzer
                 time.sleep(60)
             
-            # ═══════════════════════════════════════════════════════════
-            # 🎯 THỨ 2-6 - QUÉT CÁC MÃ ĐÃ CHỌN
-            # ═══════════════════════════════════════════════════════════
+            # THỨ 2-6 8:30 - Quét tín hiệu
             elif current_weekday < 5 and current_hour == 8 and current_minute == 30:
-                print(f"\n{'='*70}")
-                print(f"📊 [{now.strftime('%A').upper()} 8:30] QUÉT TÍN HIỆU")
-                print(f"{'='*70}\n")
-                
-                try:
-                    run_bot_sync()
-                    print(f"\n✅ Hoàn thành. Hẹn gặp lại vào 8:30 ngày mai!\n")
-                except Exception as e:
-                    print(f"❌ Lỗi chạy bot: {e}")
-                
+                print(f"\n🎯 [{now.strftime('%A').upper()}] QUÉT TÍN HIỆU")
+                run_bot_sync()  # Uses improved logic
                 time.sleep(60)
             
-            time.sleep(30)  # Giảm CPU usage
+            time.sleep(30)
             
         except Exception as e:
             print(f"❌ Lỗi scheduler: {e}")

@@ -19,8 +19,3 @@ def setup_logging():
     logging.getLogger('telegram').setLevel(logging.WARNING)
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('tensorflow').setLevel(logging.WARNING)
-
-# Thêm vào đầu các file chính
-# main.py, backtest.py, bot_runner.py thêm:
-# from logging_config import setup_logging
-# setup_logging()

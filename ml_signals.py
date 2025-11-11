@@ -14,46 +14,50 @@ class MLSignalGenerator:
             df = add_ml_features(df)
             
             # Kiểm tra xem có đủ data không
-            if len(df) < 50:
+            if len(df) < 20:
                 return self._fallback_technical_analysis(df)
-                
+                    
             # Lấy data gần nhất
             latest = df.iloc[-1]
             
-            # Chuẩn bị features cho ML - SỬA: kiểm tra features tồn tại
+            # Chuẩn bị features cho ML - GIẢM NGƯỠNG
             feature_cols = get_feature_columns()
             available_features = [col for col in feature_cols if col in df.columns]
             
-            if len(available_features) < len(feature_cols) * 0.8:  # Nếu thiếu >20% features
-                print(f"⚠️ Thiếu features cho ML, dùng technical analysis")
+            print(f"🔍 Features check: {len(available_features)} available of {len(feature_cols)}")
+            
+            # CHỈ CẦN 12/18 FEATURES LÀ CHẠY ĐƯỢC
+            if len(available_features) >= 12:  
+                X = df[available_features].values
+                
+                # ML Prediction
+                ml_scores = self.predictor.predict(X)
+                ml_score = ml_scores[-1] if len(ml_scores) > 0 else 0.5
+                
+                # Technical Analysis Score
+                tech_score = self._calculate_technical_score(latest)
+                
+                # Ensemble Decision
+                signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
+                
+                return {
+                    'signal': signal,
+                    'confidence': confidence,
+                    'ml_score': ml_score,
+                    'technical_score': tech_score,
+                    'reason': reason + f" | ML: {len(available_features)}/{len(feature_cols)} features",
+                    'price': latest['close'],
+                    'rsi': latest.get('rsi', 50),
+                    'ema_trend': 'UP' if latest.get('ema20', 0) > latest.get('ema50', 0) else 'DOWN'
+                }
+            else:
+                print(f"⚠️ Không đủ features cho ML ({len(available_features)}/{len(feature_cols)}), dùng technical analysis")
                 return self._fallback_technical_analysis(df)
                 
-            X = df[available_features].values
-            
-            # ML Prediction (chỉ dùng RF)
-            ml_scores = self.predictor.predict(X)
-            ml_score = ml_scores[-1] if len(ml_scores) > 0 else 0.5
-            
-            # Technical Analysis Score
-            tech_score = self._calculate_technical_score(latest)
-            
-            # Ensemble Decision
-            signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
-            
-            return {
-                'signal': signal,
-                'confidence': confidence,
-                'ml_score': ml_score,
-                'technical_score': tech_score,
-                'reason': reason,
-                'price': latest['close'],
-                'rsi': latest.get('rsi', 50),
-                'ema_trend': 'UP' if latest.get('ema20', 0) > latest.get('ema50', 0) else 'DOWN'
-            }
         except Exception as e:
             print(f"⚠️ Lỗi ML analysis: {e}")
             return self._fallback_technical_analysis(df)
-    
+        
     def _fallback_technical_analysis(self, df):
         """Phân tích kỹ thuật khi ML không khả dụng"""
         try:
