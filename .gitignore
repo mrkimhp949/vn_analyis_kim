@@ -55,6 +55,24 @@ config_private.py
 .env
 .env.local
 
+# User data & cache (không push lên GitHub)
+my_portfolio.json
+active_positions.json
+portfolio_status.json
+news_cache.json
+signals_cache.json
+selected_tickers.json
+telegram_subscriptions.json
+portfolio_history.json
+paper_trading.json
+
+# Training reports (có thể ignore hoặc push tùy mục đích)
+# reports/*.json
+
+# Feature store (parquet files - quá lớn)
+feature_store/*.parquet
+!feature_store/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db

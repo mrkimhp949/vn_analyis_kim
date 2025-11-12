@@ -65,6 +65,7 @@ def schedule_job():
     last_portfolio_check = None
     last_news_refresh = None
     last_daily_summary = None
+    last_pnl_record = None
     
     while True:
         try:
@@ -139,6 +140,27 @@ def schedule_job():
                     print("✅ Đã gửi daily summary")
                 except Exception as e:
                     print(f"❌ Lỗi gửi daily summary: {e}")
+                time.sleep(61)
+            
+            # 15:30 - Record daily PnL cho portfolio và paper trading
+            elif (current_weekday < 5 and current_hour == 15 and current_minute == 30 and
+                  last_pnl_record != current_date):
+                print("\n📊 [15:30] GHI LẠI PNL HÀNG NGÀY")
+                try:
+                    # Record portfolio history
+                    from portfolio_manager import PortfolioManager
+                    pm = PortfolioManager()
+                    pm._record_daily_snapshot()
+                    
+                    # Record paper trading PnL
+                    from paper_trading import get_paper_account
+                    paper_account = get_paper_account()
+                    paper_account.record_daily_pnl()
+                    
+                    last_pnl_record = current_date
+                    print("✅ Đã ghi lại PnL hàng ngày")
+                except Exception as e:
+                    print(f"❌ Lỗi ghi PnL: {e}")
                 time.sleep(61)
             
             time.sleep(30)

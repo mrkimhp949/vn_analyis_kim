@@ -9,12 +9,21 @@ Kết nối với tài khoản chứng khoán (giả lập)
 import json
 import os
 from datetime import datetime
+from typing import Optional
 from portfolio_analyzer import PortfolioAnalyzer
+from portfolio_history import PortfolioHistoryTracker
+from risk_metrics import (
+    calculate_sector_exposure,
+    check_sector_overweight,
+    calculate_portfolio_correlation_risk,
+    get_diversification_recommendation
+)
 
 class PortfolioManager:
     def __init__(self, portfolio_file='my_portfolio.json'):
         self.portfolio_file = portfolio_file
         self.analyzer = PortfolioAnalyzer()
+        self.history_tracker = PortfolioHistoryTracker()
         self.load_portfolio()
     
     def load_portfolio(self):
@@ -72,6 +81,10 @@ class PortfolioManager:
             }
         
         self.save_portfolio()
+        
+        # Record history
+        self._record_daily_snapshot()
+        
         print(f"✅ Đã thêm {shares} CP {symbol} vào portfolio")
     
     def remove_stock(self, symbol, shares=None, price=None, date=None):
@@ -121,6 +134,10 @@ class PortfolioManager:
             current['last_updated'] = date
         
         self.save_portfolio()
+        
+        # Record history
+        self._record_daily_snapshot()
+        
         msg = f"Đã bán {shares:,} CP {symbol}"
         print(f"✅ {msg}")
         return True, msg
@@ -136,7 +153,7 @@ class PortfolioManager:
         }
     
     def get_portfolio_summary(self):
-        """Lấy tổng quan portfolio"""
+        """Lấy tổng quan portfolio với risk metrics"""
         holdings = self.get_current_holdings()
         total_value = 0
         total_invested = 0
@@ -144,6 +161,7 @@ class PortfolioManager:
         # Lấy giá hiện tại và tính toán
         from data_loader import load_data
         
+        holdings_with_prices = {}
         for symbol, holding in holdings.items():
             try:
                 df = load_data(symbol, lookback=5)
@@ -154,8 +172,27 @@ class PortfolioManager:
                     
                     total_value += current_value
                     total_invested += invested_value
+                    
+                    holdings_with_prices[symbol] = {
+                        **holding,
+                        'current_price': current_price,
+                        'current_value': current_value,
+                        'entry_value': invested_value,
+                        'pnl_amount': current_value - invested_value,
+                        'pnl_percent': ((current_price - holding['avg_price']) / holding['avg_price'] * 100) if holding['avg_price'] > 0 else 0
+                    }
             except:
                 continue
+        
+        # Calculate sector exposure
+        sector_exposure = calculate_sector_exposure(holdings_with_prices)
+        
+        # Check for overweight sectors
+        overweight_sectors = check_sector_overweight(sector_exposure, max_sector_pct=40.0)
+        
+        # Calculate correlation risk
+        symbols = list(holdings.keys())
+        correlation_risk = calculate_portfolio_correlation_risk(symbols) if len(symbols) >= 2 else None
         
         return {
             'total_stocks': len(holdings),
@@ -163,8 +200,41 @@ class PortfolioManager:
             'total_invested': total_invested,
             'total_pnl': total_value - total_invested,
             'total_return_percent': ((total_value - total_invested) / total_invested * 100) if total_invested > 0 else 0,
-            'holdings': holdings
+            'holdings': holdings_with_prices,
+            'sector_exposure': sector_exposure,
+            'overweight_sectors': overweight_sectors,
+            'correlation_risk': correlation_risk,
         }
+    
+    def _record_daily_snapshot(self):
+        """Ghi lại snapshot portfolio trong ngày"""
+        try:
+            summary = self.get_portfolio_summary()
+            holdings = summary.get('holdings', {})
+            
+            # Format holdings for history
+            holdings_data = {}
+            for symbol, data in holdings.items():
+                holdings_data[symbol] = {
+                    'shares': data.get('shares', 0),
+                    'current_price': data.get('current_price', 0),
+                    'value': data.get('current_value', 0),
+                    'pnl': data.get('pnl_amount', 0),
+                }
+            
+            portfolio_data = {
+                'total_value': summary.get('total_portfolio_value', 0),
+                'total_invested': summary.get('total_invested', 0),
+                'total_pnl': summary.get('total_pnl', 0),
+                'total_return_pct': summary.get('total_return_percent', 0),
+                'num_positions': summary.get('total_stocks', 0),
+                'holdings': holdings_data,
+                'sector_exposure': summary.get('sector_exposure', {}),
+            }
+            
+            self.history_tracker.record_daily_snapshot(portfolio_data)
+        except Exception as e:
+            print(f"⚠️ Lỗi ghi snapshot: {e}")
     
     def analyze_portfolio(self):
         """Phân tích portfolio và đề xuất"""
@@ -172,9 +242,49 @@ class PortfolioManager:
         return self.analyzer.analyze_current_portfolio(current_holdings)
     
     def get_detailed_analysis(self):
-        """Lấy phân tích chi tiết với report formatted"""
+        """Lấy phân tích chi tiết với report formatted và risk metrics"""
         analysis = self.analyze_portfolio()
-        return self.analyzer.format_analysis_report(analysis)
+        report = self.analyzer.format_analysis_report(analysis)
+        
+        # Add risk metrics
+        summary = self.get_portfolio_summary()
+        diversification = get_diversification_recommendation(summary.get('holdings', {}))
+        
+        # Append risk section
+        risk_section = "\n\n" + "="*60 + "\n"
+        risk_section += "⚠️ RISK ANALYSIS\n"
+        risk_section += "="*60 + "\n\n"
+        
+        # Sector exposure
+        if summary.get('overweight_sectors'):
+            risk_section += "📊 Sector Exposure:\n"
+            for sector, pct in summary['overweight_sectors']:
+                risk_section += f"  ⚠️ {sector}: {pct:.1f}% (vượt 40%)\n"
+            risk_section += "\n"
+        
+        # Correlation risk
+        if summary.get('correlation_risk'):
+            corr_risk = summary['correlation_risk']
+            risk_section += f"🔗 Correlation Risk:\n"
+            risk_section += f"  Avg Correlation: {corr_risk.get('avg_correlation', 0):.2f}\n"
+            risk_section += f"  Risk Score: {corr_risk.get('risk_score', 0)}/100\n"
+            risk_section += f"  {corr_risk.get('recommendation', '')}\n\n"
+        
+        # Diversification recommendations
+        if diversification.get('warnings'):
+            risk_section += "💡 Recommendations:\n"
+            for rec in diversification.get('recommendations', [])[:3]:
+                risk_section += f"  • {rec}\n"
+        
+        return report + risk_section
+    
+    def get_performance_history(self, days: Optional[int] = None):
+        """Lấy performance history"""
+        return self.history_tracker.get_performance_metrics(days)
+    
+    def get_equity_curve(self, days: Optional[int] = None):
+        """Lấy equity curve"""
+        return self.history_tracker.get_equity_curve(days)
     
     def print_portfolio_status(self):
         """In trạng thái portfolio"""

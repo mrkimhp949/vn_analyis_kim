@@ -516,6 +516,29 @@ async def run_bot_with_context(bot_instance, chat_id):
             if position.shares == 0:
                 continue
 
+            # ===== PAPER TRADING EXECUTION =====
+            paper_trade_executed = False
+            try:
+                from paper_trading import get_paper_account
+                paper_account = get_paper_account()
+                
+                # Execute paper trade
+                success, paper_msg, paper_trade = paper_account.execute_buy(
+                    symbol=symbol,
+                    shares=position.shares,
+                    price=price,
+                    signal_confidence=entry_signal.confidence,
+                    signal_reason=", ".join(entry_signal.reasons[:2]),
+                    stop_loss=entry_signal.stop_loss,
+                    take_profit=position.recommended_entries[-1] if position.recommended_entries else None
+                )
+                
+                if success:
+                    paper_trade_executed = True
+                    print(f"📝 Paper trade: {paper_msg}")
+            except Exception as e:
+                log_error(f"Lỗi paper trading: {e}")
+            
             if position_sizer and symbol not in position_sizer.current_positions:
                 position_sizer.add_position(symbol, position.shares, entry_signal.entry_price)
                 existing_symbols.add(symbol)

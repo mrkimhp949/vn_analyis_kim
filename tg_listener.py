@@ -29,6 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("⚙️ Quản lý đăng ký", callback_data="action:subscriptions"),
+            InlineKeyboardButton("📝 Paper Trading", callback_data="action:paperaccount"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -45,6 +46,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unsubscribe SYMBOL - Hủy đăng ký\n"
         "/mysubs - Xem đăng ký của tôi\n"
         "/summary - Summary cuối ngày\n"
+        "/paper - Paper trading account\n"
+        "/papertrades - Lịch sử paper trading\n"
         "/status - Trạng thái bot\n\n"
         "💡 Hoặc dùng nút bên dưới để thao tác nhanh!",
         reply_markup=reply_markup
@@ -279,6 +282,62 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(msg)
             else:
                 await query.edit_message_text("⚠️ Subscription manager chưa sẵn sàng.")
+        
+        elif action == "papertrades":
+            try:
+                from paper_trading import get_paper_account
+                account = get_paper_account()
+                trades = account.get_trade_history()
+                
+                if not trades:
+                    await query.edit_message_text("📭 Chưa có giao dịch nào.")
+                    return
+                
+                recent_trades = trades[:5]
+                msg = "📊 *Paper Trading (5 gần nhất):*\n\n"
+                for trade in recent_trades:
+                    action = trade.get("action", "")
+                    symbol = trade.get("symbol", "")
+                    shares = trade.get("shares", 0)
+                    price = trade.get("price", 0)
+                    emoji = "🟢" if action == "BUY" else "🔴"
+                    msg += f"{emoji} {action} {shares} CP {symbol} @ {price:,.0f}\n"
+                
+                await query.edit_message_text(msg, parse_mode='Markdown')
+            except Exception as e:
+                await query.edit_message_text(f"❌ Lỗi: {e}")
+        
+        elif action == "paperperf":
+            try:
+                from paper_trading import get_paper_account
+                account = get_paper_account()
+                stats = account.get_statistics()
+                
+                msg = "📈 *Paper Trading Performance:*\n\n"
+                msg += f"💰 P&L: {stats['current_pnl']:+,.0f} VNĐ\n"
+                msg += f"📊 Return: {stats['current_return_pct']:+.2f}%\n"
+                msg += f"🔄 Trades: {stats['total_trades']}\n"
+                msg += f"💸 Phí: {stats['total_commission']:,.0f} VNĐ"
+                
+                await query.edit_message_text(msg, parse_mode='Markdown')
+            except Exception as e:
+                await query.edit_message_text(f"❌ Lỗi: {e}")
+        
+        elif action == "paperaccount":
+            try:
+                from paper_trading import get_paper_account
+                account = get_paper_account()
+                summary = account.format_account_summary()
+                
+                keyboard = [[
+                    InlineKeyboardButton("📊 Trade History", callback_data="action:papertrades"),
+                    InlineKeyboardButton("📈 Performance", callback_data="action:paperperf"),
+                ]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(summary, parse_mode='Markdown', reply_markup=reply_markup)
+            except Exception as e:
+                await query.edit_message_text(f"❌ Lỗi: {e}")
     
     elif data.startswith("subscribe:"):
         symbol = data.split(":")[1]
@@ -351,6 +410,54 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {e}")
 
+# ===== PAPER TRADING COMMANDS =====
+async def paper_account_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /paper - Xem paper trading account"""
+    try:
+        from paper_trading import get_paper_account
+        account = get_paper_account()
+        summary = account.format_account_summary()
+        
+        keyboard = [[
+            InlineKeyboardButton("📊 Trade History", callback_data="action:papertrades"),
+            InlineKeyboardButton("📈 Performance", callback_data="action:paperperf"),
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(summary, parse_mode='Markdown', reply_markup=reply_markup)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+
+async def paper_trades_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /papertrades - Xem lịch sử giao dịch paper trading"""
+    try:
+        from paper_trading import get_paper_account
+        account = get_paper_account()
+        trades = account.get_trade_history()
+        
+        if not trades:
+            await update.message.reply_text("📭 Chưa có giao dịch nào trong paper trading account.")
+            return
+        
+        # Show last 10 trades
+        recent_trades = trades[:10]
+        msg = "📊 *Paper Trading History (10 gần nhất):*\n\n"
+        
+        for trade in recent_trades:
+            action = trade.get("action", "")
+            symbol = trade.get("symbol", "")
+            shares = trade.get("shares", 0)
+            price = trade.get("price", 0)
+            timestamp = trade.get("timestamp", "")[:16]
+            
+            emoji = "🟢" if action == "BUY" else "🔴"
+            msg += f"{emoji} {action} {shares} CP {symbol} @ {price:,.0f} VNĐ\n"
+            msg += f"   {timestamp}\n\n"
+        
+        await update.message.reply_text(msg, parse_mode='Markdown')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+
 async def run_bot_async():
     """Hàm async chạy bot"""
     print("✅ Telegram Bot đang khởi động...")
@@ -376,6 +483,8 @@ async def run_bot_async():
     app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     app.add_handler(CommandHandler("mysubs", mysubs_command))
     app.add_handler(CommandHandler("summary", summary_command))
+    app.add_handler(CommandHandler("paper", paper_account_command))
+    app.add_handler(CommandHandler("papertrades", paper_trades_command))
     
     # Inline button handlers
     app.add_handler(CallbackQueryHandler(button_callback))
