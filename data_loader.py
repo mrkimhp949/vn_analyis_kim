@@ -1,8 +1,3 @@
-"""
-data_loader.py - IMPROVED VERSION
-Cải thiện xử lý columns và error handling
-"""
-
 import pandas as pd
 from datetime import datetime, timedelta
 import requests

@@ -281,16 +281,16 @@ async def remove_from_portfolio(symbol: str, shares: int = None):
         from portfolio_manager import PortfolioManager
         manager = PortfolioManager()
         
-        success = manager.remove_stock(symbol, shares)
+        success, message = manager.remove_stock(symbol, shares)
         
         if success:
             return {
                 "status": "success", 
-                "message": f"Đã bán {shares if shares else 'tất cả'} CP {symbol}",
+                "message": message,
                 "symbol": symbol
             }
         else:
-            return {"status": "error", "message": f"Không thể bán {symbol}"}
+            return {"status": "error", "message": message}
         
     except Exception as e:
         return {"status": "error", "message": str(e)}
