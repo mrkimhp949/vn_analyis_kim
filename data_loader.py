@@ -5,6 +5,7 @@ import hashlib
 import pickle
 import os
 import sys
+import time
 
 DATA_CACHE_DIR = 'data_cache'
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
@@ -16,22 +17,44 @@ if hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-def load_data(symbol, lookback=200, use_cache=True):
+def load_data(symbol, lookback=200, use_cache=True, use_incremental=True):
     """
-    Load dữ liệu từ TCBS API với cache
+    Load dữ liệu từ TCBS API với cache và incremental updates
     
     IMPROVEMENTS:
     - ✅ Better column handling
     - ✅ Validation for required data
     - ✅ Clear error messages
     - ✅ Type checking
+    - ✅ Incremental cache updates
+    - ✅ API monitoring
     """
-    # Tạo cache key
+    # ===== STEP 1: Kiểm tra incremental cache =====
+    if use_incremental:
+        try:
+            from incremental_cache import get_incremental_cache
+            inc_cache = get_incremental_cache()
+            cached_df = inc_cache.get_cached_data(symbol, lookback)
+            
+            if cached_df is not None and not cached_df.empty:
+                # Kiểm tra xem có cần update không (trong vòng 1 giờ)
+                symbol_key = symbol.upper()
+                cache_metadata = inc_cache.metadata.get(symbol_key, {})
+                last_update_str = cache_metadata.get('last_update')
+                
+                if last_update_str:
+                    last_update = datetime.fromisoformat(last_update_str)
+                    if (datetime.now() - last_update).total_seconds() < 3600:  # < 1 giờ
+                        print(f"📁 Load {symbol} từ incremental cache ({len(cached_df)} rows)")
+                        return cached_df
+        except Exception as e:
+            print(f"⚠️ Lỗi incremental cache: {e}, fallback to normal cache...")
+    
+    # ===== STEP 2: Kiểm tra normal cache =====
     cache_key = f"{symbol}_{lookback}_{datetime.today().strftime('%Y%m%d')}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
     cache_file = os.path.join(DATA_CACHE_DIR, f"{cache_hash}.pkl")
     
-    # Kiểm tra cache
     if use_cache and os.path.exists(cache_file):
         try:
             with open(cache_file, 'rb') as f:
@@ -40,11 +63,29 @@ def load_data(symbol, lookback=200, use_cache=True):
         except Exception as e:
             print(f"⚠️ Lỗi load cache: {e}, tải lại từ API...")
     
-    # Load từ API
-    end = datetime.today()
-    start = end - timedelta(days=lookback*2)
-    
+    # ===== STEP 3: Load từ API với monitoring =====
     url = "https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term"
+    
+    # Kiểm tra incremental range
+    incremental_range = None
+    if use_incremental:
+        try:
+            from incremental_cache import get_incremental_cache
+            inc_cache = get_incremental_cache()
+            incremental_range = inc_cache.get_incremental_range(symbol)
+        except Exception:
+            pass
+    
+    if incremental_range:
+        start_ts, end_ts = incremental_range
+        start = datetime.fromtimestamp(start_ts)
+        end = datetime.fromtimestamp(end_ts)
+        print(f"📥 Tải {symbol} incremental từ {start.date()} đến {end.date()}...")
+    else:
+        end = datetime.today()
+        start = end - timedelta(days=lookback*2)
+        print(f"📥 Tải {symbol} full từ TCBS...")
+    
     params = {
         "ticker": symbol,
         "type": "stock",
@@ -53,10 +94,37 @@ def load_data(symbol, lookback=200, use_cache=True):
         "to": int(end.timestamp())
     }
     
+    # API monitoring với retry
     try:
-        print(f"📥 Tải {symbol} từ TCBS...")
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
+        from api_monitor import get_api_monitor
+        api_monitor = get_api_monitor()
+        
+        # Ping check trước (chỉ check URL, không dùng params)
+        success, response_time, error = api_monitor.ping(
+            url,
+            timeout=15,
+            retries=3,
+            retry_delay=1.0
+        )
+        
+        if not success:
+            print(f"⚠️ API ping failed: {error}, vẫn thử fetch data...")
+        
+        # Fetch data với retry logic
+        response = None
+        for attempt in range(3):
+            try:
+                response = requests.get(url, params=params, timeout=15)
+                response.raise_for_status()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                time.sleep(1.0 * (attempt + 1))
+        
+        if response is None:
+            raise Exception("Failed to fetch data after retries")
+        
         data = response.json()
         
         # ✅ VALIDATION: Check response structure
@@ -95,7 +163,17 @@ def load_data(symbol, lookback=200, use_cache=True):
         
         print(f"✅ Tải thành công {len(df)} nến cho {symbol}")
         
-        # Lưu cache
+        # ===== STEP 4: Lưu incremental cache =====
+        if use_incremental:
+            try:
+                from incremental_cache import get_incremental_cache
+                inc_cache = get_incremental_cache()
+                inc_cache.update_cache(symbol, df, incremental=True)
+                print(f"💾 Đã cập nhật incremental cache cho {symbol}")
+            except Exception as e:
+                print(f"⚠️ Lỗi lưu incremental cache: {e}")
+        
+        # Lưu normal cache
         _save_cache(df, cache_file, symbol)
         
         return df

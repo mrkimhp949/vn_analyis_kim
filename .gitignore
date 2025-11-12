@@ -65,6 +65,8 @@ selected_tickers.json
 telegram_subscriptions.json
 portfolio_history.json
 paper_trading.json
+intraday_cache/
+api_monitor.json
 
 # Training reports (có thể ignore hoặc push tùy mục đích)
 # reports/*.json

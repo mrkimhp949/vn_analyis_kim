@@ -57,8 +57,10 @@ tz = pytz.timezone("Asia/Ho_Chi_Minh")
 # ═══════════════════════════════════════════════════════════
 
 def schedule_job():
-    """Scheduler với improved logic và error handling"""
+    """Scheduler với improved logic, error handling và VN trading schedule"""
     print("🤖 Bot khởi động với Portfolio Management!")
+    
+    from vn_trading_schedule import should_run_scheduled_task, is_trading_hour, is_trading_day
     
     last_sector_analysis = None
     last_signal_scan = None
@@ -75,6 +77,19 @@ def schedule_job():
             current_weekday = now.weekday()
             current_date = now.date()
             
+            # ===== CHECK: Chỉ chạy trong giờ giao dịch VN =====
+            if not should_run_scheduled_task(now):
+                # Nếu không phải giờ giao dịch, sleep lâu hơn
+                if not is_trading_day(now):
+                    # Ngày nghỉ (T3/T7), sleep 1 giờ
+                    time.sleep(3600)
+                elif not is_trading_hour(now):
+                    # Ngoài giờ giao dịch, sleep 30 phút
+                    time.sleep(1800)
+                else:
+                    time.sleep(60)
+                continue
+            
             # THỨ 7 20:00 - Phân tích ngành (chỉ chạy 1 lần mỗi tuần)
             if (current_weekday == 5 and current_hour == 20 and current_minute == 0 and 
                 last_sector_analysis != current_date):
@@ -87,8 +102,8 @@ def schedule_job():
                     print(f"❌ Lỗi phân tích ngành: {e}")
                 time.sleep(61)
             
-            # THỨ 2-6 8:30 - Quét tín hiệu (chỉ chạy 1 lần mỗi ngày)
-            elif (current_weekday < 5 and current_hour == 8 and current_minute == 30 and 
+            # THỨ 2-6 9:15 - Quét tín hiệu (sau khi mở cửa 15 phút, chỉ chạy 1 lần mỗi ngày)
+            elif (is_trading_day(now) and current_hour == 9 and current_minute == 15 and 
                   last_signal_scan != current_date):
                 print(f"\n🎯 [{now.strftime('%A').upper()}] QUÉT TÍN HIỆU")
                 try:
@@ -99,8 +114,8 @@ def schedule_job():
                     print(f"❌ Lỗi quét tín hiệu: {e}")
                 time.sleep(61)
             
-            # THỨ 6 15:00 - Kiểm tra portfolio (1 lần/tuần)
-            elif (current_weekday == 4 and current_hour == 15 and current_minute == 0 and 
+            # THỨ 6 14:45 - Kiểm tra portfolio (trước khi đóng cửa, 1 lần/tuần)
+            elif (is_trading_day(now) and current_weekday == 4 and current_hour == 14 and current_minute == 45 and 
                   last_portfolio_check != current_date):
                 print("\n💼 [THỨ 6] KIỂM TRA PORTFOLIO")
                 try:
@@ -112,8 +127,9 @@ def schedule_job():
                     print(f"❌ Lỗi kiểm tra portfolio: {e}")
                 time.sleep(61)
 
-            # Refresh tin tức đa nguồn vài lần/ngày
-            elif (update_news_cache and current_hour in (7, 12, 17) and current_minute == 10 and
+            # Refresh tin tức đa nguồn trong giờ giao dịch (9:30, 13:30, 14:30)
+            elif (update_news_cache and is_trading_hour(now) and 
+                  current_hour in (9, 13, 14) and current_minute == 30 and
                   last_news_refresh != (current_date, current_hour)):
                 try:
                     print("\n📰 Đang cập nhật tin tức thị trường...")
@@ -125,8 +141,8 @@ def schedule_job():
                     print(f"⚠️ Lỗi cập nhật tin tức: {e}")
                 time.sleep(61)
             
-            # 17:00 - Gửi daily summary cho tất cả users
-            elif (current_weekday < 5 and current_hour == 17 and current_minute == 0 and
+            # 15:15 - Gửi daily summary cho tất cả users (sau khi đóng cửa)
+            elif (is_trading_day(now) and current_hour == 15 and current_minute == 15 and
                   last_daily_summary != current_date):
                 print("\n📊 [17:00] GỬI DAILY SUMMARY")
                 try:
@@ -142,8 +158,8 @@ def schedule_job():
                     print(f"❌ Lỗi gửi daily summary: {e}")
                 time.sleep(61)
             
-            # 15:30 - Record daily PnL cho portfolio và paper trading
-            elif (current_weekday < 5 and current_hour == 15 and current_minute == 30 and
+            # 15:10 - Record daily PnL cho portfolio và paper trading (trước khi đóng cửa)
+            elif (is_trading_hour(now) and current_hour == 15 and current_minute == 10 and
                   last_pnl_record != current_date):
                 print("\n📊 [15:30] GHI LẠI PNL HÀNG NGÀY")
                 try:
@@ -163,6 +179,7 @@ def schedule_job():
                     print(f"❌ Lỗi ghi PnL: {e}")
                 time.sleep(61)
             
+            # Sleep ngắn hơn trong giờ giao dịch để responsive hơn
             time.sleep(30)
             
         except Exception as e:
