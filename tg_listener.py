@@ -1,6 +1,8 @@
 import asyncio
+import time
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
+from telegram.error import NetworkError as TgNetworkError
 from config import TELEGRAM_TOKEN
 from bot_runner_improved import run_bot_with_context
 
@@ -119,15 +121,22 @@ async def run_bot_async():
 
 def start_bot_listener():
     """Chạy Telegram bot trong thread riêng với event loop mới"""
-    # ✅ Tạo event loop mới cho thread này
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        loop.run_until_complete(run_bot_async())
-    except Exception as e:
-        print(f"❌ Lỗi Telegram Bot: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        loop.close()
+    backoff = 5
+    while True:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(run_bot_async())
+            break  # Thoát nếu shutdown bình thường
+        except TgNetworkError as e:
+            print(f"⚠️ Mất kết nối Telegram: {e}. Thử lại sau {backoff}s...")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+        except Exception as e:
+            print(f"❌ Lỗi Telegram Bot: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+        finally:
+            loop.close()

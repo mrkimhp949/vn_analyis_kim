@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Bot
 import pandas as pd
 
@@ -71,7 +71,7 @@ except ImportError as e:
 try:
     from improved_entry_logic import ImprovedEntryLogic
     entry_logic = ImprovedEntryLogic(
-        min_confidence=60,
+        min_confidence=50,
         min_risk_reward=2.0,
         require_trend_alignment=True,
         require_volume_confirmation=False
@@ -116,6 +116,11 @@ SELECTED_TICKERS_FILE = 'selected_tickers.json'
 POSITIONS_FILE = 'active_positions.json'
 LOGS_DIR = 'logs'
 os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Scan & risk configs
+MAX_SCAN_UNIVERSE = int(os.getenv('MAX_SCAN_UNIVERSE', '40'))
+SECTOR_CACHE_TTL_DAYS = int(os.getenv('SECTOR_CACHE_TTL_DAYS', '7'))
+WATCHLIST_SIZE = int(os.getenv('WATCHLIST_SIZE', '5'))
 
 
 # ======================================================
@@ -217,6 +222,115 @@ async def send_sector_summary_telegram(result):
 
 
 # ======================================================
+# DATA & STRATEGY HELPERS
+# ======================================================
+
+def _parse_datetime(value):
+    """Parse ISO datetime string safely"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+
+def _load_sector_snapshot():
+    """Đọc cached sector snapshot nếu còn hạn"""
+    if not os.path.exists(SELECTED_TICKERS_FILE):
+        return None
+    try:
+        with open(SELECTED_TICKERS_FILE, 'r', encoding='utf-8') as f:
+            snapshot = json.load(f)
+        analyzed_at = _parse_datetime(snapshot.get('selected_at'))
+        if analyzed_at and datetime.now() - analyzed_at > timedelta(days=SECTOR_CACHE_TTL_DAYS):
+            print("ℹ️ Sector snapshot đã quá hạn -> cần refresh")
+            return None
+        return snapshot
+    except Exception as e:
+        log_error(f"Lỗi đọc sector snapshot: {e}")
+        return None
+
+
+def get_selected_tickers(force_refresh=False, max_tickers=MAX_SCAN_UNIVERSE):
+    """
+    Trả về (tickers, snapshot) - ưu tiên sử dụng dữ liệu cache để tránh quét lặp.
+    """
+    snapshot = None if force_refresh else _load_sector_snapshot()
+
+    if snapshot is None:
+        selected = run_sector_analysis()
+        snapshot = _load_sector_snapshot() or {
+            'tickers': selected,
+            'selected_at': datetime.now().isoformat()
+        }
+
+    tickers = snapshot.get('tickers') or TICKERS
+    tickers = sorted(set(tickers)) or TICKERS
+
+    if max_tickers and max_tickers > 0:
+        tickers = tickers[:max_tickers]
+
+    return tickers, snapshot
+
+
+def apply_market_adjustments(market_regime):
+    """Điều chỉnh tham số chiến lược theo market regime"""
+    if not entry_logic or not position_sizer:
+        return
+
+    regime = (market_regime or {}).get('regime', 'UNKNOWN').upper()
+
+    if regime == 'BULL':
+        entry_logic.min_confidence = 55
+        entry_logic.min_risk_reward = 1.8
+        entry_logic.require_trend_alignment = True
+        position_sizer.max_total_exposure = 0.70
+        position_sizer.min_positions = 6
+    elif regime == 'BEAR':
+        entry_logic.min_confidence = 50
+        entry_logic.min_risk_reward = 1.4
+        entry_logic.require_trend_alignment = False
+        position_sizer.max_total_exposure = 0.30
+        position_sizer.min_positions = 2
+    else:  # SIDEWAYS / UNKNOWN
+        entry_logic.min_confidence = 55
+        entry_logic.min_risk_reward = 1.6
+        entry_logic.require_trend_alignment = True
+        position_sizer.max_total_exposure = 0.50
+        position_sizer.min_positions = 4
+
+    print(
+        "⚙️ Điều chỉnh chiến lược "
+        f"(regime={regime}, min_conf={entry_logic.min_confidence}, "
+        f"R:R>={entry_logic.min_risk_reward}, trend_required={entry_logic.require_trend_alignment}, "
+        f"max_exposure={position_sizer.max_total_exposure*100:.0f}%)"
+    )
+
+
+def sync_position_sizer_with_active_positions(active_positions):
+    """Đồng bộ position_sizer.current_positions với vị thế đang nắm"""
+    if not position_sizer:
+        return
+
+    position_sizer.current_positions = {}
+    for symbol, pos in active_positions.items():
+        shares = pos.get('shares', 0)
+        if shares <= 0:
+            continue
+        entry_price = pos.get('entry_price', 0)
+        position_sizer.current_positions[symbol] = {
+            'shares': shares,
+            'entry_price': entry_price,
+            'current_price': pos.get('current_price', entry_price),
+            'unrealized_pnl': 0
+        }
+
+
+# ======================================================
 # BOT RUNNER - IMPROVED VERSION WITH ERROR HANDLING
 # ======================================================
 async def check_portfolio_and_recommend(bot_instance, chat_id):
@@ -282,28 +396,46 @@ async def run_bot_with_context(bot_instance, chat_id):
         log_error(f"Lỗi get market regime: {e}")
         market_regime = None
     
+    apply_market_adjustments(market_regime)
+
+    # Đồng bộ các vị thế hiện tại
+    active_positions = load_active_positions()
+    existing_symbols = set(active_positions.keys())
+    sync_position_sizer_with_active_positions(active_positions)
+
     # ===== CHECK 2: LOAD TICKERS =====
-    current_tickers = load_selected_tickers()
+    current_tickers, sector_snapshot = get_selected_tickers()
     print(f"🔍 Quét {len(current_tickers)} mã...")
     
     signal_count = 0
-    
+    watchlist_candidates = []
+
+    top_sectors = sector_snapshot.get('top_sectors')[:3] if sector_snapshot else []
+    sector_text = "\n".join([f"   • {s}" for s in top_sectors]) if top_sectors else "   • N/A"
+
     try:
         regime_text = market_regime['regime'] if market_regime else 'UNKNOWN'
         await bot_instance.send_message(
             chat_id=chat_id,
-            text=f"🔍 Đang quét {len(current_tickers)} mã...\n"
-                 f"📊 Market: {regime_text}"
+            text=(
+                f"🔍 Đang quét {len(current_tickers)} mã...\n"
+                f"📊 Market: {regime_text}\n"
+                f"🏆 Top sectors:\n{sector_text}"
+            )
         )
     except Exception as e:
         log_error(f"Lỗi gửi Telegram: {e}")
-    
+
     # ===== CHECK 3: CHECK EXITS TRƯỚC =====
     await check_active_positions(bot_instance, chat_id, market_regime)
     
     # ===== CHECK 4: SCAN FOR NEW ENTRIES =====
     for symbol in current_tickers:
         try:
+            if symbol in existing_symbols:
+                print(f"⏭️ Bỏ qua {symbol} (đã có vị thế)")
+                continue
+
             df = load_data(symbol, LOOKBACK)
             if df.empty or len(df) < 50:
                 continue
@@ -323,6 +455,14 @@ async def run_bot_with_context(bot_instance, chat_id):
             )
             
             if not entry_signal.should_enter:
+                ml_confidence = ml_signal.get('confidence', 0)
+                if ml_confidence >= max(0, entry_logic.min_confidence - 5):
+                    reason = ", ".join(entry_signal.warnings) if entry_signal.warnings else "Không đạt bộ lọc"
+                    watchlist_candidates.append({
+                        'symbol': symbol,
+                        'confidence': ml_confidence,
+                        'reason': reason
+                    })
                 continue
             
             latest = df.iloc[-1]
@@ -344,6 +484,10 @@ async def run_bot_with_context(bot_instance, chat_id):
             
             if position.shares == 0:
                 continue
+
+            if position_sizer and symbol not in position_sizer.current_positions:
+                position_sizer.add_position(symbol, position.shares, entry_signal.entry_price)
+                existing_symbols.add(symbol)
             
             # ===== FORMAT MESSAGE =====
             msg = format_entry_recommendation(
@@ -382,6 +526,22 @@ async def run_bot_with_context(bot_instance, chat_id):
     except Exception as e:
         log_error(f"Lỗi gửi summary: {e}")
     print(summary)
+
+    if signal_count == 0:
+        if watchlist_candidates:
+            watchlist_candidates.sort(key=lambda x: x['confidence'], reverse=True)
+            top_watchlist = watchlist_candidates[:WATCHLIST_SIZE]
+            lines = [
+                f"• {item['symbol']}: {item['confidence']:.0f}% - {item['reason']}"
+                for item in top_watchlist
+            ]
+            watchlist_msg = "👀 *WATCHLIST* (chưa đủ điều kiện BUY):\n" + "\n".join(lines)
+        else:
+            watchlist_msg = "⚠️ Thị trường chưa có mã nào đạt điều kiện BUY. Tiếp tục quan sát."
+        try:
+            await bot_instance.send_message(chat_id, text=watchlist_msg, parse_mode='Markdown')
+        except Exception as e:
+            log_error(f"Lỗi gửi watchlist: {e}")
 
 
 async def check_active_positions(bot_instance, chat_id, market_regime):
@@ -499,8 +659,9 @@ def format_entry_recommendation(symbol, entry_signal, position, market_regime):
 # ================ FILE I/O ====================
 
 def load_selected_tickers():
-    print(f"Quet {len(TICKERS)} ma tu config")
-    return TICKERS  # ✅ LUÔN trả về tất cả mã từ config
+    tickers, _ = get_selected_tickers(force_refresh=False)
+    print(f"Quet {len(tickers)} ma tu snapshot/config")
+    return tickers
 
 def load_active_positions():
     """Load active positions"""
