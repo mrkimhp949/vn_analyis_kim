@@ -75,13 +75,18 @@ class PortfolioManager:
         print(f"✅ Đã thêm {shares} CP {symbol} vào portfolio")
     
     def remove_stock(self, symbol, shares=None, price=None, date=None):
-        """Bán cổ phiếu khỏi portfolio"""
+        """Bán cổ phiếu khỏi portfolio
+
+        Returns:
+            tuple[bool, str]: (success, message)
+        """
         if date is None:
             date = datetime.now().isoformat()
         
         if symbol not in self.portfolio:
-            print(f"❌ Không có {symbol} trong portfolio")
-            return False
+            msg = f"Không có {symbol} trong portfolio"
+            print(f"❌ {msg}")
+            return False, msg
         
         current = self.portfolio[symbol]
         
@@ -89,8 +94,9 @@ class PortfolioManager:
             shares = current['shares']  # Bán hết
         
         if shares > current['shares']:
-            print(f"❌ Không đủ cổ phiếu để bán")
-            return False
+            msg = f"Không đủ cổ phiếu để bán (hiện có {current['shares']:,} CP)"
+            print(f"❌ {msg}")
+            return False, msg
         
         # Ghi nhận giao dịch
         transaction = {
@@ -115,8 +121,9 @@ class PortfolioManager:
             current['last_updated'] = date
         
         self.save_portfolio()
-        print(f"✅ Đã bán {shares} CP {symbol} khỏi portfolio")
-        return True
+        msg = f"Đã bán {shares:,} CP {symbol}"
+        print(f"✅ {msg}")
+        return True, msg
     
     def get_current_holdings(self):
         """Lấy danh sách cổ phiếu đang nắm giữ"""

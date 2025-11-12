@@ -103,6 +103,14 @@ except ImportError as e:
     print(f"❌ Lỗi import improved_exit_logic: {e}")
     exit_strategy = None
 
+try:
+    from news_analyzer import analyze_news_trend, get_top_news
+    print("✅ Import news_analyzer thành công")
+except ImportError as e:
+    print(f"⚠️ Không thể import news_analyzer: {e}")
+    analyze_news_trend = None
+    get_top_news = None
+
 # Initialize bot
 try:
     bot = Bot(token=TELEGRAM_TOKEN)
@@ -454,14 +462,37 @@ async def run_bot_with_context(bot_instance, chat_id):
                 market_regime=market_regime
             )
             
+            news_context = analyze_news_trend(symbol) if analyze_news_trend else None
+            news_sentiment = news_context.get("sentiment_score", 0.0) if news_context else 0.0
+            if news_context and news_context.get("articles"):
+                if news_sentiment >= 0.5:
+                    entry_signal.confidence = min(100, entry_signal.confidence + 5)
+                    entry_signal.reasons.append(f"📰 Tin tức tích cực ({news_sentiment:+.2f})")
+                elif news_sentiment <= -0.5:
+                    entry_signal.confidence = max(0, entry_signal.confidence - 7)
+                    entry_signal.warnings.append(f"📰 Tin tức tiêu cực ({news_sentiment:+.2f})")
+                else:
+                    entry_signal.reasons.append(f"📰 Tin tức trung lập ({news_sentiment:+.2f})")
+
+            if entry_signal.should_enter and entry_signal.confidence < entry_logic.min_confidence:
+                entry_signal.should_enter = False
+                entry_signal.warnings.append(
+                    f"Confidence giảm xuống dưới ngưỡng sau khi điều chỉnh tin tức ({entry_signal.confidence}%)"
+                )
+
             if not entry_signal.should_enter:
-                ml_confidence = ml_signal.get('confidence', 0)
-                if ml_confidence >= max(0, entry_logic.min_confidence - 5):
+                confidence_for_watchlist = max(ml_signal.get('confidence', 0), entry_signal.confidence)
+                if confidence_for_watchlist >= max(0, entry_logic.min_confidence - 5):
                     reason = ", ".join(entry_signal.warnings) if entry_signal.warnings else "Không đạt bộ lọc"
+                    top_headline = ""
+                    if news_context and news_context.get("top_headlines"):
+                        top_headline = news_context["top_headlines"][0]["title"]
                     watchlist_candidates.append({
                         'symbol': symbol,
-                        'confidence': ml_confidence,
-                        'reason': reason
+                        'confidence': confidence_for_watchlist,
+                        'reason': reason,
+                        'sentiment': news_sentiment,
+                        'headline': top_headline
                     })
                 continue
             
@@ -494,7 +525,8 @@ async def run_bot_with_context(bot_instance, chat_id):
                 symbol, 
                 entry_signal, 
                 position,
-                market_regime
+                market_regime,
+                news_context=news_context
             )
             
             await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
@@ -532,7 +564,13 @@ async def run_bot_with_context(bot_instance, chat_id):
             watchlist_candidates.sort(key=lambda x: x['confidence'], reverse=True)
             top_watchlist = watchlist_candidates[:WATCHLIST_SIZE]
             lines = [
-                f"• {item['symbol']}: {item['confidence']:.0f}% - {item['reason']}"
+                "• {symbol}: {conf:.0f}% - {reason}{sentiment}{headline}".format(
+                    symbol=item['symbol'],
+                    conf=item['confidence'],
+                    reason=item['reason'],
+                    sentiment=f", sentiment {item.get('sentiment', 0.0):+.2f}" if 'sentiment' in item else "",
+                    headline=f" | {item['headline']}" if item.get('headline') else ""
+                )
                 for item in top_watchlist
             ]
             watchlist_msg = "👀 *WATCHLIST* (chưa đủ điều kiện BUY):\n" + "\n".join(lines)
@@ -606,7 +644,7 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
             log_error(f"Lỗi check exit {symbol}: {e}")
 
 
-def format_entry_recommendation(symbol, entry_signal, position, market_regime):
+def format_entry_recommendation(symbol, entry_signal, position, market_regime, news_context=None):
     """Format entry recommendation message"""
     
     msg = f"🎯 *TÍN HIỆU VÀO LỆNH - {symbol}*\n\n"
@@ -652,6 +690,14 @@ def format_entry_recommendation(symbol, entry_signal, position, market_regime):
     
     # Risk
     msg += f"\n💸 *Risk:* {position.max_loss:,.0f} VNĐ ({position.risk_percent:.2f}%)"
+
+    if news_context and news_context.get("articles"):
+        msg += f"\n\n📰 *News Sentiment:* {news_context['sentiment_label']} ({news_context['sentiment_score']:+.2f})\n"
+        for article in news_context.get("top_headlines", [])[:2]:
+            published = article.get("published_at", "")[:16].replace("T", " ")
+            msg += f"  • {article['title']} ({article['source']}, {published})\n"
+            if article.get("url"):
+                msg += f"    {article['url']}\n"
     
     return msg
 

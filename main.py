@@ -40,6 +40,16 @@ try:
 except ImportError as e:
     print(f"❌ Lỗi import logging_config: {e}")
 
+try:
+    from news_analyzer import update_news_cache
+except ImportError:
+    update_news_cache = None
+
+try:
+    from config import TICKERS
+except ImportError:
+    TICKERS = []
+
 tz = pytz.timezone("Asia/Ho_Chi_Minh")
 
 # ═══════════════════════════════════════════════════════════
@@ -53,6 +63,7 @@ def schedule_job():
     last_sector_analysis = None
     last_signal_scan = None
     last_portfolio_check = None
+    last_news_refresh = None
     
     while True:
         try:
@@ -97,6 +108,19 @@ def schedule_job():
                     print("✅ Đã hoàn thành kiểm tra portfolio")
                 except Exception as e:
                     print(f"❌ Lỗi kiểm tra portfolio: {e}")
+                time.sleep(61)
+
+            # Refresh tin tức đa nguồn vài lần/ngày
+            elif (update_news_cache and current_hour in (7, 12, 17) and current_minute == 10 and
+                  last_news_refresh != (current_date, current_hour)):
+                try:
+                    print("\n📰 Đang cập nhật tin tức thị trường...")
+                    slice_symbols = TICKERS[:40] if TICKERS else None
+                    update_news_cache(symbols=slice_symbols)
+                    last_news_refresh = (current_date, current_hour)
+                    print("✅ Tin tức đã được cập nhật")
+                except Exception as e:
+                    print(f"⚠️ Lỗi cập nhật tin tức: {e}")
                 time.sleep(61)
             
             time.sleep(30)

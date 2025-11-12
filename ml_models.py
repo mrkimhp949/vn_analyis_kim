@@ -1,5 +1,3 @@
-# [file name]: ml_models.py
-# [file content begin]
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier

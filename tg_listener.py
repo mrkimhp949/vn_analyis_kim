@@ -5,6 +5,10 @@ from telegram import Update
 from telegram.error import NetworkError as TgNetworkError
 from config import TELEGRAM_TOKEN
 from bot_runner_improved import run_bot_with_context
+try:
+    from news_analyzer import format_news_brief
+except ImportError:
+    format_news_brief = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -14,6 +18,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/portfolio - Xem portfolio\n" 
         "/addstock SYMBOL SHARES PRICE - Thêm cổ phiếu\n"
         "/sellstock SYMBOL [SHARES] - Bán cổ phiếu\n"
+        "/news SYMBOL - Tin tức & sentiment mới nhất\n"
         "/status - Trạng thái bot"
     )
 
@@ -78,16 +83,32 @@ async def sell_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         from portfolio_manager import PortfolioManager
         manager = PortfolioManager()
-        success = manager.remove_stock(symbol, shares)
+        success, message = manager.remove_stock(symbol, shares)
         
         if success:
-            shares_msg = f"{shares} CP" if shares else "tất cả"
-            await update.message.reply_text(f"✅ Đã bán {shares_msg} {symbol}")
+            await update.message.reply_text(f"✅ {message}")
         else:
-            await update.message.reply_text(f"❌ Không thể bán {symbol}")
+            await update.message.reply_text(f"❌ {message}")
         
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {e}")
+
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /news SYMBOL - Tin tức & sentiment"""
+    if format_news_brief is None:
+        await update.message.reply_text("⚠️ Module tin tức chưa sẵn sàng.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ Usage: /news SYMBOL\nVí dụ: /news VNM")
+        return
+
+    symbol = context.args[0].upper()
+    try:
+        message = format_news_brief(symbol)
+        await update.message.reply_text(message)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi lấy tin tức cho {symbol}: {e}")
 
 async def run_bot_async():
     """Hàm async chạy bot"""
@@ -102,6 +123,7 @@ async def run_bot_async():
     app.add_handler(CommandHandler("portfolio", portfolio_command))
     app.add_handler(CommandHandler("addstock", add_stock_command))
     app.add_handler(CommandHandler("sellstock", sell_stock_command))
+    app.add_handler(CommandHandler("news", news_command))
     
     # ✅ Khởi tạo và chạy bot thủ công
     await app.initialize()
