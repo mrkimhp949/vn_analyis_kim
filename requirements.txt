@@ -13,3 +13,11 @@ joblib==1.3.2
 pytz==2024.1
 openpyxl==3.1.2
 python-multipart==0.0.6
+transformers==4.35.2  # Optional: advanced sentiment
+torch==2.0.1          # Optional: required by transformers
+xgboost==2.0.3        # Optional: ensemble models & volatility forecasting
+# TensorFlow: LSTM models support
+# Note: If you have tensorflow-cpu installed, uninstall it first: pip uninstall tensorflow-cpu
+# Then install: pip install tensorflow==2.15.0
+# tensorflow==2.15.0    # Optional: LSTM models (install separately to avoid conflicts)
+pyarrow==14.0.1       # Required: parquet file support for feature store

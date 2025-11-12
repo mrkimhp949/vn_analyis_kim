@@ -159,6 +159,7 @@ class Backtester:
         position = 0  # Số cổ phiếu đang nắm giữ
         trades = []
         portfolio_values = []
+        position_data = None
         
         # Simulate trading với progress indicator
         total_days = len(df) - 50
@@ -199,6 +200,39 @@ class Backtester:
                 signal = result.get('signal', 'HOLD')
                 confidence = result.get('confidence', 0)
                 price = current_row['close']
+                day_high = current_row.get('high', price)
+                day_low = current_row.get('low', price)
+                atr_value = current_row.get('atr', current_data['close'].rolling(14).std().iloc[-1])
+                
+                # Kiểm tra stop-loss / take-profit khi đang giữ vị thế
+                if position > 0 and position_data:
+                    exit_reason = None
+                    exit_price = None
+                    if day_low <= position_data['stop_loss']:
+                        exit_price = position_data['stop_loss']
+                        exit_reason = 'STOP_LOSS'
+                    elif day_high >= position_data['take_profit']:
+                        exit_price = position_data['take_profit']
+                        exit_reason = 'TAKE_PROFIT'
+                    
+                    if exit_reason and exit_price:
+                        revenue = position * exit_price * (1 - self.commission)
+                        capital += revenue
+                        trades.append({
+                            'date': current_row['time'],
+                            'type': 'SELL',
+                            'price': exit_price,
+                            'shares': position,
+                            'value': revenue,
+                            'confidence': confidence,
+                            'ml_score': result.get('ml_score', 0),
+                            'exit_reason': exit_reason
+                        })
+                        position = 0
+                        position_data = None
+                        # Sau khi chốt, không tiếp tục xử lý SIGNAL SELL cùng ngày
+                        if signal != 'BUY':
+                            continue
                 
                 # Áp dụng slippage
                 execution_price = self._apply_slippage(price, signal)
@@ -208,7 +242,9 @@ class Backtester:
                     # Tính ATR và stop loss dựa trên features
                     enriched = add_ml_features(current_data)
                     latest_atr = float(enriched.iloc[-1].get('atr', 0)) if len(enriched) > 0 else 0
-                    stop_loss_price = max(0, execution_price - 2.0 * latest_atr)
+                    atr_for_stop = latest_atr if latest_atr > 0 else atr_value if pd.notna(atr_value) and atr_value > 0 else execution_price * 0.03
+                    stop_loss_price = max(0, execution_price - 2.0 * atr_for_stop)
+                    take_profit_price = execution_price + 3.0 * atr_for_stop
                     
                     # Sizing an toàn bằng ConservativePositionSizer
                     sized = self.position_sizer.calculate_position_size(
@@ -235,8 +271,14 @@ class Backtester:
                             'confidence': confidence,
                             'ml_score': result.get('ml_score', 0),
                             'atr': latest_atr,
-                            'stop_loss': stop_loss_price
+                            'stop_loss': stop_loss_price,
+                            'exit_reason': 'OPEN'
                         })
+                        position_data = {
+                            'entry_price': execution_price,
+                            'stop_loss': stop_loss_price,
+                            'take_profit': take_profit_price
+                        }
                 
                 elif signal == 'SELL' and confidence >= confidence_threshold and position > 0:
                     # Bán
@@ -250,10 +292,12 @@ class Backtester:
                         'shares': position,
                         'value': revenue,
                         'confidence': confidence,
-                        'ml_score': result.get('ml_score', 0)
+                            'ml_score': result.get('ml_score', 0),
+                            'exit_reason': 'SIGNAL_SELL'
                     })
                     
                     position = 0
+                    position_data = None
                 
                 # Portfolio value
                 portfolio_value = capital + (position * price if position > 0 else 0)
@@ -278,9 +322,11 @@ class Backtester:
                 'shares': position,
                 'value': position * final_execution_price,
                 'confidence': 0,
-                'ml_score': 0
+                'ml_score': 0,
+                'exit_reason': 'EOD_EXIT'
             })
             position = 0
+            position_data = None
         
         # Calculate metrics
         final_capital = capital
@@ -293,6 +339,11 @@ class Backtester:
         trades_df = pd.DataFrame(trades)
         winning_trades = 0
         losing_trades = 0
+        trade_profits = []
+        gross_profit = 0.0
+        gross_loss = 0.0
+        consecutive_losses = 0
+        max_consecutive_losses = 0
         
         if len(trades_df) > 0:
             buy_trades = trades_df[trades_df['type'] == 'BUY']
@@ -301,11 +352,19 @@ class Backtester:
             for i in range(min(len(buy_trades), len(sell_trades))):
                 buy_price = buy_trades.iloc[i]['price']
                 sell_price = sell_trades.iloc[i]['price']
+                shares_traded = sell_trades.iloc[i]['shares']
+                pnl = (sell_price - buy_price) * shares_traded - (buy_price * shares_traded * self.commission) - (sell_price * shares_traded * self.commission)
+                trade_profits.append(pnl)
                 
-                if sell_price > buy_price:
+                if pnl > 0:
                     winning_trades += 1
+                    gross_profit += pnl
+                    consecutive_losses = 0
                 else:
                     losing_trades += 1
+                    gross_loss += abs(pnl)
+                    consecutive_losses += 1
+                    max_consecutive_losses = max(max_consecutive_losses, consecutive_losses)
         
         win_rate = (winning_trades / (winning_trades + losing_trades) * 100) if (winning_trades + losing_trades) > 0 else 0
         
@@ -316,6 +375,12 @@ class Backtester:
         # Sharpe Ratio
         returns = portfolio_df['value'].pct_change().dropna()
         sharpe_ratio = (returns.mean() / returns.std() * np.sqrt(252)) if len(returns) > 0 and returns.std() > 0 else 0
+
+        downside_returns = returns[returns < 0]
+        sortino_ratio = (returns.mean() / downside_returns.std() * np.sqrt(252)) if len(downside_returns) > 0 and downside_returns.std() > 0 else 0
+        annual_return = ((final_capital / self.initial_capital) ** (252 / max(len(portfolio_df), 1)) - 1) if len(portfolio_df) > 0 else 0
+        calmar_ratio = (annual_return / (max_drawdown / 100)) if max_drawdown > 0 else 0
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
         
         # Average confidence
         avg_confidence = trades_df['confidence'].mean() if len(trades_df) > 0 else 0
@@ -332,6 +397,10 @@ class Backtester:
             'win_rate': win_rate,
             'max_drawdown': max_drawdown,
             'sharpe_ratio': sharpe_ratio,
+            'sortino_ratio': sortino_ratio,
+            'calmar_ratio': calmar_ratio,
+            'profit_factor': profit_factor,
+            'max_consecutive_losses': max_consecutive_losses,
             'avg_confidence': avg_confidence,
             'confidence_threshold': confidence_threshold,
             'trades': trades_df,
@@ -397,6 +466,10 @@ class Backtester:
         print(f"🎲 Tỷ lệ thắng:        {results['win_rate']:>14.2f} %")
         print(f"📉 Max Drawdown:       {results['max_drawdown']:>14.2f} %")
         print(f"📈 Sharpe Ratio:       {results['sharpe_ratio']:>14.2f}")
+        print(f"📈 Sortino Ratio:      {results['sortino_ratio']:>14.2f}")
+        print(f"📈 Calmar Ratio:       {results['calmar_ratio']:>14.2f}")
+        print(f"💹 Profit Factor:      {results['profit_factor']:>14.2f}")
+        print(f"⚠️ Chuỗi thua tối đa:  {results['max_consecutive_losses']:>15}")
         print(f"{'='*60}\n")
         
         # Performance vs Buy&Hold
@@ -530,7 +603,11 @@ class Backtester:
             'Buy&Hold (%)': f"{r['buy_hold_return']:.2f}",
             'Trades': r['total_trades'],
             'Win Rate (%)': f"{r['win_rate']:.2f}",
-            'Sharpe': f"{r['sharpe_ratio']:.2f}"
+            'Sharpe': f"{r['sharpe_ratio']:.2f}",
+            'Sortino': f"{r['sortino_ratio']:.2f}",
+            'Calmar': f"{r['calmar_ratio']:.2f}",
+            'Profit Factor': f"{r['profit_factor']:.2f}",
+            'Max Loss Streak': r['max_consecutive_losses']
         } for r in all_results])
         
         print(summary_df.to_string(index=False))
@@ -554,7 +631,11 @@ class Backtester:
                 'Losing Trades': r['losing_trades'],
                 'Win Rate (%)': r['win_rate'],
                 'Max Drawdown (%)': r['max_drawdown'],
-                'Sharpe Ratio': r['sharpe_ratio']
+                'Sharpe Ratio': r['sharpe_ratio'],
+                'Sortino Ratio': r['sortino_ratio'],
+                'Calmar Ratio': r['calmar_ratio'],
+                'Profit Factor': r['profit_factor'],
+                'Max Consecutive Losses': r['max_consecutive_losses']
             } for r in all_results])
             
             # Export Excel với format đẹp

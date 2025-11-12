@@ -16,6 +16,7 @@ from improved_entry_logic import ImprovedEntryLogic
 from improved_exit_logic import ImprovedExitStrategy
 from improved_position_sizing import ConservativePositionSizer
 from market_regime_proxy import ProxyMarketRegimeAnalyzer
+from risk_metrics import calculate_sector_exposure, summarize_exposure
 import logging
 import sys
 import logging
@@ -281,6 +282,8 @@ class PortfolioAnalyzer:
         
         sell_recommendations = sum(1 for h in current_holdings.values() if h.get('recommendation') == 'SELL')
         hold_recommendations = sum(1 for h in current_holdings.values() if h.get('recommendation') == 'HOLD')
+
+        sector_exposure = calculate_sector_exposure(current_holdings) if current_holdings else {}
         
         return {
             'total_portfolio_value': total_value,
@@ -289,7 +292,8 @@ class PortfolioAnalyzer:
             'total_return_percent': (total_pnl / total_invested * 100) if total_invested > 0 else 0,
             'number_of_stocks': len(current_holdings),
             'sell_recommendations_count': sell_recommendations,
-            'hold_recommendations_count': hold_recommendations
+            'hold_recommendations_count': hold_recommendations,
+            'sector_exposure': sector_exposure
         }
     
     def _create_error_analysis(self, symbol, error_msg):
@@ -343,6 +347,11 @@ class PortfolioAnalyzer:
         report.append(f"• Lợi nhuận: {summary['total_pnl']:,.0f} VNĐ ({summary['total_return_percent']:.1f}%)")
         report.append(f"• Số mã: {summary['number_of_stocks']}")
         report.append(f"• Đề xuất BÁN: {summary['sell_recommendations_count']} mã")
+        exposure_lines = summarize_exposure(summary.get('sector_exposure', {}), top_n=5)
+        if exposure_lines:
+            report.append("• Phân bổ theo ngành:")
+            for line in exposure_lines:
+                report.append(f"  └ {line}")
         report.append("")
         
         # Sell Recommendations

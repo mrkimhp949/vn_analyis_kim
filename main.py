@@ -64,6 +64,7 @@ def schedule_job():
     last_signal_scan = None
     last_portfolio_check = None
     last_news_refresh = None
+    last_daily_summary = None
     
     while True:
         try:
@@ -121,6 +122,23 @@ def schedule_job():
                     print("✅ Tin tức đã được cập nhật")
                 except Exception as e:
                     print(f"⚠️ Lỗi cập nhật tin tức: {e}")
+                time.sleep(61)
+            
+            # 17:00 - Gửi daily summary cho tất cả users
+            elif (current_weekday < 5 and current_hour == 17 and current_minute == 0 and
+                  last_daily_summary != current_date):
+                print("\n📊 [17:00] GỬI DAILY SUMMARY")
+                try:
+                    from telegram_notifications import send_daily_summary_to_all
+                    # Run async function in new event loop
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(send_daily_summary_to_all())
+                    loop.close()
+                    last_daily_summary = current_date
+                    print("✅ Đã gửi daily summary")
+                except Exception as e:
+                    print(f"❌ Lỗi gửi daily summary: {e}")
                 time.sleep(61)
             
             time.sleep(30)

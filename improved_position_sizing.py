@@ -5,6 +5,7 @@ Quản lý vốn an toàn hơn cho người mới bắt đầu
 """
 
 import numpy as np
+import pandas as pd
 from typing import Dict, Optional
 from dataclasses import dataclass
 import logging
@@ -63,7 +64,8 @@ class ConservativePositionSizer:
                                stop_loss: float,
                                confidence: int,
                                signal_strength: str = 'MODERATE',
-                               market_regime: Optional[Dict] = None) -> PositionSize:
+                               market_regime: Optional[Dict] = None,
+                               df: Optional[pd.DataFrame] = None) -> PositionSize:
         """
         Tính position size an toàn
         
@@ -109,7 +111,24 @@ class ConservativePositionSizer:
             market_regime
         )
         
-        adjusted_risk_amount = base_risk_amount * risk_multiplier
+        # Volatility adjustment (nếu có data)
+        volatility_factor = 1.0
+        if df is not None and len(df) > 20:
+            try:
+                from ml_pipeline.volatility_forecaster import VolatilityForecaster
+                vol_forecaster = VolatilityForecaster()
+                if vol_forecaster.load():
+                    predicted_vol = vol_forecaster.forecast(df)
+                    # Giảm position nếu volatility cao (>5%), tăng nếu thấp (<2%)
+                    if predicted_vol > 0.05:
+                        volatility_factor = 0.7  # Giảm 30% nếu volatility cao
+                        warnings.append(f"⚠️ Giảm position 30% do volatility cao ({predicted_vol*100:.1f}%)")
+                    elif predicted_vol < 0.02:
+                        volatility_factor = 1.1  # Tăng 10% nếu volatility thấp
+            except Exception as e:
+                logger.debug(f"Volatility forecasting not available: {e}")
+        
+        adjusted_risk_amount = base_risk_amount * risk_multiplier * volatility_factor
         
         # Số cổ phiếu dựa trên risk
         shares_by_risk = int(adjusted_risk_amount / risk_per_share)

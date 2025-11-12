@@ -1,0 +1,47 @@
+{
+  "ensemble": {
+    "accuracy": {
+      "mean": 0.526,
+      "std": 0.05678027826631356
+    },
+    "precision": {
+      "mean": 0.4615272399450898,
+      "std": 0.09502489108977248
+    },
+    "recall": {
+      "mean": 0.3458784540632766,
+      "std": 0.3286495415613839
+    },
+    "f1": {
+      "mean": 0.3259105276540194,
+      "std": 0.17742245804197462
+    }
+  },
+  "volatility": {
+    "train_mae": 0.007072011130125039,
+    "train_rmse": 0.0203128395703122,
+    "test_mae": 0.009722131225528724,
+    "test_rmse": 0.015207802519764533,
+    "features_used": [
+      "volatility_5d",
+      "volatility_10d",
+      "volatility_20d",
+      "volatility_ratio",
+      "atr_pct",
+      "atr_ma_ratio",
+      "volume_ratio",
+      "volume_volatility",
+      "daily_range",
+      "range_ma_ratio",
+      "rsi_volatility",
+      "macd_volatility"
+    ]
+  },
+  "market_regime": null,
+  "tickers": [
+    "VNM",
+    "VCB",
+    "HPG"
+  ],
+  "lookback_days": 200
+}
