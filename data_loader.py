@@ -11,6 +11,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional
+from rate_limiter import tcbs_limiter
 
 # Suppress yfinance ERROR logging
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -86,9 +87,12 @@ def load_data(symbol, lookback=200, use_cache=True):
 
 def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     """
-    Tải dữ liệu từ TCBS API
+    Tải dữ liệu từ TCBS API với rate limiting
     """
     try:
+        # Apply rate limiting
+        tcbs_limiter.wait()
+        
         url = f"{TCBS_API_BASE}/stock-insight/v1/stock/bars-long-term"
         
         params = {

@@ -2,6 +2,13 @@ import os
 import sys
 from typing import List
 
+# Load .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file into environment
+except ImportError:
+    print("⚠️ python-dotenv not installed. Install: pip install python-dotenv")
+
 # Fix encoding cho Windows console
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -18,9 +25,18 @@ def get_env_list(key: str, default: List[str]) -> List[str]:
         return [x.strip() for x in value.split(',')]
     return default
 
-# Sử dụng env vars từ Render
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', "8234790554:AAFbdwZ3zi0ocpELA0gav6qeYqDKXbDg-yI")
-CHAT_ID = os.getenv('CHAT_ID', "5501113513")
+# Sử dụng env vars - KHÔNG hardcode credentials
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
+
+# Validate required credentials
+if not TELEGRAM_TOKEN:
+    print("⚠️ WARNING: TELEGRAM_TOKEN not set. Bot will not work!")
+    print("   Set it: export TELEGRAM_TOKEN='your_token'")
+
+if not CHAT_ID:
+    print("⚠️ WARNING: CHAT_ID not set. Bot will not work!")
+    print("   Set it: export CHAT_ID='your_chat_id'")
 
 RESOLUTION = "1D"
 LOOKBACK = 200

@@ -1,4 +1,5 @@
 # Trading Bot - Optimized for Python 3.11 & Render
+python-dotenv==1.0.0  # Load .env file
 pandas==2.2.2
 numpy==1.26.4
 scikit-learn==1.5.0

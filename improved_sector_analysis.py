@@ -353,9 +353,46 @@ class EnhancedSectorAnalyzer:
         if not sector1_stocks or not sector2_stocks:
             return 0.0
         
-        # Simplified: Giả sử correlation = 0.5 (cần implement tốt hơn)
-        # TODO: Implement proper correlation calculation
-        return 0.5
+        # Calculate actual correlation between sectors
+        try:
+            from data_loader import load_data
+            import numpy as np
+            
+            # Get representative stocks from each sector
+            stock1 = sector1_stocks[0] if sector1_stocks else None
+            stock2 = sector2_stocks[0] if sector2_stocks else None
+            
+            if not stock1 or not stock2:
+                return 0.5  # Fallback
+            
+            # Load data
+            df1 = load_data(stock1, lookback=60, use_cache=True)
+            df2 = load_data(stock2, lookback=60, use_cache=True)
+            
+            if df1.empty or df2.empty or len(df1) < 30 or len(df2) < 30:
+                return 0.5  # Fallback
+            
+            # Calculate returns
+            returns1 = df1['close'].pct_change().dropna()
+            returns2 = df2['close'].pct_change().dropna()
+            
+            # Align dates
+            common_dates = returns1.index.intersection(returns2.index)
+            if len(common_dates) < 20:
+                return 0.5  # Fallback
+            
+            # Calculate correlation
+            corr = returns1[common_dates].corr(returns2[common_dates])
+            
+            # Handle NaN
+            if np.isnan(corr):
+                return 0.5
+            
+            return float(corr)
+            
+        except Exception as e:
+            logger.debug(f"Error calculating correlation: {e}")
+            return 0.5  # Fallback
     
     def _select_best_tickers(self,
                             selected_sectors: List[str],
