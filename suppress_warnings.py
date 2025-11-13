@@ -30,10 +30,6 @@ import logging
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.getLogger('tensorflow').propagate = False
 
-# Disable yfinance ERROR logging (nhiều mã VN không có trên Yahoo)
-logging.getLogger('yfinance').setLevel(logging.CRITICAL)
-logging.getLogger('yfinance').propagate = False
-
 # Try to disable TensorFlow v1 compatibility warnings
 try:
     import tensorflow as tf

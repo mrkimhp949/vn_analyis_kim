@@ -38,82 +38,38 @@ TELEGRAM_TOKEN = _config.telegram.token
 CHAT_ID = _config.telegram.chat_id
 RESOLUTION = "1D"
 LOOKBACK = _config.data.lookback
-USE_DYNAMIC_TICKERS = _config.data.use_dynamic_tickers
+USE_CSV_TICKERS = _config.data.use_csv_tickers
 MIN_VOLUME = _config.data.min_volume
-
-# ═══════════════════════════════════════════════════════════
-# 🏦 NGÀNH KIM (Tài chính, Ngân hàng, Chứng khoán)
-# ═══════════════════════════════════════════════════════════
-KIM_SECTOR = {
-    'banks_big4': ['VCB', 'CTG', 'BID', 'TCB'],
-    'banks_other': ['MBB', 'ACB', 'VPB', 'STB', 'TPB', 'VIB', 'HDB', 'SHB', 'MSB', 'OCB'],
-    'securities': ['SSI', 'VND', 'HCM', 'VCI', 'FTS', 'MBS', 'BSI'],  # Removed AGR (delisted)
-    'insurance': ['BVH', 'BMI', 'PVI', 'PTI', 'BIC', 'PGI', 'VNR', 'MIG'],
-    'finance': ['FLC', 'VCS', 'CTS', 'ORS', 'IFS', 'TVS', 'APS', 'WSS']
-}
-
-# ═══════════════════════════════════════════════════════════
-# 💻 NGÀNH THỦY (Công nghệ, Dữ liệu, Logistics, Viễn thông)
-# ═══════════════════════════════════════════════════════════
-THUY_SECTOR = {
-    'technology': ['FPT', 'CMG', 'VGI', 'SAM', 'ELC', 'ITD', 'VTP', 'SGT', 'CMT'],
-    'telecom': ['CTR', 'FOX', 'VNZ', 'SGN', 'VGS', 'ICT', 'TIG'],
-    'logistics': ['GMD', 'HAH', 'TMS', 'VSC', 'VOS', 'STG', 'PHP', 'SGP'],
-    'ecommerce': ['MWG', 'FRT', 'PNJ', 'DGW', 'PET'],
-    'digital': ['VNM', 'HDG', 'VNP', 'VTO', 'DAG']
-}
-
-def get_all_tickers(sectors_dict):
-    """Lấy tất cả mã từ một dict sectors"""
-    tickers = []
-    for category, stocks in sectors_dict.items():
-        tickers.extend(stocks)
-    return sorted(list(set(tickers)))
-
-# Danh sách mặc định (fallback nếu không dùng dynamic tickers)
-KIM_TICKERS = get_all_tickers(KIM_SECTOR)
-THUY_TICKERS = get_all_tickers(THUY_SECTOR)
-ALL_TICKERS_STATIC = sorted(list(set(KIM_TICKERS + THUY_TICKERS)))
 
 def get_tickers() -> List[str]:
     """
-    Lấy danh sách mã cổ phiếu
-    - Nếu USE_DYNAMIC_TICKERS=true: Lấy từ TCBS API
-    - Nếu không: Dùng danh sách static trong config
+    Lấy TẤT CẢ mã cổ phiếu từ List.csv
     """
+    # Check env override
     env_tickers = os.getenv('TICKERS')
     if env_tickers:
-        tickers = [x.strip() for x in env_tickers.split(',')]
+        tickers = [x.strip().upper() for x in env_tickers.split(',') if x.strip()]
         print(f"📊 Sử dụng {len(tickers)} mã từ env variable")
         return tickers
     
-    if _config.data.use_dynamic_tickers:
-        try:
-            from ticker_fetcher import get_active_tickers
-            
-            # Get config values
-            min_volume = _config.data.min_volume
-            max_tickers = _config.data.max_tickers
-            
-            # Use cache and skip validation for speed
-            tickers = get_active_tickers(
-                min_volume=min_volume,
-                use_cache=True,
-                max_tickers=max_tickers,
-                skip_validation=True  # Fast mode - use cached list
-            )
-            
-            limit_text = f" (limit: {max_tickers})" if max_tickers > 0 else " (all)"
-            print(f"📊 Lấy {len(tickers)} mã từ TCBS API{limit_text}")
-            return tickers
-            
-        except Exception as e:
-            print(f"⚠️ Lỗi lấy dynamic tickers: {e}")
-            print(f"📊 Fallback: Sử dụng {len(ALL_TICKERS_STATIC)} mã static")
-            return ALL_TICKERS_STATIC
-    
-    print(f"📊 Sử dụng {len(ALL_TICKERS_STATIC)} mã static từ config")
-    return ALL_TICKERS_STATIC
+    # Load TẤT CẢ từ List.csv
+    try:
+        from ticker_loader import get_ticker_loader
+        
+        loader = get_ticker_loader()
+        tickers = loader.all_tickers
+        
+        if not tickers:
+            raise ValueError("No tickers loaded from List.csv")
+        
+        print(f"📊 Loaded {len(tickers)} mã từ List.csv")
+        return tickers
+        
+    except Exception as e:
+        print(f"❌ Lỗi load từ List.csv: {e}")
+        # Fallback to empty list - user must fix List.csv
+        print("⚠️ Không có tickers! Vui lòng kiểm tra List.csv")
+        return []
 
 # Lấy danh sách tickers
 TICKERS = get_tickers()

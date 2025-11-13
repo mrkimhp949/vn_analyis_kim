@@ -16,8 +16,7 @@ import pandas as pd
 # ===== CONFIG IMPORTS =====
 try:
     from config import (
-        TICKERS, LOOKBACK, CHAT_ID, TELEGRAM_TOKEN,
-        KIM_SECTOR, THUY_SECTOR
+        TICKERS, LOOKBACK, CHAT_ID, TELEGRAM_TOKEN
     )
     print("✅ Import config thành công")
 except ImportError as e:
@@ -27,8 +26,6 @@ except ImportError as e:
     LOOKBACK = 100
     CHAT_ID = "5501113513"
     TELEGRAM_TOKEN = "234790554:AAFbdwZ3zi0ocpELA0gav6qeYqDKXbDg-yI"
-    KIM_SECTOR = {}
-    THUY_SECTOR = {}
 
 # ===== ORIGINAL MODULES =====
 try:
@@ -172,40 +169,35 @@ def check_market_before_trading():
 # ======================================================
 
 def run_sector_analysis():
-    """Phân tích ngành với enhanced analyzer và error handling"""
-    print("🔍 Bắt đầu phân tích thị trường (Enhanced)...")
+    """
+    DEPRECATED: No longer does sector analysis
+    Simply returns all tickers from List.csv
+    """
+    print("📊 Loading tickers from List.csv...")
     
-    if not sector_analyzer:
-        print("❌ Sector analyzer không khả dụng")
-        return TICKERS[:10]
-    
-    # Combine all sectors
-    all_sectors = {}
     try:
-        all_sectors.update({f"Kim_{k}": v for k, v in KIM_SECTOR.items()})
-        all_sectors.update({f"Thuy_{k}": v for k, v in THUY_SECTOR.items()})
-    except Exception as e:
-        print(f"⚠️ Lỗi combine sectors: {e}")
-        # Fallback to basic sectors
-        all_sectors = {'Basic': TICKERS[:20]}
-    
-    # Run analysis
-    try:
-        result = sector_analyzer.analyze_all_sectors(
-            all_sectors,
-            lookback=100
-        )
+        result = {
+            'analyzed_at': datetime.now().isoformat(),
+            'selected_sectors': [],
+            'selected_tickers': TICKERS,
+            'sector_scores': {},
+            'market_summary': {
+                'market_sentiment': 'NEUTRAL',
+                'avg_sector_score': 0,
+                'note': 'No sector analysis - all tickers from List.csv'
+            }
+        }
         
         # Save results
         with open(SELECTED_TICKERS_FILE, 'w', encoding='utf-8') as f:
             json.dump({
                 'selected_at': result['analyzed_at'],
-                'top_sectors': result['selected_sectors'],
+                'top_sectors': [],
                 'tickers': result['selected_tickers'],
                 'market_summary': result['market_summary']
             }, f, indent=2, ensure_ascii=False)
         
-        print(f"\n✅ ĐÃ CHỌN {len(result['selected_tickers'])} MÃ CHO TUẦN NÀY")
+        print(f"✅ Loaded {len(result['selected_tickers'])} tickers")
         
         # Send Telegram summary
         asyncio.run(send_sector_summary_telegram(result))
@@ -213,30 +205,20 @@ def run_sector_analysis():
         return result['selected_tickers']
         
     except Exception as e:
-        log_error(f"Lỗi sector analysis: {e}")
-        # Fallback to default tickers
-        return TICKERS[:10]
+        log_error(f"Lỗi loading tickers: {e}")
+        return TICKERS
 
 
 async def send_sector_summary_telegram(result):
-    """Gửi summary qua Telegram với error handling"""
+    """Gửi summary qua Telegram - simplified version"""
     if not bot:
         print("❌ Bot không khả dụng, không gửi Telegram")
         return
         
     try:
-        msg = "📊 *PHÂN TÍCH THỊ TRƯỜNG TUẦN MỚI*\n\n"
-        
-        msg += "🏆 *TOP SECTORS:*\n"
-        for i, sector in enumerate(result['selected_sectors'][:3], 1):
-            score = result['sector_scores'][sector]['total_score']
-            msg += f"{i}. {sector}: {score:.1f}/100\n"
-        
-        msg += f"\n📋 *{len(result['selected_tickers'])} MÃ ĐƯỢC CHỌN*\n"
-        
-        summary = result['market_summary']
-        msg += f"\n📈 *SENTIMENT:* {summary['market_sentiment']}\n"
-        msg += f"💯 *Avg Score:* {summary['avg_sector_score']:.1f}/100"
+        msg = "📊 *TICKERS LOADED*\n\n"
+        msg += f"📋 *{len(result['selected_tickers'])} mã* từ List.csv\n"
+        msg += f"\n⏰ Updated: {result['analyzed_at'][:16]}"
         
         await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='Markdown')
     except Exception as e:

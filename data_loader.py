@@ -13,9 +13,6 @@ from datetime import datetime, timedelta
 from typing import Optional
 from rate_limiter import tcbs_limiter
 
-# Suppress yfinance ERROR logging
-logging.getLogger('yfinance').setLevel(logging.CRITICAL)
-
 DATA_CACHE_DIR = 'data_cache'
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
 

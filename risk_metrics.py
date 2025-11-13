@@ -4,26 +4,6 @@ import math
 import pandas as pd
 import numpy as np
 
-try:
-    from config import KIM_SECTOR, THUY_SECTOR
-except ImportError:
-    KIM_SECTOR = {}
-    THUY_SECTOR = {}
-
-
-def _build_sector_map() -> Dict[str, str]:
-    sector_map = {}
-    for sector_group, codes in KIM_SECTOR.items():
-        for code in codes:
-            sector_map[code.upper()] = f"KIM::{sector_group.upper()}"
-    for sector_group, codes in THUY_SECTOR.items():
-        for code in codes:
-            sector_map[code.upper()] = f"THUY::{sector_group.upper()}"
-    return sector_map
-
-
-SECTOR_MAP = _build_sector_map()
-
 
 def calculate_sector_exposure(current_holdings: Dict[str, Dict]) -> Dict[str, float]:
     """Tính exposure theo sector"""
