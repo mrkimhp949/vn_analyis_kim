@@ -2,6 +2,9 @@ import logging
 import os
 from typing import Dict, List
 
+# Suppress warnings
+import suppress_warnings  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 

@@ -1,5 +1,9 @@
 # [file name]: main.py
 # [file content begin]
+
+# Suppress warnings first
+import suppress_warnings  # noqa: F401
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -415,7 +419,7 @@ if __name__ == "__main__":
     except ImportError:
         print("⚠️ Logging config not available")
     
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 8080))  # Changed from 8000 to 8080
     
     print(f"\n{'='*70}")
     print(f"🚀 KHỞI ĐỘNG BOT TRADING - PYTHON 3.11.0")

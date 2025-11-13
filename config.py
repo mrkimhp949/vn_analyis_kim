@@ -25,13 +25,18 @@ CHAT_ID = os.getenv('CHAT_ID', "5501113513")
 RESOLUTION = "1D"
 LOOKBACK = 200
 
+# Cấu hình cho ticker fetcher
+# Mặc định tắt dynamic tickers, dùng danh sách static trong config
+USE_DYNAMIC_TICKERS = os.getenv('USE_DYNAMIC_TICKERS', 'false').lower() == 'true'
+MIN_VOLUME = int(os.getenv('MIN_VOLUME', '100000'))  # Volume tối thiểu
+
 # ═══════════════════════════════════════════════════════════
 # 🏦 NGÀNH KIM (Tài chính, Ngân hàng, Chứng khoán)
 # ═══════════════════════════════════════════════════════════
 KIM_SECTOR = {
     'banks_big4': ['VCB', 'CTG', 'BID', 'TCB'],
     'banks_other': ['MBB', 'ACB', 'VPB', 'STB', 'TPB', 'VIB', 'HDB', 'SHB', 'MSB', 'OCB'],
-    'securities': ['SSI', 'VND', 'HCM', 'VCI', 'FTS', 'MBS', 'BSI', 'AGR'],
+    'securities': ['SSI', 'VND', 'HCM', 'VCI', 'FTS', 'MBS', 'BSI'],  # Removed AGR (delisted)
     'insurance': ['BVH', 'BMI', 'PVI', 'PTI', 'BIC', 'PGI', 'VNR', 'MIG'],
     'finance': ['FLC', 'VCS', 'CTS', 'ORS', 'IFS', 'TVS', 'APS', 'WSS']
 }
@@ -54,12 +59,39 @@ def get_all_tickers(sectors_dict):
         tickers.extend(stocks)
     return sorted(list(set(tickers)))
 
-# Danh sách mặc định
+# Danh sách mặc định (fallback nếu không dùng dynamic tickers)
 KIM_TICKERS = get_all_tickers(KIM_SECTOR)
 THUY_TICKERS = get_all_tickers(THUY_SECTOR)
-ALL_TICKERS = sorted(list(set(KIM_TICKERS + THUY_TICKERS)))
+ALL_TICKERS_STATIC = sorted(list(set(KIM_TICKERS + THUY_TICKERS)))
 
-# Có thể override tickers qua env (Render)
-TICKERS = get_env_list('TICKERS', ALL_TICKERS)  # Giới hạn 10 mã trên Render
+def get_tickers() -> List[str]:
+    """
+    Lấy danh sách mã cổ phiếu
+    - Nếu USE_DYNAMIC_TICKERS=true: Lấy từ Yahoo Finance
+    - Nếu không: Dùng danh sách static trong config
+    """
+    # Kiểm tra env override trước
+    env_tickers = os.getenv('TICKERS')
+    if env_tickers:
+        tickers = [x.strip() for x in env_tickers.split(',')]
+        print(f"📊 Sử dụng {len(tickers)} mã từ env variable")
+        return tickers
+    
+    # Nếu dùng dynamic tickers
+    if USE_DYNAMIC_TICKERS:
+        try:
+            from ticker_fetcher import get_active_tickers
+            tickers = get_active_tickers(min_volume=MIN_VOLUME, use_cache=True)
+            print(f"📊 Lấy {len(tickers)} mã từ TCBS API (volume >= {MIN_VOLUME:,})")
+            return tickers
+        except Exception as e:
+            print(f"⚠️ Lỗi lấy dynamic tickers: {e}")
+            print(f"📊 Fallback: Sử dụng {len(ALL_TICKERS_STATIC)} mã static")
+            return ALL_TICKERS_STATIC
+    
+    # Dùng danh sách static
+    print(f"📊 Sử dụng {len(ALL_TICKERS_STATIC)} mã static từ config")
+    return ALL_TICKERS_STATIC
 
-print(f"📊 Đang theo dõi {len(TICKERS)} mã cổ phiếu trên Render")
+# Lấy danh sách tickers
+TICKERS = get_tickers()

@@ -132,6 +132,15 @@ class PortfolioAnalyzer:
             df = load_data(symbol, lookback=100)
             if df.empty:
                 return self._create_error_analysis(symbol, "Không có dữ liệu")
+        except ValueError as e:
+            error_msg = str(e)
+            if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
+                return self._create_error_analysis(symbol, f"Mã có thể đã bị hủy niêm yết")
+            return self._create_error_analysis(symbol, f"Lỗi tải dữ liệu: {error_msg}")
+        except Exception as e:
+            return self._create_error_analysis(symbol, f"Lỗi: {str(e)}")
+        
+        try:
             
             current_price = df['close'].iloc[-1]
             entry_price = holding['avg_price']
@@ -211,7 +220,16 @@ class PortfolioAnalyzer:
                 try:
                     safe_print(f"     📈 ({i+1}/{len(symbols_to_scan)}) Phân tích {symbol}...")
                     
-                    df = load_data(symbol, lookback=100)
+                    try:
+                        df = load_data(symbol, lookback=100)
+                    except ValueError as e:
+                        error_msg = str(e)
+                        if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
+                            safe_print(f"       ⚠️ {symbol}: Mã có thể đã bị hủy niêm yết")
+                            continue
+                        safe_print(f"       ❌ {symbol}: Lỗi tải dữ liệu - {error_msg}")
+                        continue
+                    
                     if df.empty or len(df) < 50:
                         safe_print(f"       ⚠️ {symbol}: Không đủ dữ liệu")
                         continue

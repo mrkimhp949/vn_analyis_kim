@@ -113,7 +113,15 @@ class EnhancedSectorAnalyzer:
         
         for ticker in tickers:
             try:
-                df = load_data(ticker, lookback)
+                try:
+                    df = load_data(ticker, lookback)
+                except ValueError as e:
+                    error_msg = str(e)
+                    if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
+                        logger.debug(f"  ⏭️ {ticker}: Mã có thể đã bị hủy niêm yết")
+                        continue
+                    logger.error(f"  ❌ {ticker}: Lỗi tải dữ liệu - {error_msg}")
+                    continue
                 
                 if df.empty or len(df) < 50:
                     continue

@@ -2,6 +2,9 @@
 # [file content begin]
 # -*- coding: utf-8 -*-
 
+# Suppress warnings first
+import suppress_warnings  # noqa: F401
+
 import asyncio
 import json
 import os
@@ -14,7 +17,7 @@ import pandas as pd
 try:
     from config import (
         TICKERS, LOOKBACK, CHAT_ID, TELEGRAM_TOKEN,
-        KIM_SECTOR, THUY_SECTOR, ALL_TICKERS
+        KIM_SECTOR, THUY_SECTOR
     )
     print("✅ Import config thành công")
 except ImportError as e:
@@ -26,7 +29,6 @@ except ImportError as e:
     TELEGRAM_TOKEN = "234790554:AAFbdwZ3zi0ocpELA0gav6qeYqDKXbDg-yI"
     KIM_SECTOR = {}
     THUY_SECTOR = {}
-    ALL_TICKERS = TICKERS
 
 # ===== ORIGINAL MODULES =====
 try:
@@ -447,6 +449,19 @@ async def run_bot_with_context(bot_instance, chat_id):
             df = load_data(symbol, LOOKBACK)
             if df.empty or len(df) < 50:
                 continue
+        except ValueError as e:
+            error_msg = str(e)
+            if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
+                print(f"⚠️ Bỏ qua {symbol}: {error_msg}")
+                continue
+            else:
+                print(f"❌ Lỗi tải dữ liệu {symbol}: {error_msg}")
+                continue
+        except Exception as e:
+            print(f"❌ Lỗi không xác định khi xử lý {symbol}: {e}")
+            continue
+        
+        try:
             
             # Get ML signal
             ml_signal = ml_generator.analyze(df)
@@ -622,6 +637,19 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
             df = load_data(symbol, LOOKBACK)
             if df.empty:
                 continue
+        except ValueError as e:
+            error_msg = str(e)
+            if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
+                print(f"⚠️ {symbol} có thể đã bị hủy niêm yết - cần xem xét đóng vị thế thủ công")
+                continue
+            else:
+                print(f"❌ Lỗi tải dữ liệu {symbol}: {error_msg}")
+                continue
+        except Exception as e:
+            print(f"❌ Lỗi không xác định khi xử lý {symbol}: {e}")
+            continue
+        
+        try:
             
             latest = df.iloc[-1]
             current_price = latest['close']
@@ -729,7 +757,7 @@ def format_entry_recommendation(symbol, entry_signal, position, market_regime, n
 
 def load_selected_tickers():
     tickers, _ = get_selected_tickers(force_refresh=False)
-    print(f"Quet {len(tickers)} ma tu snapshot/config")
+    print(f"🔍 Quét {len(tickers)} mã từ snapshot/config")
     return tickers
 
 def load_active_positions():

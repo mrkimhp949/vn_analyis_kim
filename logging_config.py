@@ -1,5 +1,9 @@
 # [file name]: logging_config.py
 # [file content begin]
+
+# Suppress warnings first (before any imports)
+import suppress_warnings  # noqa: F401
+
 import logging
 import os
 import sys
