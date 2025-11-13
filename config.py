@@ -78,7 +78,7 @@ ALL_TICKERS_STATIC = sorted(list(set(KIM_TICKERS + THUY_TICKERS)))
 def get_tickers() -> List[str]:
     """
     Lấy danh sách mã cổ phiếu
-    - Nếu USE_DYNAMIC_TICKERS=true: Lấy từ Yahoo Finance
+    - Nếu USE_DYNAMIC_TICKERS=true: Lấy từ TCBS API
     - Nếu không: Dùng danh sách static trong config
     """
     env_tickers = os.getenv('TICKERS')
@@ -90,9 +90,23 @@ def get_tickers() -> List[str]:
     if _config.data.use_dynamic_tickers:
         try:
             from ticker_fetcher import get_active_tickers
-            tickers = get_active_tickers(min_volume=_config.data.min_volume, use_cache=True)
-            print(f"📊 Lấy {len(tickers)} mã từ TCBS API (volume >= {_config.data.min_volume:,})")
+            
+            # Get config values
+            min_volume = _config.data.min_volume
+            max_tickers = _config.data.max_tickers
+            
+            # Use cache and skip validation for speed
+            tickers = get_active_tickers(
+                min_volume=min_volume,
+                use_cache=True,
+                max_tickers=max_tickers,
+                skip_validation=True  # Fast mode - use cached list
+            )
+            
+            limit_text = f" (limit: {max_tickers})" if max_tickers > 0 else " (all)"
+            print(f"📊 Lấy {len(tickers)} mã từ TCBS API{limit_text}")
             return tickers
+            
         except Exception as e:
             print(f"⚠️ Lỗi lấy dynamic tickers: {e}")
             print(f"📊 Fallback: Sử dụng {len(ALL_TICKERS_STATIC)} mã static")

@@ -41,22 +41,26 @@ class TickerFetcher:
             except Exception as e:
                 print(f"⚠️ Không đọc được cache file: {e}")
     
-    def get_vietnam_tickers(self, min_volume: float = 100000) -> List[str]:
+    def get_vietnam_tickers(self, min_volume: float = 100000, max_tickers: int = 0, 
+                           skip_validation: bool = False) -> List[str]:
         """
         Lấy danh sách mã cổ phiếu Việt Nam từ TCBS API
         
         Args:
             min_volume: Volume tối thiểu để lọc
+            max_tickers: Số lượng mã tối đa (0 = không giới hạn)
+            skip_validation: Bỏ qua validation để nhanh hơn (dùng cache)
             
         Returns:
             List các mã cổ phiếu hợp lệ
         """
         # Check memory cache
-        if 'vietnam_tickers' in self.cache:
-            cache_age = time.time() - self.cache_time.get('vietnam_tickers', 0)
+        cache_key = f'vietnam_tickers_{min_volume}_{max_tickers}'
+        if cache_key in self.cache:
+            cache_age = time.time() - self.cache_time.get(cache_key, 0)
             if cache_age < self.cache_duration:
-                print(f"📁 Sử dụng cache danh sách mã ({len(self.cache['vietnam_tickers'])} mã)")
-                return self.cache['vietnam_tickers']
+                print(f"📁 Sử dụng cache danh sách mã ({len(self.cache[cache_key])} mã, age: {cache_age/3600:.1f}h)")
+                return self.cache[cache_key]
         
         print("🔍 Đang lấy danh sách mã từ TCBS API...")
         
@@ -66,6 +70,17 @@ class TickerFetcher:
         if not all_tickers:
             print("⚠️ Không lấy được danh sách từ TCBS, dùng danh sách static")
             all_tickers = self._get_common_vietnam_tickers()
+        
+        print(f"📊 Tổng số mã từ TCBS: {len(all_tickers)}")
+        
+        # Nếu skip validation, return luôn (nhanh)
+        if skip_validation:
+            result = all_tickers[:max_tickers] if max_tickers > 0 else all_tickers
+            self.cache[cache_key] = result
+            self.cache_time[cache_key] = time.time()
+            self._save_cache_to_file(result)
+            print(f"✅ Trả về {len(result)} mã (skip validation)")
+            return result
         
         # Validate và lọc theo volume
         valid_tickers = []
@@ -86,6 +101,11 @@ class TickerFetcher:
                 else:
                     print(f"  ❌ {symbol}: Không hợp lệ                    ")
                 
+                # Limit số lượng nếu cần
+                if max_tickers > 0 and len(valid_tickers) >= max_tickers:
+                    print(f"\n⏹️ Đã đủ {max_tickers} mã, dừng quét")
+                    break
+                
                 # Rate limiting
                 time.sleep(0.05)
                 
@@ -96,41 +116,118 @@ class TickerFetcher:
         print(f"\n✅ Tìm thấy {len(valid_tickers)} mã hợp lệ")
         
         # Cache kết quả
-        self.cache['vietnam_tickers'] = valid_tickers
-        self.cache_time['vietnam_tickers'] = time.time()
+        self.cache[cache_key] = valid_tickers
+        self.cache_time[cache_key] = time.time()
+        self._save_cache_to_file(valid_tickers)
         
         return valid_tickers
     
-    def _fetch_all_tickers_from_tcbs(self) -> List[str]:
-        """Lấy danh sách tất cả mã từ TCBS API"""
+    def _save_cache_to_file(self, tickers: List[str]):
+        """Save cache to file"""
         try:
-            # TCBS API endpoint để lấy danh sách mã
-            url = f"{TCBS_API_BASE}/stock/list"
-            
-            response = requests.get(url, timeout=10)
+            cache_data = {
+                'tickers': tickers,
+                'updated_at': datetime.now().isoformat(),
+                'count': len(tickers)
+            }
+            with open(TICKERS_CACHE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2, ensure_ascii=False)
+            print(f"💾 Đã lưu {len(tickers)} mã vào cache file")
+        except Exception as e:
+            print(f"⚠️ Không lưu được cache: {e}")
+    
+    def _fetch_all_tickers_from_tcbs(self) -> List[str]:
+        """Lấy danh sách tất cả mã từ nhiều nguồn"""
+        
+        # Method 1: SSI iBoard API (Most reliable)
+        try:
+            print("  🔍 Thử SSI iBoard API...")
+            url = "https://iboard.ssi.com.vn/dchart/api/1.1/defaultAllStock"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
+                tickers = []
                 
-                # Extract ticker symbols
+                # SSI returns array of stock objects
                 if isinstance(data, list):
-                    tickers = [item.get('ticker') or item.get('symbol') for item in data]
-                    tickers = [t for t in tickers if t]  # Remove None
-                    print(f"  📊 TCBS API: {len(tickers)} mã")
+                    for item in data:
+                        ticker = item.get('stockCode') or item.get('code') or item.get('symbol')
+                        if ticker:
+                            tickers.append(ticker.upper())
+                
+                if tickers:
+                    print(f"  ✅ SSI API: {len(tickers)} mã")
                     return tickers
-                elif isinstance(data, dict) and 'data' in data:
-                    items = data['data']
-                    tickers = [item.get('ticker') or item.get('symbol') for item in items]
-                    tickers = [t for t in tickers if t]
-                    print(f"  📊 TCBS API: {len(tickers)} mã")
-                    return tickers
-            
-            print(f"  ⚠️ TCBS API trả về status {response.status_code}")
-            return []
-            
         except Exception as e:
-            print(f"  ⚠️ Lỗi khi gọi TCBS API: {e}")
-            return []
+            print(f"  ⚠️ SSI API failed: {str(e)[:50]}")
+        
+        # Method 2: VNDirect API
+        try:
+            print("  🔍 Thử VNDirect API...")
+            url = "https://finfo-api.vndirect.com.vn/v4/stocks"
+            params = {
+                'q': 'type:STOCK~floor:HOSE,HNX,UPCOM',
+                'size': 2000,
+                'page': 1
+            }
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict) and 'data' in data:
+                    items = data['data']
+                    tickers = [item.get('code') for item in items if item.get('code')]
+                    if tickers:
+                        print(f"  ✅ VNDirect API: {len(tickers)} mã")
+                        return tickers
+        except Exception as e:
+            print(f"  ⚠️ VNDirect API failed: {str(e)[:50]}")
+        
+        # Method 3: TCBS API (backup)
+        try:
+            print("  🔍 Thử TCBS API...")
+            endpoints = [
+                f"{TCBS_API_BASE}/stock-insight/v1/stock/second-tc-price",
+                f"{TCBS_API_BASE}/stock/list"
+            ]
+            
+            for url in endpoints:
+                try:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        tickers = []
+                        
+                        if isinstance(data, dict) and 'data' in data:
+                            items = data['data']
+                            if isinstance(items, list):
+                                tickers = [
+                                    item.get('t') or item.get('ticker') or 
+                                    item.get('symbol') or item.get('code')
+                                    for item in items
+                                ]
+                        elif isinstance(data, list):
+                            tickers = [
+                                item.get('ticker') or item.get('symbol') or item.get('code')
+                                for item in data
+                            ]
+                        
+                        tickers = [t.upper() for t in tickers if t and isinstance(t, str)]
+                        if tickers:
+                            print(f"  ✅ TCBS API: {len(tickers)} mã")
+                            return tickers
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"  ⚠️ TCBS API failed: {str(e)[:50]}")
+        
+        # Method 4: Comprehensive static list (fallback)
+        print("  ⚠️ Tất cả API failed, dùng comprehensive static list...")
+        return self._get_comprehensive_vietnam_tickers()
     
     def _validate_ticker_tcbs(self, symbol: str) -> tuple[bool, float]:
         """
@@ -176,10 +273,7 @@ class TickerFetcher:
             return False, 0
     
     def _get_common_vietnam_tickers(self) -> List[str]:
-        """
-        Danh sách các mã phổ biến Việt Nam (fallback)
-        """
-        # Import từ config
+        """Danh sách các mã phổ biến Việt Nam (fallback)"""
         try:
             from config import KIM_SECTOR, THUY_SECTOR
             
@@ -191,33 +285,82 @@ class TickerFetcher:
             return sorted(list(set(tickers)))
             
         except Exception:
-            # Fallback nếu không import được
-            return [
-                # Banks
-                'VCB', 'CTG', 'BID', 'TCB', 'MBB', 'ACB', 'VPB', 'STB', 
-                'TPB', 'VIB', 'HDB', 'SHB', 'MSB', 'OCB',
-                
-                # Securities
-                'SSI', 'VND', 'HCM', 'VCI', 'FTS', 'MBS', 'BSI',
-                
-                # Real Estate
-                'VHM', 'VIC', 'NVL', 'PDR', 'DXG', 'KDH', 'HDG',
-                
-                # Manufacturing
-                'HPG', 'HSG', 'NKG',
-                
-                # Retail & Consumer
-                'VNM', 'MSN', 'MWG', 'FRT', 'PNJ',
-                
-                # Technology
-                'FPT', 'CMG', 'VGI',
-                
-                # Energy
-                'GAS', 'POW', 'PLX',
-                
-                # Others
-                'VJC', 'HVN',
-            ]
+            return self._get_comprehensive_vietnam_tickers()
+    
+    def _get_comprehensive_vietnam_tickers(self) -> List[str]:
+        """
+        Comprehensive list of Vietnam stocks (300+ tickers)
+        Updated: Nov 2025
+        """
+        return [
+            # === HOSE - Blue Chips ===
+            'VCB', 'VHM', 'VIC', 'VNM', 'HPG', 'FPT', 'MSN', 'MWG', 'VPB', 'GAS',
+            'CTG', 'BID', 'TCB', 'MBB', 'ACB', 'STB', 'SSI', 'VRE', 'PLX', 'POW',
+            
+            # === Banks ===
+            'VCB', 'CTG', 'BID', 'TCB', 'MBB', 'ACB', 'VPB', 'STB', 'TPB', 'VIB',
+            'HDB', 'SHB', 'MSB', 'OCB', 'LPB', 'EIB', 'VBB', 'BVB', 'NVB', 'ABB',
+            'BAB', 'KLB', 'NAB', 'PGB', 'SEAB', 'VAB', 'VBB',
+            
+            # === Securities ===
+            'SSI', 'VND', 'HCM', 'VCI', 'FTS', 'MBS', 'BSI', 'VIX', 'SHS', 'APS',
+            'CTS', 'ORS', 'IFS', 'TVS', 'WSS', 'BVS', 'AGR', 'EVS', 'PSI',
+            
+            # === Real Estate ===
+            'VHM', 'VIC', 'VRE', 'NVL', 'PDR', 'DXG', 'KDH', 'HDG', 'DIG', 'NLG',
+            'HDC', 'CEO', 'LDG', 'SCR', 'SZC', 'IDC', 'ITA', 'KBC', 'NBB', 'NTL',
+            'PPI', 'QCG', 'SJS', 'TDH', 'TDC', 'UIC', 'VCG', 'VPI',
+            
+            # === Manufacturing & Steel ===
+            'HPG', 'HSG', 'NKG', 'POM', 'TLH', 'VGS', 'DTL', 'HT1', 'SMC', 'TIS',
+            'VCS', 'VIS', 'VNS', 'VSH', 'VCA', 'VHC', 'VTO',
+            
+            # === Retail & Consumer ===
+            'VNM', 'MSN', 'MWG', 'FRT', 'PNJ', 'DGW', 'PET', 'SAB', 'VHC', 'MCH',
+            'VCF', 'BBC', 'KDC', 'VNL', 'QNS', 'SBT', 'CAN', 'VTO', 'TNG',
+            
+            # === Technology ===
+            'FPT', 'CMG', 'VGI', 'SAM', 'ELC', 'ITD', 'VTP', 'SGT', 'CMT', 'ICT',
+            'TIG', 'SGN', 'VGS', 'FOX', 'VNZ', 'CTR', 'EFI', 'CMX',
+            
+            # === Energy & Utilities ===
+            'GAS', 'POW', 'PLX', 'PVD', 'PVS', 'PVT', 'PVC', 'PVG', 'BSR', 'OIL',
+            'NT2', 'REE', 'PC1', 'VSH', 'GEG', 'GEX', 'PGV', 'PGD',
+            
+            # === Logistics & Transportation ===
+            'GMD', 'HAH', 'TMS', 'VSC', 'VOS', 'STG', 'PHP', 'SGP', 'VJC', 'HVN',
+            'ACV', 'VTP', 'TCL', 'TRA', 'VFC', 'VIP', 'VTO', 'VST',
+            
+            # === Insurance ===
+            'BVH', 'BMI', 'PVI', 'PTI', 'BIC', 'PGI', 'VNR', 'MIG', 'ABI', 'PRE',
+            
+            # === Construction & Materials ===
+            'HBC', 'CTD', 'HT1', 'VCG', 'LCG', 'PC1', 'HU1', 'C32', 'C47', 'DPG',
+            'FCN', 'HU3', 'HU4', 'LBM', 'NNC', 'PXI', 'SC5', 'SZL', 'TDW', 'THG',
+            'VCR', 'VE1', 'VE2', 'VE3', 'VE4', 'VE8', 'VE9',
+            
+            # === Agriculture & Fishery ===
+            'VHC', 'HNG', 'BAF', 'FMC', 'ANV', 'AAM', 'AGF', 'AGG', 'ASM', 'BFC',
+            'CAV', 'CMV', 'DBC', 'FID', 'HAG', 'HVG', 'KSB', 'LAF', 'LSS', 'MKV',
+            'NSC', 'SJF', 'TS4', 'VIF', 'VNH',
+            
+            # === Pharmaceuticals & Healthcare ===
+            'DHG', 'DMC', 'IMP', 'TRA', 'DBD', 'DCL', 'DHT', 'DVN', 'PME', 'PPP',
+            'SPM', 'TNG', 'TNH', 'DP1', 'DP2', 'DP3',
+            
+            # === Chemicals & Fertilizers ===
+            'DPM', 'DCM', 'DGC', 'DDV', 'BFC', 'CSV', 'LAS', 'NCS', 'PHR', 'SFG',
+            
+            # === Textiles & Garments ===
+            'VGT', 'TNG', 'MSH', 'STK', 'TCM', 'GIL', 'VGG', 'TET', 'VTL',
+            
+            # === Food & Beverage ===
+            'VNM', 'SAB', 'MCH', 'VCF', 'BBC', 'KDC', 'VNL', 'QNS', 'SBT', 'CAN',
+            'VTO', 'TNG', 'LSS', 'HNG', 'BAF', 'FMC', 'ANV',
+            
+            # === Others ===
+            'VCS', 'VTO', 'DAG', 'VNP', 'HDG', 'CTR', 'FOX', 'VNZ', 'SGN', 'VGS',
+        ]
     
     def get_sector_tickers(self, sector: str, min_volume: float = 100000) -> List[str]:
         """
@@ -278,13 +421,16 @@ def get_ticker_fetcher() -> TickerFetcher:
     return _fetcher_instance
 
 
-def get_active_tickers(min_volume: float = 100000, use_cache: bool = True) -> List[str]:
+def get_active_tickers(min_volume: float = 100000, use_cache: bool = True, 
+                      max_tickers: int = 0, skip_validation: bool = False) -> List[str]:
     """
     Helper function để lấy danh sách mã active
     
     Args:
         min_volume: Volume tối thiểu
         use_cache: Có sử dụng cache không
+        max_tickers: Số lượng mã tối đa (0 = không giới hạn)
+        skip_validation: Bỏ qua validation để nhanh hơn
         
     Returns:
         List các mã cổ phiếu hợp lệ
@@ -295,7 +441,11 @@ def get_active_tickers(min_volume: float = 100000, use_cache: bool = True) -> Li
         fetcher.cache.clear()
         fetcher.cache_time.clear()
     
-    return fetcher.get_vietnam_tickers(min_volume=min_volume)
+    return fetcher.get_vietnam_tickers(
+        min_volume=min_volume,
+        max_tickers=max_tickers,
+        skip_validation=skip_validation
+    )
 
 
 if __name__ == "__main__":

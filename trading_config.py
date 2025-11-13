@@ -12,16 +12,18 @@ class DataConfig:
     """Data source configuration"""
     lookback: int = 200
     min_volume: int = 100000
-    use_dynamic_tickers: bool = False
+    use_dynamic_tickers: bool = True  # Changed to True - use TCBS API
     cache_enabled: bool = True
+    max_tickers: int = 0  # 0 = no limit, scan all tickers from TCBS
     
     @classmethod
     def from_env(cls):
         return cls(
             lookback=int(os.getenv('LOOKBACK', 200)),
             min_volume=int(os.getenv('MIN_VOLUME', 100000)),
-            use_dynamic_tickers=os.getenv('USE_DYNAMIC_TICKERS', 'false').lower() == 'true',
-            cache_enabled=os.getenv('CACHE_ENABLED', 'true').lower() == 'true'
+            use_dynamic_tickers=os.getenv('USE_DYNAMIC_TICKERS', 'true').lower() == 'true',
+            cache_enabled=os.getenv('CACHE_ENABLED', 'true').lower() == 'true',
+            max_tickers=int(os.getenv('MAX_TICKERS', 0))
         )
 
 
