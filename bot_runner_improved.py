@@ -121,11 +121,23 @@ except Exception as e:
     print(f"❌ Lỗi khởi tạo Telegram bot: {e}")
     bot = None
 
-# Files
+# Files (legacy - migrating to database)
 SELECTED_TICKERS_FILE = 'selected_tickers.json'
-POSITIONS_FILE = 'active_positions.json'
+POSITIONS_FILE = 'active_positions.json'  # DEPRECATED: Use database instead
 LOGS_DIR = 'logs'
 os.makedirs(LOGS_DIR, exist_ok=True)
+
+# Database & Monitoring
+try:
+    from portfolio_manager import get_portfolio_manager
+    from monitoring import get_system_monitor, monitor_api_call
+    portfolio_manager = get_portfolio_manager()
+    system_monitor = get_system_monitor()
+    print("✅ Database & monitoring initialized")
+except ImportError as e:
+    print(f"⚠️ Database/monitoring not available: {e}")
+    portfolio_manager = None
+    system_monitor = None
 
 # Scan & risk configs
 MAX_SCAN_UNIVERSE = int(os.getenv('MAX_SCAN_UNIVERSE', '40'))
@@ -351,18 +363,16 @@ async def check_portfolio_and_recommend(bot_instance, chat_id):
         print("❌ Bot không khả dụng")
         return
     
+    if not portfolio_manager:
+        print("⚠️ Portfolio manager không khả dụng")
+        return
+    
     try:
-        from portfolio_manager import PortfolioManager
-        
-        # Khởi tạo portfolio manager
-        manager = PortfolioManager()
-        
         # Lấy phân tích chi tiết
-        analysis_report = manager.get_detailed_analysis()
+        analysis_report = portfolio_manager.get_detailed_analysis()
         
         # Gửi qua Telegram
         if len(analysis_report) > 4000:
-            # Chia nhỏ message nếu quá dài
             parts = [analysis_report[i:i+4000] for i in range(0, len(analysis_report), 4000)]
             for part in parts:
                 await bot_instance.send_message(chat_id, part, parse_mode='Markdown')
@@ -680,8 +690,20 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
                 
                 # Update position
                 if exit_decision.exit_type == 'FULL':
+                    # Close in database
+                    if portfolio_manager:
+                        try:
+                            portfolio_manager.close_position(
+                                symbol=symbol,
+                                exit_price=current_price,
+                                reason=exit_decision.exit_reason.value
+                            )
+                        except Exception as e:
+                            log_error(f"Lỗi close position in DB: {e}")
+                    
                     if position_sizer:
                         position_sizer.close_position(symbol, current_price)
+                    
                     del positions[symbol]
                     print(f"🔴 Đã đóng {symbol}: {exit_decision.exit_reason.value}")
                 else:
@@ -764,19 +786,27 @@ def load_selected_tickers():
     return tickers
 
 def load_active_positions():
-    """Load active positions"""
+    """Load active positions - from database or fallback to JSON"""
+    if portfolio_manager:
+        try:
+            return portfolio_manager.get_positions()
+        except Exception as e:
+            log_error(f"Lỗi load positions from DB: {e}")
+    
+    # Fallback to JSON
     if os.path.exists(POSITIONS_FILE):
         try:
             with open(POSITIONS_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            log_error(f"Lỗi load positions: {e}")
+            log_error(f"Lỗi load positions from JSON: {e}")
     
     return {}
 
 
 def save_active_positions(positions):
-    """Save active positions"""
+    """Save active positions - DEPRECATED, use portfolio_manager instead"""
+    # Keep for backward compatibility
     try:
         with open(POSITIONS_FILE, 'w', encoding='utf-8') as f:
             json.dump(positions, f, indent=2, ensure_ascii=False)
@@ -785,9 +815,28 @@ def save_active_positions(positions):
 
 
 def save_pending_position(symbol, entry_signal, position):
-    """Save position vừa có signal"""
-    positions = load_active_positions()
+    """Save position vừa có signal - use database if available"""
+    if portfolio_manager:
+        try:
+            portfolio_manager.add_position(
+                symbol=symbol,
+                shares=position.shares,
+                entry_price=entry_signal.entry_price,
+                stop_loss=entry_signal.stop_loss,
+                take_profit=entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else None,
+                metadata={
+                    'entry_date': datetime.now().isoformat(),
+                    'take_profit_targets': entry_signal.take_profit_targets,
+                    'confidence': entry_signal.confidence,
+                    'strength': entry_signal.strength.name
+                }
+            )
+            return
+        except Exception as e:
+            log_error(f"Lỗi save position to DB: {e}")
     
+    # Fallback to JSON
+    positions = load_active_positions()
     positions[symbol] = {
         'entry_date': datetime.now().isoformat(),
         'entry_price': entry_signal.entry_price,
@@ -796,7 +845,6 @@ def save_pending_position(symbol, entry_signal, position):
         'shares': position.shares,
         'partial_exits': []
     }
-    
     save_active_positions(positions)
 
 

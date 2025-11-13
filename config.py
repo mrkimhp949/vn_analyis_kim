@@ -1,11 +1,22 @@
+"""
+DEPRECATED: Use trading_config.py instead
+This file is kept for backward compatibility only
+"""
 import os
 import sys
 from typing import List
+import warnings
+
+warnings.warn(
+    "config.py is deprecated. Use 'from trading_config import get_config' instead",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Load .env file
 try:
     from dotenv import load_dotenv
-    load_dotenv()  # Load .env file into environment
+    load_dotenv()
 except ImportError:
     print("⚠️ python-dotenv not installed. Install: pip install python-dotenv")
 
@@ -14,37 +25,21 @@ if sys.stdout.encoding != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except AttributeError:
-        # Python < 3.7
         import codecs
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
 
-def get_env_list(key: str, default: List[str]) -> List[str]:
-    """Lấy list từ environment variable"""
-    value = os.getenv(key)
-    if value:
-        return [x.strip() for x in value.split(',')]
-    return default
+# Import from new config
+from trading_config import get_config
 
-# Sử dụng env vars - KHÔNG hardcode credentials
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+_config = get_config()
 
-# Validate required credentials
-if not TELEGRAM_TOKEN:
-    print("⚠️ WARNING: TELEGRAM_TOKEN not set. Bot will not work!")
-    print("   Set it: export TELEGRAM_TOKEN='your_token'")
-
-if not CHAT_ID:
-    print("⚠️ WARNING: CHAT_ID not set. Bot will not work!")
-    print("   Set it: export CHAT_ID='your_chat_id'")
-
+# Backward compatibility exports
+TELEGRAM_TOKEN = _config.telegram.token
+CHAT_ID = _config.telegram.chat_id
 RESOLUTION = "1D"
-LOOKBACK = 200
-
-# Cấu hình cho ticker fetcher
-# Mặc định tắt dynamic tickers, dùng danh sách static trong config
-USE_DYNAMIC_TICKERS = os.getenv('USE_DYNAMIC_TICKERS', 'false').lower() == 'true'
-MIN_VOLUME = int(os.getenv('MIN_VOLUME', '100000'))  # Volume tối thiểu
+LOOKBACK = _config.data.lookback
+USE_DYNAMIC_TICKERS = _config.data.use_dynamic_tickers
+MIN_VOLUME = _config.data.min_volume
 
 # ═══════════════════════════════════════════════════════════
 # 🏦 NGÀNH KIM (Tài chính, Ngân hàng, Chứng khoán)
@@ -86,26 +81,23 @@ def get_tickers() -> List[str]:
     - Nếu USE_DYNAMIC_TICKERS=true: Lấy từ Yahoo Finance
     - Nếu không: Dùng danh sách static trong config
     """
-    # Kiểm tra env override trước
     env_tickers = os.getenv('TICKERS')
     if env_tickers:
         tickers = [x.strip() for x in env_tickers.split(',')]
         print(f"📊 Sử dụng {len(tickers)} mã từ env variable")
         return tickers
     
-    # Nếu dùng dynamic tickers
-    if USE_DYNAMIC_TICKERS:
+    if _config.data.use_dynamic_tickers:
         try:
             from ticker_fetcher import get_active_tickers
-            tickers = get_active_tickers(min_volume=MIN_VOLUME, use_cache=True)
-            print(f"📊 Lấy {len(tickers)} mã từ TCBS API (volume >= {MIN_VOLUME:,})")
+            tickers = get_active_tickers(min_volume=_config.data.min_volume, use_cache=True)
+            print(f"📊 Lấy {len(tickers)} mã từ TCBS API (volume >= {_config.data.min_volume:,})")
             return tickers
         except Exception as e:
             print(f"⚠️ Lỗi lấy dynamic tickers: {e}")
             print(f"📊 Fallback: Sử dụng {len(ALL_TICKERS_STATIC)} mã static")
             return ALL_TICKERS_STATIC
     
-    # Dùng danh sách static
     print(f"📊 Sử dụng {len(ALL_TICKERS_STATIC)} mã static từ config")
     return ALL_TICKERS_STATIC
 
