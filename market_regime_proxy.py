@@ -44,7 +44,8 @@ class ProxyMarketRegimeAnalyzer:
             try:
                 safe_print(f"  📊 Phân tích {symbol}...")
                 
-                df = load_data(symbol, lookback=100)
+                from config import LOOKBACK
+                df = load_data(symbol, lookback=LOOKBACK)
                 if df.empty or len(df) < 50:
                     safe_print(f"  ⏭️ {symbol}: Không đủ dữ liệu")
                     continue

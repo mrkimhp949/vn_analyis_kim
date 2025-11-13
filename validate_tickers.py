@@ -1,7 +1,3 @@
-"""
-Script để kiểm tra và loại bỏ các mã cổ phiếu không hợp lệ
-Sử dụng TCBS API thay vì Yahoo Finance
-"""
 import sys
 import requests
 from datetime import datetime, timedelta

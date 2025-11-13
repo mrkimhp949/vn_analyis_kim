@@ -1,7 +1,3 @@
-"""
-Script nhanh để kiểm tra các mã không hợp lệ trong config
-Sử dụng TCBS API thay vì Yahoo Finance
-"""
 import suppress_warnings  # noqa: F401
 
 import requests

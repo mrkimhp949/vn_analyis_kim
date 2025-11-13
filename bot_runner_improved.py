@@ -440,10 +440,13 @@ async def run_bot_with_context(bot_instance, chat_id):
     await check_active_positions(bot_instance, chat_id, market_regime)
     
     # ===== CHECK 4: SCAN FOR NEW ENTRIES =====
+    print(f"\n🔍 Quét {len(current_tickers)} mã để tìm cơ hội mua mới")
+    print(f"📊 Đang nắm giữ: {len(existing_symbols)} mã ({', '.join(existing_symbols) if existing_symbols else 'không có'})")
+    
     for symbol in current_tickers:
         try:
             if symbol in existing_symbols:
-                print(f"⏭️ Bỏ qua {symbol} (đã có vị thế)")
+                # print(f"⏭️ Bỏ qua {symbol} (đã có vị thế)")
                 continue
 
             df = load_data(symbol, LOOKBACK)

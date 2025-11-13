@@ -18,6 +18,7 @@ from improved_position_sizing import ConservativePositionSizer
 from market_regime_proxy import ProxyMarketRegimeAnalyzer
 from portfolio_regime_adjuster import PortfolioRegimeAdjuster
 from portfolio_optimizer import PortfolioOptimizer
+from config import LOOKBACK
 from risk_metrics import calculate_sector_exposure, summarize_exposure
 import logging
 import sys
@@ -129,7 +130,7 @@ class PortfolioAnalyzer:
     def _analyze_single_stock(self, symbol, holding, market_regime):
         """Phân tích 1 cổ phiếu - KHÔNG trả về bất kỳ object nào"""
         try:
-            df = load_data(symbol, lookback=100)
+            df = load_data(symbol, lookback=LOOKBACK)
             if df.empty:
                 return self._create_error_analysis(symbol, "Không có dữ liệu")
         except ValueError as e:
@@ -221,7 +222,7 @@ class PortfolioAnalyzer:
                     safe_print(f"     📈 ({i+1}/{len(symbols_to_scan)}) Phân tích {symbol}...")
                     
                     try:
-                        df = load_data(symbol, lookback=100)
+                        df = load_data(symbol, lookback=LOOKBACK)
                     except ValueError as e:
                         error_msg = str(e)
                         if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
@@ -387,6 +388,10 @@ class PortfolioAnalyzer:
         report.append("📊 **BÁO CÁO PHÂN TÍCH PORTFOLIO**")
         report.append("=" * 50)
         
+        # Note
+        report.append("ℹ️ **LƯU Ý**: Đề xuất BÁN/GIỮ là cho mã đang nắm giữ, MUA MỚI là cho mã chưa có")
+        report.append("")
+        
         # Market Regime
         regime = analysis_result['market_regime']
         if regime:
@@ -436,21 +441,21 @@ class PortfolioAnalyzer:
         
         # Sell Recommendations
         if analysis_result['sell_recommendations']:
-            report.append("🔴 **NÊN BÁN**")
+            report.append("🔴 **NÊN BÁN** (Mã đang nắm giữ)")
             for rec in analysis_result['sell_recommendations']:
                 report.append(f"• {rec['symbol']}: {rec['pnl_percent']:+.1f}% - {rec['recommendation_reason']}")
             report.append("")
         
         # Hold Recommendations
         if analysis_result['hold_recommendations']:
-            report.append("🟡 **NÊN GIỮ**")
+            report.append("🟡 **NÊN GIỮ** (Mã đang nắm giữ)")
             for rec in analysis_result['hold_recommendations']:
                 report.append(f"• {rec['symbol']}: {rec['pnl_percent']:+.1f}% - {rec['ml_signal']} ({rec['ml_confidence']}%)")
             report.append("")
         
         # New Buy Opportunities
         if analysis_result['new_buy_recommendations']:
-            report.append("🟢 **CƠ HỘI MUA MỚI**")
+            report.append("🟢 **CƠ HỘI MUA MỚI** (Mã chưa nắm giữ)")
             for opp in analysis_result['new_buy_recommendations']:
                 signal = opp['entry_signal']
                 report.append(f"• {opp['symbol']}: {opp['current_price']:,.0f} VNĐ")

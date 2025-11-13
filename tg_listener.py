@@ -361,7 +361,17 @@ async def send_daily_summary_to_all():
 
 async def generate_daily_summary() -> str:
     """Tạo daily summary: hiệu suất, tin tức, watchlist"""
+    from datetime import datetime
+    import pytz
+    
     msg_parts = []
+    tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    now = datetime.now(tz)
+    
+    # Header
+    msg_parts.append(f"📊 *DAILY SUMMARY*\n")
+    msg_parts.append(f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n")
+    msg_parts.append(f"{'='*30}\n\n")
     
     # 1. Portfolio Performance
     try:
@@ -375,30 +385,79 @@ async def generate_daily_summary() -> str:
             pnl = total_value - total_cost
             pnl_pct = (pnl / total_cost * 100) if total_cost > 0 else 0
             
-            msg_parts.append(f"💼 *Portfolio hôm nay:*\n")
-            msg_parts.append(f"💰 Tổng giá trị: {total_value:,.0f} VNĐ\n")
+            msg_parts.append(f"💼 *PORTFOLIO*\n")
+            msg_parts.append(f"💰 Giá trị: {total_value:,.0f} VNĐ\n")
+            msg_parts.append(f"💵 Vốn: {total_cost:,.0f} VNĐ\n")
             msg_parts.append(f"{'📈' if pnl >= 0 else '📉'} P&L: {pnl:+,.0f} VNĐ ({pnl_pct:+.2f}%)\n")
             msg_parts.append(f"📊 Số mã: {len(portfolio)}\n")
+            
+            # Top gainers/losers
+            positions = []
+            for symbol, pos in portfolio.items():
+                pnl_pos = pos.get("total_value", 0) - pos.get("total_cost", 0)
+                pnl_pct_pos = (pnl_pos / pos.get("total_cost", 1)) * 100
+                positions.append((symbol, pnl_pct_pos))
+            
+            positions.sort(key=lambda x: x[1], reverse=True)
+            
+            if positions:
+                msg_parts.append(f"\n🏆 Top 3:\n")
+                for symbol, pnl_pct in positions[:3]:
+                    emoji = "📈" if pnl_pct >= 0 else "📉"
+                    msg_parts.append(f"  {emoji} {symbol}: {pnl_pct:+.2f}%\n")
+        else:
+            msg_parts.append(f"💼 *PORTFOLIO*\n")
+            msg_parts.append(f"Chưa có vị thế nào\n")
     except Exception as e:
-        msg_parts.append(f"⚠️ Lỗi portfolio: {e}\n")
+        msg_parts.append(f"💼 *PORTFOLIO*\n")
+        msg_parts.append(f"⚠️ Lỗi: {str(e)[:50]}\n")
     
-    # 2. Hot News
+    # 2. Market Regime
+    try:
+        from market_regime_proxy import ProxyMarketRegimeAnalyzer
+        regime_analyzer = ProxyMarketRegimeAnalyzer()
+        regime = regime_analyzer.analyze_market_regime()
+        
+        msg_parts.append(f"\n📈 *THỊ TRƯỜNG*\n")
+        msg_parts.append(f"Trạng thái: {regime.get('regime', 'UNKNOWN')}\n")
+        msg_parts.append(f"Confidence: {regime.get('confidence', 0):.0f}%\n")
+        msg_parts.append(f"Tradeable: {'✅' if regime.get('tradeable', False) else '❌'}\n")
+    except Exception:
+        pass
+    
+    # 3. Hot News
     if get_hot_news:
         try:
             hot_news = get_hot_news(limit=3)
             if hot_news:
-                msg_parts.append(f"\n🔥 *Tin nóng:*\n")
+                msg_parts.append(f"\n🔥 *TIN TỨC*\n")
                 for news in hot_news:
                     symbol = news.get("symbol", "_market")
-                    title = news.get("title", "N/A")[:50]
+                    title = news.get("title", "N/A")[:40]
                     sentiment = news.get("sentiment", 0)
-                    msg_parts.append(f"• {symbol}: {title}... ({sentiment:+.2f})\n")
+                    emoji = "📈" if sentiment > 0 else "📉" if sentiment < 0 else "➖"
+                    msg_parts.append(f"{emoji} {symbol}: {title}...\n")
         except Exception:
             pass
     
-    # 3. Watchlist (top signals từ lần scan gần nhất)
-    msg_parts.append(f"\n👀 *Watchlist:*\n")
-    msg_parts.append(f"Dùng /run để xem tín hiệu mới nhất")
+    # 4. Paper Trading
+    try:
+        from paper_trading import PaperTradingAccount
+        paper = PaperTradingAccount()
+        stats = paper.get_statistics()
+        
+        if stats:
+            msg_parts.append(f"\n📝 *PAPER TRADING*\n")
+            msg_parts.append(f"Balance: {stats.get('balance', 0):,.0f} VNĐ\n")
+            msg_parts.append(f"Total P&L: {stats.get('total_pnl', 0):+,.0f} VNĐ\n")
+            msg_parts.append(f"Win Rate: {stats.get('win_rate', 0):.1f}%\n")
+    except Exception:
+        pass
+    
+    # Footer
+    msg_parts.append(f"\n{'='*30}\n")
+    msg_parts.append(f"💡 Dùng /run để scan tín hiệu mới\n")
+    msg_parts.append(f"💼 Dùng /portfolio để xem chi tiết\n")
     
     return "".join(msg_parts) if msg_parts else "📊 Summary sẽ có sau khi có dữ liệu."
 

@@ -13,7 +13,7 @@ TICKERS_CACHE_FILE = 'tickers_cache.json'
 TCBS_API_BASE = 'https://apipubaws.tcbs.com.vn'
 
 class TickerFetcher:
-    """Lấy danh sách mã cổ phiếu từ Yahoo Finance"""
+    """Lấy danh sách mã cổ phiếu từ TCBS"""
     
     def __init__(self):
         self.cache = {}
