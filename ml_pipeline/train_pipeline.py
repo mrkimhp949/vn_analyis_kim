@@ -6,8 +6,14 @@ import os
 from config import TICKERS
 from features import get_feature_columns
 from ml_pipeline.data_manager import DataIngestionConfig, DataManager
+from ml_pipeline.feature_selection import select_features_with_shap
 from ml_pipeline.model_trainer import EnsembleTrainer, TrainingConfig
 from ml_pipeline.volatility_forecaster import VolatilityForecaster
+
+try:
+    from model_monitor import get_model_monitor
+except ImportError:  # pragma: no cover - monitoring optional
+    get_model_monitor = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,8 +62,25 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
 
     # Ensemble model training
     feature_cols = [col for col in get_feature_columns() if col in dataset.columns]
-    logger.info(f"Training ensemble with {len(feature_cols)} features")
-    
+    logger.info(f"Initial feature count: {len(feature_cols)}")
+
+    selected_features, shap_importance = select_features_with_shap(
+        dataset,
+        feature_columns=feature_cols,
+        target_column="target",
+        max_samples=min(3000, len(dataset)),
+        correlation_threshold=0.92,
+    )
+    if selected_features and len(selected_features) >= 5:
+        logger.info(
+            "Using SHAP-selected features (%d -> %d)",
+            len(feature_cols),
+            len(selected_features),
+        )
+        feature_cols = selected_features
+    else:
+        logger.info("SHAP selection skipped; using original feature set.")
+
     trainer = EnsembleTrainer(TrainingConfig(feature_columns=feature_cols))
     metrics = trainer.train(dataset, market_regime=market_regime)
     
@@ -73,13 +96,42 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
         "market_regime": market_regime,
         "tickers": tickers,
         "lookback_days": lookback,
+        "feature_columns": feature_cols,
     }
+    if shap_importance is not None:
+        all_metrics["shap_feature_importance"] = shap_importance.to_dict(orient="records")
+
+    # Record model version & drift monitoring
+    if get_model_monitor:
+        try:
+            monitor = get_model_monitor()
+            record = monitor.record_training_run(
+                model_name="ensemble_classifier",
+                metrics=metrics,
+                metadata={
+                    "tickers": tickers,
+                    "lookback": lookback,
+                    "market_regime": market_regime,
+                },
+            )
+            drift_info = monitor.check_drift("ensemble_classifier", metric_key="accuracy")
+            all_metrics["model_monitor"] = {
+                "version": record.get("version"),
+                "drift": drift_info,
+            }
+        except Exception as exc:
+            logger.warning(f"Model monitor failed: {exc}")
     
     # Save reports
     os.makedirs("reports", exist_ok=True)
     report_file = "reports/training_report.json"
     if market_regime:
         report_file = f"reports/training_report_{market_regime.lower()}.json"
+
+    if shap_importance is not None:
+        shap_report = "reports/shap_feature_importance.json"
+        shap_importance.to_json(shap_report, orient="records", force_ascii=False, indent=2)
+        logger.info(f"Saved SHAP feature importance to {shap_report}")
     
     with open(report_file, "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2, ensure_ascii=False)

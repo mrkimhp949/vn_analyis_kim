@@ -1,180 +1,98 @@
 """
-Stacking Ensemble with Meta-Model
-Dùng Logistic Regression hoặc LightGBM làm meta-layer để kết hợp RF, XGB, LSTM
+Stacking meta-model cho ensemble
 """
+import json
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
+
 import joblib
 import numpy as np
-import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 logger = logging.getLogger(__name__)
 
-# Optional import for LightGBM
 try:
     import lightgbm as lgb
     LIGHTGBM_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional dependency
     LIGHTGBM_AVAILABLE = False
-    logger.warning("LightGBM not available. Install with: pip install lightgbm. Will use LogisticRegression instead.")
+    logger.info("LightGBM not installed. Stacking meta-model sẽ dùng LogisticRegression.")
 
 
-class StackingEnsemble:
-    """
-    Stacking ensemble với meta-model
-    
-    Base models: RF, GB, XGBoost, LSTM
-    Meta model: LogisticRegression hoặc LightGBM
-    """
-    
-    def __init__(
-        self,
-        base_models: List,
-        meta_model_type: str = "lightgbm",  # "lightgbm" or "logistic"
-        use_cv: bool = True,
-        n_splits: int = 5
-    ):
-        self.base_models = base_models
-        self.meta_model_type = meta_model_type
-        self.use_cv = use_cv
-        self.n_splits = n_splits
-        self.meta_model = None
-        self.base_model_names = []
-    
-    def _build_meta_model(self, n_base_models: int):
-        """Build meta-model"""
-        if self.meta_model_type == "lightgbm" and LIGHTGBM_AVAILABLE:
-            self.meta_model = lgb.LGBMClassifier(
-                n_estimators=100,
+class StackingMetaModel:
+    """Meta-model dùng để kết hợp dự báo từ các base model."""
+
+    def __init__(self, model_type: str = "lightgbm"):
+        self.model_type = model_type
+        self.model = None
+        self.feature_names: List[str] = []
+
+    def _build_model(self):
+        if self.model_type == "lightgbm" and LIGHTGBM_AVAILABLE:
+            self.model = lgb.LGBMClassifier(
+                n_estimators=200,
+                learning_rate=0.05,
                 max_depth=3,
-                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
                 random_state=42,
+                n_jobs=-1,
                 verbose=-1,
-                n_jobs=-1
             )
-            logger.info("Using LightGBM as meta-model")
+            logger.info("Stacking meta-model sử dụng LightGBM.")
         else:
-            # Use LogisticRegression as fallback
-            self.meta_model = LogisticRegression(
-                max_iter=1000,
+            self.model = LogisticRegression(
+                max_iter=2000,
+                solver="lbfgs",
+                class_weight="balanced",
                 random_state=42,
-                solver='lbfgs'
             )
-            logger.info("Using LogisticRegression as meta-model")
-    
-    def fit(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray
-    ) -> Dict:
-        """
-        Train stacking ensemble
-        
-        Returns:
-            Dict với metrics
-        """
-        n_base_models = len(self.base_models)
-        self._build_meta_model(n_base_models)
-        
-        # Step 1: Get base model predictions on validation set
-        base_predictions = []
-        
-        for i, model in enumerate(self.base_models):
-            try:
-                if hasattr(model, 'predict_proba'):
-                    pred = model.predict_proba(X_val)[:, 1]  # Probability of class 1
-                else:
-                    # For LSTM or other models
-                    pred = model.predict(X_val).flatten()
-                    # Convert to probabilities if needed
-                    if pred.max() > 1 or pred.min() < 0:
-                        pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
-                
-                base_predictions.append(pred)
-                model_name = getattr(model, '__class__', type(model)).__name__
-                self.base_model_names.append(model_name)
-                logger.info(f"Base model {i+1} ({model_name}): predictions shape {pred.shape}")
-            except Exception as e:
-                logger.warning(f"Failed to get predictions from base model {i+1}: {e}")
-                # Use zeros as fallback
-                base_predictions.append(np.zeros(len(y_val)))
-                self.base_model_names.append(f"Model_{i+1}")
-        
-        # Stack base predictions
-        meta_features = np.column_stack(base_predictions)
-        logger.info(f"Meta features shape: {meta_features.shape}")
-        
-        # Step 2: Train meta-model on base predictions
-        self.meta_model.fit(meta_features, y_val)
-        
-        # Step 3: Evaluate
-        meta_pred = self.meta_model.predict_proba(meta_features)[:, 1]
-        meta_cls = (meta_pred >= 0.5).astype(int)
-        
-        metrics = {
-            "accuracy": float(accuracy_score(y_val, meta_cls)),
-            "precision": float(precision_score(y_val, meta_cls, zero_division=0)),
-            "recall": float(recall_score(y_val, meta_cls, zero_division=0)),
-            "f1": float(f1_score(y_val, meta_cls, zero_division=0)),
-        }
-        
-        logger.info(f"Stacking ensemble - Accuracy: {metrics['accuracy']:.4f}, "
-                   f"F1: {metrics['f1']:.4f}")
-        
-        return metrics
-    
-    def predict(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Predict với stacking ensemble
-        
-        Returns:
-            (probabilities, classes)
-        """
-        if self.meta_model is None:
-            raise ValueError("Meta-model chưa được train. Gọi fit() trước.")
-        
-        # Get base model predictions
-        base_predictions = []
-        
-        for model in self.base_models:
-            try:
-                if hasattr(model, 'predict_proba'):
-                    pred = model.predict_proba(X)[:, 1]
-                else:
-                    pred = model.predict(X).flatten()
-                    if pred.max() > 1 or pred.min() < 0:
-                        pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
-                
-                base_predictions.append(pred)
-            except Exception as e:
-                logger.warning(f"Failed to get predictions from base model: {e}")
-                base_predictions.append(np.zeros(len(X)))
-        
-        # Stack and predict with meta-model
-        meta_features = np.column_stack(base_predictions)
-        probabilities = self.meta_model.predict_proba(meta_features)[:, 1]
-        classes = (probabilities >= 0.5).astype(int)
-        
-        return probabilities, classes
-    
+            if self.model_type == "lightgbm":
+                logger.info("LightGBM không khả dụng. Fallback sang LogisticRegression cho stacking meta-model.")
+
+    def fit(self, meta_features: np.ndarray, y: np.ndarray, feature_names: Optional[List[str]] = None):
+        if meta_features.ndim != 2:
+            raise ValueError("meta_features phải là mảng 2 chiều [n_samples, n_models]")
+        if len(meta_features) != len(y):
+            raise ValueError("meta_features và y phải có cùng số lượng mẫu")
+
+        self._build_model()
+        self.model.fit(meta_features, y)
+        self.feature_names = feature_names or [f"model_{i}" for i in range(meta_features.shape[1])]
+        logger.info(
+            "Đã huấn luyện stacking meta-model với %d mẫu và %d base models.",
+            meta_features.shape[0],
+            meta_features.shape[1],
+        )
+
+    def predict_proba(self, meta_features: np.ndarray) -> np.ndarray:
+        if self.model is None:
+            raise ValueError("Meta-model chưa được huấn luyện")
+        return self.model.predict_proba(meta_features)[:, 1]
+
+    def predict(self, meta_features: np.ndarray) -> np.ndarray:
+        proba = self.predict_proba(meta_features)
+        return (proba >= 0.5).astype(int)
+
     def save(self, save_dir: str):
-        """Save meta-model"""
         os.makedirs(save_dir, exist_ok=True)
-        meta_model_path = os.path.join(save_dir, "stacking_meta_model.pkl")
-        joblib.dump(self.meta_model, meta_model_path)
-        logger.info(f"Saved stacking meta-model to {meta_model_path}")
-    
+        joblib.dump(self.model, os.path.join(save_dir, "stacking_meta_model.pkl"))
+        with open(os.path.join(save_dir, "stacking_meta_info.json"), "w", encoding="utf-8") as f:
+            json.dump({"model_type": self.model_type, "feature_names": self.feature_names}, f, indent=2)
+        logger.info("Đã lưu stacking meta-model vào %s", save_dir)
+
     def load(self, save_dir: str):
-        """Load meta-model"""
-        meta_model_path = os.path.join(save_dir, "stacking_meta_model.pkl")
-        if os.path.exists(meta_model_path):
-            self.meta_model = joblib.load(meta_model_path)
-            logger.info(f"Loaded stacking meta-model from {meta_model_path}")
-        else:
-            raise FileNotFoundError(f"Meta-model not found at {meta_model_path}")
+        model_path = os.path.join(save_dir, "stacking_meta_model.pkl")
+        info_path = os.path.join(save_dir, "stacking_meta_info.json")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Không tìm thấy meta-model tại {model_path}")
+        self.model = joblib.load(model_path)
+        if os.path.exists(info_path):
+            with open(info_path, "r", encoding="utf-8") as f:
+                info = json.load(f)
+                self.model_type = info.get("model_type", self.model_type)
+                self.feature_names = info.get("feature_names", [])
+        logger.info("Đã load stacking meta-model từ %s", model_path)
+
 

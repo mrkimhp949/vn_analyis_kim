@@ -1,11 +1,12 @@
-import pandas as pd
-from datetime import datetime, timedelta
-import requests
-import hashlib
-import pickle
 import os
 import sys
-import time
+import pickle
+import hashlib
+import importlib
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
+
 
 DATA_CACHE_DIR = 'data_cache'
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
@@ -63,127 +64,67 @@ def load_data(symbol, lookback=200, use_cache=True, use_incremental=True):
         except Exception as e:
             print(f"⚠️ Lỗi load cache: {e}, tải lại từ API...")
     
-    # ===== STEP 3: Load từ API với monitoring =====
-    url = "https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/bars-long-term"
-    
-    # Kiểm tra incremental range
-    incremental_range = None
+    # ===== STEP 3: Load từ Yahoo Finance =====
+    incremental_range: Optional[Tuple[int, int]] = None
     if use_incremental:
         try:
             from incremental_cache import get_incremental_cache
             inc_cache = get_incremental_cache()
             incremental_range = inc_cache.get_incremental_range(symbol)
         except Exception:
-            pass
-    
+            incremental_range = None
+
+    end_dt = datetime.utcnow()
     if incremental_range:
-        start_ts, end_ts = incremental_range
-        start = datetime.fromtimestamp(start_ts)
-        end = datetime.fromtimestamp(end_ts)
-        print(f"📥 Tải {symbol} incremental từ {start.date()} đến {end.date()}...")
+        start_dt = datetime.fromtimestamp(incremental_range[0]) - timedelta(days=3)
+        print(f"📥 Tải {symbol} (incremental) từ Yahoo Finance...")
     else:
-        end = datetime.today()
-        start = end - timedelta(days=lookback*2)
-        print(f"📥 Tải {symbol} full từ TCBS...")
-    
-    params = {
-        "ticker": symbol,
-        "type": "stock",
-        "resolution": "D",
-        "from": int(start.timestamp()),
-        "to": int(end.timestamp())
-    }
-    
-    # API monitoring với retry
-    try:
-        from api_monitor import get_api_monitor
-        api_monitor = get_api_monitor()
-        
-        # Ping check trước (chỉ check URL, không dùng params)
-        success, response_time, error = api_monitor.ping(
-            url,
-            timeout=15,
-            retries=3,
-            retry_delay=1.0
+        start_dt = end_dt - timedelta(days=lookback * 3)
+        print(f"📥 Tải {symbol} (full) từ Yahoo Finance...")
+
+    df = _download_from_yahoo(symbol, start_dt, end_dt)
+
+    # ✅ IMPROVED: Normalize column names với validation
+    df = _normalize_columns(df, symbol)
+
+    # ✅ VALIDATION: Check required columns exist
+    required_cols = ['time', 'open', 'high', 'low', 'close', 'volume']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Thiếu các cột quan trọng: {missing_cols}")
+
+    # ✅ DATA QUALITY: Remove invalid rows
+    df = _clean_data(df, symbol)
+
+    # ✅ VALIDATION: Check if we have enough data
+    if len(df) < min(50, lookback * 0.3):
+        raise ValueError(
+            f"Dữ liệu không đủ cho {symbol}: có {len(df)} nến, "
+            f"cần ít nhất {min(50, lookback * 0.3)}"
         )
-        
-        if not success:
-            print(f"⚠️ API ping failed: {error}, vẫn thử fetch data...")
-        
-        # Fetch data với retry logic
-        response = None
-        for attempt in range(3):
-            try:
-                response = requests.get(url, params=params, timeout=15)
-                response.raise_for_status()
-                break
-            except Exception as e:
-                if attempt == 2:
-                    raise
-                time.sleep(1.0 * (attempt + 1))
-        
-        if response is None:
-            raise Exception("Failed to fetch data after retries")
-        
-        data = response.json()
-        
-        # ✅ VALIDATION: Check response structure
-        if 'data' not in data:
-            raise ValueError(f"API response thiếu field 'data' cho {symbol}")
-        
-        if not data['data'] or len(data['data']) == 0:
-            raise ValueError(f"Không có dữ liệu trong response cho {symbol}")
-        
-        # Tạo DataFrame từ response
-        df = pd.DataFrame(data['data'])
-        
-        # ✅ IMPROVED: Normalize column names với validation
-        df = _normalize_columns(df, symbol)
-        
-        # ✅ VALIDATION: Check required columns exist
-        required_cols = ['time', 'open', 'high', 'low', 'close', 'volume']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
-            raise ValueError(f"Thiếu các cột quan trọng: {missing_cols}")
-        
-        # ✅ DATA QUALITY: Remove invalid rows
-        df = _clean_data(df, symbol)
-        
-        # ✅ VALIDATION: Check if we have enough data
-        if len(df) < min(50, lookback * 0.3):
-            raise ValueError(
-                f"Dữ liệu không đủ cho {symbol}: có {len(df)} nến, "
-                f"cần ít nhất {min(50, lookback * 0.3)}"
-            )
-        
-        # Sort và limit
-        df = df.sort_values('time')
-        df = df.tail(lookback)
-        df = df.reset_index(drop=True)
-        
-        print(f"✅ Tải thành công {len(df)} nến cho {symbol}")
-        
-        # ===== STEP 4: Lưu incremental cache =====
-        if use_incremental:
-            try:
-                from incremental_cache import get_incremental_cache
-                inc_cache = get_incremental_cache()
-                inc_cache.update_cache(symbol, df, incremental=True)
-                print(f"💾 Đã cập nhật incremental cache cho {symbol}")
-            except Exception as e:
-                print(f"⚠️ Lỗi lưu incremental cache: {e}")
-        
-        # Lưu normal cache
-        _save_cache(df, cache_file, symbol)
-        
-        return df
-        
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Lỗi kết nối API cho {symbol}: {e}")
-    except ValueError as e:
-        raise Exception(f"Lỗi dữ liệu cho {symbol}: {e}")
-    except Exception as e:
-        raise Exception(f"Lỗi không xác định khi tải {symbol}: {e}")
+
+    # Sort và limit
+    df = df.sort_values('time')
+    df = df.tail(lookback)
+    df = df.reset_index(drop=True)
+
+    print(f"✅ Tải thành công {len(df)} nến cho {symbol}")
+
+    # ===== STEP 4: Lưu incremental cache =====
+    if use_incremental:
+        try:
+            from incremental_cache import get_incremental_cache
+            inc_cache = get_incremental_cache()
+            inc_cache.update_cache(symbol, df, incremental=True)
+            print(f"💾 Đã cập nhật incremental cache cho {symbol}")
+        except Exception as e:
+            print(f"⚠️ Lỗi lưu incremental cache: {e}")
+
+    # Lưu normal cache
+    _save_cache(df, cache_file, symbol)
+
+    return df
+
 
 
 def _normalize_columns(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -251,11 +192,60 @@ def _normalize_columns(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     
     if 'volume' not in df.columns:
         print(f"  ⚠️ Thiếu cột 'volume' - điền giá trị 0")
-        df[col] = 0
+        df['volume'] = 0
     
     # Select only required columns
     df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
     
+    return df
+
+
+def _download_from_yahoo(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """
+    Tải dữ liệu daily từ Yahoo Finance.
+    """
+    try:
+        yf = importlib.import_module("yfinance")
+    except ImportError as exc:
+        raise ImportError("yfinance chưa được cài đặt. Vui lòng chạy: pip install yfinance") from exc
+    # Yahoo cần thêm buffer để tránh missing data
+    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_buffered = end + timedelta(days=1)
+
+    df = yf.download(
+        symbol,
+        start=start,
+        end=end_buffered,
+        interval="1d",
+        progress=False,
+        auto_adjust=False,
+        threads=False,
+    )
+
+    if df.empty:
+        raise ValueError(f"Yahoo Finance không trả dữ liệu cho {symbol}")
+
+    df = df.reset_index()
+    # Thống nhất cột tên
+    rename_map = {
+        'Date': 'time',
+        'Open': 'open',
+        'High': 'high',
+        'Low': 'low',
+        'Close': 'close',
+        'Adj Close': 'adj_close',
+        'Volume': 'volume',
+    }
+    df = df.rename(columns=rename_map)
+
+    # Giữ lại các cột cần thiết; lưu adj_close nếu có
+    keep_cols = [col for col in ['time', 'open', 'high', 'low', 'close', 'adj_close', 'volume'] if col in df.columns]
+    df = df[keep_cols]
+
+    # Điền volume thiếu bằng 0
+    if 'volume' in df.columns:
+        df['volume'] = df['volume'].fillna(0)
+
     return df
 
 
@@ -331,7 +321,7 @@ def test_data_loader():
     """
     Test data loader với các trường hợp khác nhau
     """
-    test_symbols = ['VNM', 'VCB', 'HPG']
+    test_symbols = ['AAPL', 'MSFT', 'SPY']
     
     print("\n" + "="*60)
     print("🧪 TESTING DATA LOADER")

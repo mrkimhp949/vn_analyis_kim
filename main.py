@@ -52,6 +52,26 @@ except ImportError:
 
 tz = pytz.timezone("Asia/Ho_Chi_Minh")
 
+def _run_weekly_model_retraining():
+    """Trigger model retraining pipeline."""
+    try:
+        from ml_pipeline.train_pipeline import run_pipeline
+    except ImportError as exc:
+        print(f"❌ Không thể import train_pipeline: {exc}")
+        return
+
+    try:
+        tickers = TICKERS[:40] if TICKERS else []
+        if not tickers:
+            print("⚠️ Không có danh sách tickers để retrain, bỏ qua.")
+            return
+        print("🔄 Đang retrain ensemble & volatility models...")
+        report = run_pipeline(tickers=tickers, lookback=250, refresh=True)
+        print("✅ Retrain hoàn tất. Accuracy:",
+              report.get("ensemble", {}).get("accuracy", {}).get("mean"))
+    except Exception as exc:
+        print(f"❌ Lỗi retrain models: {exc}")
+
 # ═══════════════════════════════════════════════════════════
 # 📅 SCHEDULER VỚI AUTO SECTOR SELECTION - IMPROVED
 # ═══════════════════════════════════════════════════════════
@@ -68,6 +88,7 @@ def schedule_job():
     last_news_refresh = None
     last_daily_summary = None
     last_pnl_record = None
+    last_model_retrain = None
     
     while True:
         try:
@@ -76,6 +97,15 @@ def schedule_job():
             current_minute = now.minute
             current_weekday = now.weekday()
             current_date = now.date()
+
+            # ===== WEEKLY MODEL RETRAINING (Chủ nhật 20:00) =====
+            if (current_weekday == 6 and current_hour == 20 and current_minute == 0 and
+                    last_model_retrain != current_date):
+                print("\n🤖 [CHỦ NHẬT] TỰ ĐỘNG HUẤN LUYỆN LẠI MÔ HÌNH")
+                _run_weekly_model_retraining()
+                last_model_retrain = current_date
+                time.sleep(61)
+                continue
             
             # ===== CHECK: Chỉ chạy trong giờ giao dịch VN =====
             if not should_run_scheduled_task(now):
@@ -126,7 +156,7 @@ def schedule_job():
                 except Exception as e:
                     print(f"❌ Lỗi kiểm tra portfolio: {e}")
                 time.sleep(61)
-
+            
             # Refresh tin tức đa nguồn trong giờ giao dịch (9:30, 13:30, 14:30)
             elif (update_news_cache and is_trading_hour(now) and 
                   current_hour in (9, 13, 14) and current_minute == 30 and

@@ -12,6 +12,9 @@ from datetime import datetime
 from typing import Optional
 from portfolio_analyzer import PortfolioAnalyzer
 from portfolio_history import PortfolioHistoryTracker
+from market_regime_proxy import ProxyMarketRegimeAnalyzer
+from portfolio_regime_adjuster import PortfolioRegimeAdjuster
+from portfolio_optimizer import PortfolioOptimizer
 from risk_metrics import (
     calculate_sector_exposure,
     check_sector_overweight,
@@ -24,6 +27,9 @@ class PortfolioManager:
         self.portfolio_file = portfolio_file
         self.analyzer = PortfolioAnalyzer()
         self.history_tracker = PortfolioHistoryTracker()
+        self.regime_adjuster = PortfolioRegimeAdjuster()
+        self.market_analyzer = ProxyMarketRegimeAnalyzer()
+        self.optimizer = PortfolioOptimizer()
         self.load_portfolio()
     
     def load_portfolio(self):
@@ -193,6 +199,43 @@ class PortfolioManager:
         # Calculate correlation risk
         symbols = list(holdings.keys())
         correlation_risk = calculate_portfolio_correlation_risk(symbols) if len(symbols) >= 2 else None
+
+        market_state = None
+        try:
+            market_state = self.market_analyzer.analyze_market_regime()
+        except Exception:
+            market_state = None
+
+        regime_adjustment = None
+        try:
+            adjustment = self.regime_adjuster.evaluate_adjustment(
+                holdings_with_prices,
+                market_regime=market_state,
+                current_cash=0.0,
+            )
+            regime_adjustment = {
+                'regime': adjustment.regime,
+                'target_cash_ratio': adjustment.target_cash_ratio,
+                'target_exposure_ratio': adjustment.target_exposure_ratio,
+                'required_cash_increase': adjustment.required_cash_increase,
+                'suggested_sales': adjustment.suggested_sales,
+                'notes': adjustment.notes,
+            }
+        except Exception:
+            regime_adjustment = None
+
+        optimal_allocation = None
+        try:
+            optimization = self.optimizer.optimize_weights(symbols)
+            if optimization:
+                optimal_allocation = {
+                    'method': optimization.method,
+                    'weights': optimization.weights,
+                    'annualized_volatility': optimization.annualized_volatility,
+                    'notes': optimization.notes,
+                }
+        except Exception:
+            optimal_allocation = None
         
         return {
             'total_stocks': len(holdings),
@@ -204,6 +247,9 @@ class PortfolioManager:
             'sector_exposure': sector_exposure,
             'overweight_sectors': overweight_sectors,
             'correlation_risk': correlation_risk,
+            'market_regime': market_state,
+            'regime_adjustment': regime_adjustment,
+            'optimal_allocation': optimal_allocation,
         }
     
     def _record_daily_snapshot(self):
@@ -267,8 +313,44 @@ class PortfolioManager:
             corr_risk = summary['correlation_risk']
             risk_section += f"🔗 Correlation Risk:\n"
             risk_section += f"  Avg Correlation: {corr_risk.get('avg_correlation', 0):.2f}\n"
+            risk_section += f"  Distance Corr Avg: {corr_risk.get('distance_correlation_avg', 0):.2f}\n"
+            risk_section += f"  Copula Corr Avg: {corr_risk.get('copula_correlation_avg', 0):.2f}\n"
             risk_section += f"  Risk Score: {corr_risk.get('risk_score', 0)}/100\n"
             risk_section += f"  {corr_risk.get('recommendation', '')}\n\n"
+            if corr_risk.get('high_distance_pairs'):
+                top_dist = corr_risk['high_distance_pairs'][0]
+                risk_section += (
+                    f"  • Distance corr cao: {top_dist[0]} - {top_dist[1]} ({top_dist[2]:.2f})\n"
+                )
+            if corr_risk.get('high_copula_pairs'):
+                top_cop = corr_risk['high_copula_pairs'][0]
+                risk_section += (
+                    f"  • Copula corr cao: {top_cop[0]} - {top_cop[1]} ({top_cop[2]:.2f})\n"
+                )
+            risk_section += "\n"
+
+        if summary.get('regime_adjustment'):
+            adj = summary['regime_adjustment']
+            risk_section += "⚠️ Regime Control:\n"
+            risk_section += f"  Regime: {adj.get('regime')}\n"
+            risk_section += f"  Target Cash: {adj.get('target_cash_ratio', 0)*100:.0f}%\n"
+            risk_section += f"  Required Cash Increase: {adj.get('required_cash_increase', 0):,.0f} VNĐ\n"
+            if adj.get('suggested_sales'):
+                top_sale = adj['suggested_sales'][0]
+                risk_section += f"  Gợi ý bán: {top_sale['symbol']} ({top_sale['shares_to_sell']} CP)\n"
+            risk_section += "\n"
+
+        if summary.get('optimal_allocation'):
+            opt = summary['optimal_allocation']
+            if opt and opt.get('weights'):
+                risk_section += "🧮 Optimal Allocation:\n"
+                risk_section += f"  Method: {opt.get('method')}\n"
+                if opt.get('annualized_volatility') is not None:
+                    risk_section += f"  Expected Vol: {opt['annualized_volatility']:.2%}\n"
+                top_weights = sorted(opt['weights'].items(), key=lambda x: x[1], reverse=True)[:5]
+                for symbol, weight in top_weights:
+                    risk_section += f"  • {symbol}: {weight*100:.1f}%\n"
+                risk_section += "\n"
         
         # Diversification recommendations
         if diversification.get('warnings'):

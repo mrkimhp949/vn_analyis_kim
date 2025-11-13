@@ -4,13 +4,22 @@ market_regime.py - Market Regime Detection
 Phát hiện tình trạng thị trường để quyết định có nên trade hay không
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, Tuple
-from data_loader import load_data
 import logging
+from typing import Dict, Tuple, Optional
+
+import numpy as np
+import pandas as pd
+
+from data_loader import load_data
 
 logger = logging.getLogger(__name__)
+
+try:
+    from hmmlearn.hmm import GaussianHMM  # type: ignore
+    HMM_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency
+    HMM_AVAILABLE = False
+    logger.info("hmmlearn not installed. HMM-based regime detection disabled.")
 
 
 class MarketRegimeAnalyzer:
@@ -62,6 +71,16 @@ class MarketRegimeAnalyzer:
             # 4. Market breadth (nếu có dữ liệu)
             # breadth_score = self._analyze_market_breadth()
             
+            details = {
+                'weekly_change': weekly_change,
+                'trend_direction': trend_direction,
+                'trend_strength': trend_strength,
+                'volatility': volatility,
+                'vnindex_price': latest['close'],
+                'sma20': vnindex['close'].rolling(20).mean().iloc[-1],
+                'sma50': vnindex['close'].rolling(50).mean().iloc[-1]
+            }
+
             # Determine regime
             regime = self._determine_regime(
                 weekly_change, 
@@ -69,6 +88,19 @@ class MarketRegimeAnalyzer:
                 trend_strength,
                 volatility
             )
+
+            hmm_info = self._detect_regime_hmm(vnindex)
+            if hmm_info:
+                details['hmm_state'] = hmm_info['state']
+                details['hmm_regime'] = hmm_info['regime']
+                details['hmm_confidence'] = hmm_info['confidence']
+                details['hmm_probabilities'] = hmm_info['probabilities']
+                details['hmm_state_means'] = hmm_info['state_means']
+                details['hmm_state_volatility'] = hmm_info['state_volatility']
+
+                if hmm_info['confidence'] >= 0.6 and hmm_info['regime'] != regime:
+                    details['regime_before_hmm'] = regime
+                    regime = hmm_info['regime']
             
             # Tradeable decision
             tradeable = self._is_tradeable(regime, volatility, weekly_change)
@@ -79,16 +111,6 @@ class MarketRegimeAnalyzer:
                 trend_strength, 
                 volatility
             )
-            
-            details = {
-                'weekly_change': weekly_change,
-                'trend_direction': trend_direction,
-                'trend_strength': trend_strength,
-                'volatility': volatility,
-                'vnindex_price': latest['close'],
-                'sma20': vnindex['close'].rolling(20).mean().iloc[-1],
-                'sma50': vnindex['close'].rolling(50).mean().iloc[-1]
-            }
             
             result = {
                 'regime': regime,
@@ -195,6 +217,59 @@ class MarketRegimeAnalyzer:
         
         # Default: sideways
         return 'SIDEWAYS'
+
+    def _detect_regime_hmm(self, df: pd.DataFrame) -> Optional[Dict]:
+        """Sử dụng Hidden Markov Model để phát hiện regime (Bull/Neutral/Bear)."""
+        if not HMM_AVAILABLE or len(df) < 60:
+            return None
+
+        try:
+            returns = df['close'].pct_change().dropna()
+            if len(returns) < 50:
+                return None
+
+            returns_array = returns.values.reshape(-1, 1)
+            hmm = GaussianHMM(
+                n_components=3,
+                covariance_type='full',
+                n_iter=200,
+                random_state=42,
+                verbose=False,
+            )
+            hmm.fit(returns_array)
+
+            hidden_states = hmm.predict(returns_array)
+            state_probs = hmm.predict_proba(returns_array)
+            state_means = hmm.means_.flatten()
+
+            order = np.argsort(state_means)
+            regime_map = {
+                order[0]: 'BEAR',
+                order[1]: 'SIDEWAYS',
+                order[2]: 'BULL',
+            }
+
+            current_state = hidden_states[-1]
+            current_regime = regime_map.get(current_state, 'SIDEWAYS')
+            confidence = float(state_probs[-1, current_state])
+
+            covariances = hmm.covars_
+            if covariances.ndim == 3:
+                state_vol = covariances.reshape(covariances.shape[0], -1).mean(axis=1)
+            else:
+                state_vol = covariances.reshape(-1)
+
+            return {
+                'state': int(current_state),
+                'regime': current_regime,
+                'confidence': confidence,
+                'probabilities': state_probs[-1].tolist(),
+                'state_means': state_means.tolist(),
+                'state_volatility': state_vol.tolist(),
+            }
+        except Exception as exc:
+            logger.debug(f"HMM regime detection failed: {exc}")
+            return None
     
     def _is_tradeable(self, 
                       regime: str, 

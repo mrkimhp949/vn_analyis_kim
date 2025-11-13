@@ -1,5 +1,6 @@
 import logging
-from typing import List, Optional
+import os
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -13,35 +14,53 @@ class VietnameseSentimentAnalyzer:
     def __init__(self):
         self.pipeline = None
         self.model_name = None
+        self.id2label: Dict[int, str] = {}
+
+        custom_model_path = os.environ.get("PHOBERT_FINE_TUNED_PATH", "models/phobert_vi_financial")
         try:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
-            # Thử PhoBERT trước (mô hình tiếng Việt tốt nhất)
-            try:
-                model_name = "vinai/phobert-base-v2"
-                tokenizer = AutoTokenizer.from_pretrained(model_name)
-                # PhoBERT không có sẵn sentiment model, dùng multilingual BERT với fine-tuning
-                # Hoặc dùng ViBERT nếu có
-                logger.info("Attempting to load PhoBERT...")
-                # Fallback to multilingual sentiment model optimized for Vietnamese
-                model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
-                tokenizer = AutoTokenizer.from_pretrained(model_name)
-                model = AutoModelForSequenceClassification.from_pretrained(model_name)
-                self.pipeline = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
-                self.model_name = "multilingual-bert"
-                logger.info("Loaded multilingual BERT sentiment pipeline (optimized for Vietnamese).")
-            except Exception as e1:
-                logger.warning(f"PhoBERT not available: {e1}. Trying ViBERT...")
-                # Thử ViBERT hoặc fallback
+            if os.path.isdir(custom_model_path):
                 try:
-                    model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
-                    tokenizer = AutoTokenizer.from_pretrained(model_name)
-                    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+                    tokenizer = AutoTokenizer.from_pretrained(custom_model_path)
+                    model = AutoModelForSequenceClassification.from_pretrained(custom_model_path)
+                    self.pipeline = pipeline(
+                        "text-classification", model=model, tokenizer=tokenizer, truncation=True
+                    )
+                    self.model_name = "phobert-finetuned"
+                    self.id2label = getattr(model.config, "id2label", {})
+                    logger.info("Loaded fine-tuned PhoBERT sentiment model from %s", custom_model_path)
+                except Exception as custom_exc:
+                    logger.warning("Không thể load PhoBERT fine-tuned: %s", custom_exc)
+                    self.pipeline = None
+                    self.model_name = None
+                    self.id2label = {}
+
+            if self.pipeline is None:
+                # Try PhoBERT base with fallback to multilingual sentiment
+                try:
+                    logger.info("Attempting to load PhoBERT base model...")
+                    base_model_name = "vinai/phobert-base-v2"
+                    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+                    model = AutoModelForSequenceClassification.from_pretrained(
+                        "nlptown/bert-base-multilingual-uncased-sentiment"
+                    )
                     self.pipeline = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
                     self.model_name = "multilingual-bert"
-                    logger.info("Loaded multilingual BERT sentiment pipeline.")
-                except Exception as e2:
-                    logger.warning(f"ViBERT not available: {e2}. Fallback keyword scoring.")
+                    self.id2label = getattr(model.config, "id2label", {})
+                    logger.info("Loaded multilingual BERT sentiment pipeline (optimized for Vietnamese).")
+                except Exception as e1:
+                    logger.warning(f"PhoBERT not available: {e1}. Trying multilingual directly...")
+                    try:
+                        fallback_model = "nlptown/bert-base-multilingual-uncased-sentiment"
+                        tokenizer = AutoTokenizer.from_pretrained(fallback_model)
+                        model = AutoModelForSequenceClassification.from_pretrained(fallback_model)
+                        self.pipeline = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
+                        self.model_name = "multilingual-bert"
+                        self.id2label = getattr(model.config, "id2label", {})
+                        logger.info("Loaded multilingual BERT sentiment pipeline.")
+                    except Exception as e2:
+                        logger.warning(f"ViBERT/Multilingual model not available: {e2}. Fallback keyword scoring.")
         except Exception as e:
             logger.warning(f"Không thể load transformer model: {e}. Fallback keyword scoring.")
 
@@ -66,6 +85,16 @@ class VietnameseSentimentAnalyzer:
             "áp lực bán",
         ]
 
+    def _normalize_label(self, raw_label: str) -> str:
+        label = raw_label
+        if raw_label.upper().startswith("LABEL_"):
+            try:
+                idx = int(raw_label.split("_")[-1])
+                label = self.id2label.get(idx, raw_label)
+            except ValueError:
+                pass
+        return label.lower()
+
     def score(self, texts: List[str]) -> float:
         if not texts:
             return 0.0
@@ -75,12 +104,18 @@ class VietnameseSentimentAnalyzer:
                 results = self.pipeline(texts)
                 score = 0.0
                 for res in results:
-                    label = res["label"]
-                    if label in ("5 stars", "4 stars"):
-                        score += 1.0
-                    elif label in ("1 star", "2 stars"):
-                        score -= 1.0
-                return max(min(score / len(results), 1.0), -1.0)
+                    label = self._normalize_label(res.get("label", ""))
+                    prob = float(res.get("score", 0.0))
+                    if any(key in label for key in ["5 star", "4 star", "positive", "pos"]):
+                        score += prob
+                    elif any(key in label for key in ["1 star", "2 star", "negative", "neg"]):
+                        score -= prob
+                    elif "neutral" in label or "neu" in label or "middle" in label:
+                        score += 0.0
+                    else:
+                        # Unknown label - treat as neutral
+                        score += 0.0
+                return max(min(score / max(len(results), 1), 1.0), -1.0)
             except Exception as e:
                 logger.warning(f"Transformer scoring failed: {e}")
 

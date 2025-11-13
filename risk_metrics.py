@@ -1,5 +1,6 @@
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
+import math
 import pandas as pd
 import numpy as np
 
@@ -55,6 +56,28 @@ def check_sector_overweight(exposure: Dict[str, float], max_sector_pct: float = 
     return sorted(overweight, key=lambda x: x[1], reverse=True)
 
 
+def load_returns_dataframe(symbols: List[str], lookback: int = 60) -> pd.DataFrame:
+    """Load daily returns for given symbols."""
+    from data_loader import load_data
+
+    returns_data = {}
+    
+    for symbol in symbols:
+        try:
+            df = load_data(symbol, lookback=lookback, use_cache=True)
+            if not df.empty and 'close' in df.columns:
+                returns = df['close'].pct_change().dropna()
+                if len(returns) >= 20:
+                    returns_data[symbol] = returns
+        except Exception:
+            continue
+
+    if len(returns_data) < 2:
+        return pd.DataFrame()
+
+    return pd.DataFrame(returns_data)
+
+
 def calculate_correlation_matrix(symbols: List[str], lookback: int = 60) -> pd.DataFrame:
     """
     Tính correlation matrix giữa các symbols
@@ -66,31 +89,65 @@ def calculate_correlation_matrix(symbols: List[str], lookback: int = 60) -> pd.D
     Returns:
         DataFrame với correlation matrix
     """
-    from data_loader import load_data
-    
-    returns_data = {}
-    
-    for symbol in symbols:
-        try:
-            df = load_data(symbol, lookback=lookback, use_cache=True)
-            if not df.empty and 'close' in df.columns:
-                returns = df['close'].pct_change().dropna()
-                if len(returns) >= 20:  # Cần ít nhất 20 điểm dữ liệu
-                    returns_data[symbol] = returns
-        except Exception:
-            continue
-    
-    if len(returns_data) < 2:
-        # Trả về empty matrix nếu không đủ data
+    returns_df = load_returns_dataframe(symbols, lookback)
+    if returns_df.empty:
         return pd.DataFrame()
-    
-    # Tạo DataFrame từ returns
-    returns_df = pd.DataFrame(returns_data)
-    
-    # Tính correlation
-    correlation_matrix = returns_df.corr()
-    
-    return correlation_matrix
+    return returns_df.corr()
+
+
+def _distance_correlation(x: np.ndarray, y: np.ndarray) -> float:
+    if x.ndim != 1:
+        x = x.ravel()
+    if y.ndim != 1:
+        y = y.ravel()
+
+    n = len(x)
+    if n != len(y) or n == 0:
+        return 0.0
+
+    x = x.reshape(n, 1)
+    y = y.reshape(n, 1)
+
+    a = np.abs(x - x.T)
+    b = np.abs(y - y.T)
+
+    A = a - a.mean(axis=0) - a.mean(axis=1).reshape(-1, 1) + a.mean()
+    B = b - b.mean(axis=0) - b.mean(axis=1).reshape(-1, 1) + b.mean()
+
+    dcov_xy = np.mean(A * B)
+    dcov_xx = np.mean(A * A)
+    dcov_yy = np.mean(B * B)
+
+    if dcov_xx <= 0 or dcov_yy <= 0:
+        return 0.0
+
+    return math.sqrt(max(dcov_xy, 0.0) / math.sqrt(dcov_xx * dcov_yy))
+
+
+def calculate_distance_correlation_matrix(returns_df: pd.DataFrame) -> pd.DataFrame:
+    if returns_df.empty or returns_df.shape[1] < 2:
+        return pd.DataFrame()
+
+    symbols = returns_df.columns.tolist()
+    matrix = pd.DataFrame(np.eye(len(symbols)), index=symbols, columns=symbols)
+
+    for i, sym_i in enumerate(symbols):
+        for j in range(i + 1, len(symbols)):
+            sym_j = symbols[j]
+            dcor = _distance_correlation(returns_df[sym_i].values, returns_df[sym_j].values)
+            matrix.loc[sym_i, sym_j] = dcor
+            matrix.loc[sym_j, sym_i] = dcor
+
+    return matrix
+
+
+def calculate_copula_correlation_matrix(returns_df: pd.DataFrame) -> pd.DataFrame:
+    if returns_df.empty or returns_df.shape[1] < 2:
+        return pd.DataFrame()
+
+    ranks = returns_df.rank(pct=True)
+    matrix = ranks.corr()
+    return matrix
 
 
 def check_high_correlation(
@@ -130,6 +187,48 @@ def check_high_correlation(
     return sorted(high_corr_pairs, key=lambda x: abs(x[2]), reverse=True)
 
 
+def check_high_distance_correlation(
+    distance_matrix: pd.DataFrame,
+    threshold: float = 0.6,
+    current_holdings: Optional[List[str]] = None
+) -> List[Tuple[str, str, float]]:
+    if distance_matrix.empty:
+        return []
+
+    symbols = current_holdings or distance_matrix.columns.tolist()
+    symbols = [s for s in symbols if s in distance_matrix.columns]
+
+    pairs = []
+    for i, sym_i in enumerate(symbols):
+        for sym_j in symbols[i + 1:]:
+            if sym_j in distance_matrix.columns:
+                value = distance_matrix.loc[sym_i, sym_j]
+                if not np.isnan(value) and value >= threshold:
+                    pairs.append((sym_i, sym_j, value))
+    return sorted(pairs, key=lambda x: x[2], reverse=True)
+
+
+def check_high_copula_correlation(
+    copula_matrix: pd.DataFrame,
+    threshold: float = 0.7,
+    current_holdings: Optional[List[str]] = None
+) -> List[Tuple[str, str, float]]:
+    if copula_matrix.empty:
+        return []
+
+    symbols = current_holdings or copula_matrix.columns.tolist()
+    symbols = [s for s in symbols if s in copula_matrix.columns]
+
+    pairs = []
+    for i, sym_i in enumerate(symbols):
+        for sym_j in symbols[i + 1:]:
+            if sym_j in copula_matrix.columns:
+                value = copula_matrix.loc[sym_i, sym_j]
+                if not np.isnan(value) and abs(value) >= threshold:
+                    pairs.append((sym_i, sym_j, value))
+    return sorted(pairs, key=lambda x: abs(x[2]), reverse=True)
+
+
 def get_sector_for_symbol(symbol: str) -> str:
     """Lấy sector của một symbol"""
     return SECTOR_MAP.get(symbol.upper(), "UNCLASSIFIED")
@@ -153,27 +252,51 @@ def calculate_portfolio_correlation_risk(
         return {
             "avg_correlation": 0.0,
             "high_corr_pairs": [],
+            "distance_correlation_avg": 0.0,
+            "high_distance_pairs": [],
+            "copula_correlation_avg": 0.0,
+            "high_copula_pairs": [],
             "risk_score": 0,
             "recommendation": "Cần thêm mã để đánh giá correlation"
         }
     
-    correlation_matrix = calculate_correlation_matrix(current_holdings, lookback)
-    
-    if correlation_matrix.empty:
+    returns_df = load_returns_dataframe(current_holdings, lookback)
+    if returns_df.empty or returns_df.shape[1] < 2:
         return {
             "avg_correlation": 0.0,
             "high_corr_pairs": [],
+            "distance_correlation_avg": 0.0,
+            "high_distance_pairs": [],
+            "copula_correlation_avg": 0.0,
+            "high_copula_pairs": [],
             "risk_score": 50,
             "recommendation": "Không đủ dữ liệu để tính correlation"
         }
+
+    correlation_matrix = returns_df.corr()
+    distance_matrix = calculate_distance_correlation_matrix(returns_df)
+    copula_matrix = calculate_copula_correlation_matrix(returns_df)
     
     # Tính correlation trung bình (chỉ lấy upper triangle, loại bỏ diagonal)
     mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=1)
     correlations = correlation_matrix.where(mask).stack()
-    avg_correlation = correlations.abs().mean()
+    avg_correlation = correlations.abs().mean() if not correlations.empty else 0.0
+
+    distance_avg = 0.0
+    copula_avg = 0.0
+    if not distance_matrix.empty:
+        mask_dist = np.triu(np.ones_like(distance_matrix, dtype=bool), k=1)
+        distance_values = distance_matrix.where(mask_dist).stack()
+        distance_avg = distance_values.mean() if not distance_values.empty else 0.0
+    if not copula_matrix.empty:
+        mask_cop = np.triu(np.ones_like(copula_matrix, dtype=bool), k=1)
+        copula_vals = copula_matrix.where(mask_cop).stack().abs()
+        copula_avg = copula_vals.mean() if not copula_vals.empty else 0.0
     
     # Tìm các cặp có correlation cao
     high_corr_pairs = check_high_correlation(correlation_matrix, threshold=0.7, current_holdings=current_holdings)
+    high_distance_pairs = check_high_distance_correlation(distance_matrix, threshold=0.6, current_holdings=current_holdings)
+    high_copula_pairs = check_high_copula_correlation(copula_matrix, threshold=0.7, current_holdings=current_holdings)
     
     # Tính risk score (0-100, càng cao càng rủi ro)
     risk_score = min(100, int(avg_correlation * 100))
@@ -189,6 +312,10 @@ def calculate_portfolio_correlation_risk(
     return {
         "avg_correlation": float(avg_correlation),
         "high_corr_pairs": high_corr_pairs,
+        "distance_correlation_avg": float(distance_avg),
+        "high_distance_pairs": high_distance_pairs,
+        "copula_correlation_avg": float(copula_avg),
+        "high_copula_pairs": high_copula_pairs,
         "risk_score": risk_score,
         "recommendation": recommendation
     }

@@ -21,3 +21,9 @@ xgboost==2.0.3        # Optional: ensemble models & volatility forecasting
 # Then install: pip install tensorflow==2.15.0
 # tensorflow==2.15.0    # Optional: LSTM models (install separately to avoid conflicts)
 pyarrow==14.0.1       # Required: parquet file support for feature store
+lightgbm==4.1.0       # Optional: stacking meta-model
+shap==0.44.0          # Optional: feature importance analysis
+hmmlearn==0.3.0       # Optional: Hidden Markov Model for market regime
+datasets==2.16.1      # Optional: for fine-tuning PhoBERT
+scipy==1.11.4         # Optional: HRP optimizer distance metrics
+yfinance==0.2.36      # Market data from Yahoo Finance

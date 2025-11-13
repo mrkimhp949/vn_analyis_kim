@@ -16,6 +16,8 @@ from improved_entry_logic import ImprovedEntryLogic
 from improved_exit_logic import ImprovedExitStrategy
 from improved_position_sizing import ConservativePositionSizer
 from market_regime_proxy import ProxyMarketRegimeAnalyzer
+from portfolio_regime_adjuster import PortfolioRegimeAdjuster
+from portfolio_optimizer import PortfolioOptimizer
 from risk_metrics import calculate_sector_exposure, summarize_exposure
 import logging
 import sys
@@ -61,6 +63,8 @@ class PortfolioAnalyzer:
         self.exit_strategy = ImprovedExitStrategy()
         self.position_sizer = ConservativePositionSizer()
         self.market_analyzer = ProxyMarketRegimeAnalyzer()
+        self.regime_adjuster = PortfolioRegimeAdjuster()
+        self.optimizer = PortfolioOptimizer()
         
     def analyze_current_portfolio(self, current_holdings):
         """
@@ -110,7 +114,9 @@ class PortfolioAnalyzer:
             
             # Tổng kết portfolio
             analysis_result['portfolio_summary'] = self._calculate_portfolio_summary(
-                analysis_result['current_holdings']
+                analysis_result['current_holdings'],
+                market_regime,
+                analysis_result.get('cash_available', 0.0)
             )
             
             self._save_analysis(analysis_result)
@@ -274,7 +280,7 @@ class PortfolioAnalyzer:
         else:
             return "Vẫn tiềm năng - Nên tiếp tục nắm giữ"
     
-    def _calculate_portfolio_summary(self, current_holdings):
+    def _calculate_portfolio_summary(self, current_holdings, market_regime, current_cash=0.0):
         """Tính tổng kết portfolio"""
         total_value = sum(h['current_value'] for h in current_holdings.values() if 'current_value' in h)
         total_pnl = sum(h['pnl_amount'] for h in current_holdings.values() if 'pnl_amount' in h)
@@ -284,7 +290,29 @@ class PortfolioAnalyzer:
         hold_recommendations = sum(1 for h in current_holdings.values() if h.get('recommendation') == 'HOLD')
 
         sector_exposure = calculate_sector_exposure(current_holdings) if current_holdings else {}
-        
+
+        regime_adjustment = self.regime_adjuster.evaluate_adjustment(
+            current_holdings,
+            market_regime=market_regime,
+            current_cash=current_cash or 0.0,
+        )
+
+        optimal_allocation = None
+        try:
+            optimization = self.optimizer.optimize_weights(
+                [symbol for symbol, data in current_holdings.items() if data.get('shares', 0) > 0]
+            )
+            if optimization:
+                optimal_allocation = {
+                    'method': optimization.method,
+                    'weights': optimization.weights,
+                    'annualized_volatility': optimization.annualized_volatility,
+                    'notes': optimization.notes,
+                }
+        except Exception as exc:
+            logging_msg = f"Failed to optimize portfolio: {exc}"
+            logger.debug(logging_msg)
+
         return {
             'total_portfolio_value': total_value,
             'total_invested': total_invested,
@@ -293,7 +321,16 @@ class PortfolioAnalyzer:
             'number_of_stocks': len(current_holdings),
             'sell_recommendations_count': sell_recommendations,
             'hold_recommendations_count': hold_recommendations,
-            'sector_exposure': sector_exposure
+            'sector_exposure': sector_exposure,
+            'regime_adjustment': {
+                'regime': regime_adjustment.regime,
+                'target_cash_ratio': regime_adjustment.target_cash_ratio,
+                'target_exposure_ratio': regime_adjustment.target_exposure_ratio,
+                'required_cash_increase': regime_adjustment.required_cash_increase,
+                'suggested_sales': regime_adjustment.suggested_sales,
+                'notes': regime_adjustment.notes,
+            },
+            'optimal_allocation': optimal_allocation,
         }
     
     def _create_error_analysis(self, symbol, error_msg):
@@ -352,7 +389,32 @@ class PortfolioAnalyzer:
             report.append("• Phân bổ theo ngành:")
             for line in exposure_lines:
                 report.append(f"  └ {line}")
+        adjustment = summary.get('regime_adjustment')
+        if adjustment:
+            report.append("")
+            report.append("⚠️ **ĐIỀU CHỈNH THEO REGIME**")
+            report.append(f"• Regime: {adjustment.get('regime')}")
+            report.append(f"• Mục tiêu tiền mặt: {adjustment.get('target_cash_ratio', 0)*100:.0f}%")
+            report.append(f"• Cần tăng tiền mặt thêm: {adjustment.get('required_cash_increase', 0):,.0f} VNĐ")
+            if adjustment.get('suggested_sales'):
+                report.append("• Đề xuất bán:")
+                for sale in adjustment['suggested_sales']:
+                    report.append(
+                        f"  └ {sale['symbol']}: bán {sale['shares_to_sell']} CP (~{sale['approx_value']:,.0f} VNĐ)"
+                    )
+            if adjustment.get('notes'):
+                report.append(f"• Ghi chú: {adjustment['notes']}")
         report.append("")
+
+        optimal = summary.get('optimal_allocation')
+        if optimal and optimal.get('weights'):
+            report.append("🧮 **PHÂN BỔ TỐI ƯU (HRP/RISK BUDGETING)**")
+            report.append(f"• Phương pháp: {optimal.get('method')}")
+            if optimal.get('annualized_volatility') is not None:
+                report.append(f"• Vol kỳ vọng: {optimal['annualized_volatility']:.2%}")
+            for symbol, weight in sorted(optimal['weights'].items(), key=lambda x: x[1], reverse=True):
+                report.append(f"  └ {symbol}: {weight*100:.1f}%")
+            report.append("")
         
         # Sell Recommendations
         if analysis_result['sell_recommendations']:
@@ -376,7 +438,6 @@ class PortfolioAnalyzer:
                 report.append(f"• {opp['symbol']}: {opp['current_price']:,.0f} VNĐ")
                 report.append(f"  └ {signal.confidence}% - {signal.strength.name} - {opp['position_info'].shares:,} CP")
             report.append("")
-        
         return "\n".join(report)
 
 # Utility function để tích hợp nhanh
