@@ -192,13 +192,54 @@ class EnsembleTrainer:
                 except Exception as e:
                     logger.warning(f"LSTM training failed in fold {fold_idx}: {e}")
 
-            # Normalize weights
-            total_weight = sum(weights)
-            weights = [w / total_weight for w in weights]
-            
-            # Ensemble prediction
-            ensemble_pred = sum(pred * w for pred, w in zip(predictions, weights))
-            ensemble_cls = (ensemble_pred >= 0.5).astype(int)
+            # ===== STACKING ENSEMBLE (nếu có) =====
+            use_stacking = True  # Có thể config
+            if use_stacking:
+                try:
+                    from ml_pipeline.stacking_ensemble import StackingEnsemble
+                    
+                    # Tạo base models list
+                    base_models = [rf_model, gb_model]
+                    if xgb_model:
+                        base_models.append(xgb_model)
+                    if lstm_pred is not None:
+                        # Tạo wrapper cho LSTM predictions
+                        class LSTMWrapper:
+                            def __init__(self, pred):
+                                self.pred = pred
+                            def predict_proba(self, X):
+                                # Return predictions as probabilities
+                                return np.column_stack([1 - self.pred, self.pred])
+                            def predict(self, X):
+                                return (self.pred >= 0.5).astype(int)
+                        
+                        lstm_wrapper = LSTMWrapper(lstm_pred)
+                        base_models.append(lstm_wrapper)
+                    
+                    # Train stacking ensemble
+                    stacking = StackingEnsemble(
+                        base_models=base_models,
+                        meta_model_type="lightgbm"  # hoặc "logistic"
+                    )
+                    stacking.fit(X_train_scaled, y_train, X_val_scaled, y_val)
+                    
+                    # Predict với stacking
+                    ensemble_pred, ensemble_cls = stacking.predict(X_val_scaled)
+                    
+                    logger.info(f"Using stacking ensemble with {len(base_models)} base models")
+                except Exception as e:
+                    logger.warning(f"Stacking failed, falling back to weighted average: {e}")
+                    # Fallback to weighted average
+                    total_weight = sum(weights)
+                    weights = [w / total_weight for w in weights]
+                    ensemble_pred = sum(pred * w for pred, w in zip(predictions, weights))
+                    ensemble_cls = (ensemble_pred >= 0.5).astype(int)
+            else:
+                # Weighted average (original method)
+                total_weight = sum(weights)
+                weights = [w / total_weight for w in weights]
+                ensemble_pred = sum(pred * w for pred, w in zip(predictions, weights))
+                ensemble_cls = (ensemble_pred >= 0.5).astype(int)
 
             fold_metrics = {
                 "accuracy": accuracy_score(y_val, ensemble_cls),
