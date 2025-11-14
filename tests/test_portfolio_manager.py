@@ -14,20 +14,13 @@ class TestPortfolioManager:
     """Test PortfolioManager class"""
 
     @pytest.fixture(autouse=True)
-    def setup(self, monkeypatch):
+    def setup(self):
         """Setup test database"""
         from database import TradingDB
-        import database
-        import portfolio_manager
 
         # Create fresh in-memory database for each test
-        # :memory: database is always fresh, no need to delete data
         self.db = TradingDB(':memory:')
         self.db.create_tables()
-
-        # Use monkeypatch to replace get_db in both modules
-        monkeypatch.setattr(database, 'get_db', lambda: self.db)
-        monkeypatch.setattr(portfolio_manager, 'get_db', lambda: self.db)
 
         yield
 
@@ -36,6 +29,8 @@ class TestPortfolioManager:
         from portfolio_manager import PortfolioManager
 
         manager = PortfolioManager()
+        # Directly replace manager's db with test db
+        manager.db = self.db
 
         # Should not raise exception
         manager.add_position(
@@ -58,6 +53,7 @@ class TestPortfolioManager:
         from exceptions import PortfolioError
 
         manager = PortfolioManager()
+        manager.db = self.db
 
         # Empty symbol
         with pytest.raises(PortfolioError) as exc_info:
@@ -80,6 +76,7 @@ class TestPortfolioManager:
         from exceptions import PortfolioError
 
         manager = PortfolioManager()
+        manager.db = self.db
 
         # Zero shares
         with pytest.raises(PortfolioError) as exc_info:
@@ -102,6 +99,7 @@ class TestPortfolioManager:
         from exceptions import PortfolioError
 
         manager = PortfolioManager()
+        manager.db = self.db
 
         # Zero price
         with pytest.raises(PortfolioError) as exc_info:
@@ -119,6 +117,7 @@ class TestPortfolioManager:
         from exceptions import PortfolioError
 
         manager = PortfolioManager()
+        manager.db = self.db
 
         # Stop loss >= entry price
         with pytest.raises(PortfolioError) as exc_info:
@@ -136,6 +135,7 @@ class TestPortfolioManager:
         from exceptions import PortfolioError
 
         manager = PortfolioManager()
+        manager.db = self.db
 
         # Take profit <= entry price
         with pytest.raises(PortfolioError) as exc_info:
@@ -152,6 +152,7 @@ class TestPortfolioManager:
         from portfolio_manager import PortfolioManager
 
         manager = PortfolioManager()
+        manager.db = self.db
 
         # Add positions
         manager.add_position('VCB', 100, 60000)
