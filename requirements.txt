@@ -28,3 +28,7 @@ hmmlearn==0.3.0       # Optional: Hidden Markov Model for market regime
 datasets==2.16.1      # Optional: for fine-tuning PhoBERT
 scipy==1.11.4         # Optional: HRP optimizer distance metrics
 yfinance==0.2.36      # Market data from Yahoo Finance
+
+# Development & Testing
+pytest==7.4.3          # Unit testing framework
+pytest-cov==4.1.0      # Test coverage reporting
