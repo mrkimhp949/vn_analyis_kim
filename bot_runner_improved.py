@@ -81,19 +81,39 @@ except ImportError as e:
     print(f"❌ Lỗi import improved_entry_logic: {e}")
     entry_logic = None
 
+# Try enhanced position sizing first, fallback to conservative
 try:
-    from improved_position_sizing import ConservativePositionSizer
-    position_sizer = ConservativePositionSizer(
+    from position_sizing_enhanced import EnhancedPositionSizer
+    from trading_config import get_config
+    config = get_config(validate=False)  # Don't validate on import
+    
+    position_sizer = EnhancedPositionSizer(
         total_capital=100_000_000,
-        max_risk_per_trade=0.02,
-        max_position_size=0.10,
+        max_risk_per_trade=config.trading.max_position_size * 0.02 / 0.15,  # Scale to match
+        max_position_size=config.trading.max_position_size,
+        min_position_size=config.trading.min_position_size,
         max_total_exposure=0.60,
-        min_positions=8
+        max_portfolio_risk=config.trading.max_portfolio_risk,
+        max_sector_exposure=config.trading.max_sector_exposure,
+        use_kelly=True,
+        kelly_fraction=0.5  # Half-Kelly for safety
     )
-    print("✅ Import improved_position_sizing thành công")
+    print("✅ Import enhanced_position_sizing thành công (với Kelly Criterion)")
 except ImportError as e:
-    print(f"❌ Lỗi import improved_position_sizing: {e}")
-    position_sizer = None
+    print(f"⚠️ Enhanced position sizing không khả dụng: {e}, dùng conservative...")
+    try:
+        from improved_position_sizing import ConservativePositionSizer
+        position_sizer = ConservativePositionSizer(
+            total_capital=100_000_000,
+            max_risk_per_trade=0.02,
+            max_position_size=0.10,
+            max_total_exposure=0.60,
+            min_positions=8
+        )
+        print("✅ Import improved_position_sizing thành công (fallback)")
+    except ImportError as e2:
+        print(f"❌ Lỗi import position sizing: {e2}")
+        position_sizer = None
 
 try:
     from improved_exit_logic import ImprovedExitStrategy
@@ -128,14 +148,16 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 # Database & Monitoring
 try:
     from portfolio_manager import get_portfolio_manager
-    from monitoring import get_system_monitor, monitor_api_call
+    from monitoring import get_system_monitor, get_performance_monitor, monitor_api_call
     portfolio_manager = get_portfolio_manager()
     system_monitor = get_system_monitor()
+    performance_monitor = get_performance_monitor()
     print("✅ Database & monitoring initialized")
 except ImportError as e:
     print(f"⚠️ Database/monitoring not available: {e}")
     portfolio_manager = None
     system_monitor = None
+    performance_monitor = None
 
 # Scan & risk configs
 MAX_SCAN_UNIVERSE = int(os.getenv('MAX_SCAN_UNIVERSE', '40'))
@@ -526,6 +548,13 @@ async def run_bot_with_context(bot_instance, chat_id):
                 print(f"❌ Lỗi tải dữ liệu {symbol}: {error_msg}")
                 continue
         except Exception as e:
+            # Handle custom exceptions
+            from exceptions import DataLoadError, DataQualityError
+            if isinstance(e, (DataLoadError, DataQualityError)):
+                print(f"⚠️ {symbol}: {e.message}")
+                if e.context:
+                    print(f"   Context: {e.context}")
+                continue
             print(f"❌ Lỗi không xác định khi xử lý {symbol}: {e}")
             continue
         
@@ -608,16 +637,79 @@ async def run_bot_with_context(bot_instance, chat_id):
             # Skip nếu không có position sizer
             if not position_sizer:
                 continue
-                
-            # ===== IMPROVED POSITION SIZING =====
-            position = position_sizer.calculate_position_size(
-                symbol=symbol,
-                entry_price=price,
-                stop_loss=entry_signal.stop_loss,
-                confidence=entry_signal.confidence,
-                signal_strength=entry_signal.strength.name,
-                market_regime=market_regime
-            )
+            
+            # ===== GET METRICS FOR ENHANCED POSITION SIZING =====
+            win_rate = None
+            avg_win_loss_ratio = None
+            portfolio_risk = None
+            sector = None  # TODO: Get sector from ticker info
+            
+            # Get performance metrics for Kelly Criterion
+            if performance_monitor:
+                try:
+                    metrics = performance_monitor.get_metrics()
+                    if metrics['total_trades'] > 10:  # Need enough trades for reliable metrics
+                        win_rate = metrics['win_rate'] / 100.0  # Convert to 0-1
+                        if metrics['avg_loss'] != 0:
+                            avg_win_loss_ratio = abs(metrics['avg_profit'] / metrics['avg_loss'])
+                except Exception as e:
+                    log_error(f"Lỗi get metrics: {e}")
+            
+            # Calculate portfolio risk
+            if portfolio_manager:
+                try:
+                    portfolio_value = portfolio_manager.get_portfolio_value()
+                    total_risk = sum(
+                        pos.get('stop_loss', 0) and 
+                        (pos['shares'] * abs(pos['avg_price'] - pos.get('stop_loss', pos['avg_price'])))
+                        for pos in active_positions.values()
+                    )
+                    portfolio_risk = total_risk / position_sizer.total_capital if position_sizer.total_capital > 0 else 0
+                except Exception as e:
+                    log_error(f"Lỗi calculate portfolio risk: {e}")
+            
+            # ===== ENHANCED POSITION SIZING (with Kelly Criterion) =====
+            try:
+                # Check if using enhanced position sizer
+                from position_sizing_enhanced import EnhancedPositionSizer
+                if isinstance(position_sizer, EnhancedPositionSizer):
+                    # Use enhanced position sizing with Kelly
+                    take_profit = entry_signal.take_profit_targets[1] if len(entry_signal.take_profit_targets) > 1 else entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else price * 1.1
+                    
+                    position = position_sizer.calculate_position_size(
+                        symbol=symbol,
+                        entry_price=price,
+                        stop_loss=entry_signal.stop_loss,
+                        take_profit=take_profit,
+                        confidence=entry_signal.confidence,
+                        signal_strength=entry_signal.strength.name,
+                        market_regime=market_regime,
+                        sector=sector,
+                        portfolio_risk=portfolio_risk,
+                        win_rate=win_rate,
+                        avg_win_loss_ratio=avg_win_loss_ratio
+                    )
+                else:
+                    # Fallback to conservative position sizing
+                    position = position_sizer.calculate_position_size(
+                        symbol=symbol,
+                        entry_price=price,
+                        stop_loss=entry_signal.stop_loss,
+                        confidence=entry_signal.confidence,
+                        signal_strength=entry_signal.strength.name,
+                        market_regime=market_regime
+                    )
+            except Exception as e:
+                log_error(f"Lỗi calculate position size: {e}")
+                # Fallback to simple calculation
+                position = position_sizer.calculate_position_size(
+                    symbol=symbol,
+                    entry_price=price,
+                    stop_loss=entry_signal.stop_loss,
+                    confidence=entry_signal.confidence,
+                    signal_strength=entry_signal.strength.name,
+                    market_regime=market_regime
+                )
             
             if position.shares == 0:
                 continue

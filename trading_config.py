@@ -5,6 +5,7 @@ All trading parameters in one place
 import os
 from dataclasses import dataclass
 from typing import Optional
+from exceptions import ConfigurationError
 
 
 @dataclass
@@ -23,6 +24,19 @@ class DataConfig:
             use_csv_tickers=os.getenv('USE_CSV_TICKERS', 'true').lower() == 'true',
             cache_enabled=os.getenv('CACHE_ENABLED', 'true').lower() == 'true'
         )
+    
+    def validate(self):
+        """Validate data configuration"""
+        if self.lookback < 50:
+            raise ConfigurationError(
+                f"lookback must be >= 50, got {self.lookback}",
+                context={'config': 'data', 'field': 'lookback', 'value': self.lookback}
+            )
+        if self.min_volume < 0:
+            raise ConfigurationError(
+                f"min_volume must be >= 0, got {self.min_volume}",
+                context={'config': 'data', 'field': 'min_volume', 'value': self.min_volume}
+            )
 
 
 @dataclass
@@ -60,6 +74,50 @@ class TradingConfig:
             max_portfolio_risk=float(os.getenv('MAX_PORTFOLIO_RISK', 0.20)),
             max_sector_exposure=float(os.getenv('MAX_SECTOR_EXPOSURE', 0.40))
         )
+    
+    def validate(self):
+        """Validate trading configuration"""
+        if not (0 <= self.min_confidence <= 100):
+            raise ConfigurationError(
+                f"min_confidence must be between 0 and 100, got {self.min_confidence}",
+                context={'config': 'trading', 'field': 'min_confidence', 'value': self.min_confidence}
+            )
+        
+        if self.min_risk_reward < 1.0:
+            raise ConfigurationError(
+                f"min_risk_reward must be >= 1.0, got {self.min_risk_reward}",
+                context={'config': 'trading', 'field': 'min_risk_reward', 'value': self.min_risk_reward}
+            )
+        
+        if not (0 < self.max_position_size <= 1.0):
+            raise ConfigurationError(
+                f"max_position_size must be between 0 and 1.0, got {self.max_position_size}",
+                context={'config': 'trading', 'field': 'max_position_size', 'value': self.max_position_size}
+            )
+        
+        if not (0 < self.min_position_size < self.max_position_size):
+            raise ConfigurationError(
+                f"min_position_size ({self.min_position_size}) must be < max_position_size ({self.max_position_size})",
+                context={'config': 'trading', 'min': self.min_position_size, 'max': self.max_position_size}
+            )
+        
+        if self.max_positions < 1:
+            raise ConfigurationError(
+                f"max_positions must be >= 1, got {self.max_positions}",
+                context={'config': 'trading', 'field': 'max_positions', 'value': self.max_positions}
+            )
+        
+        if not (0 < self.max_portfolio_risk <= 1.0):
+            raise ConfigurationError(
+                f"max_portfolio_risk must be between 0 and 1.0, got {self.max_portfolio_risk}",
+                context={'config': 'trading', 'field': 'max_portfolio_risk', 'value': self.max_portfolio_risk}
+            )
+        
+        if not (0 < self.max_sector_exposure <= 1.0):
+            raise ConfigurationError(
+                f"max_sector_exposure must be between 0 and 1.0, got {self.max_sector_exposure}",
+                context={'config': 'trading', 'field': 'max_sector_exposure', 'value': self.max_sector_exposure}
+            )
 
 
 @dataclass
@@ -155,6 +213,18 @@ class Config:
         """Validate all configurations"""
         errors = []
         
+        # Validate data config
+        try:
+            self.data.validate()
+        except ConfigurationError as e:
+            errors.append(str(e))
+        
+        # Validate trading config
+        try:
+            self.trading.validate()
+        except ConfigurationError as e:
+            errors.append(str(e))
+        
         # Validate telegram if enabled
         if self.telegram.enabled:
             try:
@@ -162,15 +232,22 @@ class Config:
             except ValueError as e:
                 errors.append(f"Telegram: {e}")
         
-        # Validate trading params
-        if self.trading.min_confidence < 0 or self.trading.min_confidence > 100:
-            errors.append("min_confidence must be between 0 and 100")
+        # Validate API config
+        if self.api.tcbs_rate_limit < 1:
+            errors.append(f"tcbs_rate_limit must be >= 1, got {self.api.tcbs_rate_limit}")
         
-        if self.trading.max_position_size > 1.0:
-            errors.append("max_position_size must be <= 1.0")
+        if self.api.request_timeout < 1:
+            errors.append(f"request_timeout must be >= 1, got {self.api.request_timeout}")
+        
+        # Validate server config
+        if not (1024 <= self.server.port <= 65535):
+            errors.append(f"port must be between 1024 and 65535, got {self.server.port}")
         
         if errors:
-            raise ValueError(f"Configuration errors: {', '.join(errors)}")
+            raise ConfigurationError(
+                f"Configuration validation failed: {len(errors)} error(s)",
+                context={'errors': errors}
+            )
     
     def summary(self) -> str:
         """Get configuration summary"""
@@ -181,7 +258,8 @@ class Config:
         lines.append("\n📊 Data:")
         lines.append(f"  Lookback: {self.data.lookback}")
         lines.append(f"  Min Volume: {self.data.min_volume:,}")
-        lines.append(f"  Dynamic Tickers: {self.data.use_dynamic_tickers}")
+        lines.append(f"  Use CSV Tickers: {self.data.use_csv_tickers}")
+        lines.append(f"  Cache Enabled: {self.data.cache_enabled}")
         
         lines.append("\n💹 Trading:")
         lines.append(f"  Min Confidence: {self.trading.min_confidence}%")
@@ -209,11 +287,24 @@ class Config:
 # Singleton instance
 _config = None
 
-def get_config() -> Config:
-    """Get configuration singleton"""
+def get_config(validate: bool = True) -> Config:
+    """
+    Get configuration singleton
+    
+    Args:
+        validate: Whether to validate config on load (default: True)
+    
+    Returns:
+        Config instance
+        
+    Raises:
+        ConfigurationError: If validation fails
+    """
     global _config
     if _config is None:
         _config = Config.load()
+        if validate:
+            _config.validate()
     return _config
 
 

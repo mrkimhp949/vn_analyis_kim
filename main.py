@@ -226,6 +226,20 @@ async def lifespan(app: FastAPI):
     print("🚀 Khởi động Trading Bot...")
     print(f"🐍 Python version")
     print(f"⏰ Timezone: {tz}")
+    
+    # Validate configuration on startup
+    try:
+        from trading_config import get_config
+        from exceptions import ConfigurationError
+        config = get_config(validate=True)
+        print("✅ Configuration validated successfully")
+        print(config.summary())
+    except ConfigurationError as e:
+        print(f"❌ Configuration error: {e}")
+        print("⚠️ Bot will continue but some features may not work correctly")
+    except Exception as e:
+        print(f"⚠️ Error loading configuration: {e}")
+    
     print(f"🔧 Starting background services...")
     
     # Khởi động scheduler trong thread riêng

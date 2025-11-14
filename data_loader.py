@@ -12,6 +12,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional
 from rate_limiter import tcbs_limiter
+from exceptions import DataLoadError, DataQualityError
+from data_quality import get_quality_checker
 
 DATA_CACHE_DIR = 'data_cache'
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
@@ -56,19 +58,43 @@ def load_data(symbol, lookback=200, use_cache=True):
     end_dt = datetime.now()
     start_dt = end_dt - timedelta(days=lookback * 2)  # Buffer
     
-    df = _download_from_tcbs(symbol, start_dt, end_dt)
+    try:
+        df = _download_from_tcbs(symbol, start_dt, end_dt)
+    except Exception as e:
+        raise DataLoadError(
+            f"Failed to download data for {symbol}",
+            context={'symbol': symbol, 'lookback': lookback, 'error': str(e)}
+        ) from e
     
-    # Validate
+    # Validate basic requirements
     if df.empty or len(df) < min(50, lookback * 0.3):
-        raise ValueError(
-            f"Dữ liệu không đủ cho {symbol}: có {len(df)} nến, "
-            f"cần ít nhất {min(50, lookback * 0.3)}"
+        raise DataLoadError(
+            f"Insufficient data for {symbol}: got {len(df)} bars, need at least {min(50, lookback * 0.3)}",
+            context={'symbol': symbol, 'got': len(df), 'required': min(50, lookback * 0.3)}
         )
     
     # Sort và limit
     df = df.sort_values('time')
     df = df.tail(lookback)
     df = df.reset_index(drop=True)
+    
+    # Data quality check
+    try:
+        quality_checker = get_quality_checker()
+        quality_results = quality_checker.validate(df, symbol)
+        
+        if not quality_results['valid']:
+            # Log issues but don't fail - clean data instead
+            if quality_results['issues']:
+                logger.warning(f"Data quality issues for {symbol}: {quality_results['issues']}")
+                # Auto-clean data
+                df = quality_checker.clean_data(df, method='forward_fill')
+            
+            if quality_results['warnings']:
+                logger.info(f"Data quality warnings for {symbol}: {quality_results['warnings']}")
+    except Exception as e:
+        logger.warning(f"Data quality check failed for {symbol}: {e}")
+        # Continue anyway - don't fail on quality check errors
     
     print(f"✅ Tải thành công {len(df)} nến cho {symbol}")
     
@@ -103,17 +129,26 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
         response = requests.get(url, params=params, timeout=10)
         
         if response.status_code != 200:
-            raise ValueError(f"TCBS API trả về status {response.status_code}")
+            raise DataLoadError(
+                f"TCBS API returned status {response.status_code} for {symbol}",
+                context={'symbol': symbol, 'status_code': response.status_code}
+            )
         
         data = response.json()
         
         if not isinstance(data, dict) or 'data' not in data:
-            raise ValueError(f"TCBS API trả về format không đúng")
+            raise DataLoadError(
+                f"TCBS API returned invalid format for {symbol}",
+                context={'symbol': symbol, 'response_keys': list(data.keys()) if isinstance(data, dict) else None}
+            )
         
         bars = data['data']
         
         if not bars:
-            raise ValueError(f"TCBS không có dữ liệu cho {symbol}")
+            raise DataLoadError(
+                f"No data available for {symbol} from TCBS",
+                context={'symbol': symbol}
+            )
         
         # Convert to DataFrame
         df = pd.DataFrame(bars)
@@ -142,11 +177,20 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
         return df
         
     except requests.exceptions.Timeout:
-        raise ValueError(f"Timeout khi tải dữ liệu {symbol} từ TCBS")
+        raise DataLoadError(
+            f"Timeout loading data for {symbol} from TCBS",
+            context={'symbol': symbol, 'error_type': 'timeout'}
+        )
     except requests.exceptions.RequestException as e:
-        raise ValueError(f"Lỗi kết nối TCBS API: {str(e)}")
+        raise DataLoadError(
+            f"TCBS API connection error for {symbol}",
+            context={'symbol': symbol, 'error_type': 'connection', 'error': str(e)}
+        )
     except Exception as e:
-        raise ValueError(f"Lỗi tải dữ liệu {symbol}: {str(e)}")
+        raise DataLoadError(
+            f"Error loading data for {symbol}",
+            context={'symbol': symbol, 'error_type': 'unknown', 'error': str(e)}
+        ) from e
 
 
 # Test function
