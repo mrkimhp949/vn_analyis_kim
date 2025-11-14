@@ -12,7 +12,7 @@ import logging
 from backtesting.engine import BacktestEngine, BacktestConfig, BacktestResult
 from improved_entry_logic import ImprovedEntryLogic
 from improved_exit_logic import ImprovedExitStrategy
-from data_loader import load_stock_data
+from data_loader import load_data
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +58,18 @@ class StrategyRunner:
         data_cache = {}
         for symbol in symbols:
             try:
-                df = load_stock_data(
+                # Calculate lookback bars (estimate ~250 trading days per year)
+                days_diff = (end_date - start_date).days
+                lookback = int(days_diff * 1.5)  # Add 50% buffer for indicators
+
+                df = load_data(
                     symbol=symbol,
-                    start_date=start_date - timedelta(days=365),  # Extra data for indicators
-                    end_date=end_date
+                    lookback=lookback,
+                    use_cache=True
                 )
                 if df is not None and len(df) > 0:
+                    # Filter to date range
+                    df = df[df['time'] <= end_date].copy()
                     data_cache[symbol] = df
                     logger.info(f"Loaded {len(df)} bars for {symbol}")
                 else:
