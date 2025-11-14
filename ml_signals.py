@@ -2,10 +2,20 @@ from features import add_ml_features, get_feature_columns
 from ml_models import MLPredictor
 import numpy as np
 
+# ML Model Monitor
+try:
+    from ml_model_monitor import get_ml_model_monitor
+    ml_monitor = get_ml_model_monitor()
+    use_monitoring = True
+except ImportError:
+    ml_monitor = None
+    use_monitoring = False
+
 class MLSignalGenerator:
     def __init__(self):
         self.predictor = MLPredictor()
         self.predictor.load_models()
+        self.model_version = "default"  # Can be updated when models are retrained
         
     def analyze(self, df):
         """Phân tích và tạo tín hiệu từ ML + Technical Analysis"""
@@ -40,9 +50,25 @@ class MLSignalGenerator:
                 # Ensemble Decision
                 signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
                 
+                # Calibrate confidence nếu có monitoring
+                calibrated_confidence = confidence
+                if use_monitoring and ml_monitor:
+                    try:
+                        calibrated_confidence = ml_monitor.calibrate_confidence(
+                            confidence,
+                            model_version=self.model_version
+                        )
+                        if abs(calibrated_confidence - confidence) > 5:  # Significant difference
+                            reason += f" | Calibrated: {calibrated_confidence:.0f}%"
+                    except Exception as e:
+                        print(f"⚠️ Lỗi calibrate confidence: {e}")
+                
+                # Note: Prediction recording will be done in bot_runner with symbol context
+                
                 return {
                     'signal': signal,
-                    'confidence': confidence,
+                    'confidence': int(calibrated_confidence),
+                    'raw_confidence': confidence,
                     'ml_score': ml_score,
                     'technical_score': tech_score,
                     'reason': reason + f" | ML: {len(available_features)}/{len(feature_cols)} features",

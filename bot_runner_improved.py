@@ -115,13 +115,24 @@ except ImportError as e:
         print(f"❌ Lỗi import position sizing: {e2}")
         position_sizer = None
 
+# Try enhanced exit strategy first, fallback to improved
 try:
-    from improved_exit_logic import ImprovedExitStrategy
-    exit_strategy = ImprovedExitStrategy()
-    print("✅ Import improved_exit_logic thành công")
+    from exit_strategy_enhanced import EnhancedExitStrategy
+    exit_strategy = EnhancedExitStrategy(
+        use_dynamic_trailing=True,
+        use_breakeven_stop=True,
+        breakeven_activation=0.10  # 10% profit activates breakeven
+    )
+    print("✅ Import enhanced_exit_strategy thành công (với dynamic trailing & breakeven)")
 except ImportError as e:
-    print(f"❌ Lỗi import improved_exit_logic: {e}")
-    exit_strategy = None
+    print(f"⚠️ Enhanced exit strategy không khả dụng: {e}, dùng improved...")
+    try:
+        from improved_exit_logic import ImprovedExitStrategy
+        exit_strategy = ImprovedExitStrategy()
+        print("✅ Import improved_exit_logic thành công (fallback)")
+    except ImportError as e2:
+        print(f"❌ Lỗi import exit strategy: {e2}")
+        exit_strategy = None
 
 try:
     from news_analyzer import analyze_news_trend, get_top_news
@@ -158,6 +169,15 @@ except ImportError as e:
     portfolio_manager = None
     system_monitor = None
     performance_monitor = None
+
+# Portfolio Risk Manager
+try:
+    from portfolio_risk_manager import get_portfolio_risk_manager
+    portfolio_risk_manager = get_portfolio_risk_manager(total_capital=100_000_000)
+    print("✅ Portfolio risk manager initialized")
+except ImportError as e:
+    print(f"⚠️ Portfolio risk manager not available: {e}")
+    portfolio_risk_manager = None
 
 # Scan & risk configs
 MAX_SCAN_UNIVERSE = int(os.getenv('MAX_SCAN_UNIVERSE', '40'))
@@ -563,6 +583,20 @@ async def run_bot_with_context(bot_instance, chat_id):
             # Get ML signal
             ml_signal = ml_generator.analyze(df)
             
+            # Record prediction for monitoring
+            try:
+                from ml_model_monitor import get_ml_model_monitor
+                ml_monitor = get_ml_model_monitor()
+                if ml_monitor:
+                    ml_monitor.record_prediction(
+                        symbol=symbol,
+                        predicted_signal=ml_signal.get('signal', 'HOLD'),
+                        predicted_confidence=ml_signal.get('raw_confidence', ml_signal.get('confidence', 0)),
+                        model_version='default'
+                    )
+            except Exception:
+                pass  # Silent fail - monitoring is optional
+            
             # Skip nếu không có entry logic
             if not entry_logic:
                 continue
@@ -714,9 +748,38 @@ async def run_bot_with_context(bot_instance, chat_id):
             if position.shares == 0:
                 continue
             
+            # ===== PORTFOLIO RISK CHECK (Enhanced) =====
+            position_value = position.shares * price
+            position_risk = position.max_loss
+            
+            # Check với Portfolio Risk Manager
+            if portfolio_risk_manager:
+                try:
+                    # Prepare positions dict for risk manager
+                    risk_positions = {}
+                    for sym, pos in active_positions.items():
+                        risk_positions[sym] = {
+                            'shares': pos.get('shares', 0),
+                            'avg_price': pos.get('entry_price', pos.get('avg_price', 0)),
+                            'current_price': pos.get('current_price', pos.get('entry_price', 0)),
+                            'stop_loss': pos.get('stop_loss', pos.get('entry_price', 0) * 0.93)
+                        }
+                    
+                    can_add_risk, risk_reason = portfolio_risk_manager.can_add_position(
+                        symbol=symbol,
+                        position_value=position_value,
+                        position_risk=position_risk,
+                        positions=risk_positions
+                    )
+                    
+                    if not can_add_risk:
+                        print(f"🚫 {symbol}: Portfolio risk check failed - {risk_reason}")
+                        continue
+                except Exception as e:
+                    log_error(f"Lỗi portfolio risk check: {e}")
+            
             # ===== PORTFOLIO LOCK CHECK =====
             if portfolio_lock:
-                position_value = position.shares * price
                 can_add, lock_reason = portfolio_lock.can_add_position(
                     symbol=symbol,
                     position_value=position_value,
@@ -788,7 +851,30 @@ async def run_bot_with_context(bot_instance, chat_id):
         except Exception as e:
             log_error(f"Lỗi quét {symbol}: {e}")
     
-    # ===== CHECK 5: PORTFOLIO ANALYSIS =====
+    # ===== CHECK 5: PORTFOLIO RISK ANALYSIS =====
+    if portfolio_risk_manager and active_positions:
+        try:
+            # Prepare positions for risk manager
+            risk_positions = {}
+            for sym, pos in active_positions.items():
+                risk_positions[sym] = {
+                    'shares': pos.get('shares', 0),
+                    'avg_price': pos.get('entry_price', pos.get('avg_price', 0)),
+                    'current_price': pos.get('current_price', pos.get('entry_price', 0)),
+                    'stop_loss': pos.get('stop_loss', pos.get('entry_price', 0) * 0.93)
+                }
+            
+            # Calculate risk metrics
+            risk_metrics = portfolio_risk_manager.calculate_portfolio_risk(risk_positions)
+            
+            # Send risk summary nếu có issues
+            if risk_metrics.risk_status in ['HIGH', 'CRITICAL']:
+                risk_summary = portfolio_risk_manager.get_risk_summary(risk_positions)
+                await bot_instance.send_message(chat_id, f"⚠️ *PORTFOLIO RISK ALERT*\n\n{risk_summary}", parse_mode='Markdown')
+        except Exception as e:
+            log_error(f"Lỗi portfolio risk analysis: {e}")
+    
+    # ===== CHECK 6: PORTFOLIO ANALYSIS =====
     print("\n📊 Kiểm tra portfolio...")
     await check_portfolio_and_recommend(bot_instance, chat_id)
     # Summary
@@ -829,7 +915,7 @@ async def run_bot_with_context(bot_instance, chat_id):
 
 
 async def check_active_positions(bot_instance, chat_id, market_regime):
-    """Check các positions đang active với error handling"""
+    """Check các positions đang active với enhanced exit strategy và error handling"""
     if not bot_instance or not exit_strategy:
         return
         
@@ -839,6 +925,22 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
         return
     
     print(f"\n📊 Kiểm tra {len(positions)} positions đang active...")
+    
+    # Check circuit breaker before checking positions
+    if portfolio_risk_manager:
+        try:
+            portfolio_value = sum(
+                pos.get('shares', 0) * pos.get('current_price', pos.get('entry_price', 0))
+                for pos in positions.values()
+            )
+            should_trigger, cb_reason = portfolio_risk_manager.check_circuit_breaker(portfolio_value)
+            if should_trigger:
+                msg = f"🚨 *CIRCUIT BREAKER TRIGGERED*\n\n{cb_reason}\n\nKhông thể trade thêm cho đến khi review."
+                await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
+                print(f"🚨 {cb_reason}")
+                return  # Stop checking positions
+        except Exception as e:
+            log_error(f"Lỗi check circuit breaker: {e}")
     
     for symbol, pos_data in list(positions.items()):
         try:
@@ -854,6 +956,10 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
                 print(f"❌ Lỗi tải dữ liệu {symbol}: {error_msg}")
                 continue
         except Exception as e:
+            from exceptions import DataLoadError, DataQualityError
+            if isinstance(e, (DataLoadError, DataQualityError)):
+                print(f"⚠️ {symbol}: {e.message}")
+                continue
             print(f"❌ Lỗi không xác định khi xử lý {symbol}: {e}")
             continue
         
@@ -865,7 +971,21 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
             # Get ML signal
             ml_signal = ml_generator.analyze(df)
             
-            # Check exit
+            # Record prediction for monitoring (for exit signals)
+            try:
+                from ml_model_monitor import get_ml_model_monitor
+                ml_monitor = get_ml_model_monitor()
+                if ml_monitor and ml_signal.get('signal') == 'SELL':
+                    ml_monitor.record_prediction(
+                        symbol=symbol,
+                        predicted_signal='SELL',
+                        predicted_confidence=ml_signal.get('raw_confidence', ml_signal.get('confidence', 0)),
+                        model_version='default'
+                    )
+            except Exception:
+                pass  # Silent fail - monitoring is optional
+            
+            # Check exit với enhanced exit strategy
             exit_decision = exit_strategy.check_exit(
                 symbol=symbol,
                 entry_price=pos_data['entry_price'],
@@ -883,6 +1003,34 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
                 msg = exit_strategy.format_exit_message(symbol, exit_decision)
                 await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
                 
+                # Handle partial exits với enhanced tracking
+                if exit_decision.exit_type.startswith('PARTIAL'):
+                    # Extract percentage from exit_type (e.g., 'PARTIAL_50%' -> 50)
+                    try:
+                        exit_percent = int(exit_decision.exit_type.split('_')[1].replace('%', ''))
+                        shares = pos_data.get('shares', 0)
+                        shares_to_exit = int(shares * exit_percent / 100)
+                        remaining_shares = shares - shares_to_exit
+                        
+                        # Record partial exit nếu using enhanced exit strategy
+                        from exit_strategy_enhanced import EnhancedExitStrategy
+                        if isinstance(exit_strategy, EnhancedExitStrategy):
+                            exit_strategy.record_partial_exit(
+                                symbol=symbol,
+                                exit_price=current_price,
+                                shares_exited=shares_to_exit,
+                                remaining_shares=remaining_shares,
+                                entry_price=pos_data['entry_price'],
+                                exit_reason=exit_decision.exit_reason
+                            )
+                        
+                        # Update position
+                        pos_data['shares'] = remaining_shares
+                        pos_data.setdefault('partial_exits', []).append(current_price)
+                        print(f"🟡 Chốt lời {exit_percent}% {symbol}: {exit_decision.exit_reason.value}")
+                    except Exception as e:
+                        log_error(f"Lỗi handle partial exit: {e}")
+                
                 # Update position
                 if exit_decision.exit_type == 'FULL':
                     # Close in database
@@ -899,11 +1047,13 @@ async def check_active_positions(bot_instance, chat_id, market_regime):
                     if position_sizer:
                         position_sizer.close_position(symbol, current_price)
                     
+                    # Clear tracking nếu using enhanced exit strategy
+                    from exit_strategy_enhanced import EnhancedExitStrategy
+                    if isinstance(exit_strategy, EnhancedExitStrategy):
+                        exit_strategy.clear_position_tracking(symbol)
+                    
                     del positions[symbol]
                     print(f"🔴 Đã đóng {symbol}: {exit_decision.exit_reason.value}")
-                else:
-                    pos_data.setdefault('partial_exits', []).append(current_price)
-                    print(f"🟡 Chốt lời 1 phần {symbol}: {exit_decision.exit_type}")
                 
                 save_active_positions(positions)
             
