@@ -54,7 +54,7 @@ class TestImprovedEntryLogic:
         df['volume_ratio'] = 1.6 if volume_surge else 0.8
 
         # Fill NaN
-        df = df.fillna(method='bfill')
+        df = df.bfill()
 
         return df
 
@@ -163,7 +163,7 @@ class TestImprovedExitLogic:
         df['atr'] = df['close'].rolling(14).std() * 2
         df['rsi'] = 50
 
-        return df.fillna(method='bfill')
+        return df.bfill()
 
     def test_exit_on_stop_loss(self):
         """Test exit when stop loss is hit"""
