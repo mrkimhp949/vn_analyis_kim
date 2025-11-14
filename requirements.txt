@@ -28,3 +28,18 @@ hmmlearn==0.3.0       # Optional: Hidden Markov Model for market regime
 datasets==2.16.1      # Optional: for fine-tuning PhoBERT
 scipy==1.11.4         # Optional: HRP optimizer distance metrics
 yfinance==0.2.36      # Market data from Yahoo Finance
+prometheus-client==0.19.0  # Prometheus metrics export
+websockets==12.0       # WebSocket client for real-time price feeds
+
+# Development & Testing
+pytest==7.4.3          # Unit testing framework
+pytest-cov==4.1.0      # Test coverage reporting
+
+# Code Quality Tools (Development only)
+black==23.12.1         # Code formatter
+isort==5.13.2          # Import sorter
+flake8==7.0.0          # Linter
+mypy==1.8.0            # Type checker
+bandit==1.7.6          # Security scanner
+pre-commit==3.6.0      # Pre-commit hooks
+safety==3.0.1          # Dependency security checker (updated for packaging>=22.0 compatibility)

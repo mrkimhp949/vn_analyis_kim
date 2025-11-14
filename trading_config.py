@@ -45,34 +45,40 @@ class TradingConfig:
     # Entry logic
     min_confidence: int = 60
     min_risk_reward: float = 2.0
-    
+    support_distance_percent: float = 3.0  # Max distance to support (%)
+
     # Exit logic
     stop_loss_percent: float = -7.0
     take_profit_percent: float = 15.0
     trailing_stop_percent: float = 3.0
-    
+    trailing_activation_percent: float = 8.0  # Activate trailing stop after 8% gain
+
     # Position sizing
     max_position_size: float = 0.15  # 15% of portfolio
     min_position_size: float = 0.05  # 5% of portfolio
     max_positions: int = 10
-    
+
     # Risk management
     max_portfolio_risk: float = 0.20  # 20% max risk
     max_sector_exposure: float = 0.40  # 40% max per sector
+    max_loss_per_day_pct: float = 5.0  # Max loss per day (%) for circuit breaker
     
     @classmethod
     def from_env(cls):
         return cls(
             min_confidence=int(os.getenv('MIN_CONFIDENCE', 60)),
             min_risk_reward=float(os.getenv('MIN_RISK_REWARD', 2.0)),
+            support_distance_percent=float(os.getenv('SUPPORT_DISTANCE_PERCENT', 3.0)),
             stop_loss_percent=float(os.getenv('STOP_LOSS_PERCENT', -7.0)),
             take_profit_percent=float(os.getenv('TAKE_PROFIT_PERCENT', 15.0)),
             trailing_stop_percent=float(os.getenv('TRAILING_STOP_PERCENT', 3.0)),
+            trailing_activation_percent=float(os.getenv('TRAILING_ACTIVATION_PERCENT', 8.0)),
             max_position_size=float(os.getenv('MAX_POSITION_SIZE', 0.15)),
             min_position_size=float(os.getenv('MIN_POSITION_SIZE', 0.05)),
             max_positions=int(os.getenv('MAX_POSITIONS', 10)),
             max_portfolio_risk=float(os.getenv('MAX_PORTFOLIO_RISK', 0.20)),
-            max_sector_exposure=float(os.getenv('MAX_SECTOR_EXPOSURE', 0.40))
+            max_sector_exposure=float(os.getenv('MAX_SECTOR_EXPOSURE', 0.40)),
+            max_loss_per_day_pct=float(os.getenv('MAX_LOSS_PER_DAY_PCT', 5.0))
         )
     
     def validate(self):

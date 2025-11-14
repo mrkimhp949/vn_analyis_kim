@@ -32,7 +32,56 @@ class PortfolioManager:
                     stop_loss: Optional[float] = None,
                     take_profit: Optional[float] = None,
                     metadata: Optional[Dict] = None):
-        """Add new position"""
+        """Add new position with input validation"""
+        from exceptions import PortfolioError
+
+        # Validate inputs
+        if not symbol or not isinstance(symbol, str):
+            raise PortfolioError("Symbol must be a non-empty string", context={'symbol': symbol})
+
+        if not symbol.isalpha() or len(symbol) > 10:
+            raise PortfolioError(
+                "Invalid symbol format. Must be alphabetic and max 10 characters",
+                context={'symbol': symbol}
+            )
+
+        if not isinstance(shares, int) or shares <= 0:
+            raise PortfolioError(
+                "Shares must be a positive integer",
+                context={'shares': shares, 'type': type(shares).__name__}
+            )
+
+        if not isinstance(entry_price, (int, float)) or entry_price <= 0:
+            raise PortfolioError(
+                "Entry price must be a positive number",
+                context={'entry_price': entry_price, 'type': type(entry_price).__name__}
+            )
+
+        # Validate stop_loss and take_profit if provided
+        if stop_loss is not None:
+            if not isinstance(stop_loss, (int, float)) or stop_loss <= 0:
+                raise PortfolioError(
+                    "Stop loss must be a positive number",
+                    context={'stop_loss': stop_loss}
+                )
+            if stop_loss >= entry_price:
+                raise PortfolioError(
+                    "Stop loss must be below entry price for long positions",
+                    context={'stop_loss': stop_loss, 'entry_price': entry_price}
+                )
+
+        if take_profit is not None:
+            if not isinstance(take_profit, (int, float)) or take_profit <= 0:
+                raise PortfolioError(
+                    "Take profit must be a positive number",
+                    context={'take_profit': take_profit}
+                )
+            if take_profit <= entry_price:
+                raise PortfolioError(
+                    "Take profit must be above entry price for long positions",
+                    context={'take_profit': take_profit, 'entry_price': entry_price}
+                )
+
         entry_date = datetime.now().isoformat()
         entry_value = shares * entry_price
         

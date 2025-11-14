@@ -23,21 +23,61 @@ class TradingDB:
     
     def __init__(self, db_path='trading.db'):
         self.db_path = db_path
+        self._enable_wal_mode()
         self.create_tables()
-    
+
+    def _enable_wal_mode(self):
+        """Enable WAL mode for better concurrency"""
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute('PRAGMA synchronous=NORMAL')
+            conn.close()
+        except Exception as e:
+            import logging
+            logging.warning(f"Could not enable WAL mode: {e}")
+
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Return rows as dicts
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        """
+        Context manager for database connections
+
+        Improvements:
+        - Increased timeout to 10s to handle concurrent access
+        - WAL mode enabled for better concurrent reads
+        - Automatic retry on database locked errors
+        """
+        max_retries = 3
+        retry_delay = 0.1
+
+        for attempt in range(max_retries):
+            try:
+                # Increased timeout from default 5s to 10s
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn.row_factory = sqlite3.Row  # Return rows as dicts
+
+                try:
+                    yield conn
+                    conn.commit()
+                    break
+                except sqlite3.OperationalError as e:
+                    conn.rollback()
+                    if 'database is locked' in str(e) and attempt < max_retries - 1:
+                        import time
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    raise
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e) and attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                raise
     
     def create_tables(self):
         """Create all tables"""

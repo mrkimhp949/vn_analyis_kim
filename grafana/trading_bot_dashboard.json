@@ -1,0 +1,242 @@
+{
+  "dashboard": {
+    "title": "Trading Bot Performance Dashboard",
+    "tags": ["trading", "bot", "vietnam", "stocks"],
+    "timezone": "Asia/Ho_Chi_Minh",
+    "schemaVersion": 36,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Portfolio Value",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "portfolio_total_value",
+            "legendFormat": "Total Value",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "yaxes": [
+          {"format": "short", "label": "VND"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Portfolio P&L",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "portfolio_pnl_percent",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value",
+          "unit": "percent"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 0, "color": "yellow"},
+                {"value": 5, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active Positions",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "portfolio_positions",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+        "options": {
+          "graphMode": "none",
+          "colorMode": "background"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Signals Generated (24h)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(signals_generated_total[24h])",
+            "legendFormat": "{{signal_type}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Signal Confidence Distribution",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "rate(signal_confidence_bucket[1h])",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "Trades Executed",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(trades_executed_total[1h])",
+            "legendFormat": "{{action}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Paper Trading Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "paper_trading_pnl",
+            "legendFormat": "P&L",
+            "refId": "A"
+          },
+          {
+            "expr": "paper_trading_win_rate",
+            "legendFormat": "Win Rate %",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "ML Prediction Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(ml_prediction_seconds_bucket[5m]))",
+            "legendFormat": "p95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(ml_prediction_seconds_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "yaxes": [
+          {"format": "s", "label": "Seconds"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "API Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(api_requests_total[5m])",
+            "legendFormat": "{{endpoint}} ({{status}})",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      },
+      {
+        "id": 10,
+        "title": "Cache Hit Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 32},
+        "options": {
+          "graphMode": "area",
+          "unit": "percent"
+        }
+      },
+      {
+        "id": 11,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(errors_total[5m])",
+            "legendFormat": "{{component}} - {{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 18, "x": 6, "y": 32},
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [0.1], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]},
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "1m",
+          "name": "High Error Rate Alert"
+        }
+      },
+      {
+        "id": 12,
+        "title": "Risk Metrics",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "risk_sharpe_ratio",
+            "refId": "A",
+            "legendFormat": "Sharpe Ratio"
+          },
+          {
+            "expr": "risk_sortino_ratio",
+            "refId": "B",
+            "legendFormat": "Sortino Ratio"
+          },
+          {
+            "expr": "risk_max_drawdown",
+            "refId": "C",
+            "legendFormat": "Max Drawdown %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40}
+      },
+      {
+        "id": 13,
+        "title": "Sector Exposure",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "risk_sector_exposure",
+            "refId": "A",
+            "legendFormat": "{{sector}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40}
+      }
+    ]
+  }
+}

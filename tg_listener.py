@@ -422,8 +422,8 @@ async def generate_daily_summary() -> str:
         msg_parts.append(f"Trạng thái: {regime.get('regime', 'UNKNOWN')}\n")
         msg_parts.append(f"Confidence: {regime.get('confidence', 0):.0f}%\n")
         msg_parts.append(f"Tradeable: {'✅' if regime.get('tradeable', False) else '❌'}\n")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not fetch market regime for summary: {e}")
     
     # 3. Hot News
     if get_hot_news:
@@ -437,8 +437,8 @@ async def generate_daily_summary() -> str:
                     sentiment = news.get("sentiment", 0)
                     emoji = "📈" if sentiment > 0 else "📉" if sentiment < 0 else "➖"
                     msg_parts.append(f"{emoji} {symbol}: {title}...\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Could not fetch hot news for summary: {e}")
     
     # 4. Paper Trading
     try:
@@ -451,8 +451,8 @@ async def generate_daily_summary() -> str:
             msg_parts.append(f"Balance: {stats.get('balance', 0):,.0f} VNĐ\n")
             msg_parts.append(f"Total P&L: {stats.get('total_pnl', 0):+,.0f} VNĐ\n")
             msg_parts.append(f"Win Rate: {stats.get('win_rate', 0):.1f}%\n")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not fetch paper trading stats for summary: {e}")
     
     # Footer
     msg_parts.append(f"\n{'='*30}\n")
