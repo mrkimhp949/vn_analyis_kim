@@ -16,9 +16,8 @@ from telegram import Bot
 from config import LOOKBACK, MAX_SCAN_UNIVERSE, WATCHLIST_SIZE
 from data_loader import load_data
 from ml_signals import MLSignalGenerator
-from improved_entry_logic import ImprovedEntryLogic
-from position_sizing_enhanced import EnhancedPositionSizer
-from exit_strategy_enhanced import EnhancedExitStrategy
+from strategy_manager import get_strategy_manager
+from circuit_breaker import get_circuit_breaker
 from news_analyzer import analyze_news_trend
 from portfolio_manager import get_portfolio_manager
 from portfolio_lock import get_portfolio_lock
@@ -48,17 +47,23 @@ class TradingOrchestrator:
         self.ml_generator = MLSignalGenerator()
         self.paper_account = get_paper_account()
         self.ml_monitor = get_ml_model_monitor()
+        self.strategy_manager = get_strategy_manager()
+        self.circuit_breaker = get_circuit_breaker()
 
-        # Các thành phần có thể được thay thế bởi StrategyManager
-        self.entry_logic: Optional[ImprovedEntryLogic] = None
-        self.position_sizer: Optional[EnhancedPositionSizer] = None
-        self.exit_strategy: Optional[EnhancedExitStrategy] = None
+        # Các thành phần chiến lược sẽ được lấy từ StrategyManager
+        self.entry_logic: Optional[Any] = None
+        self.position_sizer: Optional[Any] = None
+        self.exit_strategy: Optional[Any] = None
 
-    def set_strategies(self, entry_logic, position_sizer, exit_strategy):
-        """Gán các đối tượng chiến lược từ bên ngoài."""
-        self.entry_logic = entry_logic
-        self.position_sizer = position_sizer
-        self.exit_strategy = exit_strategy
+    def _setup_strategies(self, market_regime: Dict):
+        """Lấy và gán các chiến lược từ StrategyManager."""
+        strategies = self.strategy_manager.get_strategies(market_regime)
+        self.entry_logic = strategies["entry_logic"]
+        self.position_sizer = strategies["position_sizer"]
+        self.exit_strategy = strategies["exit_strategy"]
+        logging.info(
+            f"🔧 Đã thiết lập chiến lược cho chế độ: {self.strategy_manager._determine_config_key(market_regime.get('regime', 'Sideways'), market_regime.get('confidence', 50))}"
+        )
 
     def adjust_signal_with_news(self, entry_signal, news_context):
         """
@@ -174,13 +179,33 @@ class TradingOrchestrator:
         """
         Chạy quá trình quét toàn diện để tìm kiếm cơ hội và quản lý vị thế.
         """
+        # 0. KIỂM TRA NGẮT MẠCH (CIRCUIT BREAKER)
+        vnindex_change = vnindex_df['close'].pct_change().iloc[-1] if vnindex_df is not None and not vnindex_df.empty else 0.0
+        # Lấy PNL thực tế từ portfolio manager nếu có
+        current_pnl_pct = self.portfolio_manager.get_daily_pnl_pct()
+
+        if self.circuit_breaker.check_and_update(portfolio_pnl=current_pnl_pct, vnindex_change_pct=vnindex_change):
+            reason = self.circuit_breaker.tripped_reason
+            logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
+            await self.bot.send_message(
+                self.chat_id,
+                f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
+                parse_mode="Markdown",
+            )
+            # Vẫn cho phép kiểm tra thoát lệnh
+            await self.check_active_positions(market_regime, vnindex_df)
+            return
+
+        # 1. THIẾT LẬP CHIẾN LƯỢC DỰA TRÊN THỊ TRƯỜNG
+        self._setup_strategies(market_regime)
+
         if not all([self.entry_logic, self.position_sizer, self.exit_strategy]):
             logging.critical(
                 "❌ Các chiến lược (entry, sizing, exit) chưa được thiết lập cho Orchestrator."
             )
             return
 
-        # 1. Lấy danh sách các vị thế và mã cổ phiếu cần quét
+        # 2. Lấy danh sách các vị thế và mã cổ phiếu cần quét
         active_positions = self.portfolio_manager.get_positions()
         existing_symbols = set(active_positions.keys())
         self.sync_position_sizer_with_active_positions(active_positions)
@@ -188,13 +213,13 @@ class TradingOrchestrator:
         current_tickers = self.get_scan_universe()
         logging.info(f"🔍 Quét {len(current_tickers)} mã...")
 
-        # 2. Gửi thông báo bắt đầu quét
+        # 3. Gửi thông báo bắt đầu quét
         await self.send_scan_start_message(current_tickers, market_regime)
 
-        # 3. KIỂM TRA THOÁT LỆNH TRƯỚC
+        # 4. KIỂM TRA THOÁT LỆNH TRƯỚC
         await self.check_active_positions(market_regime, vnindex_df)
 
-        # 4. QUÉT TÌM LỆNH MUA MỚI (SONG SONG)
+        # 5. QUÉT TÌM LỆNH MUA MỚI (SONG SONG)
         logging.info(f"\n🔍 Quét {len(current_tickers)} mã để tìm cơ hội mua mới")
         logging.info(
             f"📊 Đang nắm giữ: {len(existing_symbols)} mã ({', '.join(existing_symbols) if existing_symbols else 'không có'})"
@@ -206,10 +231,10 @@ class TradingOrchestrator:
             current_tickers, existing_symbols, market_regime, vnindex_df
         )
 
-        # 5. PHÂN TÍCH RỦI RO DANH MỤC SAU KHI QUÉT
+        # 6. PHÂN TÍCH RỦI RO DANH MỤC SAU KHI QUÉT
         await self.perform_post_scan_risk_analysis()
 
-        # 6. TỔNG KẾT
+        # 7. TỔNG KẾT
         await self.send_summary_and_watchlist(
             len(current_tickers), signal_count, market_regime, watchlist_candidates
         )
@@ -299,6 +324,10 @@ class TradingOrchestrator:
             if exit_decision.should_exit:
                 msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
                 await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
+
+                # Ghi nhận kết quả giao dịch vào Circuit Breaker
+                pnl = (current_price - pos_data["entry_price"]) * pos_data["shares"]
+                self.circuit_breaker.record_trade(pnl)
 
                 success, sell_msg, _ = self.paper_account.execute_sell(
                     symbol=symbol,
@@ -519,6 +548,8 @@ class TradingOrchestrator:
         else:
             if self.portfolio_lock:
                 self.portfolio_lock.cancel_position(symbol)
+            # Nếu mua thất bại, không tính là lệnh thua
+            # self.circuit_breaker.record_trade(-1) # Không nên làm vậy
 
         return success, paper_msg
 

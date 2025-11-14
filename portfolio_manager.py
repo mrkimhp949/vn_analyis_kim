@@ -373,6 +373,32 @@ class PortfolioManager:
             "num_positions": len(positions),
         }
 
+    def get_daily_pnl_pct(self) -> float:
+        """
+        Tính toán P&L trong ngày dưới dạng phần trăm của tổng vốn.
+        Hữu ích cho Circuit Breaker.
+        """
+        # Lấy snapshot gần nhất từ DB (thường là cuối ngày hôm qua)
+        last_snapshot = self.db.get_last_portfolio_snapshot()
+        if not last_snapshot:
+            return 0.0 # Không có snapshot, không thể tính PNL trong ngày
+
+        # Lấy giá trị hiện tại của portfolio
+        current_portfolio_value = self.get_portfolio_value().get("total_value", 0.0)
+        
+        # Lấy tổng vốn từ config (hoặc có thể lấy từ snapshot nếu muốn)
+        total_capital = self.config.trading.total_capital
+        if total_capital == 0:
+            return 0.0
+
+        # PNL trong ngày = (Giá trị hiện tại - Giá trị cuối ngày hôm qua)
+        daily_pnl = current_portfolio_value - last_snapshot['total_value']
+        
+        # PNL % so với tổng vốn
+        daily_pnl_pct = daily_pnl / total_capital
+        
+        return daily_pnl_pct
+
     def save_portfolio_snapshot(self):
         """Save current portfolio snapshot"""
         portfolio = self.get_portfolio_value()

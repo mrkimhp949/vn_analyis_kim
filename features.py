@@ -25,7 +25,47 @@ def add_ml_features(
 
     df = df.copy()
 
-    # ... (các features khác giữ nguyên) ...
+    # 1. Moving Averages
+    df['sma20'] = df['close'].rolling(20).mean()
+    df['ema20'] = df['close'].ewm(span=20).mean()
+    df['ema50'] = df['close'].ewm(span=50).mean()
+    
+    # 2. RSI
+    df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+    df['rsi_signal'] = (df['rsi'] > 30) & (df['rsi'] < 70)
+    
+    # 3. ATR
+    df['atr'] = ta.volatility.AverageTrueRange(
+        df['high'], df['low'], df['close'], window=14
+    ).average_true_range()
+    
+    # 4. MACD
+    macd = ta.trend.MACD(df['close'])
+    df['macd'] = macd.macd()
+    df['macd_signal'] = macd.macd_signal()
+    df['macd_diff'] = macd.macd_diff()
+    df['macd_signal_line'] = (df['macd'] > df['macd_signal']).astype(int)
+    
+    # 5. Bollinger Bands
+    bb = ta.volatility.BollingerBands(df['close'])
+    df['bb_high'] = bb.bollinger_hband()
+    df['bb_low'] = bb.bollinger_lband()
+    df['bb_mid'] = bb.bollinger_mavg()
+    df['bb_width'] = (df['bb_high'] - df['bb_low']) / df['bb_mid']
+    df['bb_position'] = (df['close'] - df['bb_low']) / (df['bb_high'] - df['bb_low'])
+    
+    # 6. Momentum
+    df['momentum_5'] = df['close'].pct_change(5)
+    df['momentum_10'] = df['close'].pct_change(10)
+    df['momentum_20'] = df['close'].pct_change(20)
+    
+    # 7. Volume
+    df['volume_sma20'] = df['volume'].rolling(20).mean()
+    df['volume_ratio'] = df['volume'] / df['volume_sma20']
+    df['volume_surge'] = (df['volume_ratio'] > 1.5).astype(int)
+    
+    # 8. Volatility
+    df['volatility_20'] = df['close'].pct_change().rolling(20).std()
 
     # 12. RELATIVE STRENGTH (RS) - TÍNH TOÁN THỰC SỰ
     if index_df is not None and not index_df.empty:
@@ -65,7 +105,10 @@ def add_ml_features(
     df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
 
     # Fill NaN values
-    # ... (giữ nguyên) ...
+    feature_cols = get_feature_columns()
+    for col in feature_cols:
+        if col in df.columns:
+            df[col] = df[col].fillna(0)
 
     return df
 
