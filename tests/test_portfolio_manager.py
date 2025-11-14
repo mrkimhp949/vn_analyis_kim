@@ -22,16 +22,35 @@ class TestPortfolioManager:
         from database import TradingDB
         import database
 
+        # Create fresh database for each test
         self.db = TradingDB(':memory:')
         self.db.create_tables()
+
+        # Clear any existing data (in case of reuse)
+        with self.db.get_connection() as conn:
+            conn.execute('DELETE FROM positions')
+            conn.execute('DELETE FROM portfolio_history')
+            conn.execute('DELETE FROM trades')
+            conn.execute('DELETE FROM signals_cache')
+            conn.commit()
 
         # Mock get_db to return test database
         self.original_get_db = database.get_db
         database.get_db = lambda: self.db
 
     def teardown_method(self):
-        """Restore original get_db"""
+        """Clean up after each test"""
         import database
+
+        # Clear all data from tables
+        with self.db.get_connection() as conn:
+            conn.execute('DELETE FROM positions')
+            conn.execute('DELETE FROM portfolio_history')
+            conn.execute('DELETE FROM trades')
+            conn.execute('DELETE FROM signals_cache')
+            conn.commit()
+
+        # Restore original get_db
         database.get_db = self.original_get_db
 
     def test_add_position_valid(self):
