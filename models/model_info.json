@@ -1,1 +1,1 @@
-{"expected_features": 18}
+{"expected_features": 18, "version": "1.0", "last_updated": "2024-11-14", "feature_list": ["sma20", "ema20", "ema50", "rsi", "rsi_signal", "atr", "macd", "macd_signal", "macd_diff", "macd_signal_line", "bb_width", "bb_position", "momentum_5", "momentum_10", "momentum_20", "volume_ratio", "volume_surge", "volatility_20"]}

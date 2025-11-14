@@ -122,16 +122,29 @@ def add_ml_features(df):
     return df
 
 def get_feature_columns():
-    """Danh sách features cho ML - CẬP NHẬT ĐÚNG 18 FEATURES"""
-    # CHỈ GIỮ LẠI 18 FEATURES QUAN TRỌNG NHẤT
+    """
+    Danh sách features cho ML - EXACTLY 18 FEATURES
+
+    DO NOT MODIFY without updating:
+    - ml_models.py::MLPredictor.expected_features
+    - tests/test_ml_models.py
+    - models/model_info.json
+
+    Current count: 18 features
+    """
     return [
-        'sma20', 'ema20', 'ema50', 
-        'rsi', 'rsi_signal',
-        'atr',
-        'macd', 'macd_signal', 'macd_diff', 'macd_signal_line',
-        'bb_width', 'bb_position',
-        'momentum_5', 'momentum_10', 'momentum_20',
-        'volume_ratio', 'volume_surge',
-        'volatility_20'
-    ]
+        # Technical Indicators (10 features)
+        'sma20', 'ema20', 'ema50',  # Moving averages (3)
+        'rsi', 'rsi_signal',  # RSI indicators (2)
+        'atr',  # Average True Range (1)
+        'macd', 'macd_signal', 'macd_diff', 'macd_signal_line',  # MACD (4)
+
+        # Price Patterns (5 features)
+        'bb_width', 'bb_position',  # Bollinger Bands (2)
+        'momentum_5', 'momentum_10', 'momentum_20',  # Momentum (3)
+
+        # Volume & Volatility (3 features)
+        'volume_ratio', 'volume_surge',  # Volume (2)
+        'volatility_20'  # Volatility (1)
+    ]  # Total: 18 features
 # [file content end]
