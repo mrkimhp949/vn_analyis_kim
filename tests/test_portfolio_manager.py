@@ -18,14 +18,16 @@ class TestPortfolioManager:
         """Setup test database"""
         from database import TradingDB
         import database
+        import portfolio_manager
 
         # Create fresh in-memory database for each test
         # :memory: database is always fresh, no need to delete data
         self.db = TradingDB(':memory:')
         self.db.create_tables()
 
-        # Use monkeypatch to replace get_db
+        # Use monkeypatch to replace get_db in both modules
         monkeypatch.setattr(database, 'get_db', lambda: self.db)
+        monkeypatch.setattr(portfolio_manager, 'get_db', lambda: self.db)
 
         yield
 
