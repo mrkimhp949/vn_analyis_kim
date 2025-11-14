@@ -54,6 +54,7 @@ backtest_results/*.xlsx
 config_private.py
 .env
 .env.local
+.env.yaml  # Google Cloud Run environment variables
 
 # User data & cache (không push lên GitHub)
 my_portfolio.json
