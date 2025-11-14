@@ -136,7 +136,7 @@ jobs:
     name: Docker Build
     runs-on: ubuntu-latest
     needs: [test, lint]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    # Run on all PRs and pushes to validate Dockerfile
 
     steps:
     - name: Checkout code
