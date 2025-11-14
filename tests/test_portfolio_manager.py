@@ -20,13 +20,23 @@ class TestPortfolioManager:
         """Setup test database"""
         # Use in-memory database for testing
         from database import TradingDB
+        import database
+
         self.db = TradingDB(':memory:')
         self.db.create_tables()
+
+        # Mock get_db to return test database
+        self.original_get_db = database.get_db
+        database.get_db = lambda: self.db
+
+    def teardown_method(self):
+        """Restore original get_db"""
+        import database
+        database.get_db = self.original_get_db
 
     def test_add_position_valid(self):
         """Test adding valid position"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Should not raise exception
         manager.add_position(
@@ -46,7 +56,6 @@ class TestPortfolioManager:
     def test_add_position_invalid_symbol(self):
         """Test adding position with invalid symbol"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Empty symbol
         with pytest.raises(PortfolioError) as exc_info:
@@ -66,7 +75,6 @@ class TestPortfolioManager:
     def test_add_position_invalid_shares(self):
         """Test adding position with invalid shares"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Zero shares
         with pytest.raises(PortfolioError) as exc_info:
@@ -86,7 +94,6 @@ class TestPortfolioManager:
     def test_add_position_invalid_price(self):
         """Test adding position with invalid price"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Zero price
         with pytest.raises(PortfolioError) as exc_info:
@@ -101,7 +108,6 @@ class TestPortfolioManager:
     def test_add_position_invalid_stop_loss(self):
         """Test adding position with invalid stop loss"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Stop loss >= entry price
         with pytest.raises(PortfolioError) as exc_info:
@@ -116,7 +122,6 @@ class TestPortfolioManager:
     def test_add_position_invalid_take_profit(self):
         """Test adding position with invalid take profit"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Take profit <= entry price
         with pytest.raises(PortfolioError) as exc_info:
@@ -131,7 +136,6 @@ class TestPortfolioManager:
     def test_get_portfolio_value(self):
         """Test calculating portfolio value"""
         manager = PortfolioManager()
-        manager.db = self.db
 
         # Add positions
         manager.add_position('VCB', 100, 60000)
