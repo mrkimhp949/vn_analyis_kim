@@ -34,11 +34,13 @@ class StrategyRunner:
 
         logger.info("Strategy runner initialized")
 
-    def run_backtest(self,
-                     symbols: List[str],
-                     start_date: datetime,
-                     end_date: datetime,
-                     use_ml_signals: bool = False) -> BacktestResult:
+    def run_backtest(
+        self,
+        symbols: List[str],
+        start_date: datetime,
+        end_date: datetime,
+        use_ml_signals: bool = False,
+    ) -> BacktestResult:
         """
         Run backtest on multiple symbols
 
@@ -62,14 +64,10 @@ class StrategyRunner:
                 days_diff = (end_date - start_date).days
                 lookback = int(days_diff * 1.5)  # Add 50% buffer for indicators
 
-                df = load_data(
-                    symbol=symbol,
-                    lookback=lookback,
-                    use_cache=True
-                )
+                df = load_data(symbol=symbol, lookback=lookback, use_cache=True)
                 if df is not None and len(df) > 0:
                     # Filter to date range
-                    df = df[df['time'] <= end_date].copy()
+                    df = df[df["time"] <= end_date].copy()
                     data_cache[symbol] = df
                     logger.info(f"Loaded {len(df)} bars for {symbol}")
                 else:
@@ -83,9 +81,11 @@ class StrategyRunner:
         # Get all unique trading dates
         all_dates = set()
         for df in data_cache.values():
-            all_dates.update(df['time'].dt.date)
+            all_dates.update(df["time"].dt.date)
         trading_dates = sorted(list(all_dates))
-        trading_dates = [d for d in trading_dates if start_date.date() <= d <= end_date.date()]
+        trading_dates = [
+            d for d in trading_dates if start_date.date() <= d <= end_date.date()
+        ]
 
         logger.info(f"Simulating {len(trading_dates)} trading days...")
 
@@ -99,12 +99,12 @@ class StrategyRunner:
                     continue
 
                 df = data_cache[symbol]
-                df_up_to_date = df[df['time'].dt.date <= current_date].copy()
+                df_up_to_date = df[df["time"].dt.date <= current_date].copy()
 
                 if len(df_up_to_date) < 50:  # Need enough history
                     continue
 
-                current_price = df_up_to_date['close'].iloc[-1]
+                current_price = df_up_to_date["close"].iloc[-1]
                 current_prices[symbol] = current_price
 
                 trade = self.engine.positions[symbol]
@@ -117,7 +117,7 @@ class StrategyRunner:
                     stop_loss=trade.stop_loss,
                     take_profit_targets=[trade.take_profit],
                     entry_date=trade.entry_date,
-                    df=df_up_to_date
+                    df=df_up_to_date,
                 )
 
                 if exit_decision.should_exit:
@@ -125,7 +125,11 @@ class StrategyRunner:
                         symbol=symbol,
                         date=datetime.combine(current_date, datetime.min.time()),
                         exit_price=current_price,
-                        reason=exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
+                        reason=(
+                            exit_decision.exit_reason.value
+                            if exit_decision.exit_reason
+                            else "Unknown"
+                        ),
                     )
 
             # Check entries (look for new opportunities)
@@ -138,12 +142,12 @@ class StrategyRunner:
                     continue
 
                 df = data_cache[symbol]
-                df_up_to_date = df[df['time'].dt.date <= current_date].copy()
+                df_up_to_date = df[df["time"].dt.date <= current_date].copy()
 
                 if len(df_up_to_date) < 200:  # Need enough history for indicators
                     continue
 
-                current_price = df_up_to_date['close'].iloc[-1]
+                current_price = df_up_to_date["close"].iloc[-1]
                 current_prices[symbol] = current_price
 
                 # Generate entry signal
@@ -151,19 +155,29 @@ class StrategyRunner:
                 if use_ml_signals:
                     # In real backtest, you'd use actual ML predictions here
                     # For now, we'll just use technical analysis
-                    ml_signal = {'signal': 'HOLD', 'confidence': 50, 'reason': 'Backtest'}
+                    ml_signal = {
+                        "signal": "HOLD",
+                        "confidence": 50,
+                        "reason": "Backtest",
+                    }
 
                 try:
-                    entry_signal = self.entry_logic.analyze_entry(df_up_to_date, ml_signal)
+                    entry_signal = self.entry_logic.analyze_entry(
+                        df_up_to_date, ml_signal
+                    )
 
-                    if entry_signal.signal_type == 'BUY':
+                    if entry_signal.signal_type == "BUY":
                         self.engine.open_position(
                             symbol=symbol,
                             date=datetime.combine(current_date, datetime.min.time()),
                             entry_price=entry_signal.entry_price,
                             stop_loss=entry_signal.stop_loss,
-                            take_profit=entry_signal.take_profit_targets[1] if len(entry_signal.take_profit_targets) > 1 else entry_signal.entry_price * 1.15,
-                            reason=f"{entry_signal.strength.value}: {', '.join(entry_signal.reasons)}"
+                            take_profit=(
+                                entry_signal.take_profit_targets[1]
+                                if len(entry_signal.take_profit_targets) > 1
+                                else entry_signal.entry_price * 1.15
+                            ),
+                            reason=f"{entry_signal.strength.value}: {', '.join(entry_signal.reasons)}",
                         )
                 except Exception as e:
                     logger.error(f"Error analyzing {symbol}: {e}")
@@ -171,19 +185,21 @@ class StrategyRunner:
             # Update equity curve
             self.engine.update_equity(
                 date=datetime.combine(current_date, datetime.min.time()),
-                current_prices=current_prices
+                current_prices=current_prices,
             )
 
         # Close any remaining positions at end
         for symbol in list(self.engine.positions.keys()):
             if symbol in data_cache:
                 df = data_cache[symbol]
-                final_price = df[df['time'].dt.date <= end_date.date()]['close'].iloc[-1]
+                final_price = df[df["time"].dt.date <= end_date.date()]["close"].iloc[
+                    -1
+                ]
                 self.engine.close_position(
                     symbol=symbol,
                     date=datetime.combine(end_date.date(), datetime.min.time()),
                     exit_price=final_price,
-                    reason="Backtest End"
+                    reason="Backtest End",
                 )
 
         # Calculate and return results
@@ -193,8 +209,9 @@ class StrategyRunner:
         return results
 
 
-def run_simple_backtest(symbols: List[str] = None,
-                        months_back: int = 12) -> BacktestResult:
+def run_simple_backtest(
+    symbols: List[str] = None, months_back: int = 12
+) -> BacktestResult:
     """
     Quick helper function to run a simple backtest
 
@@ -206,7 +223,7 @@ def run_simple_backtest(symbols: List[str] = None,
         BacktestResult
     """
     if symbols is None:
-        symbols = ['VCB', 'HPG', 'VHM', 'VNM', 'VIC', 'GAS', 'MSN', 'MWG', 'TCB', 'BID']
+        symbols = ["VCB", "HPG", "VHM", "VNM", "VIC", "GAS", "MSN", "MWG", "TCB", "BID"]
 
     end_date = datetime.now()
     start_date = end_date - timedelta(days=months_back * 30)
@@ -215,15 +232,12 @@ def run_simple_backtest(symbols: List[str] = None,
         initial_capital=100_000_000,  # 100M VND
         commission_rate=0.0015,
         position_size_pct=0.20,
-        max_positions=5
+        max_positions=5,
     )
 
     runner = StrategyRunner(config)
     results = runner.run_backtest(
-        symbols=symbols,
-        start_date=start_date,
-        end_date=end_date,
-        use_ml_signals=False
+        symbols=symbols, start_date=start_date, end_date=end_date, use_ml_signals=False
     )
 
     runner.engine.print_results(results)
@@ -231,7 +245,7 @@ def run_simple_backtest(symbols: List[str] = None,
     return results
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Example usage
     logging.basicConfig(level=logging.INFO)
 

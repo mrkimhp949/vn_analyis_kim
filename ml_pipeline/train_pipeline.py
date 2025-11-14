@@ -32,16 +32,18 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
         error_msg = "No tickers provided for training!"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
+
     # Filter out empty/invalid tickers
     tickers = [t.strip().upper() for t in tickers if t and t.strip()]
     if not tickers:
         error_msg = "All tickers are invalid!"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
-    logger.info(f"Starting training pipeline for {len(tickers)} tickers: {tickers}, lookback={lookback} days")
-    
+
+    logger.info(
+        f"Starting training pipeline for {len(tickers)} tickers: {tickers}, lookback={lookback} days"
+    )
+
     # Data ingestion
     try:
         ingestion_config = DataIngestionConfig(
@@ -55,7 +57,7 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
     except Exception as e:
         logger.error(f"Data ingestion failed: {e}", exc_info=True)
         raise
-    
+
     if dataset.empty:
         logger.error("No data ingested!")
         return {"error": "No data"}
@@ -83,12 +85,12 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
 
     trainer = EnsembleTrainer(TrainingConfig(feature_columns=feature_cols))
     metrics = trainer.train(dataset, market_regime=market_regime)
-    
+
     # Volatility forecasting model training
     logger.info("Training volatility forecasting model...")
     vol_forecaster = VolatilityForecaster()
     vol_metrics = vol_forecaster.train(dataset)
-    
+
     # Combine metrics
     all_metrics = {
         "ensemble": metrics,
@@ -99,7 +101,9 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
         "feature_columns": feature_cols,
     }
     if shap_importance is not None:
-        all_metrics["shap_feature_importance"] = shap_importance.to_dict(orient="records")
+        all_metrics["shap_feature_importance"] = shap_importance.to_dict(
+            orient="records"
+        )
 
     # Record model version & drift monitoring
     if get_model_monitor:
@@ -114,14 +118,16 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
                     "market_regime": market_regime,
                 },
             )
-            drift_info = monitor.check_drift("ensemble_classifier", metric_key="accuracy")
+            drift_info = monitor.check_drift(
+                "ensemble_classifier", metric_key="accuracy"
+            )
             all_metrics["model_monitor"] = {
                 "version": record.get("version"),
                 "drift": drift_info,
             }
         except Exception as exc:
             logger.warning(f"Model monitor failed: {exc}")
-    
+
     # Save reports
     os.makedirs("reports", exist_ok=True)
     report_file = "reports/training_report.json"
@@ -130,29 +136,38 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
 
     if shap_importance is not None:
         shap_report = "reports/shap_feature_importance.json"
-        shap_importance.to_json(shap_report, orient="records", force_ascii=False, indent=2)
+        shap_importance.to_json(
+            shap_report, orient="records", force_ascii=False, indent=2
+        )
         logger.info(f"Saved SHAP feature importance to {shap_report}")
-    
+
     with open(report_file, "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2, ensure_ascii=False)
-    
+
     logger.info(f"Training complete! Report saved to {report_file}")
     return all_metrics
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train ensemble ML pipeline with volatility forecasting.")
+    parser = argparse.ArgumentParser(
+        description="Train ensemble ML pipeline with volatility forecasting."
+    )
     parser.add_argument("--tickers", type=str, default=",".join(TICKERS))
     parser.add_argument("--lookback", type=int, default=600)
     parser.add_argument("--refresh", action="store_true")
-    parser.add_argument("--regime", type=str, choices=["BULL", "BEAR", "SIDEWAYS"], 
-                       help="Market regime for regime-specific training")
+    parser.add_argument(
+        "--regime",
+        type=str,
+        choices=["BULL", "BEAR", "SIDEWAYS"],
+        help="Market regime for regime-specific training",
+    )
     args = parser.parse_args()
     tickers = [sym.strip().upper() for sym in args.tickers.split(",") if sym.strip()]
-    metrics = run_pipeline(tickers, args.lookback, args.refresh, market_regime=args.regime)
+    metrics = run_pipeline(
+        tickers, args.lookback, args.refresh, market_regime=args.regime
+    )
     print(json.dumps(metrics, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     main()
-

@@ -1,4 +1,5 @@
 """Portfolio regime-based exposure control."""
+
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -130,4 +131,3 @@ class PortfolioRegimeAdjuster:
                 break
 
         return plan, remaining
-

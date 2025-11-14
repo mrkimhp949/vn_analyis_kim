@@ -1,4 +1,5 @@
 """SHAP-based feature selection utilities."""
+
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -66,7 +67,10 @@ def select_features_with_shap(
 
     available_features = [col for col in feature_columns if col in df.columns]
     if len(available_features) < 5:
-        logger.warning("Không đủ features để thực hiện SHAP selection (%d).", len(available_features))
+        logger.warning(
+            "Không đủ features để thực hiện SHAP selection (%d).",
+            len(available_features),
+        )
         return available_features, None
 
     X = df[available_features].copy()

@@ -7,11 +7,11 @@ from backtesting.strategy_runner import StrategyRunner, run_simple_backtest
 from backtesting.visualizer import BacktestVisualizer
 
 __all__ = [
-    'BacktestEngine',
-    'BacktestConfig',
-    'BacktestResult',
-    'Trade',
-    'StrategyRunner',
-    'run_simple_backtest',
-    'BacktestVisualizer'
+    "BacktestEngine",
+    "BacktestConfig",
+    "BacktestResult",
+    "Trade",
+    "StrategyRunner",
+    "run_simple_backtest",
+    "BacktestVisualizer",
 ]

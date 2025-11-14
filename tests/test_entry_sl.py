@@ -16,29 +16,28 @@ def test_stop_loss_below_entry():
     low = close - 10
     volume = np.full(n, 1000)
 
-    df = pd.DataFrame({
-        'open': openp,
-        'high': high,
-        'low': low,
-        'close': close,
-        'volume': volume
-    }, index=dates)
+    df = pd.DataFrame(
+        {"open": openp, "high": high, "low": low, "close": close, "volume": volume},
+        index=dates,
+    )
 
     # Add indicators (ATR, EMA, etc.)
     df = add_ml_features(df)
 
     # Use higher ML confidence so adjusted confidence stays above threshold in this synthetic scenario
-    ml_signal = {'signal': 'BUY', 'confidence': 90}
+    ml_signal = {"signal": "BUY", "confidence": 90}
 
     logic = ImprovedEntryLogic(
         min_confidence=60,
         min_risk_reward=1.5,
         require_trend_alignment=False,
-        require_volume_confirmation=False
+        require_volume_confirmation=False,
     )
 
     signal = logic.analyze_entry(df, ml_signal)
 
     # Ensure we produced an entry and that stop loss is below entry price
     assert signal.should_enter is True, "Expected should_enter True"
-    assert signal.stop_loss < signal.entry_price, f"Stop loss {signal.stop_loss} must be < entry {signal.entry_price}"
+    assert (
+        signal.stop_loss < signal.entry_price
+    ), f"Stop loss {signal.stop_loss} must be < entry {signal.entry_price}"

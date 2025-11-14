@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PositionAlert:
     """Alert for position events"""
+
     symbol: str
     alert_type: str  # 'STOP_LOSS', 'TAKE_PROFIT', 'TRAILING_STOP', 'RISK_WARNING'
     message: str
@@ -46,10 +47,12 @@ class LivePortfolioMonitor:
     - Telegram notifications (optional)
     """
 
-    def __init__(self,
-                 portfolio_manager: PortfolioManager = None,
-                 websocket_config: WebSocketConfig = None,
-                 enable_alerts: bool = True):
+    def __init__(
+        self,
+        portfolio_manager: PortfolioManager = None,
+        websocket_config: WebSocketConfig = None,
+        enable_alerts: bool = True,
+    ):
 
         self.portfolio = portfolio_manager or PortfolioManager()
         self.price_feed = PriceFeedClient(websocket_config)
@@ -62,7 +65,7 @@ class LivePortfolioMonitor:
         # Performance tracking
         self.last_portfolio_value = 0
         self.daily_high = 0
-        self.daily_low = float('inf')
+        self.daily_low = float("inf")
 
         # Register price callback
         self.price_feed.add_price_callback(self.handle_price_update)
@@ -86,9 +89,9 @@ class LivePortfolioMonitor:
         position = positions[symbol]
 
         # Calculate current P&L
-        entry_price = position['avg_price']
+        entry_price = position["avg_price"]
         current_price = update.price
-        shares = position['shares']
+        shares = position["shares"]
 
         pnl = (current_price - entry_price) * shares
         pnl_percent = ((current_price - entry_price) / entry_price) * 100
@@ -99,76 +102,86 @@ class LivePortfolioMonitor:
             position=position,
             current_price=current_price,
             pnl=pnl,
-            pnl_percent=pnl_percent
+            pnl_percent=pnl_percent,
         )
 
         # Update portfolio value tracking
         self.update_portfolio_tracking()
 
-    def check_exit_conditions(self,
-                              symbol: str,
-                              position: Dict,
-                              current_price: float,
-                              pnl: float,
-                              pnl_percent: float):
+    def check_exit_conditions(
+        self,
+        symbol: str,
+        position: Dict,
+        current_price: float,
+        pnl: float,
+        pnl_percent: float,
+    ):
         """Check if any exit conditions are met"""
 
         # Get position details
-        entry_price = position['avg_price']
-        entry_date = position.get('entry_date', datetime.now())
-        stop_loss = position.get('stop_loss', entry_price * 0.95)
-        take_profit = position.get('take_profit', entry_price * 1.15)
+        entry_price = position["avg_price"]
+        entry_date = position.get("entry_date", datetime.now())
+        stop_loss = position.get("stop_loss", entry_price * 0.95)
+        take_profit = position.get("take_profit", entry_price * 1.15)
 
         # Check stop loss
         if current_price <= stop_loss:
-            self.send_alert(PositionAlert(
-                symbol=symbol,
-                alert_type='STOP_LOSS',
-                message=f"⛔ STOP LOSS HIT: {symbol} @ {current_price:,.0f} (Entry: {entry_price:,.0f})",
-                current_price=current_price,
-                position_pnl=pnl,
-                timestamp=datetime.now(),
-                urgency=5
-            ))
+            self.send_alert(
+                PositionAlert(
+                    symbol=symbol,
+                    alert_type="STOP_LOSS",
+                    message=f"⛔ STOP LOSS HIT: {symbol} @ {current_price:,.0f} (Entry: {entry_price:,.0f})",
+                    current_price=current_price,
+                    position_pnl=pnl,
+                    timestamp=datetime.now(),
+                    urgency=5,
+                )
+            )
 
         # Check take profit
         if current_price >= take_profit:
-            self.send_alert(PositionAlert(
-                symbol=symbol,
-                alert_type='TAKE_PROFIT',
-                message=f"🎯 TAKE PROFIT: {symbol} @ {current_price:,.0f} (Target: {take_profit:,.0f})",
-                current_price=current_price,
-                position_pnl=pnl,
-                timestamp=datetime.now(),
-                urgency=4
-            ))
+            self.send_alert(
+                PositionAlert(
+                    symbol=symbol,
+                    alert_type="TAKE_PROFIT",
+                    message=f"🎯 TAKE PROFIT: {symbol} @ {current_price:,.0f} (Target: {take_profit:,.0f})",
+                    current_price=current_price,
+                    position_pnl=pnl,
+                    timestamp=datetime.now(),
+                    urgency=4,
+                )
+            )
 
         # Check trailing stop
         if pnl_percent >= 8.0:  # Activate trailing if up 8%
             trailing_stop = current_price * 0.95  # 5% below current
 
             if trailing_stop > stop_loss:
-                self.send_alert(PositionAlert(
-                    symbol=symbol,
-                    alert_type='TRAILING_STOP',
-                    message=f"📈 UPDATE TRAILING STOP: {symbol} to {trailing_stop:,.0f}",
-                    current_price=current_price,
-                    position_pnl=pnl,
-                    timestamp=datetime.now(),
-                    urgency=2
-                ))
+                self.send_alert(
+                    PositionAlert(
+                        symbol=symbol,
+                        alert_type="TRAILING_STOP",
+                        message=f"📈 UPDATE TRAILING STOP: {symbol} to {trailing_stop:,.0f}",
+                        current_price=current_price,
+                        position_pnl=pnl,
+                        timestamp=datetime.now(),
+                        urgency=2,
+                    )
+                )
 
         # Risk warning if losing > 2%
         if pnl_percent < -2.0:
-            self.send_alert(PositionAlert(
-                symbol=symbol,
-                alert_type='RISK_WARNING',
-                message=f"⚠️ LOSS WARNING: {symbol} down {pnl_percent:.2f}% ({pnl:+,.0f} VND)",
-                current_price=current_price,
-                position_pnl=pnl,
-                timestamp=datetime.now(),
-                urgency=3
-            ))
+            self.send_alert(
+                PositionAlert(
+                    symbol=symbol,
+                    alert_type="RISK_WARNING",
+                    message=f"⚠️ LOSS WARNING: {symbol} down {pnl_percent:.2f}% ({pnl:+,.0f} VND)",
+                    current_price=current_price,
+                    position_pnl=pnl,
+                    timestamp=datetime.now(),
+                    urgency=3,
+                )
+            )
 
     def send_alert(self, alert: PositionAlert):
         """Send alert through all registered callbacks"""
@@ -187,7 +200,7 @@ class LivePortfolioMonitor:
         """Update portfolio performance tracking"""
         try:
             portfolio_value = self.portfolio.get_portfolio_value()
-            current_value = portfolio_value.get('total_value', 0)
+            current_value = portfolio_value.get("total_value", 0)
 
             # Update daily high/low
             if current_value > self.daily_high:
@@ -229,32 +242,34 @@ class LivePortfolioMonitor:
         """Get current portfolio summary with live prices"""
         positions = self.portfolio.get_positions()
         summary = {
-            'timestamp': datetime.now(),
-            'total_positions': len(positions),
-            'portfolio_value': self.last_portfolio_value,
-            'daily_high': self.daily_high,
-            'daily_low': self.daily_low,
-            'positions': {}
+            "timestamp": datetime.now(),
+            "total_positions": len(positions),
+            "portfolio_value": self.last_portfolio_value,
+            "daily_high": self.daily_high,
+            "daily_low": self.daily_low,
+            "positions": {},
         }
 
         for symbol, position in positions.items():
             live_price = self.price_feed.get_price(symbol)
 
             if live_price:
-                entry_price = position['avg_price']
-                shares = position['shares']
+                entry_price = position["avg_price"]
+                shares = position["shares"]
                 current_value = live_price.price * shares
                 position_pnl = (live_price.price - entry_price) * shares
-                position_pnl_pct = ((live_price.price - entry_price) / entry_price) * 100
+                position_pnl_pct = (
+                    (live_price.price - entry_price) / entry_price
+                ) * 100
 
-                summary['positions'][symbol] = {
-                    'shares': shares,
-                    'entry_price': entry_price,
-                    'current_price': live_price.price,
-                    'current_value': current_value,
-                    'pnl': position_pnl,
-                    'pnl_percent': position_pnl_pct,
-                    'change_today': live_price.change_percent
+                summary["positions"][symbol] = {
+                    "shares": shares,
+                    "entry_price": entry_price,
+                    "current_price": live_price.price,
+                    "current_value": current_value,
+                    "pnl": position_pnl,
+                    "pnl_percent": position_pnl_pct,
+                    "change_today": live_price.change_percent,
                 }
 
         return summary
@@ -263,28 +278,34 @@ class LivePortfolioMonitor:
         """Print formatted live summary"""
         summary = self.get_live_summary()
 
-        print("\n" + "="*80)
-        print(f"LIVE PORTFOLIO SUMMARY - {summary['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-        print("="*80)
+        print("\n" + "=" * 80)
+        print(
+            f"LIVE PORTFOLIO SUMMARY - {summary['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        print("=" * 80)
 
         print(f"\n📊 Portfolio Value: {summary['portfolio_value']:,.0f} VND")
         print(f"   Daily High: {summary['daily_high']:,.0f} VND")
         print(f"   Daily Low: {summary['daily_low']:,.0f} VND")
 
         print(f"\n💼 Positions ({summary['total_positions']}):")
-        print("-"*80)
-        print(f"{'Symbol':<8} {'Shares':<8} {'Entry':<12} {'Current':<12} {'P&L':<15} {'Today %':<10}")
-        print("-"*80)
+        print("-" * 80)
+        print(
+            f"{'Symbol':<8} {'Shares':<8} {'Entry':<12} {'Current':<12} {'P&L':<15} {'Today %':<10}"
+        )
+        print("-" * 80)
 
-        for symbol, pos in summary['positions'].items():
-            pnl_str = f"+{pos['pnl']:,.0f}" if pos['pnl'] >= 0 else f"{pos['pnl']:,.0f}"
+        for symbol, pos in summary["positions"].items():
+            pnl_str = f"+{pos['pnl']:,.0f}" if pos["pnl"] >= 0 else f"{pos['pnl']:,.0f}"
             pnl_pct_str = f"({pos['pnl_percent']:+.2f}%)"
             today_str = f"{pos['change_today']:+.2f}%"
 
-            print(f"{symbol:<8} {pos['shares']:<8} {pos['entry_price']:<12,.0f} "
-                  f"{pos['current_price']:<12,.0f} {pnl_str:<15} {today_str:<10}")
+            print(
+                f"{symbol:<8} {pos['shares']:<8} {pos['entry_price']:<12,.0f} "
+                f"{pos['current_price']:<12,.0f} {pnl_str:<15} {today_str:<10}"
+            )
 
-        print("="*80 + "\n")
+        print("=" * 80 + "\n")
 
 
 # Example alert callback
@@ -296,15 +317,14 @@ def telegram_alert(alert: PositionAlert):
 
 def console_alert(alert: PositionAlert):
     """Print alert to console"""
-    urgency_emoji = ['ℹ️', '📊', '⚠️', '🚨', '🔴'][min(alert.urgency - 1, 4)]
+    urgency_emoji = ["ℹ️", "📊", "⚠️", "🚨", "🔴"][min(alert.urgency - 1, 4)]
     print(f"{urgency_emoji} [{alert.timestamp.strftime('%H:%M:%S')}] {alert.message}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Example usage
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
     # Create monitor
@@ -315,7 +335,7 @@ if __name__ == '__main__':
     # monitor.add_alert_callback(telegram_alert)  # Uncomment for Telegram
 
     # Start monitoring
-    monitor.start(['VCB', 'HPG', 'VHM'])
+    monitor.start(["VCB", "HPG", "VHM"])
 
     # Print summary every 30 seconds
     try:

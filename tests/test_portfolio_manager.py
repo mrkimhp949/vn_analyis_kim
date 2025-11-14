@@ -1,6 +1,7 @@
 """
 Unit tests for Portfolio Manager - Validation Logic Only
 """
+
 import pytest
 import sys
 import os
@@ -22,5 +23,5 @@ class TestPortfolioManagerValidation:
         assert PortfolioError is not None
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

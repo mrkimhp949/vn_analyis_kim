@@ -6,6 +6,7 @@ import suppress_warnings  # noqa: F401
 # ===== LOGGING SETUP =====
 import logging
 from logging_config import setup_logging
+
 setup_logging()
 # =========================
 
@@ -17,11 +18,13 @@ import pandas as pd
 # ===== CONFIG IMPORTS =====
 try:
     from config import CHAT_ID, TELEGRAM_TOKEN, LOOKBACK
+
     logging.info("✅ Import config thành công")
 except ImportError as e:
     from exceptions import ConfigurationError
+
     logging.error("❌ Failed to import configuration.", exc_info=True)
-    raise ConfigurationError("Failed to import config.", context={'error': str(e)})
+    raise ConfigurationError("Failed to import config.", context={"error": str(e)})
 
 # ===== CORE COMPONENTS =====
 try:
@@ -31,10 +34,13 @@ try:
     from circuit_breaker import get_circuit_breaker
     from emergency_stop import get_emergency_stop
     from portfolio_manager import get_portfolio_manager
-    from data_loader import load_data # Import load_data here
+    from data_loader import load_data  # Import load_data here
+
     logging.info("✅ Import các thành phần cốt lõi thành công")
 except ImportError as e:
-    logging.critical(f"❌ Lỗi nghiêm trọng khi import các thành phần cốt lõi: {e}", exc_info=True)
+    logging.critical(
+        f"❌ Lỗi nghiêm trọng khi import các thành phần cốt lõi: {e}", exc_info=True
+    )
     raise
 
 # ===== INITIALIZE BOT & CORE SERVICES =====
@@ -72,12 +78,14 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
     # ===== 2. PHÂN TÍCH THỊ TRƯỜNG =====
     logging.info("📊 Phân tích trạng thái thị trường...")
     market_regime = market_analyzer.analyze_market_regime()
-    if not market_regime.get('tradeable', False):
+    if not market_regime.get("tradeable", False):
         msg = f"⛔ *THỊ TRƯỜNG KHÔNG PHÙ HỢP*\n\n{market_regime.get('message', 'Không rõ lý do.')}"
-        await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
-        logging.warning(f"⛔ Thị trường không phù hợp để trade: {market_regime.get('message')}")
+        await bot_instance.send_message(chat_id, msg, parse_mode="Markdown")
+        logging.warning(
+            f"⛔ Thị trường không phù hợp để trade: {market_regime.get('message')}"
+        )
         return
-    
+
     logging.info(f"✅ Thị trường OK: {market_regime.get('message')}")
 
     # ===== 3. ĐIỀU CHỈNH CHIẾN LƯỢC =====
@@ -89,7 +97,7 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
 
     # ===== 5. CHẠY QUÁ TRÌNH QUÉT CHÍNH =====
     await orchestrator.run_scan(market_regime, vnindex_df)
-    
+
     # ===== 6. PHÂN TÍCH DANH MỤC CUỐI CÙNG =====
     logging.info("\n📊 Phân tích tổng thể danh mục cuối phiên...")
     await check_portfolio_and_recommend(bot_instance, chat_id)
@@ -102,7 +110,7 @@ def check_safety_systems(bot_instance: Bot, chat_id: str) -> bool:
     can_trade_cb, cb_reason = circuit_breaker.can_trade()
     if not can_trade_cb:
         msg = f"🚫 *CIRCUIT BREAKER KÍCH HOẠT*\n\n{cb_reason}\n\n{circuit_breaker.get_status_message()}"
-        asyncio.run(bot_instance.send_message(chat_id, msg, parse_mode='Markdown'))
+        asyncio.run(bot_instance.send_message(chat_id, msg, parse_mode="Markdown"))
         logging.critical(f"🚫 Circuit Breaker: {cb_reason}")
         return False
 
@@ -111,10 +119,10 @@ def check_safety_systems(bot_instance: Bot, chat_id: str) -> bool:
     can_trade_es, es_reason = emergency_stop.can_trade()
     if not can_trade_es:
         msg = f"🚨 *DỪNG KHẨN CẤP ĐANG BẬT*\n\n{es_reason}\n\n{emergency_stop.get_status_message()}"
-        asyncio.run(bot_instance.send_message(chat_id, msg, parse_mode='Markdown'))
+        asyncio.run(bot_instance.send_message(chat_id, msg, parse_mode="Markdown"))
         logging.critical(f"🚨 Emergency Stop: {es_reason}")
         return False
-        
+
     logging.info("✅ Các hệ thống an toàn đã được kiểm tra.")
     return True
 
@@ -122,9 +130,13 @@ def check_safety_systems(bot_instance: Bot, chat_id: str) -> bool:
 def load_vnindex_data() -> pd.DataFrame | None:
     """Tải dữ liệu VN-Index và xử lý lỗi."""
     try:
-        vnindex_df = load_data('VNINDEX', lookback=LOOKBACK, use_cache=True, is_index=True)
+        vnindex_df = load_data(
+            "VNINDEX", lookback=LOOKBACK, use_cache=True, is_index=True
+        )
         if vnindex_df.empty:
-            logging.warning("⚠️ Không tải được dữ liệu VN-Index. Phân tích ML có thể bị ảnh hưởng.")
+            logging.warning(
+                "⚠️ Không tải được dữ liệu VN-Index. Phân tích ML có thể bị ảnh hưởng."
+            )
             return None
         return vnindex_df
     except Exception as e:
@@ -139,11 +151,16 @@ async def check_portfolio_and_recommend(bot_instance: Bot, chat_id: str):
         analysis_report = portfolio_manager.get_detailed_analysis()
         # Gửi các phần nhỏ nếu tin nhắn quá dài
         if len(analysis_report) > 4000:
-            parts = [analysis_report[i:i+4000] for i in range(0, len(analysis_report), 4000)]
+            parts = [
+                analysis_report[i : i + 4000]
+                for i in range(0, len(analysis_report), 4000)
+            ]
             for part in parts:
-                await bot_instance.send_message(chat_id, part, parse_mode='Markdown')
+                await bot_instance.send_message(chat_id, part, parse_mode="Markdown")
         else:
-            await bot_instance.send_message(chat_id, analysis_report, parse_mode='Markdown')
+            await bot_instance.send_message(
+                chat_id, analysis_report, parse_mode="Markdown"
+            )
         logging.info("✅ Đã gửi phân tích danh mục.")
     except Exception as e:
         error_msg = f"❌ Lỗi khi gửi phân tích danh mục: {e}"
@@ -152,6 +169,7 @@ async def check_portfolio_and_recommend(bot_instance: Bot, chat_id: str):
 
 
 # ================ RUNNER ====================
+
 
 async def run_bot():
     """Hàm async chính để chạy bot."""
@@ -163,19 +181,23 @@ def run_bot_sync():
     try:
         asyncio.run(run_bot())
     except Exception as e:
-        logging.critical(f"❌ Lỗi nghiêm trọng ở cấp cao nhất khi chạy bot: {e}", exc_info=True)
+        logging.critical(
+            f"❌ Lỗi nghiêm trọng ở cấp cao nhất khi chạy bot: {e}", exc_info=True
+        )
 
 
 # ================ MAIN ====================
 
 if __name__ == "__main__":
     """Test chạy bot"""
-    logging.info("\n" + "="*70)
+    logging.info("\n" + "=" * 70)
     logging.info("🤖>> BOT RUNNER REFACTORED <<🤖")
-    logging.info("="*70 + "\n")
-    
+    logging.info("=" * 70 + "\n")
+
     logging.info("Để chạy bot thực tế, sử dụng lệnh:")
-    logging.info("  python -c 'from bot_runner_improved import run_bot_sync; run_bot_sync()'")
-    
+    logging.info(
+        "  python -c 'from bot_runner_improved import run_bot_sync; run_bot_sync()'"
+    )
+
     # Chạy một lần để test
     run_bot_sync()

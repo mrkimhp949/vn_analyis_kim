@@ -2,6 +2,7 @@
 Ticker Loader - Load và validate tickers từ List.csv
 Validates tickers trước khi scan để tránh mã đã hủy niêm yết
 """
+
 import pandas as pd
 import os
 import json
@@ -11,37 +12,37 @@ from datetime import datetime, timedelta
 
 class TickerLoader:
     """Load và validate tất cả tickers từ List.csv"""
-    
-    def __init__(self, csv_file='List.csv', cache_file='ticker_validation_cache.json'):
+
+    def __init__(self, csv_file="List.csv", cache_file="ticker_validation_cache.json"):
         self.csv_file = csv_file
         self.cache_file = cache_file
         self.all_tickers = []
         self.validated_tickers = []
         self.invalid_tickers = []
         self.validation_cache = self._load_cache()
-        
+
         self.load_from_csv()
-    
+
     def _load_cache(self) -> Dict:
         """Load validation cache"""
         if os.path.exists(self.cache_file):
             try:
-                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 pass
-        return {'validated': {}, 'invalid': {}, 'last_updated': None}
-    
+        return {"validated": {}, "invalid": {}, "last_updated": None}
+
     def _save_cache(self):
         """Save validation cache"""
-        self.validation_cache['last_updated'] = datetime.now().isoformat()
-        with open(self.cache_file, 'w', encoding='utf-8') as f:
+        self.validation_cache["last_updated"] = datetime.now().isoformat()
+        with open(self.cache_file, "w", encoding="utf-8") as f:
             json.dump(self.validation_cache, f, indent=2, ensure_ascii=False)
-    
+
     def _is_cache_valid(self, symbol: str, max_age_days: int = 7) -> bool:
         """Check xem cache còn valid không"""
-        if symbol in self.validation_cache['validated']:
-            cached_date = self.validation_cache['validated'][symbol].get('date')
+        if symbol in self.validation_cache["validated"]:
+            cached_date = self.validation_cache["validated"][symbol].get("date")
             if cached_date:
                 try:
                     cache_time = datetime.fromisoformat(cached_date)
@@ -50,147 +51,158 @@ class TickerLoader:
                 except:
                     pass
         return False
-    
+
     def load_from_csv(self):
         """Load tất cả tickers từ CSV"""
         if not os.path.exists(self.csv_file):
             print(f"⚠️ File {self.csv_file} không tồn tại")
             return
-        
+
         try:
             # Read CSV with error handling
             df = pd.read_csv(
-                self.csv_file, 
-                encoding='utf-8',
-                on_bad_lines='skip',  # Skip bad lines
-                engine='python'  # More flexible parser
+                self.csv_file,
+                encoding="utf-8",
+                on_bad_lines="skip",  # Skip bad lines
+                engine="python",  # More flexible parser
             )
-            
+
             # Get ticker column (first column)
             self.all_tickers = df.iloc[:, 0].tolist()
-            
+
             # Clean tickers
-            self.all_tickers = [str(t).strip().upper() for t in self.all_tickers if pd.notna(t)]
-            
+            self.all_tickers = [
+                str(t).strip().upper() for t in self.all_tickers if pd.notna(t)
+            ]
+
             # Remove empty strings
             self.all_tickers = [t for t in self.all_tickers if t]
-            
+
             print(f"📊 Loaded {len(self.all_tickers)} tickers from {self.csv_file}")
-            
+
         except Exception as e:
             print(f"❌ Error loading {self.csv_file}: {e}")
             self.all_tickers = []
-    
+
     def validate_ticker(self, symbol: str, min_volume: int = 100_000) -> bool:
         """
         Validate một ticker
-        
+
         Returns:
             True nếu valid, False nếu invalid
         """
         # Check cache first
         if self._is_cache_valid(symbol):
             return True
-        
-        if symbol in self.validation_cache['invalid']:
+
+        if symbol in self.validation_cache["invalid"]:
             return False
-        
+
         try:
             from data_loader import load_data
-            
+
             # Try load data
             df = load_data(symbol, lookback=5, use_cache=False)
-            
+
             if df.empty or len(df) < 2:
-                self.validation_cache['invalid'][symbol] = {
-                    'reason': 'No data',
-                    'date': datetime.now().isoformat()
+                self.validation_cache["invalid"][symbol] = {
+                    "reason": "No data",
+                    "date": datetime.now().isoformat(),
                 }
                 self._save_cache()
                 return False
-            
+
             # Check volume
-            avg_volume = df['volume'].mean()
+            avg_volume = df["volume"].mean()
             if avg_volume < min_volume:
-                self.validation_cache['invalid'][symbol] = {
-                    'reason': f'Low volume ({avg_volume:,.0f})',
-                    'date': datetime.now().isoformat()
+                self.validation_cache["invalid"][symbol] = {
+                    "reason": f"Low volume ({avg_volume:,.0f})",
+                    "date": datetime.now().isoformat(),
                 }
                 self._save_cache()
                 return False
-            
+
             # Valid - cache it
-            self.validation_cache['validated'][symbol] = {
-                'date': datetime.now().isoformat(),
-                'avg_volume': float(avg_volume)
+            self.validation_cache["validated"][symbol] = {
+                "date": datetime.now().isoformat(),
+                "avg_volume": float(avg_volume),
             }
             self._save_cache()
             return True
-            
+
         except ValueError as e:
             error_msg = str(e)
-            if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg or "không trả dữ liệu" in error_msg:
-                self.validation_cache['invalid'][symbol] = {
-                    'reason': 'Delisted or not found',
-                    'date': datetime.now().isoformat()
+            if (
+                "hủy niêm yết" in error_msg
+                or "không tồn tại" in error_msg
+                or "không trả dữ liệu" in error_msg
+            ):
+                self.validation_cache["invalid"][symbol] = {
+                    "reason": "Delisted or not found",
+                    "date": datetime.now().isoformat(),
                 }
                 self._save_cache()
                 return False
             return False
         except Exception:
             return False
-    
+
     def get_validated_tickers(
         self,
         force_validate: bool = False,
         min_volume: int = 100_000,
-        max_tickers: int = None
+        max_tickers: int = None,
     ) -> List[str]:
         """
         Lấy danh sách tickers đã validate
-        
+
         Args:
             force_validate: Force validate lại tất cả
             min_volume: Volume tối thiểu
             max_tickers: Giới hạn số lượng tickers
-        
+
         Returns:
             List validated tickers
         """
         if not force_validate and self.validated_tickers:
-            return self.validated_tickers[:max_tickers] if max_tickers else self.validated_tickers
-        
+            return (
+                self.validated_tickers[:max_tickers]
+                if max_tickers
+                else self.validated_tickers
+            )
+
         print(f"🔍 Validating {len(self.all_tickers)} tickers...")
-        
+
         validated = []
         invalid = []
-        
+
         for i, symbol in enumerate(self.all_tickers):
             # Show progress every 10%
             if (i + 1) % max(1, len(self.all_tickers) // 10) == 0:
                 progress = (i + 1) / len(self.all_tickers) * 100
                 print(f"  Progress: {progress:.0f}% ({i+1}/{len(self.all_tickers)})")
-            
+
             if self.validate_ticker(symbol, min_volume):
                 validated.append(symbol)
             else:
                 invalid.append(symbol)
-            
+
             # Limit if needed
             if max_tickers and len(validated) >= max_tickers:
                 break
-        
+
         self.validated_tickers = validated
         self.invalid_tickers = invalid
-        
+
         print(f"✅ Validated: {len(validated)} tickers")
         print(f"❌ Invalid: {len(invalid)} tickers")
-        
+
         return validated
 
 
 # Singleton instance
 _loader = None
+
 
 def get_ticker_loader() -> TickerLoader:
     """Get singleton instance"""
@@ -205,11 +217,11 @@ if __name__ == "__main__":
     print("=" * 60)
     print("🧪 TESTING TICKER LOADER")
     print("=" * 60)
-    
+
     loader = TickerLoader()
-    
+
     print(f"\n📊 Total tickers: {len(loader.all_tickers)}")
     print(f"📋 Sample (first 20): {loader.all_tickers[:20]}")
     print(f"📋 Sample (last 20): {loader.all_tickers[-20:]}")
-    
+
     print("\n✅ Test completed!")

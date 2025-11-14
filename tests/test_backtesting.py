@@ -1,6 +1,7 @@
 """
 Unit tests for Backtesting Engine
 """
+
 import pytest
 import sys
 import os
@@ -23,7 +24,7 @@ class TestBacktestEngine:
             initial_capital=100_000_000,
             commission_rate=0.0015,
             max_positions=3,
-            position_size_pct=0.30
+            position_size_pct=0.30,
         )
         self.engine = BacktestEngine(self.config)
 
@@ -37,19 +38,19 @@ class TestBacktestEngine:
     def test_open_position_valid(self):
         """Test opening a valid position"""
         trade = self.engine.open_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 1),
             entry_price=60000,
             stop_loss=57000,
             take_profit=66000,
-            reason='Test entry'
+            reason="Test entry",
         )
 
         assert trade is not None
-        assert trade.symbol == 'VCB'
+        assert trade.symbol == "VCB"
         assert trade.entry_price == 60000
         assert trade.shares > 0
-        assert 'VCB' in self.engine.positions
+        assert "VCB" in self.engine.positions
         assert self.engine.capital < 100_000_000  # Capital reduced
 
     def test_open_position_max_positions(self):
@@ -57,20 +58,20 @@ class TestBacktestEngine:
         # Open 3 positions (max)
         for i in range(3):
             self.engine.open_position(
-                symbol=f'SYM{i}',
+                symbol=f"SYM{i}",
                 date=datetime(2024, 1, 1),
                 entry_price=50000,
                 stop_loss=47000,
-                take_profit=55000
+                take_profit=55000,
             )
 
         # Try to open 4th position
         trade = self.engine.open_position(
-            symbol='SYM4',
+            symbol="SYM4",
             date=datetime(2024, 1, 1),
             entry_price=50000,
             stop_loss=47000,
-            take_profit=55000
+            take_profit=55000,
         )
 
         assert trade is None
@@ -80,11 +81,11 @@ class TestBacktestEngine:
         """Test cannot open position with insufficient capital"""
         # Try to open position that requires more capital than available
         trade = self.engine.open_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 1),
             entry_price=200_000_000,  # Too expensive
             stop_loss=190_000_000,
-            take_profit=220_000_000
+            take_profit=220_000_000,
         )
 
         assert trade is None
@@ -93,27 +94,27 @@ class TestBacktestEngine:
         """Test closing a profitable position"""
         # Open position
         self.engine.open_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 1),
             entry_price=60000,
             stop_loss=57000,
-            take_profit=66000
+            take_profit=66000,
         )
 
         initial_capital = self.engine.capital
 
         # Close with profit
         trade = self.engine.close_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 15),
             exit_price=65000,
-            reason='Take profit'
+            reason="Take profit",
         )
 
         assert trade is not None
         assert trade.pnl > 0
         assert trade.exit_price == 65000
-        assert 'VCB' not in self.engine.positions
+        assert "VCB" not in self.engine.positions
         assert len(self.engine.completed_trades) == 1
         assert self.engine.capital > initial_capital
 
@@ -123,19 +124,19 @@ class TestBacktestEngine:
 
         # Open position
         self.engine.open_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 1),
             entry_price=60000,
             stop_loss=57000,
-            take_profit=66000
+            take_profit=66000,
         )
 
         # Close with loss
         trade = self.engine.close_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 15),
             exit_price=56000,
-            reason='Stop loss'
+            reason="Stop loss",
         )
 
         assert trade is not None
@@ -146,20 +147,20 @@ class TestBacktestEngine:
     def test_trade_pnl_calculation(self):
         """Test PnL calculation includes commission and slippage"""
         trade = Trade(
-            symbol='VCB',
+            symbol="VCB",
             entry_date=datetime(2024, 1, 1),
             entry_price=60000,
             shares=100,
             stop_loss=57000,
-            take_profit=66000
+            take_profit=66000,
         )
 
         trade.close_trade(
             exit_date=datetime(2024, 1, 15),
             exit_price=65000,
-            exit_reason='Take profit',
+            exit_reason="Take profit",
             commission_rate=0.0015,
-            slippage=0.001
+            slippage=0.001,
         )
 
         # Verify commission was charged
@@ -176,44 +177,42 @@ class TestBacktestEngine:
         """Test equity curve updates correctly"""
         # Open position
         self.engine.open_position(
-            symbol='VCB',
+            symbol="VCB",
             date=datetime(2024, 1, 1),
             entry_price=60000,
             stop_loss=57000,
-            take_profit=66000
+            take_profit=66000,
         )
 
         # Update equity with current prices
         self.engine.update_equity(
-            date=datetime(2024, 1, 5),
-            current_prices={'VCB': 62000}
+            date=datetime(2024, 1, 5), current_prices={"VCB": 62000}
         )
 
         assert len(self.engine.equity_curve) == 1
-        assert self.engine.equity_curve[0]['equity'] > self.config.initial_capital
+        assert self.engine.equity_curve[0]["equity"] > self.config.initial_capital
 
     def test_calculate_results(self):
         """Test results calculation"""
         # Simulate some trades
         for i in range(3):
             self.engine.open_position(
-                symbol=f'SYM{i}',
+                symbol=f"SYM{i}",
                 date=datetime(2024, 1, 1),
                 entry_price=50000,
                 stop_loss=47000,
-                take_profit=55000
+                take_profit=55000,
             )
 
             self.engine.update_equity(
-                date=datetime(2024, 1, 5),
-                current_prices={f'SYM{i}': 52000}
+                date=datetime(2024, 1, 5), current_prices={f"SYM{i}": 52000}
             )
 
             self.engine.close_position(
-                symbol=f'SYM{i}',
+                symbol=f"SYM{i}",
                 date=datetime(2024, 1, 10),
                 exit_price=52000,
-                reason='Test close'
+                reason="Test close",
             )
 
         results = self.engine.calculate_results()
@@ -236,5 +235,5 @@ class TestStrategyRunner:
         assert runner.exit_logic is not None
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

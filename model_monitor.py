@@ -1,4 +1,5 @@
 """Model versioning and drift monitoring utilities."""
+
 import json
 import logging
 import os
@@ -26,7 +27,9 @@ class ModelMonitor:
                     data = json.load(f)
                     if isinstance(data, dict):
                         return data
-            except Exception as exc:  # pragma: no cover - corrupted file handled gracefully
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - corrupted file handled gracefully
                 logger.warning(f"Không thể đọc lịch sử model: {exc}")
         return {}
 
@@ -76,8 +79,7 @@ class ModelMonitor:
 
         recent = history[-(window + 1) : -1]
         recent_values = [
-            self._extract_metric(item.get("metrics", {}), metric_key)
-            for item in recent
+            self._extract_metric(item.get("metrics", {}), metric_key) for item in recent
         ]
         recent_values = [val for val in recent_values if val is not None]
         if not recent_values:
