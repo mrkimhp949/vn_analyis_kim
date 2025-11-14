@@ -123,13 +123,14 @@ try:
         breakeven_activation=0.10  # 10% profit activates breakeven
     )
     print("✅ Import enhanced_exit_strategy thành công (với dynamic trailing & breakeven)")
-except ImportError as e:
+except (ImportError, TypeError) as e:
+    # TypeError can happen if __init__ signatures don't match (e.g., cached .pyc files)
     print(f"⚠️ Enhanced exit strategy không khả dụng: {e}, dùng improved...")
     try:
         from improved_exit_logic import ImprovedExitStrategy
         exit_strategy = ImprovedExitStrategy()
         print("✅ Import improved_exit_logic thành công (fallback)")
-    except ImportError as e2:
+    except (ImportError, TypeError) as e2:
         print(f"❌ Lỗi import exit strategy: {e2}")
         exit_strategy = None
 
