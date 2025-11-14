@@ -5,6 +5,87 @@ import pandas as pd
 import numpy as np
 
 
+# Sector mapping for Vietnamese stocks
+SECTOR_MAP = {
+    # Banking
+    'VCB': 'BANKING', 'TCB': 'BANKING', 'CTG': 'BANKING', 'BID': 'BANKING',
+    'MBB': 'BANKING', 'VPB': 'BANKING', 'ACB': 'BANKING', 'STB': 'BANKING',
+    'HDB': 'BANKING', 'TPB': 'BANKING', 'SHB': 'BANKING', 'VIB': 'BANKING',
+    'LPB': 'BANKING', 'EIB': 'BANKING', 'MSB': 'BANKING', 'OCB': 'BANKING',
+    'BAB': 'BANKING', 'BVB': 'BANKING', 'NVB': 'BANKING', 'PGB': 'BANKING',
+    'VAB': 'BANKING', 'ABB': 'BANKING', 'KLB': 'BANKING', 'NAB': 'BANKING',
+    'SGB': 'BANKING', 'VBB': 'BANKING',
+    
+    # Securities
+    'SSI': 'SECURITIES', 'VND': 'SECURITIES', 'HCM': 'SECURITIES', 'VCI': 'SECURITIES',
+    'FTS': 'SECURITIES', 'MBS': 'SECURITIES', 'VIX': 'SECURITIES', 'AGR': 'SECURITIES',
+    'BSI': 'SECURITIES', 'CTS': 'SECURITIES', 'SHS': 'SECURITIES', 'ORS': 'SECURITIES',
+    
+    # Real Estate
+    'VHM': 'REAL_ESTATE', 'VIC': 'REAL_ESTATE', 'NVL': 'REAL_ESTATE', 'VRE': 'REAL_ESTATE',
+    'DXG': 'REAL_ESTATE', 'PDR': 'REAL_ESTATE', 'KDH': 'REAL_ESTATE', 'DIG': 'REAL_ESTATE',
+    'HDG': 'REAL_ESTATE', 'NLG': 'REAL_ESTATE', 'KBC': 'REAL_ESTATE', 'CEO': 'REAL_ESTATE',
+    'HDC': 'REAL_ESTATE', 'SCR': 'REAL_ESTATE', 'IDC': 'REAL_ESTATE', 'LDG': 'REAL_ESTATE',
+    'TCH': 'REAL_ESTATE', 'DXS': 'REAL_ESTATE', 'CII': 'REAL_ESTATE', 'IJC': 'REAL_ESTATE',
+    
+    # Technology
+    'FPT': 'TECHNOLOGY', 'CMG': 'TECHNOLOGY', 'VGI': 'TECHNOLOGY', 'SAM': 'TECHNOLOGY',
+    'ELC': 'TECHNOLOGY', 'ITD': 'TECHNOLOGY', 'CMT': 'TECHNOLOGY', 'SGT': 'TECHNOLOGY',
+    
+    # Retail
+    'MWG': 'RETAIL', 'PNJ': 'RETAIL', 'FRT': 'RETAIL', 'DGW': 'RETAIL',
+    'VGC': 'RETAIL', 'SCS': 'RETAIL', 'PET': 'RETAIL', 'HAX': 'RETAIL',
+    
+    # Food & Beverage
+    'VNM': 'FOOD_BEVERAGE', 'MSN': 'FOOD_BEVERAGE', 'SAB': 'FOOD_BEVERAGE', 'VHC': 'FOOD_BEVERAGE',
+    'MCH': 'FOOD_BEVERAGE', 'KDC': 'FOOD_BEVERAGE', 'QNS': 'FOOD_BEVERAGE', 'SBT': 'FOOD_BEVERAGE',
+    'VCF': 'FOOD_BEVERAGE', 'BAF': 'FOOD_BEVERAGE', 'ANV': 'FOOD_BEVERAGE', 'MML': 'FOOD_BEVERAGE',
+    
+    # Oil & Gas
+    'GAS': 'OIL_GAS', 'PLX': 'OIL_GAS', 'PVS': 'OIL_GAS', 'PVD': 'OIL_GAS',
+    'PVT': 'OIL_GAS', 'PVC': 'OIL_GAS', 'PVG': 'OIL_GAS', 'BSR': 'OIL_GAS',
+    'POW': 'OIL_GAS', 'PVB': 'OIL_GAS',
+    
+    # Steel & Materials
+    'HPG': 'STEEL_MATERIALS', 'HSG': 'STEEL_MATERIALS', 'NKG': 'STEEL_MATERIALS', 'TLH': 'STEEL_MATERIALS',
+    'VGS': 'STEEL_MATERIALS', 'POM': 'STEEL_MATERIALS', 'DTL': 'STEEL_MATERIALS', 'VIS': 'STEEL_MATERIALS',
+    'SMC': 'STEEL_MATERIALS', 'TNG': 'STEEL_MATERIALS', 'VCS': 'STEEL_MATERIALS',
+    
+    # Construction
+    'CTD': 'CONSTRUCTION', 'HBC': 'CONSTRUCTION', 'PC1': 'CONSTRUCTION', 'LCG': 'CONSTRUCTION',
+    'HT1': 'CONSTRUCTION', 'VCG': 'CONSTRUCTION', 'FCN': 'CONSTRUCTION', 'C32': 'CONSTRUCTION',
+    'HU1': 'CONSTRUCTION', 'CTI': 'CONSTRUCTION', 'VC3': 'CONSTRUCTION',
+    
+    # Utilities
+    'POW': 'UTILITIES', 'NT2': 'UTILITIES', 'GEG': 'UTILITIES', 'REE': 'UTILITIES',
+    'PC1': 'UTILITIES', 'VSH': 'UTILITIES', 'BWE': 'UTILITIES',
+    
+    # Healthcare
+    'DHG': 'HEALTHCARE', 'DMC': 'HEALTHCARE', 'IMP': 'HEALTHCARE', 'DCL': 'HEALTHCARE',
+    'DBD': 'HEALTHCARE', 'TNH': 'HEALTHCARE', 'PME': 'HEALTHCARE', 'DP3': 'HEALTHCARE',
+    
+    # Transportation
+    'HVN': 'TRANSPORTATION', 'VJC': 'TRANSPORTATION', 'GMD': 'TRANSPORTATION', 'HAH': 'TRANSPORTATION',
+    'VOS': 'TRANSPORTATION', 'VSC': 'TRANSPORTATION', 'PVT': 'TRANSPORTATION',
+    
+    # Agriculture
+    'HAG': 'AGRICULTURE', 'HNG': 'AGRICULTURE', 'SBT': 'AGRICULTURE', 'BAF': 'AGRICULTURE',
+    'NSC': 'AGRICULTURE', 'LSS': 'AGRICULTURE', 'HVG': 'AGRICULTURE',
+    
+    # Textile
+    'MSH': 'TEXTILE', 'TNG': 'TEXTILE', 'STK': 'TEXTILE', 'VGT': 'TEXTILE',
+    'TCM': 'TEXTILE', 'GIL': 'TEXTILE',
+    
+    # Chemicals
+    'DGC': 'CHEMICALS', 'DPM': 'CHEMICALS', 'DCM': 'CHEMICALS', 'BFC': 'CHEMICALS',
+    'CSV': 'CHEMICALS', 'LAS': 'CHEMICALS',
+    
+    # Insurance
+    'BVH': 'INSURANCE', 'BMI': 'INSURANCE', 'PVI': 'INSURANCE', 'PTI': 'INSURANCE',
+    'MIG': 'INSURANCE', 'VNR': 'INSURANCE',
+}
+
+
 def calculate_sector_exposure(current_holdings: Dict[str, Dict]) -> Dict[str, float]:
     """Tính exposure theo sector"""
     exposure = defaultdict(float)

@@ -129,7 +129,7 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
         })
         
         # Convert time to datetime
-        df['time'] = pd.to_datetime(df['time'])
+        df['time'] = pd.to_datetime(df['time'], format='mixed', errors='coerce')
         
         # Select required columns
         df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
