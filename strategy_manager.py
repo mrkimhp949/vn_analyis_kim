@@ -8,7 +8,8 @@ from typing import Dict, Any
 
 # Import các lớp chiến lược
 from improved_entry_logic import ImprovedEntryLogic
-from position_sizing_enhanced import EnhancedPositionSizer, ConservativePositionSizer
+from position_sizing_enhanced import EnhancedPositionSizer
+from improved_position_sizing import ConservativePositionSizer
 from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
 from trading_config import get_config
 
@@ -106,24 +107,39 @@ class StrategyManager:
         regime = (market_regime or {}).get('regime', 'UNKNOWN').upper()
         logging.info(f"⚙️ Áp dụng điều chỉnh chiến lược cho thị trường: {regime}")
 
-        # DYNAMIC THRESHOLD based on market regime (đã cập nhật theo FIX_NOW.md)
+        # DYNAMIC THRESHOLD based on market regime
         if regime == 'BULL':
             self.entry_logic.min_confidence = 50
             self.entry_logic.min_risk_reward = 1.5
-            self.position_sizer.max_total_exposure = 0.70
+            if hasattr(self.position_sizer, 'max_total_exposure'):
+                self.position_sizer.max_total_exposure = 0.70
         elif regime == 'BEAR':
             self.entry_logic.min_confidence = 65
             self.entry_logic.min_risk_reward = 2.0
-            self.position_sizer.max_total_exposure = 0.30
+            if hasattr(self.position_sizer, 'max_total_exposure'):
+                self.position_sizer.max_total_exposure = 0.30
         else:  # SIDEWAYS / UNKNOWN
             self.entry_logic.min_confidence = 55
             self.entry_logic.min_risk_reward = 1.8
-            self.position_sizer.max_total_exposure = 0.50
+            if hasattr(self.position_sizer, 'max_total_exposure'):
+                self.position_sizer.max_total_exposure = 0.50
 
         logging.info(
             f"   -> min_conf={self.entry_logic.min_confidence}%, "
             f"R:R>={self.entry_logic.min_risk_reward}, "
-            f"max_exposure={self.position_sizer.max_total_exposure*100:.0f}%"
+            f"max_exposure={getattr(self.position_sizer, 'max_total_exposure', 0.0)*100:.0f}%"
         )
 
-```
+# Singleton instance
+_strategy_manager = None
+
+def get_strategy_manager() -> "StrategyManager":
+    """
+    Trả về instance singleton của StrategyManager.
+    Khởi tạo nếu chưa tồn tại.
+    """
+    global _strategy_manager
+    if _strategy_manager is None:
+        logging.info("Initializing StrategyManager singleton...")
+        _strategy_manager = StrategyManager()
+    return _strategy_manager

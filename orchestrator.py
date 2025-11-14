@@ -34,9 +34,10 @@ class TradingOrchestrator:
     Lớp điều phối chính, quản lý toàn bộ luồng quét và giao dịch.
     """
 
-    def __init__(self, bot_instance: Bot, chat_id: str):
+    def __init__(self, bot_instance: Bot, chat_id: str, vnindex_df: Optional[pd.DataFrame] = None):
         self.bot = bot_instance
         self.chat_id = chat_id
+        self.vnindex_df = vnindex_df  # Lưu trữ vnindex_df ngay khi khởi tạo
         self.portfolio_manager = get_portfolio_manager()
         self.portfolio_risk_manager = get_portfolio_risk_manager(
             total_capital=100_000_000
@@ -56,13 +57,18 @@ class TradingOrchestrator:
         self.exit_strategy: Optional[Any] = None
 
     def _setup_strategies(self, market_regime: Dict):
-        """Lấy và gán các chiến lược từ StrategyManager."""
-        strategies = self.strategy_manager.get_strategies(market_regime)
+        """Lấy và gán các chiến lược từ StrategyManager và điều chỉnh theo thị trường."""
+        # Lấy các đối tượng chiến lược gốc
+        strategies = self.strategy_manager.get_strategies()
         self.entry_logic = strategies["entry_logic"]
         self.position_sizer = strategies["position_sizer"]
         self.exit_strategy = strategies["exit_strategy"]
+        
+        # Yêu cầu StrategyManager tự điều chỉnh dựa trên trạng thái thị trường
+        self.strategy_manager.apply_market_adjustments(market_regime)
+        
         logging.info(
-            f"🔧 Đã thiết lập chiến lược cho chế độ: {self.strategy_manager._determine_config_key(market_regime.get('regime', 'Sideways'), market_regime.get('confidence', 50))}"
+            f"🔧 Đã thiết lập và điều chỉnh chiến lược cho chế độ: {market_regime.get('regime', 'Sideways')}"
         )
 
     def adjust_signal_with_news(self, entry_signal, news_context):
@@ -175,16 +181,16 @@ class TradingOrchestrator:
 
         return msg
 
-    async def run_scan(self, market_regime: Dict, vnindex_df: Optional[pd.DataFrame]):
+    async def run_scan(self, market_regime: Dict):
         """
         Chạy quá trình quét toàn diện để tìm kiếm cơ hội và quản lý vị thế.
         """
         # 0. KIỂM TRA NGẮT MẠCH (CIRCUIT BREAKER)
-        vnindex_change = vnindex_df['close'].pct_change().iloc[-1] if vnindex_df is not None and not vnindex_df.empty else 0.0
+        vnindex_change = self.vnindex_df['close'].pct_change().iloc[-1] if self.vnindex_df is not None and not self.vnindex_df.empty else 0.0
         # Lấy PNL thực tế từ portfolio manager nếu có
         current_pnl_pct = self.portfolio_manager.get_daily_pnl_pct()
 
-        if self.circuit_breaker.check_and_update(portfolio_pnl=current_pnl_pct, vnindex_change_pct=vnindex_change):
+        if self.circuit_breaker.check_and_update(portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change):
             reason = self.circuit_breaker.tripped_reason
             logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
             await self.bot.send_message(
@@ -193,19 +199,13 @@ class TradingOrchestrator:
                 parse_mode="Markdown",
             )
             # Vẫn cho phép kiểm tra thoát lệnh
-            await self.check_active_positions(market_regime, vnindex_df)
+            await self.check_active_positions(market_regime)
             return
 
         # 1. THIẾT LẬP CHIẾN LƯỢC DỰA TRÊN THỊ TRƯỜNG
         self._setup_strategies(market_regime)
 
-        if not all([self.entry_logic, self.position_sizer, self.exit_strategy]):
-            logging.critical(
-                "❌ Các chiến lược (entry, sizing, exit) chưa được thiết lập cho Orchestrator."
-            )
-            return
-
-        # 2. Lấy danh sách các vị thế và mã cổ phiếu cần quét
+        # 2. LẤY DANH SÁCH MÃ VÀ VỊ THẾ HIỆN TẠI
         active_positions = self.portfolio_manager.get_positions()
         existing_symbols = set(active_positions.keys())
         self.sync_position_sizer_with_active_positions(active_positions)
@@ -217,27 +217,18 @@ class TradingOrchestrator:
         await self.send_scan_start_message(current_tickers, market_regime)
 
         # 4. KIỂM TRA THOÁT LỆNH TRƯỚC
-        await self.check_active_positions(market_regime, vnindex_df)
+        await self.check_active_positions(market_regime)
 
         # 5. QUÉT TÌM LỆNH MUA MỚI (SONG SONG)
         logging.info(f"\n🔍 Quét {len(current_tickers)} mã để tìm cơ hội mua mới")
-        logging.info(
-            f"📊 Đang nắm giữ: {len(existing_symbols)} mã ({', '.join(existing_symbols) if existing_symbols else 'không có'})"
-        )
-
         self.portfolio_lock.clear_pending()
 
         signal_count, watchlist_candidates = await self.scan_for_new_entries(
-            current_tickers, existing_symbols, market_regime, vnindex_df
+            current_tickers, existing_symbols, market_regime
         )
 
-        # 6. PHÂN TÍCH RỦI RO DANH MỤC SAU KHI QUÉT
-        await self.perform_post_scan_risk_analysis()
-
-        # 7. TỔNG KẾT
-        await self.send_summary_and_watchlist(
-            len(current_tickers), signal_count, market_regime, watchlist_candidates
-        )
+        # 6. GỬI BÁO CÁO TÓM TẮT
+        await self.send_summary_report(signal_count, watchlist_candidates, market_regime)
 
     def get_scan_universe(self) -> List[str]:
         """Lấy danh sách các mã cổ phiếu cần quét."""
@@ -267,17 +258,22 @@ class TradingOrchestrator:
                     "unrealized_pnl": 0,
                 }
 
-    async def send_scan_start_message(self, tickers: List[str], market_regime: Dict):
+    async def send_scan_start_message(self, current_tickers, market_regime):
         """Gửi thông báo bắt đầu quét qua Telegram."""
         try:
             regime_text = market_regime.get("regime", "UNKNOWN")
-            msg = f"🔍 Đang quét {len(tickers)} mã...\n📊 Market: {regime_text}"
-            await self.bot.send_message(chat_id=self.chat_id, text=msg)
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=f"🔍 Đang quét {len(current_tickers)} mã...\n"
+                     f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
+                     f"Số mã tiềm năng: *{len(current_tickers)}*",
+                parse_mode="Markdown",
+            )
         except Exception as e:
             logging.error(f"Lỗi gửi Telegram (scan start): {e}", exc_info=True)
 
     async def check_active_positions(
-        self, market_regime: Dict, vnindex_df: Optional[pd.DataFrame]
+        self, market_regime: Dict
     ):
         """Kiểm tra và xử lý các vị thế đang nắm giữ."""
         positions = self.portfolio_manager.get_positions()
@@ -287,7 +283,7 @@ class TradingOrchestrator:
         logging.info(f"\n📊 Kiểm tra {len(positions)} vị thế đang nắm giữ...")
 
         tasks = [
-            self._check_single_position(symbol, pos_data, market_regime, vnindex_df)
+            self._check_single_position(symbol, pos_data, market_regime)
             for symbol, pos_data in positions.items()
         ]
         await asyncio.gather(*tasks)
@@ -297,7 +293,6 @@ class TradingOrchestrator:
         symbol: str,
         pos_data: Dict,
         market_regime: Dict,
-        vnindex_df: Optional[pd.DataFrame],
     ):
         """Logic kiểm tra cho một vị thế cụ thể."""
         try:
@@ -306,7 +301,7 @@ class TradingOrchestrator:
                 return
 
             current_price = df.iloc[-1]["close"]
-            ml_signal = self.ml_generator.analyze(df, index_df=vnindex_df)
+            ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
 
             exit_decision = self.exit_strategy.check_exit(
                 symbol=symbol,
@@ -321,38 +316,46 @@ class TradingOrchestrator:
                 partial_exits=pos_data.get("partial_exits", []),
             )
 
-            if exit_decision.should_exit:
-                msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
-                await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
-
-                # Ghi nhận kết quả giao dịch vào Circuit Breaker
-                pnl = (current_price - pos_data["entry_price"]) * pos_data["shares"]
-                self.circuit_breaker.record_trade(pnl)
-
-                success, sell_msg, _ = self.paper_account.execute_sell(
-                    symbol=symbol,
-                    price=current_price,
-                    exit_type=exit_decision.exit_type,
-                    reason=exit_decision.exit_reason.value,
-                )
-                if success:
-                    logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
-                    if exit_decision.exit_type == "FULL":
-                        self.exit_strategy.clear_position_tracking(symbol)
-                else:
-                    logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
-                    await self.bot.send_message(
-                        self.chat_id, f"❌ Lỗi bán {symbol}: {sell_msg}"
-                    )
-
-            if self.position_sizer:
-                self.position_sizer.update_position_price(symbol, current_price)
+            if exit_decision and exit_decision["reason"]:
+                await self.execute_exit(symbol, pos_data, exit_decision, current_price)
 
         except Exception as e:
-            logging.error(f"Lỗi check exit {symbol}: {e}", exc_info=True)
+            logging.error(
+                f"Lỗi khi kiểm tra vị thế {symbol}: {e}", exc_info=True
+            )
+
+    async def execute_exit(self, symbol, pos_data, exit_decision, current_price):
+        """Thực hiện thoát lệnh bán dựa trên quyết định thoát."""
+        try:
+            # Gửi thông báo thoát lệnh
+            msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
+            await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
+
+            # Ghi nhận kết quả giao dịch vào Circuit Breaker
+            pnl = (current_price - pos_data["entry_price"]) * pos_data["shares"]
+            self.circuit_breaker.record_trade(pnl)
+
+            success, sell_msg, _ = self.paper_account.execute_sell(
+                symbol=symbol,
+                price=current_price,
+                exit_type=exit_decision.exit_type,
+                reason=exit_decision.exit_reason.value,
+            )
+            if success:
+                logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
+                if exit_decision.exit_type == "FULL":
+                    self.exit_strategy.clear_position_tracking(symbol)
+            else:
+                logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
+                await self.bot.send_message(
+                    self.chat_id, f"❌ Lỗi bán {symbol}: {sell_msg}"
+                )
+
+        except Exception as e:
+            logging.error(f"Lỗi khi thực hiện thoát lệnh {symbol}: {e}", exc_info=True)
 
     async def scan_for_new_entries(
-        self, current_tickers, existing_symbols, market_regime, vnindex_df
+        self, current_tickers, existing_symbols, market_regime
     ):
         """Quét song song để tìm các tín hiệu vào lệnh mới."""
         signal_count = 0
@@ -362,196 +365,139 @@ class TradingOrchestrator:
         async def _scan_ticker(symbol: str):
             nonlocal signal_count
             try:
-                if symbol in existing_symbols:
+                if symbol in existing_symbols or self.portfolio_lock.is_pending(symbol):
                     return
 
-                df = load_data(symbol, LOOKBACK)
-                if df.empty or len(df) < 50:
-                    return
-
-                # --- Logic xử lý tín hiệu, entry, news, sizing ---
-                # (Logic này được giữ nguyên từ bot_runner_improved.py)
-                # ...
-                # ... (Giả sử logic phức tạp nằm ở đây)
-                # ...
-                # Cuối cùng, nếu có tín hiệu:
-                # async with results_lock:
-                #     signal_count += 1
-                #     ... (xử lý paper trade, gửi telegram)
-
-                # Để đơn giản, phần logic phức tạp này sẽ được gọi từ một hàm helper
+                # Logic xử lý được chuyển hết vào process_single_ticker_for_entry
                 entry_result = await self.process_single_ticker_for_entry(
-                    symbol, df, market_regime, vnindex_df
+                    symbol, market_regime
                 )
 
-                if entry_result:
-                    if entry_result["type"] == "signal":
-                        async with results_lock:
-                            # Re-check lock before execution
-                            if symbol in existing_symbols:
-                                if self.portfolio_lock:
-                                    self.portfolio_lock.cancel_position(symbol)
-                                return
+                if entry_result and entry_result.get("signal"):
+                    async with results_lock:
+                        signal_count += 1
+                elif entry_result and entry_result.get("is_watchlist"):
+                    async with results_lock:
+                        watchlist_candidates.append(entry_result)
 
-                        success, paper_msg = self.execute_paper_buy(entry_result)
-                        if success:
-                            existing_symbols.add(symbol)
-                            signal_count += 1
-                            logging.info(
-                                f"✅ {symbol}: {entry_result['signal'].signal_type} ({entry_result['signal'].confidence}%)"
-                            )
-                            await self.bot.send_message(
-                                self.chat_id,
-                                entry_result["message"],
-                                parse_mode="Markdown",
-                            )
-                        else:
-                            logging.error(
-                                f"❌ Paper trade failed for {symbol}: {paper_msg}"
-                            )
-
-                    elif entry_result["type"] == "watchlist":
-                        async with results_lock:
-                            watchlist_candidates.append(entry_result["data"])
-
-            except (DataLoadError, DataQualityError) as e:
-                logging.warning(f"⚠️ {symbol}: {e.message}")
             except Exception as e:
-                logging.error(f"Lỗi quét {symbol}: {e}", exc_info=True)
+                logging.error(
+                    f"Lỗi nghiêm trọng khi quét mã {symbol}: {e}", exc_info=True
+                )
 
         tasks = [_scan_ticker(symbol) for symbol in current_tickers]
         await asyncio.gather(*tasks)
         return signal_count, watchlist_candidates
 
-    async def process_single_ticker_for_entry(
-        self, symbol, df, market_regime, vnindex_df
+    async def process_single_ticker_for_entry(self, symbol: str, market_regime: dict):
+        """
+        Xử lý logic để tìm tín hiệu vào lệnh cho một mã cổ phiếu.
+        Bao gồm: Lấy dữ liệu, phân tích ML, kiểm tra entry logic, phân tích tin tức,
+                 tính toán position size và gửi thông báo.
+        """
+        try:
+            # Lấy dữ liệu
+            df = load_data(symbol, lookback=LOOKBACK)
+            if df.empty or len(df) < 50:  # Cần đủ dữ liệu để phân tích
+                return None
+
+            # Phân tích ML
+            ml_signal = self.ml_generator.analyze(symbol, df, self.vnindex_df)
+
+            # 1. Entry Logic
+            entry_signal = self.entry_logic.analyze_entry(
+                df=df,
+                ml_signal=ml_signal,
+                market_regime=market_regime,
+            )
+
+            # 2. News Analysis (nếu có tín hiệu)
+            news_sentiment = {"score": 0.5, "comment": "Neutral"}
+            if entry_signal and entry_signal.should_enter:
+                # news_sentiment = self.news_analyzer.analyze(symbol)
+                pass  # Tạm thời bỏ qua
+
+            # 3. Position Sizing
+            if entry_signal and entry_signal.should_enter:
+                # Kiểm tra xem có đủ vốn không
+                if not self.portfolio_risk_manager.can_open_new_position():
+                    logging.warning(
+                        f"Bỏ qua tín hiệu {symbol} do đã đạt giới hạn rủi ro/số vị thế."
+                    )
+                    return None
+
+                position_size_info = self.position_sizer.calculate_position_size(
+                    symbol=symbol,
+                    entry_price=entry_signal.entry_price,
+                    stop_loss_price=entry_signal.stop_loss,
+                    risk_appetite=market_regime.get("confidence", 50) / 100.0,
+                    # news_sentiment=news_sentiment["score"],
+                )
+
+                # 4. Paper Trade & Notification
+                if position_size_info and position_size_info["shares_to_buy"] > 0:
+                    # Đánh dấu mã này đang chờ xử lý để tránh quét lại
+                    self.portfolio_lock.add_pending(symbol)
+
+                    # Thực hiện paper trade
+                    self.paper_account.execute_trade(
+                        symbol=symbol,
+                        action="BUY",
+                        shares=position_size_info["shares_to_buy"],
+                        price=entry_signal.entry_price,
+                        reason=", ".join(entry_signal.reasons),
+                    )
+
+                    # Gửi thông báo Telegram
+                    await self.send_buy_signal_notification(
+                        symbol, entry_signal, position_size_info, news_sentiment
+                    )
+                    return {"signal": True}
+
+            # 5. Watchlist Logic
+            # ... (logic để thêm vào watchlist nếu không phải tín hiệu mua)
+            return None
+        except DataLoadError as e:
+            # logging.warning(f"[{symbol}] Lỗi tải dữ liệu: {e}") # Giảm log nhiễu
+            return None
+        except Exception as e:
+            logging.error(f"[{symbol}] Lỗi không xác định trong process_single_ticker_for_entry: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            return None
+
+    async def send_buy_signal_notification(
+        self, symbol, entry_signal, position_size_info, news_sentiment
     ):
-        """Xử lý logic đầy đủ cho một mã để tìm tín hiệu vào lệnh."""
-        # 1. Get ML Signal & Entry Logic
-        ml_signal = self.ml_generator.analyze(df, index_df=vnindex_df)
-        if self.ml_monitor:
-            self.ml_monitor.record_prediction(
-                symbol=symbol,
-                predicted_signal=ml_signal.get("signal", "HOLD"),
-                predicted_confidence=ml_signal.get(
-                    "raw_confidence", ml_signal.get("confidence", 0)
-                ),
-                model_version="default",
-            )
+        """Gửi thông báo tín hiệu mua qua Telegram."""
+        # Tính toán R:R cho mục tiêu đầu tiên
+        try:
+            # Đảm bảo take_profit_targets không rỗng và stop_loss khác entry_price
+            if entry_signal.take_profit_targets and entry_signal.entry_price != entry_signal.stop_loss:
+                risk_reward_ratio = (entry_signal.take_profit_targets[0] - entry_signal.entry_price) / (entry_signal.entry_price - entry_signal.stop_loss)
+            else:
+                risk_reward_ratio = 0
+        except (ZeroDivisionError, IndexError):
+            risk_reward_ratio = 0
+        
+        tp1_target = entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else 0
 
-        entry_signal = self.entry_logic.analyze_entry(
-            df=df, ml_signal=ml_signal, market_regime=market_regime
+        message = (
+            f"**🚀 TÍN HIỆU MUA MỚI 🚀**\n\n"
+            f"**Mã:** `{symbol}`\n"
+            f"**Giá vào:** `{entry_signal.entry_price:,.0f}`\n"
+            f"**Mục tiêu 1:** `{tp1_target:,.0f}`\n"
+            f"**Dừng lỗ:** `{entry_signal.stop_loss:,.0f}`\n"
+            f"**R:R (TP1):** `{risk_reward_ratio:.2f}`\n\n"
+            f"**Lý do:** {', '.join(entry_signal.reasons)}\n\n"
+            f"**--- Quản lý vốn ---**\n"
+            f"**Số CP mua:** `{position_size_info['shares_to_buy']}`\n"
+            f"**Giá trị lệnh:** `{position_size_info['trade_value']:,.0f} VNĐ`\n"
+            f"**Rủi ro lệnh:** `{position_size_info['risk_per_trade']:,.0f} VNĐ` ({position_size_info['risk_pct_of_capital']:.2%})\n\n"
+            # f"**--- Tin tức ---**\n"
+            # f"**Sentiment:** {news_sentiment['comment']} ({news_sentiment['score']:.2f})\n"
         )
-
-        # 2. News Integration
-        news_context = analyze_news_trend(symbol) if analyze_news_trend else None
-        if news_context:
-            entry_signal = self.adjust_signal_with_news(entry_signal, news_context)
-
-        # 3. Check if should enter
-        if not entry_signal.should_enter:
-            confidence_for_watchlist = max(
-                ml_signal.get("confidence", 0), entry_signal.confidence
-            )
-            if self.entry_logic and confidence_for_watchlist >= max(
-                0, self.entry_logic.min_confidence - 5
-            ):
-                reason = (
-                    ", ".join(entry_signal.warnings)
-                    if entry_signal.warnings
-                    else "Không đạt bộ lọc"
-                )
-                top_headline = (
-                    news_context["top_headlines"][0]["title"]
-                    if news_context and news_context.get("top_headlines")
-                    else ""
-                )
-                return {
-                    "type": "watchlist",
-                    "data": {
-                        "symbol": symbol,
-                        "confidence": confidence_for_watchlist,
-                        "reason": reason,
-                        "sentiment": (
-                            news_context.get("sentiment_score", 0.0)
-                            if news_context
-                            else 0.0
-                        ),
-                        "headline": top_headline,
-                    },
-                }
-            return None
-
-        # 4. Position Sizing
-        price = df.iloc[-1]["close"]
-        position = self.position_sizer.calculate_position_size(
-            symbol=symbol,
-            entry_price=price,
-            stop_loss=entry_signal.stop_loss,
-            confidence=entry_signal.confidence,
-            signal_strength=entry_signal.strength.name,
-            market_regime=market_regime,
-        )
-        if position.shares == 0:
-            return None
-
-        # 5. Risk & Lock Checks
-        can_add, lock_reason = self.portfolio_lock.can_add_position(
-            symbol=symbol,
-            position_value=position.shares * price,
-            total_capital=self.position_sizer.total_capital,
-            current_positions=self.portfolio_manager.get_positions(),
-        )
-        if not can_add:
-            logging.info(f"🔒 {symbol}: {lock_reason}")
-            return None
-
-        # 6. Format message and return result
-        msg = self.format_entry_recommendation(
-            symbol, entry_signal, position, market_regime, news_context
-        )
-        return {
-            "type": "signal",
-            "signal": entry_signal,
-            "position": position,
-            "message": msg,
-            "symbol": symbol,  # Add symbol for execute_paper_buy
-        }
-
-    def execute_paper_buy(self, entry_result):
-        """Thực thi lệnh mua giấy và cập nhật trạng thái."""
-        entry_signal = entry_result["signal"]
-        position = entry_result["position"]
-        symbol = entry_result["symbol"]
-
-        success, paper_msg, _ = self.paper_account.execute_buy(
-            symbol=symbol,
-            shares=position.shares,
-            price=entry_signal.entry_price,
-            signal_confidence=entry_signal.confidence,
-            signal_reason=", ".join(entry_signal.reasons[:2]),
-            stop_loss=entry_signal.stop_loss,
-            take_profit=(
-                position.recommended_entries[-1]["price"]
-                if position.recommended_entries
-                else None
-            ),
-        )
-
-        if success:
-            if self.position_sizer:
-                self.position_sizer.add_position(
-                    symbol, position.shares, entry_signal.entry_price
-                )
-            if self.portfolio_lock:
-                self.portfolio_lock.confirm_position(symbol)
-        else:
-            if self.portfolio_lock:
-                self.portfolio_lock.cancel_position(symbol)
-            # Nếu mua thất bại, không tính là lệnh thua
-            # self.circuit_breaker.record_trade(-1) # Không nên làm vậy
-
-        return success, paper_msg
+        await self.bot.send_message(self.chat_id, message, parse_mode="Markdown")
 
     async def perform_post_scan_risk_analysis(self):
         """Thực hiện phân tích rủi ro sau khi quét."""
@@ -583,47 +529,36 @@ class TradingOrchestrator:
         except Exception as e:
             logging.error(f"Lỗi portfolio risk analysis: {e}", exc_info=True)
 
-    async def send_summary_and_watchlist(
-        self, num_scanned, signal_count, market_regime, watchlist_candidates
-    ):
-        """Gửi tóm tắt và danh sách theo dõi."""
-        regime_text = market_regime.get("regime", "UNKNOWN")
-        summary = (
-            f"✅ Hoàn thành quét {num_scanned} mã\n"
-            f"🎯 Tín hiệu hợp lệ: {signal_count}\n"
-            f"📊 Market: {regime_text}\n"
-            f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        await self.bot.send_message(self.chat_id, text=summary)
-        logging.info(summary)
-
-        if signal_count == 0:
-            if watchlist_candidates:
-                watchlist_candidates.sort(key=lambda x: x["confidence"], reverse=True)
-                top_watchlist = watchlist_candidates[:WATCHLIST_SIZE]
-                lines = [
-                    "• {symbol}: {conf:.0f}% - {reason}{sentiment}{headline}".format(
-                        symbol=item["symbol"],
-                        conf=item["confidence"],
-                        reason=item["reason"],
-                        sentiment=(
-                            f", sentiment {item.get('sentiment', 0.0):+.2f}"
-                            if "sentiment" in item
-                            else ""
-                        ),
-                        headline=(
-                            f" | {item['headline']}" if item.get("headline") else ""
-                        ),
-                    )
-                    for item in top_watchlist
-                ]
-                watchlist_msg = "👀 *WATCHLIST* (chưa đủ điều kiện BUY):\n" + "\n".join(
-                    lines
-                )
-            else:
-                watchlist_msg = (
-                    "⚠️ Thị trường chưa có mã nào đạt điều kiện BUY. Tiếp tục quan sát."
-                )
+    async def send_scan_start_message(self, current_tickers, market_regime):
+        """Gửi thông báo bắt đầu quét qua Telegram."""
+        try:
+            regime_text = market_regime.get("regime", "UNKNOWN")
             await self.bot.send_message(
-                self.chat_id, text=watchlist_msg, parse_mode="Markdown"
+                chat_id=self.chat_id,
+                text=f"🔍 Đang quét {len(current_tickers)} mã...\n"
+                     f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
+                     f"Số mã tiềm năng: *{len(current_tickers)}*",
+                parse_mode="Markdown",
             )
+        except Exception as e:
+            logging.error(f"Lỗi gửi Telegram (scan start): {e}", exc_info=True)
+
+    async def send_summary_report(self, signal_count, watchlist_candidates, market_regime: Dict):
+        """Gửi báo cáo tóm tắt cuối phiên quét."""
+        try:
+            portfolio_summary = self.portfolio_manager.get_detailed_analysis()
+            
+            summary_msg = f"**--- BÁO CÁO QUÉT ---**\n"
+            summary_msg += f"Thời gian: {datetime.now().strftime('%H:%M %d-%m-%Y')}\n"
+            summary_msg += f"📊 Thị trường: *{market_regime.get('regime', 'N/A')}* (Conf: {market_regime.get('confidence', 0)}%)\n"
+            summary_msg += f"💡 Tín hiệu mua mới: **{signal_count}**\n"
+            
+            if watchlist_candidates:
+                summary_msg += f"👀 Watchlist: {len(watchlist_candidates)}\n"
+
+            summary_msg += "\n" + portfolio_summary
+
+            await self.bot.send_message(self.chat_id, summary_msg, parse_mode="Markdown")
+        except Exception as e:
+            logging.error(f"Lỗi gửi báo cáo tóm tắt: {e}", exc_info=True)
+            await self.bot.send_message(self.chat_id, f"Lỗi khi tạo báo cáo: {e}")

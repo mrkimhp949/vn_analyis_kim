@@ -80,6 +80,11 @@ class PortfolioLock:
             if symbol in self._pending_positions:
                 del self._pending_positions[symbol]
 
+    def is_pending(self, symbol: str) -> bool:
+        """Check if symbol has a pending position"""
+        with self._lock:
+            return symbol in self._pending_positions
+
     def get_pending_exposure(self) -> float:
         """Lấy tổng exposure đang pending"""
         with self._lock:

@@ -6,6 +6,7 @@ All trading parameters in one place
 import os
 from dataclasses import dataclass
 from typing import Optional
+from datetime import datetime, timedelta
 from exceptions import ConfigurationError
 
 
@@ -13,6 +14,8 @@ from exceptions import ConfigurationError
 class DataConfig:
     """Data source configuration"""
 
+    end_date: str = datetime.now().strftime("%Y-%m-%d")
+    start_date: str = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
     lookback: int = 200
     min_volume: int = 100000
     use_csv_tickers: bool = True  # Load from List.csv
@@ -20,7 +23,16 @@ class DataConfig:
 
     @classmethod
     def from_env(cls):
+        end_date = os.getenv("END_DATE", datetime.now().strftime("%Y-%m-%d"))
+        start_date = os.getenv(
+            "START_DATE",
+            (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=365)).strftime(
+                "%Y-%m-%d"
+            ),
+        )
         return cls(
+            end_date=end_date,
+            start_date=start_date,
             lookback=int(os.getenv("LOOKBACK", 200)),
             min_volume=int(os.getenv("MIN_VOLUME", 100000)),
             use_csv_tickers=os.getenv("USE_CSV_TICKERS", "true").lower() == "true",
@@ -49,6 +61,10 @@ class DataConfig:
 class TradingConfig:
     """Trading strategy configuration"""
 
+    # Scanning & Universe
+    max_scan_universe: int = 40  # Max tickers to scan in detail
+    watchlist_size: int = 100  # Size of the initial watchlist
+
     # Entry logic
     min_confidence: int = 60
     min_risk_reward: float = 2.0
@@ -61,6 +77,7 @@ class TradingConfig:
     trailing_activation_percent: float = 8.0  # Activate trailing stop after 8% gain
 
     # Position sizing
+    total_capital: float = 100_000_000  # 100M VND
     max_position_size: float = 0.15  # 15% of portfolio
     min_position_size: float = 0.05  # 5% of portfolio
     max_positions: int = 10
@@ -73,6 +90,8 @@ class TradingConfig:
     @classmethod
     def from_env(cls):
         return cls(
+            max_scan_universe=int(os.getenv("MAX_SCAN_UNIVERSE", 40)),
+            watchlist_size=int(os.getenv("WATCHLIST_SIZE", 100)),
             min_confidence=int(os.getenv("MIN_CONFIDENCE", 60)),
             min_risk_reward=float(os.getenv("MIN_RISK_REWARD", 2.0)),
             support_distance_percent=float(os.getenv("SUPPORT_DISTANCE_PERCENT", 3.0)),
@@ -82,6 +101,7 @@ class TradingConfig:
             trailing_activation_percent=float(
                 os.getenv("TRAILING_ACTIVATION_PERCENT", 8.0)
             ),
+            total_capital=float(os.getenv("TOTAL_CAPITAL", 100_000_000)),
             max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.15)),
             min_position_size=float(os.getenv("MIN_POSITION_SIZE", 0.05)),
             max_positions=int(os.getenv("MAX_POSITIONS", 10)),
@@ -305,6 +325,8 @@ class Config:
         lines.append("=" * 50)
 
         lines.append("\n📊 Data:")
+        lines.append(f"  Start Date: {self.data.start_date}")
+        lines.append(f"  End Date: {self.data.end_date}")
         lines.append(f"  Lookback: {self.data.lookback}")
         lines.append(f"  Min Volume: {self.data.min_volume:,}")
         lines.append(f"  Use CSV Tickers: {self.data.use_csv_tickers}")

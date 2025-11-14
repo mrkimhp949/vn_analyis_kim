@@ -47,36 +47,47 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
 
     logging.info("\n" + "="*50 + "\n🤖 BẮT ĐẦU PHIÊN QUÉT MỚI\n" + "="*50)
 
-    # 1. Khởi tạo Orchestrator
+    # 1. Tải dữ liệu VNINDEX trước để dùng chung
+    vnindex_df = None
     try:
-        orchestrator = TradingOrchestrator(bot_instance=bot_instance, chat_id=chat_id)
+        from datetime import datetime, timedelta
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=LOOKBACK)).strftime("%Y-%m-%d")
+        vnindex_df = load_data("VNINDEX", start_date=start_date, end_date=end_date, data_type="index")
+        if vnindex_df.empty:
+            logging.warning("⚠️ Không tải được dữ liệu VNINDEX.")
+    except Exception as e:
+        logging.error(f"❌ Lỗi khi tải dữ liệu VNINDEX: {e}", exc_info=True)
+        # Có thể quyết định dừng nếu dữ liệu VNINDEX là bắt buộc
+
+    # 2. Khởi tạo Orchestrator với context cần thiết
+    try:
+        orchestrator = TradingOrchestrator(
+            bot_instance=bot_instance, 
+            chat_id=chat_id,
+            vnindex_df=vnindex_df  # Truyền vnindex_df vào
+        )
         logging.info("✅ Trading Orchestrator initialized.")
     except Exception as e:
         logging.critical(f"❌ Lỗi khởi tạo TradingOrchestrator: {e}", exc_info=True)
         await bot_instance.send_message(chat_id, f"FATAL: Không thể khởi tạo Orchestrator: {e}")
         return
 
-    # 2. Lấy trạng thái thị trường và dữ liệu VN-Index
+    # 3. Lấy trạng thái thị trường
     market_regime = {}
-    vnindex_df = None
     try:
         if market_analyzer:
-            market_regime = market_analyzer.analyze_market_regime()
+            # Giờ market_analyzer có thể dùng vnindex_df đã được tải sẵn nếu cần
+            market_regime = market_analyzer.analyze_market_regime(vnindex_df=vnindex_df)
             logging.info(f"📊 Trạng thái thị trường: {market_regime.get('regime', 'N/A')} (Confidence: {market_regime.get('confidence', 0)}%)")
-        
-        # Tải dữ liệu VNINDEX để dùng chung
-        vnindex_df = load_data("VNINDEX", lookback=LOOKBACK)
-        if vnindex_df.empty:
-            logging.warning("⚠️ Không tải được dữ liệu VNINDEX.")
-
     except Exception as e:
         logging.error(f"❌ Lỗi khi phân tích thị trường: {e}", exc_info=True)
         await bot_instance.send_message(chat_id, f"Lỗi phân tích thị trường: {e}")
         # Vẫn tiếp tục với market_regime rỗng, Orchestrator sẽ xử lý
 
-    # 3. Chạy Orchestrator
+    # 4. Chạy Orchestrator
     try:
-        await orchestrator.run_scan(market_regime=market_regime, vnindex_df=vnindex_df)
+        await orchestrator.run_scan(market_regime=market_regime)
     except Exception as e:
         logging.critical(f"❌ Lỗi nghiêm trọng trong quá trình quét của Orchestrator: {e}", exc_info=True)
         await bot_instance.send_message(chat_id, f"Lỗi nghiêm trọng khi đang quét: {e}")
