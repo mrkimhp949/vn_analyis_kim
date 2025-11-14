@@ -41,4 +41,4 @@ flake8==7.0.0          # Linter
 mypy==1.8.0            # Type checker
 bandit==1.7.6          # Security scanner
 pre-commit==3.6.0      # Pre-commit hooks
-safety==2.3.5          # Dependency security checker
+safety==3.0.1          # Dependency security checker (updated for packaging>=22.0 compatibility)
