@@ -19,17 +19,10 @@ class TestPortfolioManager:
         from database import TradingDB
         import database
 
-        # Create fresh database for each test
+        # Create fresh in-memory database for each test
+        # :memory: database is always fresh, no need to delete data
         self.db = TradingDB(':memory:')
         self.db.create_tables()
-
-        # Clear any existing data
-        with self.db.get_connection() as conn:
-            conn.execute('DELETE FROM positions')
-            conn.execute('DELETE FROM portfolio_history')
-            conn.execute('DELETE FROM trades')
-            conn.execute('DELETE FROM signals_cache')
-            conn.commit()
 
         # Use monkeypatch to replace get_db
         monkeypatch.setattr(database, 'get_db', lambda: self.db)
