@@ -4,6 +4,7 @@ market_regime.py - Market Regime Detection
 Phát hiện tình trạng thị trường để quyết định có nên trade hay không
 """
 
+from datetime import datetime, timedelta
 import logging
 from typing import Dict, Tuple, Optional
 
@@ -11,7 +12,9 @@ import numpy as np
 import pandas as pd
 
 from data_loader import load_data
+from trading_config import get_config
 
+config = get_config()
 logger = logging.getLogger(__name__)
 
 try:
@@ -38,6 +41,9 @@ class MarketRegimeAnalyzer:
         self.bear_threshold = bear_threshold
         self.high_volatility_threshold = high_volatility_threshold
         self.trend_period = trend_period
+        self.end_date = config.data.end_date
+        self.start_date = config.data.start_date
+
 
     def analyze_market_regime(self) -> Dict:
         """
@@ -53,10 +59,16 @@ class MarketRegimeAnalyzer:
         """
         try:
             # Load VNINDEX data
-            vnindex = load_data("VNINDEX", lookback=100)
+            vnindex = load_data(
+                symbol="VNINDEX",
+                start_date=self.start_date,
+                end_date=self.end_date,
+                resolution="1D",
+                data_type="index",
+            )
 
             if vnindex.empty or len(vnindex) < 50:
-                logger.warning("Không đủ dữ liệu VNINDEX")
+                logger.warning(f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}")
                 return self._default_regime()
 
             # Tính các chỉ số

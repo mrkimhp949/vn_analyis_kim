@@ -32,102 +32,125 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_data(symbol, lookback=200, use_cache=True, is_index: bool = False):
+def load_data(
+    symbol: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    resolution: str = "1D",
+    data_type: str = "stock",
+    use_cache: bool = True,
+    required_bars: int = 50,
+    lookback: Optional[int] = None,
+    is_index: bool = False,
+) -> pd.DataFrame:
     """
-    Load dữ liệu từ TCBS API với cache
+    Load data from TCBS API with caching and validation.
 
     Args:
-        symbol: Mã cổ phiếu (VD: VCB, FPT, VNM)
-        lookback: Số nến cần lấy
-        use_cache: Có dùng cache không
-        is_index: Nếu là index, không dùng cache để đảm bảo dữ liệu mới nhất
+        symbol: Ticker symbol (e.g., 'FPT', 'VNINDEX').
+        start_date: Start date in 'YYYY-MM-DD' format (optional if lookback is provided).
+        end_date: End date in 'YYYY-MM-DD' format (optional, defaults to today).
+        resolution: Data resolution ('1D', '1H', etc.).
+        data_type: Type of data ('stock', 'index').
+        use_cache: Whether to use cached data.
+        required_bars: Minimum number of bars required.
+        lookback: Number of days to look back (alternative to start_date).
+        is_index: Whether this is an index (alternative to data_type='index').
 
     Returns:
-        DataFrame với columns: time, open, high, low, close, volume
+        A pandas DataFrame with the requested data, or an empty DataFrame if an error occurs.
     """
-    # Nếu là index, luôn không dùng cache
+    # Handle is_index parameter
     if is_index:
+        data_type = "index"
+    
+    # Handle lookback parameter
+    if lookback is not None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
+    
+    # Validate that we have start_date and end_date
+    if start_date is None or end_date is None:
+        raise ValueError("Either provide start_date/end_date or lookback parameter")
+    # Indexes are volatile, don't cache them to always get the latest data
+    if data_type == "index":
         use_cache = False
 
-    # Check cache
-    # ✅ FIX: Cache key không nên phụ thuộc vào ngày, trừ khi dữ liệu thay đổi trong ngày
-    cache_key = f"{symbol}_{lookback}"
+    # Generate a unique cache key based on all parameters
+    cache_key = f"{symbol}_{start_date}_{end_date}_{resolution}_{data_type}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
     cache_file = os.path.join(DATA_CACHE_DIR, f"{cache_hash}.pkl")
 
     if use_cache and os.path.exists(cache_file):
         try:
             with open(cache_file, "rb") as f:
-                # print(f"📁 Load {symbol} từ cache")
+                # logger.info(f"📁 Loading {symbol} from cache.")
                 return pickle.load(f)
         except Exception as e:
-            print(f"⚠️ Lỗi load cache: {e}, tải lại từ API...")
+            logger.warning(f"⚠️ Cache load failed for {symbol}: {e}. Refetching...")
 
-    # Load từ TCBS API
-    # print(f"📥 Tải {symbol} từ TCBS API...")
-
-    end_dt = datetime.now()
-    start_dt = end_dt - timedelta(days=lookback * 2)  # Buffer
-
+    # logger.info(f"📥 Downloading {symbol} from TCBS API...")
     try:
-        df = _download_from_tcbs(symbol, start_dt, end_dt)
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        df = _download_from_tcbs(symbol, start_dt, end_dt, resolution, data_type)
     except Exception as e:
-        raise DataLoadError(
-            f"Failed to download data for {symbol}",
-            context={"symbol": symbol, "lookback": lookback, "error": str(e)},
-        ) from e
+        logger.error(f"Failed to download data for {symbol}: {e}", exc_info=False)
+        return pd.DataFrame()  # Return empty DataFrame on download failure
 
-    # Validate basic requirements
-    if df.empty or len(df) < min(50, lookback * 0.3):
-        raise DataLoadError(
-            f"Insufficient data for {symbol}: got {len(df)} bars, need at least {min(50, lookback * 0.3)}",
-            context={
-                "symbol": symbol,
-                "got": len(df),
-                "required": min(50, lookback * 0.3),
-            },
-        )
+    # --- Data Validation and Cleaning ---
+    if df.empty:
+        # Don't log a warning if the API simply returned no data for the period
+        if "No data available" not in getattr(df, "source_error", ""):
+             logger.warning(
+                f"Insufficient data for {symbol}: got 0 bars, need at least {required_bars}"
+             )
+        return pd.DataFrame()
 
-    # Sort và limit
-    df = df.sort_values("time")
-    df = df.tail(lookback)
-    df = df.reset_index(drop=True)
 
-    # Data quality check
+    df = df.sort_values("time").reset_index(drop=True)
+
     try:
         quality_checker = get_quality_checker()
         quality_results = quality_checker.validate(df, symbol)
 
         if not quality_results["valid"]:
-            # Log issues but don't fail - clean data instead
             if quality_results["issues"]:
                 logger.warning(
                     f"Data quality issues for {symbol}: {quality_results['issues']}"
                 )
-                # Auto-clean data
                 df = quality_checker.clean_data(df, method="forward_fill")
-
             if quality_results["warnings"]:
                 logger.info(
                     f"Data quality warnings for {symbol}: {quality_results['warnings']}"
                 )
     except Exception as e:
         logger.warning(f"Data quality check failed for {symbol}: {e}")
-        # Continue anyway - don't fail on quality check errors
 
-    print(f"✅ Tải thành công {len(df)} nến cho {symbol}")
+    if len(df) < required_bars:
+        logger.warning(
+            f"Insufficient data for {symbol} after cleaning: got {len(df)} bars, need {required_bars}"
+        )
+        return pd.DataFrame()
 
-    # Save cache
-    try:
-        with open(cache_file, "wb") as f:
-            pickle.dump(df, f, protocol=pickle.HIGHEST_PROTOCOL)
-    except Exception as e:
-        print(f"⚠️ Không thể lưu cache: {e}")
+    if use_cache:
+        try:
+            with open(cache_file, "wb") as f:
+                pickle.dump(df, f)
+        except Exception as e:
+            logger.warning(f"Failed to save cache for {symbol}: {e}")
 
+    # logger.info(f"✅ Successfully loaded {len(df)} bars for {symbol}")
     return df
 
 
-def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+def _download_from_tcbs(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    resolution: str,
+    data_type: str,
+) -> pd.DataFrame:
     """
     Tải dữ liệu từ TCBS API với rate limiting và retry logic
     """
@@ -135,8 +158,6 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
 
     max_retries = 3
     retry_delays = [2, 4, 8]  # Exponential backoff: 2s, 4s, 8s
-
-    last_error = None
 
     for attempt in range(max_retries):
         try:
@@ -147,8 +168,8 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
 
             params = {
                 "ticker": symbol,
-                "type": "stock",
-                "resolution": "D",
+                "type": data_type,
+                "resolution": resolution.upper(), # API expects uppercase
                 "from": int(start.timestamp()),
                 "to": int(end.timestamp()),
             }
@@ -156,17 +177,14 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
             response = requests.get(url, params=params, timeout=10)
 
             if response.status_code != 200:
-                # Retry on 5xx server errors or 429 rate limit
-                if response.status_code >= 500 or response.status_code == 429:
-                    if attempt < max_retries - 1:
-                        print(
-                            f"⚠️ TCBS API error {response.status_code} for {symbol}, retrying in {retry_delays[attempt]}s..."
-                        )
-                        time.sleep(retry_delays[attempt])
-                        continue
-
+                if response.status_code in [429, 500, 502, 503, 504] and attempt < max_retries - 1:
+                    logger.warning(
+                        f"⚠️ TCBS API error {response.status_code} for {symbol}, retrying in {retry_delays[attempt]}s..."
+                    )
+                    time.sleep(retry_delays[attempt])
+                    continue
                 raise DataLoadError(
-                    f"TCBS API returned status {response.status_code} for {symbol}",
+                    f"TCBS API returned status {response.status_code}",
                     context={"symbol": symbol, "status_code": response.status_code},
                 )
 
@@ -174,45 +192,21 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
 
             if not isinstance(data, dict) or "data" not in data:
                 raise DataLoadError(
-                    f"TCBS API returned invalid format for {symbol}",
-                    context={
-                        "symbol": symbol,
-                        "response_keys": (
-                            list(data.keys()) if isinstance(data, dict) else None
-                        ),
-                    },
+                    f"TCBS API returned invalid format",
+                    context={"symbol": symbol, "response_keys": list(data.keys()) if isinstance(data, dict) else None},
                 )
 
-            bars = data["data"]
+            bars = data.get("data")
 
             if not bars:
-                raise DataLoadError(
-                    f"No data available for {symbol} from TCBS",
-                    context={"symbol": symbol},
-                )
+                df = pd.DataFrame()
+                df.source_error = "No data available" # Attach info for caller
+                return df
 
-            # Convert to DataFrame
             df = pd.DataFrame(bars)
-
-            # Rename columns
-            df = df.rename(
-                columns={
-                    "tradingDate": "time",
-                    "open": "open",
-                    "high": "high",
-                    "low": "low",
-                    "close": "close",
-                    "volume": "volume",
-                }
-            )
-
-            # Convert time to datetime
-            df["time"] = pd.to_datetime(df["time"], format="mixed", errors="coerce")
-
-            # Select required columns
+            df = df.rename(columns={"tradingDate": "time"})
+            df["time"] = pd.to_datetime(df["time"])
             df = df[["time", "open", "high", "low", "close", "volume"]]
-
-            # Clean data
             df = df.dropna(subset=["time", "close"])
             df = df[df["close"] > 0]
             df = df.drop_duplicates(subset=["time"], keep="last")
@@ -220,54 +214,43 @@ def _download_from_tcbs(symbol: str, start: datetime, end: datetime) -> pd.DataF
             return df
 
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            # Retry on network errors
-            last_error = e
             if attempt < max_retries - 1:
-                print(
+                logger.warning(
                     f"⚠️ Network error for {symbol}, retrying in {retry_delays[attempt]}s..."
                 )
                 time.sleep(retry_delays[attempt])
                 continue
-            else:
-                raise DataLoadError(
-                    f"Network error loading data for {symbol} after {max_retries} retries",
-                    context={
-                        "symbol": symbol,
-                        "error_type": "network",
-                        "error": str(e),
-                    },
-                ) from e
-
-        except requests.exceptions.RequestException as e:
-            # Non-retryable request errors
-            raise DataLoadError(
-                f"TCBS API connection error for {symbol}",
-                context={"symbol": symbol, "error_type": "connection", "error": str(e)},
-            ) from e
-
-        except DataLoadError:
-            # Re-raise DataLoadError as-is
-            raise
+            raise DataLoadError(f"Network error after {max_retries} retries", context={"symbol": symbol}) from e
 
         except Exception as e:
-            # Unexpected errors
-            raise DataLoadError(
-                f"Error loading data for {symbol}",
-                context={"symbol": symbol, "error_type": "unknown", "error": str(e)},
-            ) from e
+            raise DataLoadError(f"Unexpected error during download", context={"symbol": symbol}) from e
+
+    return pd.DataFrame() # Return empty df if all retries fail
 
 
 # Test function
 if __name__ == "__main__":
     print("Testing TCBS Data Loader...")
 
-    test_symbols = ["VCB", "FPT", "VNM", "HPG"]
+    test_symbols = ["VCB", "FPT", "VNM", "HPG", "VNINDEX"]
+    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    end_date = datetime.now().strftime("%Y-%m-%d")
 
     for symbol in test_symbols:
         try:
-            df = load_data(symbol, lookback=100, use_cache=False)
-            print(f"✅ {symbol}: {len(df)} rows")
-            print(f"   Date range: {df['time'].min()} to {df['time'].max()}")
-            print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
+            data_type = "index" if symbol == "VNINDEX" else "stock"
+            df = load_data(
+                symbol,
+                start_date=start_date,
+                end_date=end_date,
+                data_type=data_type,
+                use_cache=False,
+            )
+            if not df.empty:
+                print(f"✅ {symbol}: {len(df)} rows")
+                print(f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}")
+                print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
+            else:
+                print(f"⚠️ {symbol}: No data returned.")
         except Exception as e:
             print(f"❌ {symbol}: {e}")

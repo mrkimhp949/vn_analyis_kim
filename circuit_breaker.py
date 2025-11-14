@@ -28,6 +28,7 @@ class CircuitBreaker:
     - Trade quá nhiều trong 1 ngày
     - Loss quá nhiều trong 1 ngày
     - Consecutive losses
+    - VNINDEX giảm sâu
     """
 
     def __init__(
@@ -35,24 +36,35 @@ class CircuitBreaker:
         max_trades_per_day: int = 10,
         max_loss_per_day_pct: float = 0.05,  # 5% vốn
         max_consecutive_losses: int = 5,
+        vnindex_drop_threshold: float = -2.5, # Ngưỡng VNINDEX giảm để ngắt (%)
         total_capital: float = 100_000_000,
         stats_file: str = "circuit_breaker_stats.json",
     ):
         self.max_trades_per_day = max_trades_per_day
         self.max_loss_per_day_pct = max_loss_per_day_pct
         self.max_consecutive_losses = max_consecutive_losses
+        self.vnindex_drop_threshold = vnindex_drop_threshold / 100.0 # Convert to float
         self.total_capital = total_capital
         self.stats_file = stats_file
 
         self.stats = self._load_stats()
         self._check_new_day()
+        
+        # Trạng thái ngắt mạch
+        self.tripped = False
+        self.tripped_reason = ""
 
     def _load_stats(self) -> Dict:
         """Load stats từ file"""
         if os.path.exists(self.stats_file):
             try:
                 with open(self.stats_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Đảm bảo các key cần thiết tồn tại
+                    data.setdefault("today", self._get_today_stats())
+                    data.setdefault("consecutive_losses", 0)
+                    data.setdefault("last_trade_date", None)
+                    return data
             except Exception:
                 pass
 
@@ -83,41 +95,69 @@ class CircuitBreaker:
     def _check_new_day(self):
         """Check xem có phải ngày mới không, reset stats"""
         today = date.today().isoformat()
-        if self.stats["today"]["date"] != today:
+        if self.stats.get("today", {}).get("date") != today:
             # New day - reset
             self.stats["today"] = self._get_today_stats()
+            # Reset trạng thái ngắt mạch mỗi ngày mới
+            self.tripped = False
+            self.tripped_reason = ""
             self._save_stats()
+
+    def check_and_update(self, portfolio_pnl_pct: float, vnindex_change_pct: float) -> bool:
+        """
+        Kiểm tra các điều kiện ngắt mạch và cập nhật trạng thái.
+        Đây là phương thức chính để gọi từ orchestrator.
+
+        Args:
+            portfolio_pnl_pct (float): P&L hiện tại của portfolio trong ngày (dạng float, vd: -0.01 cho -1%).
+            vnindex_change_pct (float): % thay đổi của VNINDEX trong ngày.
+
+        Returns:
+            bool: True nếu ngắt mạch được kích hoạt, False nếu không.
+        """
+        if self.tripped:
+            return True # Nếu đã ngắt thì không cần check lại
+
+        # Check 1: Max loss per day
+        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
+            self.tripped = True
+            self.tripped_reason = f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            return True
+
+        # Check 2: VNINDEX giảm sâu
+        if vnindex_change_pct < self.vnindex_drop_threshold:
+            self.tripped = True
+            self.tripped_reason = f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
+            return True
+            
+        # Check 3: Max trades per day
+        if self.stats["today"]["trades_count"] >= self.max_trades_per_day:
+            self.tripped = True
+            self.tripped_reason = f"Số lệnh trong ngày ({self.stats['today']['trades_count']}) đạt giới hạn."
+            return True
+
+        # Check 4: Consecutive losses
+        if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
+            self.tripped = True
+            self.tripped_reason = f"Số lệnh thua liên tiếp ({self.stats['consecutive_losses']}) đạt giới hạn."
+            return True
+
+        return False
 
     def can_trade(self) -> Tuple[bool, str]:
         """
-        Check xem có thể trade không
-
-        Returns:
-            (can_trade, reason)
+        DEPRECATED: Use check_and_update instead.
+        Check xem có thể vào lệnh mới không.
         """
-        self._check_new_day()
-
+        if self.tripped:
+            return False, self.tripped_reason
+        
+        # This part is now mostly redundant as checks are in check_and_update
         today_stats = self.stats["today"]
-
-        # Check 1: Max trades per day
         if today_stats["trades_count"] >= self.max_trades_per_day:
             return False, f"🚫 Max trades per day reached ({self.max_trades_per_day})"
-
-        # Check 2: Max loss per day
-        max_loss = self.total_capital * self.max_loss_per_day_pct
-        if today_stats["total_loss"] >= max_loss:
-            loss_pct = (today_stats["total_loss"] / self.total_capital) * 100
-            return (
-                False,
-                f"🚫 Max loss per day reached ({loss_pct:.2f}% >= {self.max_loss_per_day_pct*100:.1f}%)",
-            )
-
-        # Check 3: Consecutive losses
         if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
-            return (
-                False,
-                f"🚫 Too many consecutive losses ({self.stats['consecutive_losses']})",
-            )
+            return False, f"🚫 Too many consecutive losses ({self.stats['consecutive_losses']})"
 
         return True, "✅ OK to trade"
 
@@ -161,7 +201,6 @@ class CircuitBreaker:
         self._check_new_day()
 
         stats = self.get_daily_stats()
-        can_trade, reason = self.can_trade()
 
         msg = []
         msg.append("🔒 **CIRCUIT BREAKER STATUS**")
@@ -172,22 +211,21 @@ class CircuitBreaker:
         msg.append(f"📈 Total profit: {stats.total_profit:,.0f} VNĐ")
         msg.append(f"💰 Net P&L: {stats.net_pnl:+,.0f} VNĐ")
         msg.append(
-            f"⚠️ Consecutive losses: {self.stats['consecutive_losses']}/{self.max_consecutive_losses}"
+            f"⚠️ Consecutive losses: {self.stats.get('consecutive_losses', 0)}/{self.max_consecutive_losses}"
         )
         msg.append("")
-        msg.append(f"Status: {reason}")
+        msg.append(f"Status: {'TRIPPED - ' + self.tripped_reason if self.tripped else 'OK'}")
 
         return "\n".join(msg)
 
-    def reset_daily_stats(self):
-        """Reset stats (for testing or manual reset)"""
+    def reset(self):
+        """Reset toàn bộ trạng thái (cho testing hoặc manual reset)"""
         self.stats["today"] = self._get_today_stats()
-        self._save_stats()
-
-    def reset_consecutive_losses(self):
-        """Reset consecutive losses (after review)"""
         self.stats["consecutive_losses"] = 0
+        self.tripped = False
+        self.tripped_reason = ""
         self._save_stats()
+        print("Circuit breaker has been reset.")
 
 
 # Global instance

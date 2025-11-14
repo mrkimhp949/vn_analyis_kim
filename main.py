@@ -17,16 +17,19 @@ import asyncio
 
 # Import các module của bot - FIXED IMPORT
 try:
-    from bot_runner_improved import run_bot_sync, run_sector_analysis
-
+    from bot_runner_improved import run_bot_sync
     print("✅ Import bot_runner_improved thành công")
 except ImportError as e:
     print(f"❌ Lỗi import bot_runner_improved: {e}")
-
-    # Fallback functions
+    # Fallback function
     def run_bot_sync():
         print("🤖 Bot runner không khả dụng")
 
+try:
+    from ticker_loader import run_sector_analysis
+    print("✅ Import run_sector_analysis từ ticker_loader thành công")
+except ImportError as e:
+    print(f"❌ Lỗi import run_sector_analysis: {e}")
     def run_sector_analysis():
         print("📊 Sector analyzer không khả dụng")
         return []

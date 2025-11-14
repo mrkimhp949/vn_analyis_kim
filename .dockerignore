@@ -1,0 +1,90 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs & Data (will be generated at runtime)
+logs/
+*.log
+data_cache/
+backtest_results/
+models/*.pkl
+models/*.joblib
+portfolio_data/
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Development files
+tests/
+scripts/benchmark.py
+run_tests.py
+run_backtest.py
+run_analytics.py
+walk_forward_test.py
+type_hints_example.py
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+Dockerfile.old
+docker-compose.yml
+
+# Misc
+*.csv
+!List.csv
+*.xlsx
+*.xls
+*.parquet
+.pre-commit-config.yaml
+.flake8
+.mypy_cache/

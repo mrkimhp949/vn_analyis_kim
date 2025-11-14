@@ -43,6 +43,8 @@ RESOLUTION = "1D"
 LOOKBACK = _config.data.lookback
 USE_CSV_TICKERS = _config.data.use_csv_tickers
 MIN_VOLUME = _config.data.min_volume
+MAX_SCAN_UNIVERSE = _config.trading.max_scan_universe
+WATCHLIST_SIZE = 5  # Or get from config if available
 
 
 def get_tickers() -> List[str]:

@@ -54,7 +54,6 @@ class EnhancedExitStrategy(ImprovedExitStrategy):
             take_profit_levels=take_profit_levels,
             stop_loss_atr_multiplier=stop_loss_atr_multiplier,
             trailing_stop_activation=trailing_stop_activation,
-            trailing_stop_distance=trailing_stop_distance,
             max_holding_days=max_holding_days,
             time_decay_threshold=time_decay_threshold,
         )

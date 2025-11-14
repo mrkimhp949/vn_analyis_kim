@@ -23,7 +23,7 @@ class TestMLPredictor:
 
     def test_predictor_initialization(self):
         """Test predictor initializes correctly"""
-        assert self.predictor.expected_features == 18
+        assert self.predictor.expected_features == 28
         assert self.predictor.models_dir == "models"
         assert self.predictor.scaler is not None
 
@@ -33,14 +33,14 @@ class TestMLPredictor:
 
         assert self.predictor.rf_model is not None
         assert hasattr(self.predictor.scaler, "mean_")
-        assert len(self.predictor.scaler.mean_) == 18
+        assert len(self.predictor.scaler.mean_) == 28
 
     def test_predict_with_correct_features(self):
         """Test prediction with correct number of features"""
         self.predictor.create_dummy_models()
 
-        # Create test data with 18 features
-        X_test = np.random.randn(10, 18)
+        # Create test data with 28 features
+        X_test = np.random.randn(10, 28)
 
         predictions = self.predictor.predict(X_test)
 
@@ -52,21 +52,21 @@ class TestMLPredictor:
         self.predictor.create_dummy_models()
 
         # Create test data with wrong number of features
-        X_test = np.random.randn(10, 15)  # Wrong: 15 instead of 18
+        X_test = np.random.randn(10, 15)  # Wrong: 15 instead of 28
 
         with pytest.raises(ValueError) as exc_info:
             self.predictor.predict(X_test)
 
         assert "Feature mismatch" in str(exc_info.value)
         assert "15" in str(exc_info.value)
-        assert "18" in str(exc_info.value)
+        assert "28" in str(exc_info.value)
 
     def test_predict_with_dataframe(self):
         """Test prediction with pandas DataFrame"""
         self.predictor.create_dummy_models()
 
-        # Create DataFrame with 18 features
-        df = pd.DataFrame(np.random.randn(10, 18))
+        # Create DataFrame with 28 features
+        df = pd.DataFrame(np.random.randn(10, 28))
 
         predictions = self.predictor.predict(df)
 
@@ -85,7 +85,7 @@ class TestMLPredictor:
 
     def test_train_with_correct_features(self):
         """Test training with correct number of features"""
-        X_train = np.random.randn(100, 18)
+        X_train = np.random.randn(100, 28)
         y_train = np.random.randint(0, 2, 100)
 
         # Should not raise exception
@@ -95,7 +95,7 @@ class TestMLPredictor:
 
     def test_train_with_wrong_features(self):
         """Test training fails with wrong number of features"""
-        X_train = np.random.randn(100, 15)  # Wrong: 15 instead of 18
+        X_train = np.random.randn(100, 15)  # Wrong: 15 instead of 28
         y_train = np.random.randint(0, 2, 100)
 
         with pytest.raises(ModelPredictionError) as exc_info:
@@ -155,7 +155,7 @@ class TestMLPredictor:
             assert hasattr(predictor2.scaler, "mean_")
 
             # Test predictions are consistent
-            X_test = np.random.randn(5, 18)
+            X_test = np.random.randn(5, 28)
             pred1 = predictor1.predict(X_test)
             pred2 = predictor2.predict(X_test)
 
@@ -186,7 +186,7 @@ class TestMLPredictor:
                 info = json.load(f)
 
             assert "expected_features" in info
-            assert info["expected_features"] == 18
+            assert info["expected_features"] == 28
             assert "saved_at" in info
 
         finally:

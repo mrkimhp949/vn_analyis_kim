@@ -196,6 +196,20 @@ class TradingDB:
             } for r in rows
         ]
 
+    def get_last_portfolio_snapshot(self) -> Optional[Dict]:
+        """Get the most recent portfolio snapshot using the read connection."""
+        query = "SELECT * FROM portfolio_history ORDER BY date DESC LIMIT 1"
+        rows = self.db_manager.execute_read(query)
+        if not rows:
+            return None
+        
+        r = rows[0]
+        return {
+            'id': r[0], 'date': r[1], 'total_value': r[2], 'total_cost': r[3],
+            'pnl': r[4], 'pnl_percent': r[5], 'num_positions': r[6],
+            'metadata': json.loads(r[7]) if r[7] else {}
+        }
+
     # ===== TRADES =====
 
     def save_trade(
