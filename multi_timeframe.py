@@ -87,6 +87,47 @@ class MultiTimeframeAnalyzer:
         weekly_df = weekly_df.reset_index()
         return weekly_df.tail(100)  # Lấy 100 tuần gần nhất
     
+    def analyze_quick(self, symbol):
+        """
+        Quick multi-timeframe analysis (optimized)
+        Chỉ check weekly trend, không phân tích đầy đủ
+        """
+        try:
+            # Daily
+            df_daily = load_data(symbol, lookback=200)
+            daily_signal = self.ml_generator.analyze(df_daily)
+            
+            # Weekly - quick check
+            df_weekly = self._create_weekly_data(symbol)
+            
+            if len(df_weekly) < 50:
+                # Not enough weekly data, use daily only
+                return daily_signal
+            
+            # Simple weekly trend check
+            weekly_ema20 = df_weekly['close'].ewm(span=20).mean()
+            weekly_ema50 = df_weekly['close'].ewm(span=50).mean()
+            
+            weekly_trend = 'UP' if weekly_ema20.iloc[-1] > weekly_ema50.iloc[-1] else 'DOWN'
+            
+            # Adjust daily signal based on weekly trend
+            if daily_signal['signal'] == 'BUY' and weekly_trend == 'UP':
+                # Both aligned - boost confidence
+                daily_signal['confidence'] = min(100, daily_signal['confidence'] + 10)
+                daily_signal['reason'] += " | Weekly trend: UP ✅"
+            elif daily_signal['signal'] == 'BUY' and weekly_trend == 'DOWN':
+                # Conflict - reduce confidence
+                daily_signal['confidence'] = max(0, daily_signal['confidence'] - 15)
+                daily_signal['reason'] += " | Weekly trend: DOWN ⚠️"
+            
+            return daily_signal
+            
+        except Exception as e:
+            print(f"⚠️ Lỗi multi-timeframe analysis: {e}")
+            # Fallback to daily only
+            df_daily = load_data(symbol, lookback=200)
+            return self.ml_generator.analyze(df_daily)
+    
     def _combine_signals(self, signals):
         """Kết hợp tín hiệu từ nhiều khung thời gian"""
         daily = signals.get('daily', {})

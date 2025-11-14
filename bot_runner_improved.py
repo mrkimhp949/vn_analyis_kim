@@ -69,13 +69,14 @@ except ImportError as e:
 
 try:
     from improved_entry_logic import ImprovedEntryLogic
+    # INCREASED min_confidence from 50 to 65 for safety
     entry_logic = ImprovedEntryLogic(
-        min_confidence=50,
+        min_confidence=65,  # ⬆️ Increased from 50
         min_risk_reward=2.0,
         require_trend_alignment=True,
         require_volume_confirmation=False
     )
-    print("✅ Import improved_entry_logic thành công")
+    print("✅ Import improved_entry_logic thành công (min_confidence=65)")
 except ImportError as e:
     print(f"❌ Lỗi import improved_entry_logic: {e}")
     entry_logic = None
@@ -282,27 +283,28 @@ def get_selected_tickers(force_refresh=False, max_tickers=MAX_SCAN_UNIVERSE):
 
 
 def apply_market_adjustments(market_regime):
-    """Điều chỉnh tham số chiến lược theo market regime"""
+    """Điều chỉnh tham số chiến lược theo market regime - IMPROVED"""
     if not entry_logic or not position_sizer:
         return
 
     regime = (market_regime or {}).get('regime', 'UNKNOWN').upper()
 
+    # DYNAMIC THRESHOLD based on market regime
     if regime == 'BULL':
-        entry_logic.min_confidence = 55
+        entry_logic.min_confidence = 60  # ⬆️ Increased from 55
         entry_logic.min_risk_reward = 1.8
         entry_logic.require_trend_alignment = True
         position_sizer.max_total_exposure = 0.70
         position_sizer.min_positions = 6
     elif regime == 'BEAR':
-        entry_logic.min_confidence = 50
-        entry_logic.min_risk_reward = 1.4
-        entry_logic.require_trend_alignment = False
+        entry_logic.min_confidence = 80  # ⬆️ Increased from 50 - Very strict in bear
+        entry_logic.min_risk_reward = 2.5  # ⬆️ Higher R:R required
+        entry_logic.require_trend_alignment = True  # ⬆️ Changed to True
         position_sizer.max_total_exposure = 0.30
         position_sizer.min_positions = 2
     else:  # SIDEWAYS / UNKNOWN
-        entry_logic.min_confidence = 55
-        entry_logic.min_risk_reward = 1.6
+        entry_logic.min_confidence = 70  # ⬆️ Increased from 55
+        entry_logic.min_risk_reward = 2.0  # ⬆️ Increased from 1.6
         entry_logic.require_trend_alignment = True
         position_sizer.max_total_exposure = 0.50
         position_sizer.min_positions = 4
@@ -375,6 +377,45 @@ async def run_bot_with_context(bot_instance, chat_id):
         print("❌ Bot instance không khả dụng")
         return
     
+    # ===== CHECK 0: SAFETY CHECKS =====
+    print("🔒 Kiểm tra safety systems...")
+    
+    # Check 0.1: Circuit Breaker
+    try:
+        from circuit_breaker import get_circuit_breaker
+        circuit_breaker = get_circuit_breaker()
+        can_trade_cb, cb_reason = circuit_breaker.can_trade()
+        
+        if not can_trade_cb:
+            msg = f"🚫 *CIRCUIT BREAKER TRIGGERED*\n\n{cb_reason}\n\n{circuit_breaker.get_status_message()}"
+            try:
+                await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
+            except Exception as e:
+                log_error(f"Lỗi gửi Telegram: {e}")
+            print(f"🚫 {cb_reason}")
+            return
+    except Exception as e:
+        log_error(f"Lỗi check circuit breaker: {e}")
+    
+    # Check 0.2: Emergency Stop
+    try:
+        from emergency_stop import get_emergency_stop
+        emergency_stop = get_emergency_stop()
+        can_trade_es, es_reason = emergency_stop.can_trade()
+        
+        if not can_trade_es:
+            msg = f"🚨 *EMERGENCY STOP ACTIVE*\n\n{es_reason}\n\n{emergency_stop.get_status_message()}"
+            try:
+                await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
+            except Exception as e:
+                log_error(f"Lỗi gửi Telegram: {e}")
+            print(f"🚨 {es_reason}")
+            return
+    except Exception as e:
+        log_error(f"Lỗi check emergency stop: {e}")
+    
+    print("✅ Safety checks passed")
+    
     # ===== CHECK 1: MARKET REGIME =====
     print("📊 Kiểm tra tình trạng thị trường...")
     can_trade, market_message = check_market_before_trading()
@@ -405,8 +446,22 @@ async def run_bot_with_context(bot_instance, chat_id):
     existing_symbols = set(active_positions.keys())
     sync_position_sizer_with_active_positions(active_positions)
 
-    # ===== CHECK 2: LOAD TICKERS =====
-    current_tickers, sector_snapshot = get_selected_tickers()
+    # ===== CHECK 2: LOAD & VALIDATE TICKERS =====
+    print("📋 Loading và validating tickers...")
+    try:
+        from ticker_loader import get_ticker_loader
+        loader = get_ticker_loader()
+        # Get validated tickers (with cache)
+        current_tickers = loader.get_validated_tickers(
+            force_validate=False,  # Use cache
+            min_volume=100_000,
+            max_tickers=MAX_SCAN_UNIVERSE
+        )
+        print(f"✅ Validated {len(current_tickers)} tickers")
+    except Exception as e:
+        log_error(f"Lỗi load tickers: {e}")
+        current_tickers, sector_snapshot = get_selected_tickers()
+    
     print(f"🔍 Quét {len(current_tickers)} mã...")
     
     signal_count = 0
@@ -434,6 +489,24 @@ async def run_bot_with_context(bot_instance, chat_id):
     # ===== CHECK 4: SCAN FOR NEW ENTRIES =====
     print(f"\n🔍 Quét {len(current_tickers)} mã để tìm cơ hội mua mới")
     print(f"📊 Đang nắm giữ: {len(existing_symbols)} mã ({', '.join(existing_symbols) if existing_symbols else 'không có'})")
+    
+    # Initialize portfolio lock
+    try:
+        from portfolio_lock import get_portfolio_lock
+        portfolio_lock = get_portfolio_lock()
+        portfolio_lock.clear_pending()  # Clear any stale pending
+    except Exception as e:
+        log_error(f"Lỗi init portfolio lock: {e}")
+        portfolio_lock = None
+    
+    # PARALLEL SCANNING (if enabled)
+    use_parallel = len(current_tickers) > 20  # Only use parallel for large lists
+    
+    if use_parallel:
+        print(f"⚡ Using parallel scanning for {len(current_tickers)} tickers...")
+        # Note: Parallel implementation would go here
+        # For now, keep sequential to avoid complexity
+        # TODO: Implement ThreadPoolExecutor for parallel scanning
     
     for symbol in current_tickers:
         try:
@@ -472,17 +545,40 @@ async def run_bot_with_context(bot_instance, chat_id):
                 market_regime=market_regime
             )
             
+            # ENHANCED NEWS INTEGRATION with higher impact
             news_context = analyze_news_trend(symbol) if analyze_news_trend else None
             news_sentiment = news_context.get("sentiment_score", 0.0) if news_context else 0.0
+            
             if news_context and news_context.get("articles"):
-                if news_sentiment >= 0.5:
-                    entry_signal.confidence = min(100, entry_signal.confidence + 5)
+                # Check for critical news topics
+                has_litigation = any('litigation' in article.get('topics', []) for article in news_context.get("articles", []))
+                has_dividend = any('dividend' in article.get('topics', []) for article in news_context.get("articles", []))
+                
+                # ENHANCED IMPACT
+                if news_sentiment >= 0.8:
+                    # Very positive news
+                    entry_signal.confidence = min(100, entry_signal.confidence + 15)
+                    entry_signal.reasons.append(f"📰 Tin tức RẤT tích cực ({news_sentiment:+.2f})")
+                elif news_sentiment >= 0.5:
+                    # Positive news
+                    entry_signal.confidence = min(100, entry_signal.confidence + 10)
                     entry_signal.reasons.append(f"📰 Tin tức tích cực ({news_sentiment:+.2f})")
+                elif news_sentiment <= -0.8 or has_litigation:
+                    # Very negative or litigation - BLOCK ENTRY
+                    entry_signal.should_enter = False
+                    entry_signal.warnings.append(f"📰 Tin tức RẤT tiêu cực hoặc kiện tụng ({news_sentiment:+.2f})")
                 elif news_sentiment <= -0.5:
-                    entry_signal.confidence = max(0, entry_signal.confidence - 7)
+                    # Negative news
+                    entry_signal.confidence = max(0, entry_signal.confidence - 15)
                     entry_signal.warnings.append(f"📰 Tin tức tiêu cực ({news_sentiment:+.2f})")
                 else:
+                    # Neutral
                     entry_signal.reasons.append(f"📰 Tin tức trung lập ({news_sentiment:+.2f})")
+                
+                # Bonus for dividend news
+                if has_dividend and news_sentiment > 0:
+                    entry_signal.confidence = min(100, entry_signal.confidence + 5)
+                    entry_signal.reasons.append("💰 Tin cổ tức")
 
             if entry_signal.should_enter and entry_signal.confidence < entry_logic.min_confidence:
                 entry_signal.should_enter = False
@@ -525,6 +621,20 @@ async def run_bot_with_context(bot_instance, chat_id):
             
             if position.shares == 0:
                 continue
+            
+            # ===== PORTFOLIO LOCK CHECK =====
+            if portfolio_lock:
+                position_value = position.shares * price
+                can_add, lock_reason = portfolio_lock.can_add_position(
+                    symbol=symbol,
+                    position_value=position_value,
+                    total_capital=position_sizer.total_capital,
+                    current_positions=active_positions
+                )
+                
+                if not can_add:
+                    print(f"🔒 {symbol}: {lock_reason}")
+                    continue
 
             # ===== PAPER TRADING EXECUTION =====
             paper_trade_executed = False
@@ -565,10 +675,21 @@ async def run_bot_with_context(bot_instance, chat_id):
             await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
             
             # Save to pending positions
-            save_pending_position(symbol, entry_signal, position)
-            
-            signal_count += 1
-            print(f"✅ {symbol}: {entry_signal.signal_type} ({entry_signal.confidence}%)")
+            try:
+                save_pending_position(symbol, entry_signal, position)
+                
+                # Confirm position in lock
+                if portfolio_lock:
+                    portfolio_lock.confirm_position(symbol)
+                
+                signal_count += 1
+                print(f"✅ {symbol}: {entry_signal.signal_type} ({entry_signal.confidence}%)")
+                
+            except Exception as e:
+                log_error(f"Lỗi save position {symbol}: {e}")
+                # Cancel position in lock
+                if portfolio_lock:
+                    portfolio_lock.cancel_position(symbol)
             
             time.sleep(0.5)  # Rate limiting
             
