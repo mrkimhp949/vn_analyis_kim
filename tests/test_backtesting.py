@@ -119,6 +119,8 @@ class TestBacktestEngine:
 
     def test_close_position_loss(self):
         """Test closing a losing position"""
+        initial_capital_before_trade = self.engine.capital
+
         # Open position
         self.engine.open_position(
             symbol='VCB',
@@ -127,8 +129,6 @@ class TestBacktestEngine:
             stop_loss=57000,
             take_profit=66000
         )
-
-        initial_capital = self.engine.capital
 
         # Close with loss
         trade = self.engine.close_position(
@@ -140,7 +140,8 @@ class TestBacktestEngine:
 
         assert trade is not None
         assert trade.pnl < 0
-        assert self.engine.capital < initial_capital
+        # After open + close with loss, capital should be less than initial
+        assert self.engine.capital < initial_capital_before_trade
 
     def test_trade_pnl_calculation(self):
         """Test PnL calculation includes commission and slippage"""
