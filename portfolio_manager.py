@@ -44,12 +44,13 @@ class PortfolioManager:
         """
         from exceptions import PortfolioError
 
-        # Validate inputs (giữ nguyên phần validation)
+        # Validate inputs
         if not symbol or not isinstance(symbol, str):
-            raise PortfolioError(
-                "Symbol must be a non-empty string", context={"symbol": symbol}
-            )
-        # ... (các validation khác giữ nguyên) ...
+            raise PortfolioError("Symbol must be a non-empty string", context={"symbol": symbol})
+        if not isinstance(shares, int) or shares <= 0:
+            raise PortfolioError("Shares must be a positive integer", context={"shares": shares})
+        if not isinstance(entry_price, (int, float)) or entry_price <= 0:
+            raise PortfolioError("Entry price must be a positive number", context={"entry_price": entry_price})
 
         existing_positions = self.db.get_positions()
 
