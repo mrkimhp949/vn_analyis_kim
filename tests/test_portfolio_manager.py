@@ -21,6 +21,7 @@ class TestPortfolioManager:
         # Use in-memory database for testing
         from database import TradingDB
         self.db = TradingDB(':memory:')
+        self.db.create_tables()
 
     def test_add_position_valid(self):
         """Test adding valid position"""

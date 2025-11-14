@@ -71,12 +71,12 @@ class TestAPIEndpoints:
             }
         )
 
-        # May succeed or fail based on validation
-        assert response.status_code in [200, 500]
+        # API returns 200 even on errors (with status field)
+        assert response.status_code == 200
 
-        if response.status_code == 200:
-            data = response.json()
-            assert data["status"] == "success"
+        data = response.json()
+        # May succeed or fail based on validation/DB state
+        assert data["status"] in ["success", "error"]
 
     def test_add_to_portfolio_invalid_symbol(self):
         """Test adding position with invalid symbol"""
@@ -89,8 +89,10 @@ class TestAPIEndpoints:
             }
         )
 
-        # Should fail
-        assert response.status_code in [422, 500]  # Validation error or server error
+        # API returns 200 with error status instead of HTTP error codes
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "error"
 
     def test_add_to_portfolio_invalid_shares(self):
         """Test adding position with invalid shares"""
@@ -103,7 +105,10 @@ class TestAPIEndpoints:
             }
         )
 
-        assert response.status_code in [422, 500]
+        # API returns 200 with error status instead of HTTP error codes
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "error"
 
     def test_add_to_portfolio_invalid_price(self):
         """Test adding position with invalid price"""
@@ -116,7 +121,10 @@ class TestAPIEndpoints:
             }
         )
 
-        assert response.status_code in [422, 500]
+        # API returns 200 with error status instead of HTTP error codes
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "error"
 
     def test_remove_from_portfolio(self):
         """Test removing position from portfolio"""

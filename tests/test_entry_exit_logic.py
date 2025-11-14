@@ -154,14 +154,17 @@ class TestImprovedExitStrategy:
 
         df = pd.DataFrame({
             'time': dates,
-            'close': close_prices,
+            'open': close_prices * 0.99,
             'high': close_prices * 1.02,
             'low': close_prices * 0.98,
+            'close': close_prices,
             'volume': np.random.randint(100000, 1000000, 50)
         })
 
         df['atr'] = df['close'].rolling(14).std() * 2
         df['rsi'] = 50
+        df['macd'] = df['close'].ewm(span=12).mean() - df['close'].ewm(span=26).mean()
+        df['macd_signal'] = df['macd'].ewm(span=9).mean()
 
         return df.bfill()
 
@@ -181,7 +184,7 @@ class TestImprovedExitStrategy:
         )
 
         assert decision.should_exit is True
-        assert decision.reason == ExitReason.STOP_LOSS
+        assert decision.exit_reason == ExitReason.STOP_LOSS
 
     def test_exit_on_take_profit(self):
         """Test exit when take profit is reached"""
@@ -200,7 +203,7 @@ class TestImprovedExitStrategy:
 
         # May exit on take profit or trailing stop
         if decision.should_exit:
-            assert decision.reason in [ExitReason.TAKE_PROFIT, ExitReason.TRAILING_STOP]
+            assert decision.exit_reason in [ExitReason.TAKE_PROFIT_1, ExitReason.TAKE_PROFIT_2, ExitReason.TAKE_PROFIT_3, ExitReason.TRAILING_STOP]
 
     def test_no_exit_in_normal_conditions(self):
         """Test no exit in normal market conditions"""
