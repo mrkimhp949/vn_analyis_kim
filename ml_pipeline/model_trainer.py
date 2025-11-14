@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Optional imports for LSTM and XGBoost
 try:
     from xgboost import XGBClassifier
+
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
@@ -31,11 +32,13 @@ try:
     from tensorflow import keras
     from tensorflow.keras.models import Sequential
     from tensorflow.keras.layers import LSTM, Dense, Dropout
+
     LSTM_AVAILABLE = True
 except ImportError:
     try:
         from keras.models import Sequential
         from keras.layers import LSTM, Dense, Dropout
+
         LSTM_AVAILABLE = True
     except ImportError:
         LSTM_AVAILABLE = False
@@ -52,7 +55,7 @@ class TrainingConfig:
 
 class EnsembleTrainer:
     """
-    Huấn luyện ensemble model (RandomForest + GradientBoosting + LSTM + XGBoost) 
+    Huấn luyện ensemble model (RandomForest + GradientBoosting + LSTM + XGBoost)
     với Cross validation và logging metrics.
     """
 
@@ -64,46 +67,56 @@ class EnsembleTrainer:
         self.lstm_sequence_length = None
         self.xgb_model = None
 
-    def _split(self, df: pd.DataFrame) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    def _split(
+        self, df: pd.DataFrame
+    ) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
         tscv = TimeSeriesSplit(n_splits=self.config.n_splits)
         X = df[self.config.feature_columns].values
         y = df[self.config.target_column].values
         splits = []
         for train_index, test_index in tscv.split(X):
-            splits.append((X[train_index], X[test_index], y[train_index], y[test_index]))
+            splits.append(
+                (X[train_index], X[test_index], y[train_index], y[test_index])
+            )
         return splits
 
     def _build_lstm(self, input_shape: Tuple[int, int]) -> Optional:
         """Build LSTM model for time series prediction"""
         if not LSTM_AVAILABLE:
             return None
-        
+
         try:
-            model = Sequential([
-                LSTM(50, return_sequences=True, input_shape=input_shape),
-                Dropout(0.2),
-                LSTM(50, return_sequences=False),
-                Dropout(0.2),
-                Dense(25, activation='relu'),
-                Dense(1, activation='sigmoid')
-            ])
-            model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+            model = Sequential(
+                [
+                    LSTM(50, return_sequences=True, input_shape=input_shape),
+                    Dropout(0.2),
+                    LSTM(50, return_sequences=False),
+                    Dropout(0.2),
+                    Dense(25, activation="relu"),
+                    Dense(1, activation="sigmoid"),
+                ]
+            )
+            model.compile(
+                optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"]
+            )
             return model
         except Exception as e:
             logger.warning(f"Failed to build LSTM: {e}")
             return None
 
-    def _prepare_lstm_data(self, X: np.ndarray, y: np.ndarray, sequence_length: int = 10) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_lstm_data(
+        self, X: np.ndarray, y: np.ndarray, sequence_length: int = 10
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Prepare data for LSTM (time series sequences)"""
         if len(X) < sequence_length:
             return None, None
-        
+
         X_seq = []
         y_seq = []
         for i in range(sequence_length, len(X)):
-            X_seq.append(X[i-sequence_length:i])
+            X_seq.append(X[i - sequence_length : i])
             y_seq.append(y[i])  # Use actual target, not feature values
-        
+
         return np.array(X_seq), np.array(y_seq)
 
     def train(self, df: pd.DataFrame, market_regime: Optional[str] = None) -> Dict:
@@ -113,11 +126,15 @@ class EnsembleTrainer:
         if df.empty:
             raise ValueError("Training dataframe is empty")
 
-        missing_features = [col for col in self.config.feature_columns if col not in df.columns]
+        missing_features = [
+            col for col in self.config.feature_columns if col not in df.columns
+        ]
         if missing_features:
             raise ValueError(f"Missing required features: {missing_features}")
         if self.config.target_column not in df.columns:
-            raise ValueError(f"Target column '{self.config.target_column}' is missing from dataframe")
+            raise ValueError(
+                f"Target column '{self.config.target_column}' is missing from dataframe"
+            )
 
         X = df[self.config.feature_columns].values
         y = df[self.config.target_column].values.astype(int)
@@ -149,8 +166,13 @@ class EnsembleTrainer:
         meta_targets_parts: List[np.ndarray] = []
 
         for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
-            logger.info("Fold %d/%d: train=%d samples, val=%d samples",
-                        fold_idx + 1, self.config.n_splits, len(train_idx), len(val_idx))
+            logger.info(
+                "Fold %d/%d: train=%d samples, val=%d samples",
+                fold_idx + 1,
+                self.config.n_splits,
+                len(train_idx),
+                len(val_idx),
+            )
 
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
@@ -187,11 +209,15 @@ class EnsembleTrainer:
                     )
                     xgb_fold.fit(X_train_scaled, y_train)
                 except Exception as e:
-                    logger.warning(f"XGBoost training failed in fold {fold_idx + 1}: {e}")
+                    logger.warning(
+                        f"XGBoost training failed in fold {fold_idx + 1}: {e}"
+                    )
                     xgb_fold = None
 
             # Prepare meta features for this fold
-            fold_meta = np.full((len(val_idx), len(base_models_order)), 0.5, dtype=np.float32)
+            fold_meta = np.full(
+                (len(val_idx), len(base_models_order)), 0.5, dtype=np.float32
+            )
 
             fold_predictions = {}
             # RF predictions
@@ -212,21 +238,35 @@ class EnsembleTrainer:
 
             # LSTM predictions
             lstm_pred = None
-            if "lstm" in base_models_order and len(X_train_scaled) > 20 and LSTM_AVAILABLE:
+            if (
+                "lstm" in base_models_order
+                and len(X_train_scaled) > 20
+                and LSTM_AVAILABLE
+            ):
                 try:
                     sequence_length = min(10, len(X_train_scaled) // 2)
                     X_train_seq, y_train_seq = self._prepare_lstm_data(
                         X_train_scaled, y_train, sequence_length
                     )
                     if X_train_seq is not None and len(X_train_seq) > 0:
-                        lstm_model = self._build_lstm((sequence_length, X_train_scaled.shape[1]))
+                        lstm_model = self._build_lstm(
+                            (sequence_length, X_train_scaled.shape[1])
+                        )
                         if lstm_model is not None and len(y_train_seq) > 0:
-                            lstm_model.fit(X_train_seq, y_train_seq, epochs=10, batch_size=32, verbose=0)
+                            lstm_model.fit(
+                                X_train_seq,
+                                y_train_seq,
+                                epochs=10,
+                                batch_size=32,
+                                verbose=0,
+                            )
                             X_val_seq, _ = self._prepare_lstm_data(
                                 X_val_scaled, y_val, sequence_length
                             )
                             if X_val_seq is not None and len(X_val_seq) > 0:
-                                lstm_pred = lstm_model.predict(X_val_seq, verbose=0).flatten()
+                                lstm_pred = lstm_model.predict(
+                                    X_val_seq, verbose=0
+                                ).flatten()
                                 if len(lstm_pred) < len(y_val):
                                     lstm_pred = np.pad(
                                         lstm_pred,
@@ -235,7 +275,9 @@ class EnsembleTrainer:
                                     )
                                 elif len(lstm_pred) > len(y_val):
                                     lstm_pred = lstm_pred[: len(y_val)]
-                                fold_meta[:, base_models_order.index("lstm")] = lstm_pred
+                                fold_meta[:, base_models_order.index("lstm")] = (
+                                    lstm_pred
+                                )
                                 fold_predictions["lstm"] = lstm_pred
                 except Exception as e:
                     logger.warning(f"LSTM training failed in fold {fold_idx + 1}: {e}")
@@ -244,9 +286,12 @@ class EnsembleTrainer:
             meta_targets_parts.append(y_val)
 
             # Ensemble metrics with weighted average (baseline before stacking)
-            weights_vector = np.array([base_weights[key] for key in base_models_order], dtype=np.float32)
+            weights_vector = np.array(
+                [base_weights[key] for key in base_models_order], dtype=np.float32
+            )
             available_mask = np.array(
-                [1.0 if key in fold_predictions else 0.0 for key in base_models_order], dtype=np.float32
+                [1.0 if key in fold_predictions else 0.0 for key in base_models_order],
+                dtype=np.float32,
             )
 
             if available_mask.sum() > 0:
@@ -279,8 +324,14 @@ class EnsembleTrainer:
             if regime_metrics is not None:
                 regime_metrics.append(fold_metrics)
 
-        meta_features = np.vstack(meta_features_parts) if meta_features_parts else np.empty((0, len(base_models_order)))
-        meta_targets = np.concatenate(meta_targets_parts) if meta_targets_parts else np.array([])
+        meta_features = (
+            np.vstack(meta_features_parts)
+            if meta_features_parts
+            else np.empty((0, len(base_models_order)))
+        )
+        meta_targets = (
+            np.concatenate(meta_targets_parts) if meta_targets_parts else np.array([])
+        )
 
         stacking_metrics = {}
         stacking_model = None
@@ -299,13 +350,19 @@ class EnsembleTrainer:
             stacking_pred = stacking_model.predict(meta_features)
             stacking_metrics = {
                 "accuracy": float(accuracy_score(meta_targets, stacking_pred)),
-                "precision": float(precision_score(meta_targets, stacking_pred, zero_division=0)),
-                "recall": float(recall_score(meta_targets, stacking_pred, zero_division=0)),
+                "precision": float(
+                    precision_score(meta_targets, stacking_pred, zero_division=0)
+                ),
+                "recall": float(
+                    recall_score(meta_targets, stacking_pred, zero_division=0)
+                ),
                 "f1": float(f1_score(meta_targets, stacking_pred, zero_division=0)),
             }
 
             stacking_proba = stacking_model.predict_proba(meta_features)
-            stacking_metrics["auc_like"] = float(np.mean(np.abs(stacking_proba - meta_targets)))
+            stacking_metrics["auc_like"] = float(
+                np.mean(np.abs(stacking_proba - meta_targets))
+            )
 
             logger.info(
                 "Stacking meta-model metrics - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4f",
@@ -380,11 +437,21 @@ class EnsembleTrainer:
                 X_full_seq, y_full_seq = self._prepare_lstm_data(
                     X_full_scaled, y, sequence_length
                 )
-                if X_full_seq is not None and len(X_full_seq) > 0 and len(y_full_seq) > 0:
-                    lstm_model_final = self._build_lstm((sequence_length, X_full_scaled.shape[1]))
+                if (
+                    X_full_seq is not None
+                    and len(X_full_seq) > 0
+                    and len(y_full_seq) > 0
+                ):
+                    lstm_model_final = self._build_lstm(
+                        (sequence_length, X_full_scaled.shape[1])
+                    )
                     if lstm_model_final:
-                        lstm_model_final.fit(X_full_seq, y_full_seq, epochs=25, batch_size=32, verbose=0)
-                        lstm_model_final.save(os.path.join(self.config.save_dir, "ensemble_lstm.h5"))
+                        lstm_model_final.fit(
+                            X_full_seq, y_full_seq, epochs=25, batch_size=32, verbose=0
+                        )
+                        lstm_model_final.save(
+                            os.path.join(self.config.save_dir, "ensemble_lstm.h5")
+                        )
                         self.lstm_model = lstm_model_final
                         self.lstm_sequence_length = sequence_length
                         logger.info("Đã huấn luyện & lưu LSTM cho ensemble.")
@@ -392,12 +459,20 @@ class EnsembleTrainer:
                 logger.warning(f"Final LSTM training failed: {e}")
 
         # Persist models & auxiliary artefacts
-        joblib.dump(rf_model_final, os.path.join(self.config.save_dir, "ensemble_rf.pkl"))
-        joblib.dump(gb_model_final, os.path.join(self.config.save_dir, "ensemble_gb.pkl"))
-        joblib.dump(self.scaler, os.path.join(self.config.save_dir, "ensemble_scaler.pkl"))
+        joblib.dump(
+            rf_model_final, os.path.join(self.config.save_dir, "ensemble_rf.pkl")
+        )
+        joblib.dump(
+            gb_model_final, os.path.join(self.config.save_dir, "ensemble_gb.pkl")
+        )
+        joblib.dump(
+            self.scaler, os.path.join(self.config.save_dir, "ensemble_scaler.pkl")
+        )
 
         if xgb_model_final:
-            joblib.dump(xgb_model_final, os.path.join(self.config.save_dir, "ensemble_xgb.pkl"))
+            joblib.dump(
+                xgb_model_final, os.path.join(self.config.save_dir, "ensemble_xgb.pkl")
+            )
 
         if stacking_model:
             stacking_model.save(self.config.save_dir)
@@ -415,7 +490,11 @@ class EnsembleTrainer:
             "target_column": self.config.target_column,
             "n_splits": self.config.n_splits,
         }
-        with open(os.path.join(self.config.save_dir, "ensemble_config.json"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(self.config.save_dir, "ensemble_config.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
             json.dump(ensemble_config, f, indent=2, ensure_ascii=False)
 
         logger.info(f"✅ Training complete. Metrics saved to {metrics_file}")
@@ -429,4 +508,3 @@ class EnsembleTrainer:
             )
 
         return metrics_summary
-

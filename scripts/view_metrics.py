@@ -21,12 +21,12 @@ def get_portfolio_metrics() -> Dict:
     portfolio = manager.get_portfolio_value()
 
     return {
-        'num_positions': portfolio['num_positions'],
-        'total_value': portfolio['total_value'],
-        'total_cost': portfolio['total_cost'],
-        'pnl': portfolio['pnl'],
-        'pnl_percent': portfolio['pnl_percent'],
-        'positions': positions
+        "num_positions": portfolio["num_positions"],
+        "total_value": portfolio["total_value"],
+        "total_cost": portfolio["total_cost"],
+        "pnl": portfolio["pnl"],
+        "pnl_percent": portfolio["pnl_percent"],
+        "positions": positions,
     }
 
 
@@ -43,16 +43,14 @@ def get_trade_statistics() -> Dict:
 
         if total_trades == 0:
             return {
-                'total_trades': 0,
-                'buy_trades': 0,
-                'sell_trades': 0,
-                'recent_trades': []
+                "total_trades": 0,
+                "buy_trades": 0,
+                "sell_trades": 0,
+                "recent_trades": [],
             }
 
         # Get buy/sell counts
-        cursor = conn.execute(
-            "SELECT action, COUNT(*) FROM trades GROUP BY action"
-        )
+        cursor = conn.execute("SELECT action, COUNT(*) FROM trades GROUP BY action")
         action_counts = {row[0]: row[1] for row in cursor.fetchall()}
 
         # Get recent trades
@@ -66,21 +64,21 @@ def get_trade_statistics() -> Dict:
         )
         recent_trades = [
             {
-                'symbol': row[0],
-                'action': row[1],
-                'shares': row[2],
-                'price': row[3],
-                'date': row[4],
-                'reason': row[5]
+                "symbol": row[0],
+                "action": row[1],
+                "shares": row[2],
+                "price": row[3],
+                "date": row[4],
+                "reason": row[5],
             }
             for row in cursor.fetchall()
         ]
 
     return {
-        'total_trades': total_trades,
-        'buy_trades': action_counts.get('BUY', 0),
-        'sell_trades': action_counts.get('SELL', 0),
-        'recent_trades': recent_trades
+        "total_trades": total_trades,
+        "buy_trades": action_counts.get("BUY", 0),
+        "sell_trades": action_counts.get("SELL", 0),
+        "recent_trades": recent_trades,
     }
 
 
@@ -114,13 +112,15 @@ def display_dashboard():
         print(f"Positions:     {portfolio['num_positions']}")
         print(f"Total Value:   {portfolio['total_value']:,.0f} VNĐ")
         print(f"Total Cost:    {portfolio['total_cost']:,.0f} VNĐ")
-        print(f"P&L:           {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.2f}%)")
+        print(
+            f"P&L:           {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.2f}%)"
+        )
 
-        if portfolio['positions']:
+        if portfolio["positions"]:
             print(f"\nCurrent Positions:")
-            for symbol, pos in portfolio['positions'].items():
-                shares = pos['shares']
-                avg_price = pos['avg_price']
+            for symbol, pos in portfolio["positions"].items():
+                shares = pos["shares"]
+                avg_price = pos["avg_price"]
                 print(f"  • {symbol:6s} {shares:>6,} shares @ {avg_price:>10,.0f} VNĐ")
 
     except Exception as e:
@@ -139,11 +139,11 @@ def display_dashboard():
         print(f"  - Buy:       {trades['buy_trades']}")
         print(f"  - Sell:      {trades['sell_trades']}")
 
-        if trades['recent_trades']:
+        if trades["recent_trades"]:
             print(f"\nRecent Trades (last 10):")
-            for trade in trades['recent_trades']:
-                action_emoji = "🟢" if trade['action'] == 'BUY' else "🔴"
-                date = trade['date'][:10] if trade['date'] else 'N/A'
+            for trade in trades["recent_trades"]:
+                action_emoji = "🟢" if trade["action"] == "BUY" else "🔴"
+                date = trade["date"][:10] if trade["date"] else "N/A"
                 print(
                     f"  {action_emoji} {date} {trade['symbol']:6s} "
                     f"{trade['action']:4s} {trade['shares']:>4} @ {trade['price']:>10,.0f} "
@@ -184,6 +184,7 @@ def display_dashboard():
 
         # Check models
         from ml_models import MLPredictor
+
         predictor = MLPredictor()
         loaded = predictor.load_models()
 
@@ -192,13 +193,14 @@ def display_dashboard():
 
         # Check database size
         import os
-        if os.path.exists('trading.db'):
-            db_size = os.path.getsize('trading.db') / (1024 * 1024)  # MB
+
+        if os.path.exists("trading.db"):
+            db_size = os.path.getsize("trading.db") / (1024 * 1024)  # MB
             print(f"Database Size: {db_size:.2f} MB")
 
         # Check cache
-        if os.path.exists('data_cache'):
-            cache_files = [f for f in os.listdir('data_cache') if f.endswith('.pkl')]
+        if os.path.exists("data_cache"):
+            cache_files = [f for f in os.listdir("data_cache") if f.endswith(".pkl")]
             print(f"Cached Tickers: {len(cache_files)}")
 
     except Exception as e:
@@ -212,10 +214,10 @@ def export_metrics_json():
     import json
 
     metrics = {
-        'timestamp': datetime.now().isoformat(),
-        'portfolio': get_portfolio_metrics(),
-        'trades': get_trade_statistics(),
-        'paper_trading': get_paper_trading_stats()
+        "timestamp": datetime.now().isoformat(),
+        "portfolio": get_portfolio_metrics(),
+        "trades": get_trade_statistics(),
+        "paper_trading": get_paper_trading_stats(),
     }
 
     return json.dumps(metrics, indent=2, default=str)
@@ -225,17 +227,9 @@ def main():
     """Main entry point"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='View trading bot metrics')
-    parser.add_argument(
-        '--json',
-        action='store_true',
-        help='Output metrics as JSON'
-    )
-    parser.add_argument(
-        '--export',
-        metavar='FILE',
-        help='Export metrics to JSON file'
-    )
+    parser = argparse.ArgumentParser(description="View trading bot metrics")
+    parser.add_argument("--json", action="store_true", help="Output metrics as JSON")
+    parser.add_argument("--export", metavar="FILE", help="Export metrics to JSON file")
 
     args = parser.parse_args()
 
@@ -243,7 +237,7 @@ def main():
         json_output = export_metrics_json()
 
         if args.export:
-            with open(args.export, 'w') as f:
+            with open(args.export, "w") as f:
                 f.write(json_output)
             print(f"✅ Metrics exported to {args.export}")
         else:
@@ -252,5 +246,5 @@ def main():
         display_dashboard()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,6 +1,7 @@
 """
 Stacking meta-model cho ensemble
 """
+
 import json
 import logging
 import os
@@ -14,10 +15,13 @@ logger = logging.getLogger(__name__)
 
 try:
     import lightgbm as lgb
+
     LIGHTGBM_AVAILABLE = True
 except ImportError:  # pragma: no cover - optional dependency
     LIGHTGBM_AVAILABLE = False
-    logger.info("LightGBM not installed. Stacking meta-model sẽ dùng LogisticRegression.")
+    logger.info(
+        "LightGBM not installed. Stacking meta-model sẽ dùng LogisticRegression."
+    )
 
 
 class StackingMetaModel:
@@ -49,9 +53,16 @@ class StackingMetaModel:
                 random_state=42,
             )
             if self.model_type == "lightgbm":
-                logger.info("LightGBM không khả dụng. Fallback sang LogisticRegression cho stacking meta-model.")
+                logger.info(
+                    "LightGBM không khả dụng. Fallback sang LogisticRegression cho stacking meta-model."
+                )
 
-    def fit(self, meta_features: np.ndarray, y: np.ndarray, feature_names: Optional[List[str]] = None):
+    def fit(
+        self,
+        meta_features: np.ndarray,
+        y: np.ndarray,
+        feature_names: Optional[List[str]] = None,
+    ):
         if meta_features.ndim != 2:
             raise ValueError("meta_features phải là mảng 2 chiều [n_samples, n_models]")
         if len(meta_features) != len(y):
@@ -59,7 +70,9 @@ class StackingMetaModel:
 
         self._build_model()
         self.model.fit(meta_features, y)
-        self.feature_names = feature_names or [f"model_{i}" for i in range(meta_features.shape[1])]
+        self.feature_names = feature_names or [
+            f"model_{i}" for i in range(meta_features.shape[1])
+        ]
         logger.info(
             "Đã huấn luyện stacking meta-model với %d mẫu và %d base models.",
             meta_features.shape[0],
@@ -78,8 +91,14 @@ class StackingMetaModel:
     def save(self, save_dir: str):
         os.makedirs(save_dir, exist_ok=True)
         joblib.dump(self.model, os.path.join(save_dir, "stacking_meta_model.pkl"))
-        with open(os.path.join(save_dir, "stacking_meta_info.json"), "w", encoding="utf-8") as f:
-            json.dump({"model_type": self.model_type, "feature_names": self.feature_names}, f, indent=2)
+        with open(
+            os.path.join(save_dir, "stacking_meta_info.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump(
+                {"model_type": self.model_type, "feature_names": self.feature_names},
+                f,
+                indent=2,
+            )
         logger.info("Đã lưu stacking meta-model vào %s", save_dir)
 
     def load(self, save_dir: str):
@@ -94,5 +113,3 @@ class StackingMetaModel:
                 self.model_type = info.get("model_type", self.model_type)
                 self.feature_names = info.get("feature_names", [])
         logger.info("Đã load stacking meta-model từ %s", model_path)
-
-

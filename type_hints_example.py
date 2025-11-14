@@ -2,6 +2,7 @@
 Type Hints Examples for Trading Bot
 Demonstrates proper typing for all major components
 """
+
 from typing import Dict, List, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,9 +26,11 @@ Timestamp = str  # ISO format
 # DATA CLASSES WITH TYPE HINTS
 # ============================================================================
 
+
 @dataclass
 class Position:
     """Trading position with full type annotations"""
+
     symbol: Symbol
     shares: Shares
     avg_price: Price
@@ -41,6 +44,7 @@ class Position:
 @dataclass
 class TradingSignal:
     """Trading signal with type annotations"""
+
     symbol: Symbol
     signal_type: str  # 'BUY' | 'SELL' | 'HOLD'
     confidence: Confidence
@@ -55,10 +59,9 @@ class TradingSignal:
 # FUNCTION TYPE HINTS EXAMPLES
 # ============================================================================
 
+
 def load_data(
-    symbol: Symbol,
-    lookback: int = 200,
-    use_cache: bool = True
+    symbol: Symbol, lookback: int = 200, use_cache: bool = True
 ) -> pd.DataFrame:
     """
     Load market data with type hints
@@ -77,9 +80,7 @@ def load_data(
     ...
 
 
-def calculate_technical_indicators(
-    df: pd.DataFrame
-) -> pd.DataFrame:
+def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate technical indicators
 
@@ -95,7 +96,7 @@ def calculate_technical_indicators(
 def analyze_entry(
     df: pd.DataFrame,
     ml_signal: Dict[str, Any],
-    market_regime: Optional[Dict[str, Any]] = None
+    market_regime: Optional[Dict[str, Any]] = None,
 ) -> TradingSignal:
     """
     Analyze entry opportunity
@@ -116,7 +117,7 @@ def calculate_position_size(
     entry_price: Price,
     stop_loss: Price,
     portfolio_value: float,
-    max_risk_per_trade: float = 0.02
+    max_risk_per_trade: float = 0.02,
 ) -> Tuple[Shares, float]:
     """
     Calculate position size
@@ -135,8 +136,7 @@ def calculate_position_size(
 
 
 def validate_signal(
-    signal: TradingSignal,
-    portfolio_positions: Dict[Symbol, Position]
+    signal: TradingSignal, portfolio_positions: Dict[Symbol, Position]
 ) -> Tuple[bool, str]:
     """
     Validate trading signal
@@ -155,9 +155,10 @@ def validate_signal(
 # ML MODEL TYPE HINTS
 # ============================================================================
 
+
 def train_model(
     X_train: Union[pd.DataFrame, NDArray[np.float64]],
-    y_train: Union[pd.Series, NDArray[np.int64]]
+    y_train: Union[pd.Series, NDArray[np.int64]],
 ) -> None:
     """
     Train ML model
@@ -169,9 +170,7 @@ def train_model(
     ...
 
 
-def predict(
-    X: Union[pd.DataFrame, NDArray[np.float64]]
-) -> NDArray[np.float64]:
+def predict(X: Union[pd.DataFrame, NDArray[np.float64]]) -> NDArray[np.float64]:
     """
     Make predictions
 
@@ -188,13 +187,14 @@ def predict(
 # PORTFOLIO MANAGEMENT TYPE HINTS
 # ============================================================================
 
+
 def add_position(
     symbol: Symbol,
     shares: Shares,
     entry_price: Price,
     stop_loss: Optional[Price] = None,
     take_profit: Optional[Price] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Add position to portfolio
@@ -242,9 +242,9 @@ def get_positions() -> Dict[Symbol, Position]:
 # RISK MANAGEMENT TYPE HINTS
 # ============================================================================
 
+
 def check_risk_limits(
-    positions: Dict[Symbol, Position],
-    new_position: Position
+    positions: Dict[Symbol, Position], new_position: Position
 ) -> Tuple[bool, List[str]]:
     """
     Check if new position violates risk limits
@@ -259,9 +259,7 @@ def check_risk_limits(
     ...
 
 
-def calculate_portfolio_risk(
-    positions: Dict[Symbol, Position]
-) -> Dict[str, float]:
+def calculate_portfolio_risk(positions: Dict[Symbol, Position]) -> Dict[str, float]:
     """
     Calculate portfolio risk metrics
 
@@ -281,9 +279,11 @@ def calculate_portfolio_risk(
 # CONFIGURATION TYPE HINTS
 # ============================================================================
 
+
 @dataclass
 class TradingConfig:
     """Trading configuration with type hints"""
+
     min_confidence: Confidence
     min_risk_reward: float
     support_distance_percent: float
@@ -307,6 +307,7 @@ class TradingConfig:
 # DATABASE TYPE HINTS
 # ============================================================================
 
+
 def save_position(
     symbol: Symbol,
     shares: Shares,
@@ -315,7 +316,7 @@ def save_position(
     entry_value: float,
     stop_loss: Optional[Price] = None,
     take_profit: Optional[Price] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Save position to database"""
     ...
@@ -325,7 +326,7 @@ def get_trades(
     symbol: Optional[Symbol] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    limit: int = 100
+    limit: int = 100,
 ) -> List[Dict[str, Any]]:
     """
     Get trade history
@@ -346,10 +347,9 @@ def get_trades(
 # ASYNC TYPE HINTS
 # ============================================================================
 
+
 async def send_telegram_message(
-    chat_id: str,
-    message: str,
-    parse_mode: Optional[str] = None
+    chat_id: str, message: str, parse_mode: Optional[str] = None
 ) -> bool:
     """
     Send Telegram message
@@ -366,8 +366,7 @@ async def send_telegram_message(
 
 
 async def fetch_market_data(
-    symbols: List[Symbol],
-    timeout: int = 10
+    symbols: List[Symbol], timeout: int = 10
 ) -> Dict[Symbol, pd.DataFrame]:
     """
     Fetch market data for multiple symbols

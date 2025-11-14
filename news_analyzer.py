@@ -13,6 +13,7 @@ except ImportError:
 
 try:
     from ml_pipeline.sentiment_model import VietnameseSentimentAnalyzer
+
     SENTIMENT_ANALYZER = VietnameseSentimentAnalyzer()
 except Exception:
     SENTIMENT_ANALYZER = None
@@ -41,13 +42,30 @@ RSS_SOURCES = [
         "name": "Bloomberg",
         "url": "https://feeds.bloomberg.com/markets/news.rss",
         "type": "international",
-        "vietnam_keywords": ["vietnam", "viet nam", "ho chi minh", "hanoi", "vietnamese", "vnd", "dong"],
+        "vietnam_keywords": [
+            "vietnam",
+            "viet nam",
+            "ho chi minh",
+            "hanoi",
+            "vietnamese",
+            "vnd",
+            "dong",
+        ],
     },
     {
         "name": "Reuters Business",
         "url": "https://feeds.reuters.com/reuters/businessNews",
         "type": "international",
-        "vietnam_keywords": ["vietnam", "viet nam", "ho chi minh", "hanoi", "vietnamese", "vnd", "dong", "southeast asia"],
+        "vietnam_keywords": [
+            "vietnam",
+            "viet nam",
+            "ho chi minh",
+            "hanoi",
+            "vietnamese",
+            "vnd",
+            "dong",
+            "southeast asia",
+        ],
     },
 ]
 
@@ -82,21 +100,66 @@ NEGATIVE_KEYWORDS = [
 # Topic classification keywords
 TOPIC_KEYWORDS = {
     "dividend": [
-        "cổ tức", "chia cổ tức", "dividend", "payout", "cổ đông", "shareholder",
-        "thưởng cổ phiếu", "stock dividend", "tiền mặt", "cash dividend"
+        "cổ tức",
+        "chia cổ tức",
+        "dividend",
+        "payout",
+        "cổ đông",
+        "shareholder",
+        "thưởng cổ phiếu",
+        "stock dividend",
+        "tiền mặt",
+        "cash dividend",
     ],
     "litigation": [
-        "kiện", "tố tụng", "litigation", "lawsuit", "tòa án", "court", "pháp lý",
-        "tranh chấp", "dispute", "vi phạm", "violation", "phạt", "fine", "penalty"
+        "kiện",
+        "tố tụng",
+        "litigation",
+        "lawsuit",
+        "tòa án",
+        "court",
+        "pháp lý",
+        "tranh chấp",
+        "dispute",
+        "vi phạm",
+        "violation",
+        "phạt",
+        "fine",
+        "penalty",
     ],
     "macro": [
-        "vĩ mô", "macro", "GDP", "lạm phát", "inflation", "lãi suất", "interest rate",
-        "ngân hàng trung ương", "central bank", "chính sách", "policy", "kinh tế",
-        "economy", "tăng trưởng", "growth", "thuế", "tax", "xuất khẩu", "export"
+        "vĩ mô",
+        "macro",
+        "GDP",
+        "lạm phát",
+        "inflation",
+        "lãi suất",
+        "interest rate",
+        "ngân hàng trung ương",
+        "central bank",
+        "chính sách",
+        "policy",
+        "kinh tế",
+        "economy",
+        "tăng trưởng",
+        "growth",
+        "thuế",
+        "tax",
+        "xuất khẩu",
+        "export",
     ],
     "earnings": [
-        "lợi nhuận", "earnings", "doanh thu", "revenue", "kết quả kinh doanh",
-        "báo cáo tài chính", "financial report", "quý", "quarter", "năm", "year"
+        "lợi nhuận",
+        "earnings",
+        "doanh thu",
+        "revenue",
+        "kết quả kinh doanh",
+        "báo cáo tài chính",
+        "financial report",
+        "quý",
+        "quarter",
+        "năm",
+        "year",
     ],
 }
 
@@ -131,7 +194,7 @@ def _parse_rss(xml_text: str, source: Dict) -> List[Dict]:
     source_name = source.get("name", "Unknown")
     source_type = source.get("type", "domestic")
     vietnam_keywords = source.get("vietnam_keywords", [])
-    
+
     try:
         from xml.etree import ElementTree as ET
 
@@ -150,7 +213,9 @@ def _parse_rss(xml_text: str, source: Dict) -> List[Dict]:
             # Filter international sources by Vietnamese keywords
             if source_type == "international" and vietnam_keywords:
                 full_text = f"{title} {description}".lower()
-                if not any(keyword.lower() in full_text for keyword in vietnam_keywords):
+                if not any(
+                    keyword.lower() in full_text for keyword in vietnam_keywords
+                ):
                     continue  # Skip if no Vietnam-related keywords
 
             # Classify topic
@@ -175,9 +240,13 @@ def _parse_rss(xml_text: str, source: Dict) -> List[Dict]:
 
 def _fetch_source(source: Dict) -> List[Dict]:
     try:
-        resp = requests.get(source["url"], timeout=10, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+        resp = requests.get(
+            source["url"],
+            timeout=10,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+        )
         resp.raise_for_status()
         return _parse_rss(resp.text, source)
     except Exception:
@@ -209,7 +278,9 @@ def _score_sentiment(texts: List[str]) -> float:
     return score / max(len(texts), 1)
 
 
-def update_news_cache(symbols: Optional[List[str]] = None, lookback_hours: int = DEFAULT_LOOKBACK_HOURS) -> Dict:
+def update_news_cache(
+    symbols: Optional[List[str]] = None, lookback_hours: int = DEFAULT_LOOKBACK_HOURS
+) -> Dict:
     """
     Fetch latest news, update cache and return it.
     Tracks source frequency and identifies hot news.
@@ -227,7 +298,7 @@ def update_news_cache(symbols: Optional[List[str]] = None, lookback_hours: int =
 
     fetched_articles = []
     source_counts = {}
-    
+
     for source in RSS_SOURCES:
         articles = _fetch_source(source)
         fetched_articles.extend(articles)
@@ -237,7 +308,10 @@ def update_news_cache(symbols: Optional[List[str]] = None, lookback_hours: int =
         cache["source_frequency"][source_name] = {
             "count": source_counts[source_name],
             "last_updated": datetime.utcnow().isoformat(),
-            "update_frequency": cache["source_frequency"].get(source_name, {}).get("update_frequency", 0) + 1,
+            "update_frequency": cache["source_frequency"]
+            .get(source_name, {})
+            .get("update_frequency", 0)
+            + 1,
         }
 
     # Track article frequency for hot news detection
@@ -250,9 +324,9 @@ def update_news_cache(symbols: Optional[List[str]] = None, lookback_hours: int =
         summary_text = f"{article['title']} {article['summary']}"
         mentioned_symbols = _extract_symbols(summary_text, symbols)
         sentiment = _score_sentiment([summary_text])
-        
+
         # Track title frequency (hot news indicator)
-        title_key = article['title'].lower()[:100]  # First 100 chars
+        title_key = article["title"].lower()[:100]  # First 100 chars
         article_titles[title_key] = article_titles.get(title_key, 0) + 1
 
         article_data = {
@@ -264,20 +338,24 @@ def update_news_cache(symbols: Optional[List[str]] = None, lookback_hours: int =
             "published_at": article["published_at"],
             "sentiment": sentiment,
             "topics": article.get("topics", ["general"]),
-            "frequency": article_titles[title_key],  # How many times similar title appears
+            "frequency": article_titles[
+                title_key
+            ],  # How many times similar title appears
         }
-        
+
         # Mark as hot news if frequency > 2 or high sentiment
         is_hot = article_titles[title_key] >= 2 or abs(sentiment) > 0.7
         if is_hot:
             article_data["is_hot"] = True
-            cache["hot_news"].append({
-                "symbol": mentioned_symbols[0] if mentioned_symbols else "_market",
-                "title": article["title"],
-                "sentiment": sentiment,
-                "published_at": article["published_at"],
-                "url": article["url"],
-            })
+            cache["hot_news"].append(
+                {
+                    "symbol": mentioned_symbols[0] if mentioned_symbols else "_market",
+                    "title": article["title"],
+                    "sentiment": sentiment,
+                    "published_at": article["published_at"],
+                    "url": article["url"],
+                }
+            )
 
         if not mentioned_symbols:
             cache["articles"].setdefault("_market", []).append(article_data)
@@ -298,13 +376,16 @@ def update_news_cache(symbols: Optional[List[str]] = None, lookback_hours: int =
         cache["articles"][sym] = filtered
         if not filtered:
             del cache["articles"][sym]
-    
+
     # Keep only recent hot news (last 24h)
     hot_news_cutoff = datetime.utcnow() - timedelta(hours=24)
     cache["hot_news"] = [
-        news for news in cache["hot_news"]
+        news
+        for news in cache["hot_news"]
         if datetime.fromisoformat(news["published_at"]) >= hot_news_cutoff
-    ][:20]  # Keep top 20 hot news
+    ][
+        :20
+    ]  # Keep top 20 hot news
 
     cache["last_updated"] = datetime.utcnow().isoformat()
     _save_cache(cache)
@@ -326,7 +407,9 @@ def _ensure_cache(symbols: Optional[List[str]] = None) -> Dict:
     return cache
 
 
-def analyze_news_trend(symbol: str, lookback_hours: int = DEFAULT_LOOKBACK_HOURS) -> Dict:
+def analyze_news_trend(
+    symbol: str, lookback_hours: int = DEFAULT_LOOKBACK_HOURS
+) -> Dict:
     """Return sentiment summary for a symbol."""
     cache = _ensure_cache()
     articles = cache.get("articles", {}).get(symbol.upper(), [])
@@ -400,7 +483,9 @@ def format_news_brief(symbol: str, limit: int = 3) -> str:
         is_hot = article.get("is_hot", False)
         hot_indicator = "🔥 " if is_hot else ""
         topic_tags = " ".join([f"[{t}]" for t in topics if t != "general"])
-        msg_lines.append(f"{hot_indicator}• {article['title']} ({source}, {published}) {topic_tags}")
+        msg_lines.append(
+            f"{hot_indicator}• {article['title']} ({source}, {published}) {topic_tags}"
+        )
         if article.get("url"):
             msg_lines.append(f"  {article['url']}")
     return "\n".join(msg_lines)
@@ -424,4 +509,3 @@ if __name__ == "__main__":
     sample_symbol = (TICKERS or ["VNM"])[0]
     summary = analyze_news_trend(sample_symbol)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-

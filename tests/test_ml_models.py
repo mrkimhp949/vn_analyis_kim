@@ -1,6 +1,7 @@
 """
 Unit tests for ML Models
 """
+
 import pytest
 import sys
 import os
@@ -23,7 +24,7 @@ class TestMLPredictor:
     def test_predictor_initialization(self):
         """Test predictor initializes correctly"""
         assert self.predictor.expected_features == 18
-        assert self.predictor.models_dir == 'models'
+        assert self.predictor.models_dir == "models"
         assert self.predictor.scaler is not None
 
     def test_create_dummy_models(self):
@@ -31,7 +32,7 @@ class TestMLPredictor:
         self.predictor.create_dummy_models()
 
         assert self.predictor.rf_model is not None
-        assert hasattr(self.predictor.scaler, 'mean_')
+        assert hasattr(self.predictor.scaler, "mean_")
         assert len(self.predictor.scaler.mean_) == 18
 
     def test_predict_with_correct_features(self):
@@ -56,9 +57,9 @@ class TestMLPredictor:
         with pytest.raises(ValueError) as exc_info:
             self.predictor.predict(X_test)
 
-        assert 'Feature mismatch' in str(exc_info.value)
-        assert '15' in str(exc_info.value)
-        assert '18' in str(exc_info.value)
+        assert "Feature mismatch" in str(exc_info.value)
+        assert "15" in str(exc_info.value)
+        assert "18" in str(exc_info.value)
 
     def test_predict_with_dataframe(self):
         """Test prediction with pandas DataFrame"""
@@ -100,18 +101,19 @@ class TestMLPredictor:
         with pytest.raises(ModelPredictionError) as exc_info:
             self.predictor.train_random_forest(X_train, y_train)
 
-        assert 'Feature count mismatch' in str(exc_info.value)
+        assert "Feature count mismatch" in str(exc_info.value)
 
     def test_load_models_creates_dummy_if_not_exists(self):
         """Test load_models creates dummy models if files don't exist"""
         # Ensure models directory exists but is empty
         import shutil
-        if os.path.exists('models'):
+
+        if os.path.exists("models"):
             # Backup existing models
-            if os.path.exists('models_backup'):
-                shutil.rmtree('models_backup')
-            shutil.copytree('models', 'models_backup')
-            shutil.rmtree('models')
+            if os.path.exists("models_backup"):
+                shutil.rmtree("models_backup")
+            shutil.copytree("models", "models_backup")
+            shutil.rmtree("models")
 
         try:
             predictor = MLPredictor()
@@ -122,11 +124,11 @@ class TestMLPredictor:
 
         finally:
             # Restore original models
-            if os.path.exists('models_backup'):
-                if os.path.exists('models'):
-                    shutil.rmtree('models')
-                shutil.copytree('models_backup', 'models')
-                shutil.rmtree('models_backup')
+            if os.path.exists("models_backup"):
+                if os.path.exists("models"):
+                    shutil.rmtree("models")
+                shutil.copytree("models_backup", "models")
+                shutil.rmtree("models_backup")
 
     def test_save_and_load_models(self):
         """Test saving and loading models"""
@@ -150,7 +152,7 @@ class TestMLPredictor:
 
             assert loaded is True
             assert predictor2.rf_model is not None
-            assert hasattr(predictor2.scaler, 'mean_')
+            assert hasattr(predictor2.scaler, "mean_")
 
             # Test predictions are consistent
             X_test = np.random.randn(5, 18)
@@ -177,19 +179,19 @@ class TestMLPredictor:
             predictor.save_models()
 
             # Check model_info.json exists and has correct data
-            info_path = os.path.join(temp_dir, 'model_info.json')
+            info_path = os.path.join(temp_dir, "model_info.json")
             assert os.path.exists(info_path)
 
-            with open(info_path, 'r') as f:
+            with open(info_path, "r") as f:
                 info = json.load(f)
 
-            assert 'expected_features' in info
-            assert info['expected_features'] == 18
-            assert 'saved_at' in info
+            assert "expected_features" in info
+            assert info["expected_features"] == 18
+            assert "saved_at" in info
 
         finally:
             shutil.rmtree(temp_dir)
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

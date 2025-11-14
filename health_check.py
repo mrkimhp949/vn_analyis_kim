@@ -36,6 +36,7 @@ class HealthChecker:
         """Check database connectivity and integrity"""
         try:
             from database import get_db
+
             db = get_db()
 
             with db.get_connection() as conn:
@@ -50,6 +51,7 @@ class HealthChecker:
         """Check if ML models are loaded"""
         try:
             from ml_models import MLPredictor
+
             predictor = MLPredictor()
             loaded = predictor.load_models()
 
@@ -78,6 +80,7 @@ class HealthChecker:
         """Check available disk space"""
         try:
             import shutil
+
             total, used, free = shutil.disk_usage("/")
             free_gb = free // (2**30)
             free_percent = (free / total) * 100
@@ -104,7 +107,7 @@ class HealthChecker:
             cache_files = [
                 os.path.join(cache_dir, f)
                 for f in os.listdir(cache_dir)
-                if f.endswith('.pkl')
+                if f.endswith(".pkl")
             ]
 
             if not cache_files:
@@ -135,8 +138,8 @@ class HealthChecker:
                 return True, "No positions (no risk)"
 
             portfolio = manager.get_portfolio_value()
-            num_positions = portfolio['num_positions']
-            pnl_percent = portfolio['pnl_percent']
+            num_positions = portfolio["num_positions"]
+            pnl_percent = portfolio["pnl_percent"]
 
             status = f"{num_positions} positions, P&L: {pnl_percent:+.1f}%"
 
@@ -199,13 +202,13 @@ class HealthChecker:
 
         if self.checks_failed == 0 and not self.warnings:
             print("🎉 All systems operational!")
-            results['overall_status'] = 'healthy'
+            results["overall_status"] = "healthy"
         elif self.checks_failed == 0:
             print("⚠️  System operational with warnings")
-            results['overall_status'] = 'warning'
+            results["overall_status"] = "warning"
         else:
             print("❌ System has issues that need attention")
-            results['overall_status'] = 'unhealthy'
+            results["overall_status"] = "unhealthy"
 
         print("=" * 70)
 
@@ -216,17 +219,13 @@ def main():
     """Run health check"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Trading Bot Health Check')
+    parser = argparse.ArgumentParser(description="Trading Bot Health Check")
     parser.add_argument(
-        '--api-url',
-        default='http://localhost:8080',
-        help='API server URL (default: http://localhost:8080)'
+        "--api-url",
+        default="http://localhost:8080",
+        help="API server URL (default: http://localhost:8080)",
     )
-    parser.add_argument(
-        '--json',
-        action='store_true',
-        help='Output results as JSON'
-    )
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
 
     args = parser.parse_args()
 
@@ -235,16 +234,17 @@ def main():
 
     if args.json:
         import json
+
         print(json.dumps(results, indent=2))
 
     # Exit code: 0 if healthy, 1 if warnings, 2 if unhealthy
-    if results['overall_status'] == 'healthy':
+    if results["overall_status"] == "healthy":
         sys.exit(0)
-    elif results['overall_status'] == 'warning':
+    elif results["overall_status"] == "warning":
         sys.exit(1)
     else:
         sys.exit(2)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

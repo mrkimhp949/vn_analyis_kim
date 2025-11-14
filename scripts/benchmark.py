@@ -44,15 +44,15 @@ class Benchmark:
         times_arr = np.array(times)
 
         result = {
-            'name': name,
-            'iterations': iterations,
-            'mean': np.mean(times_arr),
-            'median': np.median(times_arr),
-            'std': np.std(times_arr),
-            'min': np.min(times_arr),
-            'max': np.max(times_arr),
-            'p95': np.percentile(times_arr, 95),
-            'p99': np.percentile(times_arr, 99)
+            "name": name,
+            "iterations": iterations,
+            "mean": np.mean(times_arr),
+            "median": np.median(times_arr),
+            "std": np.std(times_arr),
+            "min": np.min(times_arr),
+            "max": np.max(times_arr),
+            "p95": np.percentile(times_arr, 95),
+            "p99": np.percentile(times_arr, 99),
         }
 
         self.results[name] = result
@@ -69,7 +69,7 @@ class Benchmark:
         df = pd.DataFrame(self.results.values())
 
         # Sort by mean time
-        df = df.sort_values('mean', ascending=False)
+        df = df.sort_values("mean", ascending=False)
 
         print(f"\n{'Benchmark':<40} {'Avg (ms)':<12} {'p95 (ms)':<12} {'Max (ms)':<12}")
         print("-" * 80)
@@ -106,7 +106,7 @@ def benchmark_data_loading():
 
     def load():
         try:
-            load_data('VCB', lookback=100, use_cache=True)
+            load_data("VCB", lookback=100, use_cache=True)
         except Exception:
             pass
 
@@ -118,15 +118,17 @@ def benchmark_technical_indicators():
     from features import add_ml_features
 
     # Create sample data
-    dates = pd.date_range('2024-01-01', periods=100, freq='D')
-    df = pd.DataFrame({
-        'time': dates,
-        'close': np.random.randn(100).cumsum() + 50000,
-        'high': np.random.randn(100).cumsum() + 51000,
-        'low': np.random.randn(100).cumsum() + 49000,
-        'open': np.random.randn(100).cumsum() + 50000,
-        'volume': np.random.randint(100000, 1000000, 100)
-    })
+    dates = pd.date_range("2024-01-01", periods=100, freq="D")
+    df = pd.DataFrame(
+        {
+            "time": dates,
+            "close": np.random.randn(100).cumsum() + 50000,
+            "high": np.random.randn(100).cumsum() + 51000,
+            "low": np.random.randn(100).cumsum() + 49000,
+            "open": np.random.randn(100).cumsum() + 50000,
+            "volume": np.random.randint(100000, 1000000, 100),
+        }
+    )
 
     def calculate():
         add_ml_features(df.copy())
@@ -141,24 +143,26 @@ def benchmark_entry_logic():
     logic = ImprovedEntryLogic()
 
     # Create sample data
-    dates = pd.date_range('2024-01-01', periods=100, freq='D')
-    df = pd.DataFrame({
-        'time': dates,
-        'close': np.linspace(50000, 60000, 100),
-        'high': np.linspace(51000, 61000, 100),
-        'low': np.linspace(49000, 59000, 100),
-        'volume': np.random.randint(100000, 1000000, 100),
-        'sma20': np.linspace(50000, 60000, 100),
-        'ema20': np.linspace(50000, 60000, 100),
-        'ema50': np.linspace(48000, 58000, 100),
-        'rsi': np.full(100, 50),
-        'atr': np.full(100, 1000),
-        'macd': np.full(100, 100),
-        'macd_signal': np.full(100, 50),
-        'volume_ratio': np.full(100, 1.2)
-    })
+    dates = pd.date_range("2024-01-01", periods=100, freq="D")
+    df = pd.DataFrame(
+        {
+            "time": dates,
+            "close": np.linspace(50000, 60000, 100),
+            "high": np.linspace(51000, 61000, 100),
+            "low": np.linspace(49000, 59000, 100),
+            "volume": np.random.randint(100000, 1000000, 100),
+            "sma20": np.linspace(50000, 60000, 100),
+            "ema20": np.linspace(50000, 60000, 100),
+            "ema50": np.linspace(48000, 58000, 100),
+            "rsi": np.full(100, 50),
+            "atr": np.full(100, 1000),
+            "macd": np.full(100, 100),
+            "macd_signal": np.full(100, 50),
+            "volume_ratio": np.full(100, 1.2),
+        }
+    )
 
-    ml_signal = {'signal': 'BUY', 'confidence': 75, 'reason': 'Test'}
+    ml_signal = {"signal": "BUY", "confidence": 75, "reason": "Test"}
 
     def analyze():
         logic.analyze_entry(df, ml_signal)
@@ -201,20 +205,30 @@ def main():
     bench = Benchmark()
 
     # ML benchmarks
-    bench.measure("ML Model Prediction (10 samples)", benchmark_ml_prediction(), iterations=100)
+    bench.measure(
+        "ML Model Prediction (10 samples)", benchmark_ml_prediction(), iterations=100
+    )
 
     # Data benchmarks
     bench.measure("Data Loading (with cache)", benchmark_data_loading(), iterations=20)
-    bench.measure("Technical Indicators Calculation", benchmark_technical_indicators(), iterations=50)
+    bench.measure(
+        "Technical Indicators Calculation",
+        benchmark_technical_indicators(),
+        iterations=50,
+    )
 
     # Logic benchmarks
     bench.measure("Entry Logic Analysis", benchmark_entry_logic(), iterations=50)
 
     # Database benchmarks
-    bench.measure("Database Query Operations", benchmark_database_operations(), iterations=100)
+    bench.measure(
+        "Database Query Operations", benchmark_database_operations(), iterations=100
+    )
 
     # Portfolio benchmarks
-    bench.measure("Portfolio Value Calculation", benchmark_portfolio_calculation(), iterations=100)
+    bench.measure(
+        "Portfolio Value Calculation", benchmark_portfolio_calculation(), iterations=100
+    )
 
     # Generate report
     bench.report()
@@ -230,14 +244,16 @@ def main():
         "Data Loading": 500,
         "Entry Logic Analysis": 50,
         "Database Query": 10,
-        "Portfolio Calculation": 20
+        "Portfolio Calculation": 20,
     }
 
     for component, target in targets.items():
         # Find matching benchmark
-        matching = [r for r in bench.results.values() if component.lower() in r['name'].lower()]
+        matching = [
+            r for r in bench.results.values() if component.lower() in r["name"].lower()
+        ]
         if matching:
-            actual = matching[0]['mean'] * 1000
+            actual = matching[0]["mean"] * 1000
             status = "✅ PASS" if actual < target else "❌ FAIL"
             print(f"{component:<30} {target:>6.0f}ms    {status} ({actual:.1f}ms)")
         else:
@@ -248,5 +264,5 @@ def main():
     print("=" * 80)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

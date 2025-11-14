@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PriceUpdate:
     """Real-time price update"""
+
     symbol: str
     price: float
     volume: int
@@ -39,6 +40,7 @@ class PriceUpdate:
 @dataclass
 class WebSocketConfig:
     """WebSocket configuration"""
+
     url: str = "wss://fc-data.ssi.com.vn/realtime"
     reconnect_delay: int = 5  # seconds
     max_reconnect_attempts: int = 10
@@ -108,7 +110,7 @@ class PriceFeedClient:
             self.websocket = await websockets.connect(
                 self.config.url,
                 ping_interval=self.config.heartbeat_interval,
-                ping_timeout=10
+                ping_timeout=10,
             )
             self.connected = True
             self.reconnect_attempts = 0
@@ -130,12 +132,14 @@ class PriceFeedClient:
         # SSI WebSocket subscription format
         subscription_msg = {
             "action": "subscribe",
-            "channels": [f"X:{symbol}" for symbol in self.config.subscribe_channels]
+            "channels": [f"X:{symbol}" for symbol in self.config.subscribe_channels],
         }
 
         try:
             await self.websocket.send(json.dumps(subscription_msg))
-            logger.info(f"Sent subscription for {len(self.config.subscribe_channels)} symbols")
+            logger.info(
+                f"Sent subscription for {len(self.config.subscribe_channels)} symbols"
+            )
         except Exception as e:
             logger.error(f"Failed to send subscription: {e}")
 
@@ -145,8 +149,8 @@ class PriceFeedClient:
             data = json.loads(message)
 
             # Parse price update (SSI format)
-            if 'data' in data and isinstance(data['data'], list):
-                for item in data['data']:
+            if "data" in data and isinstance(data["data"], list):
+                for item in data["data"]:
                     self.process_price_update(item)
 
         except json.JSONDecodeError:
@@ -157,22 +161,24 @@ class PriceFeedClient:
     def process_price_update(self, data: Dict):
         """Process price update from WebSocket"""
         try:
-            symbol = data.get('sym', data.get('symbol', ''))
+            symbol = data.get("sym", data.get("symbol", ""))
             if not symbol:
                 return
 
             # Create price update
             update = PriceUpdate(
                 symbol=symbol,
-                price=float(data.get('lastPrice', data.get('price', 0))),
-                volume=int(data.get('totalVol', data.get('volume', 0))),
-                change=float(data.get('change', 0)),
-                change_percent=float(data.get('changePc', data.get('changePercent', 0))),
+                price=float(data.get("lastPrice", data.get("price", 0))),
+                volume=int(data.get("totalVol", data.get("volume", 0))),
+                change=float(data.get("change", 0)),
+                change_percent=float(
+                    data.get("changePc", data.get("changePercent", 0))
+                ),
                 timestamp=datetime.now(),
-                bid=float(data.get('bid1', 0)) if 'bid1' in data else None,
-                ask=float(data.get('ask1', 0)) if 'ask1' in data else None,
-                high=float(data.get('high', 0)) if 'high' in data else None,
-                low=float(data.get('low', 0)) if 'low' in data else None
+                bid=float(data.get("bid1", 0)) if "bid1" in data else None,
+                ask=float(data.get("ask1", 0)) if "ask1" in data else None,
+                high=float(data.get("high", 0)) if "high" in data else None,
+                low=float(data.get("low", 0)) if "low" in data else None,
             )
 
             # Update cache
@@ -244,6 +250,7 @@ class PriceFeedClient:
 
     def start(self):
         """Start the WebSocket client in a background thread"""
+
         def run_async_loop():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -276,15 +283,20 @@ class PriceFeedClient:
 # Example callback function
 def print_price_update(update: PriceUpdate):
     """Print price updates to console"""
-    change_str = f"+{update.change_percent:.2f}%" if update.change_percent >= 0 else f"{update.change_percent:.2f}%"
-    print(f"[{update.timestamp.strftime('%H:%M:%S')}] {update.symbol}: {update.price:,.0f} VND ({change_str})")
+    change_str = (
+        f"+{update.change_percent:.2f}%"
+        if update.change_percent >= 0
+        else f"{update.change_percent:.2f}%"
+    )
+    print(
+        f"[{update.timestamp.strftime('%H:%M:%S')}] {update.symbol}: {update.price:,.0f} VND ({change_str})"
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Example usage
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
     # Create client
@@ -294,7 +306,7 @@ if __name__ == '__main__':
     client.add_price_callback(print_price_update)
 
     # Subscribe to symbols
-    client.subscribe(['VCB', 'HPG', 'VHM', 'VNM', 'VIC'])
+    client.subscribe(["VCB", "HPG", "VHM", "VNM", "VIC"])
 
     # Start (this runs in background)
     client.start()

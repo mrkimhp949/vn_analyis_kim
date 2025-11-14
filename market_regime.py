@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from hmmlearn.hmm import GaussianHMM  # type: ignore
+
     HMM_AVAILABLE = True
 except ImportError:  # pragma: no cover - optional dependency
     HMM_AVAILABLE = False
@@ -27,19 +28,21 @@ class MarketRegimeAnalyzer:
     Phân tích tình trạng thị trường (Bull/Bear/Sideways/High Volatility)
     để quyết định có nên trade hay không
     """
-    
-    def __init__(self, 
-                 bear_threshold=-0.03,      # -3% trong 1 tuần = bear
-                 high_volatility_threshold=0.03,  # ATR/Price > 3% = high vol
-                 trend_period=50):
+
+    def __init__(
+        self,
+        bear_threshold=-0.03,  # -3% trong 1 tuần = bear
+        high_volatility_threshold=0.03,  # ATR/Price > 3% = high vol
+        trend_period=50,
+    ):
         self.bear_threshold = bear_threshold
         self.high_volatility_threshold = high_volatility_threshold
         self.trend_period = trend_period
-    
+
     def analyze_market_regime(self) -> Dict:
         """
         Phân tích tình trạng thị trường VNINDEX
-        
+
         Returns:
             dict: {
                 'regime': 'BULL' | 'BEAR' | 'SIDEWAYS' | 'HIGH_VOLATILITY',
@@ -50,173 +53,170 @@ class MarketRegimeAnalyzer:
         """
         try:
             # Load VNINDEX data
-            vnindex = load_data('VNINDEX', lookback=100)
-            
+            vnindex = load_data("VNINDEX", lookback=100)
+
             if vnindex.empty or len(vnindex) < 50:
                 logger.warning("Không đủ dữ liệu VNINDEX")
                 return self._default_regime()
-            
+
             # Tính các chỉ số
             latest = vnindex.iloc[-1]
-            
+
             # 1. Weekly change (5 trading days)
             weekly_change = self._calculate_weekly_change(vnindex)
-            
+
             # 2. Trend analysis (SMA)
             trend_direction, trend_strength = self._analyze_trend(vnindex)
-            
+
             # 3. Volatility
             volatility = self._calculate_volatility(vnindex)
-            
+
             # 4. Market breadth (nếu có dữ liệu)
             # breadth_score = self._analyze_market_breadth()
-            
+
             details = {
-                'weekly_change': weekly_change,
-                'trend_direction': trend_direction,
-                'trend_strength': trend_strength,
-                'volatility': volatility,
-                'vnindex_price': latest['close'],
-                'sma20': vnindex['close'].rolling(20).mean().iloc[-1],
-                'sma50': vnindex['close'].rolling(50).mean().iloc[-1]
+                "weekly_change": weekly_change,
+                "trend_direction": trend_direction,
+                "trend_strength": trend_strength,
+                "volatility": volatility,
+                "vnindex_price": latest["close"],
+                "sma20": vnindex["close"].rolling(20).mean().iloc[-1],
+                "sma50": vnindex["close"].rolling(50).mean().iloc[-1],
             }
 
             # Determine regime
             regime = self._determine_regime(
-                weekly_change, 
-                trend_direction, 
-                trend_strength,
-                volatility
+                weekly_change, trend_direction, trend_strength, volatility
             )
 
             hmm_info = self._detect_regime_hmm(vnindex)
             if hmm_info:
-                details['hmm_state'] = hmm_info['state']
-                details['hmm_regime'] = hmm_info['regime']
-                details['hmm_confidence'] = hmm_info['confidence']
-                details['hmm_probabilities'] = hmm_info['probabilities']
-                details['hmm_state_means'] = hmm_info['state_means']
-                details['hmm_state_volatility'] = hmm_info['state_volatility']
+                details["hmm_state"] = hmm_info["state"]
+                details["hmm_regime"] = hmm_info["regime"]
+                details["hmm_confidence"] = hmm_info["confidence"]
+                details["hmm_probabilities"] = hmm_info["probabilities"]
+                details["hmm_state_means"] = hmm_info["state_means"]
+                details["hmm_state_volatility"] = hmm_info["state_volatility"]
 
-                if hmm_info['confidence'] >= 0.6 and hmm_info['regime'] != regime:
-                    details['regime_before_hmm'] = regime
-                    regime = hmm_info['regime']
-            
+                if hmm_info["confidence"] >= 0.6 and hmm_info["regime"] != regime:
+                    details["regime_before_hmm"] = regime
+                    regime = hmm_info["regime"]
+
             # Tradeable decision
             tradeable = self._is_tradeable(regime, volatility, weekly_change)
-            
+
             # Confidence score
-            confidence = self._calculate_confidence(
-                regime, 
-                trend_strength, 
-                volatility
-            )
-            
+            confidence = self._calculate_confidence(regime, trend_strength, volatility)
+
             result = {
-                'regime': regime,
-                'tradeable': tradeable,
-                'confidence': confidence,
-                'details': details,
-                'message': self._generate_message(regime, tradeable, details)
+                "regime": regime,
+                "tradeable": tradeable,
+                "confidence": confidence,
+                "details": details,
+                "message": self._generate_message(regime, tradeable, details),
             }
-            
+
             logger.info(f"Market Regime: {regime} | Tradeable: {tradeable}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Lỗi phân tích market regime: {e}")
             return self._default_regime()
-    
+
     def _calculate_weekly_change(self, df: pd.DataFrame) -> float:
         """Tính % thay đổi trong 1 tuần (5 ngày giao dịch)"""
         if len(df) < 6:
             return 0.0
-        
-        current_close = df['close'].iloc[-1]
-        week_ago_close = df['close'].iloc[-6]
-        
+
+        current_close = df["close"].iloc[-1]
+        week_ago_close = df["close"].iloc[-6]
+
         change = (current_close / week_ago_close - 1) * 100
         return change
-    
+
     def _analyze_trend(self, df: pd.DataFrame) -> Tuple[str, float]:
         """
         Phân tích xu hướng dựa trên SMA
-        
+
         Returns:
             direction: 'UP' | 'DOWN' | 'SIDEWAYS'
             strength: 0-100
         """
-        sma20 = df['close'].rolling(20).mean()
-        sma50 = df['close'].rolling(50).mean()
-        current_close = df['close'].iloc[-1]
-        
+        sma20 = df["close"].rolling(20).mean()
+        sma50 = df["close"].rolling(50).mean()
+        current_close = df["close"].iloc[-1]
+
         sma20_val = sma20.iloc[-1]
         sma50_val = sma50.iloc[-1]
-        
+
         # Direction
         if sma20_val > sma50_val and current_close > sma20_val:
-            direction = 'UP'
+            direction = "UP"
             # Strength: khoảng cách giữa SMAs
             strength = ((sma20_val - sma50_val) / sma50_val) * 100
             strength = min(strength * 10, 100)  # Normalize to 0-100
         elif sma20_val < sma50_val and current_close < sma20_val:
-            direction = 'DOWN'
+            direction = "DOWN"
             strength = ((sma50_val - sma20_val) / sma50_val) * 100
             strength = min(strength * 10, 100)
         else:
-            direction = 'SIDEWAYS'
+            direction = "SIDEWAYS"
             strength = 30  # Low confidence in sideways
-        
+
         return direction, strength
-    
+
     def _calculate_volatility(self, df: pd.DataFrame) -> float:
         """
         Tính volatility (normalized ATR)
-        
+
         Returns:
             float: ATR/Price ratio
         """
-        if 'atr' not in df.columns:
+        if "atr" not in df.columns:
             # Calculate ATR if not exists
-            high_low = df['high'] - df['low']
-            high_close = abs(df['high'] - df['close'].shift())
-            low_close = abs(df['low'] - df['close'].shift())
-            
-            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            high_low = df["high"] - df["low"]
+            high_close = abs(df["high"] - df["close"].shift())
+            low_close = abs(df["low"] - df["close"].shift())
+
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(
+                axis=1
+            )
             atr = true_range.rolling(14).mean()
-            df['atr'] = atr
-        
-        current_atr = df['atr'].iloc[-1]
-        current_price = df['close'].iloc[-1]
-        
+            df["atr"] = atr
+
+        current_atr = df["atr"].iloc[-1]
+        current_price = df["close"].iloc[-1]
+
         volatility = current_atr / current_price
         return volatility
-    
-    def _determine_regime(self, 
-                         weekly_change: float,
-                         trend_direction: str,
-                         trend_strength: float,
-                         volatility: float) -> str:
+
+    def _determine_regime(
+        self,
+        weekly_change: float,
+        trend_direction: str,
+        trend_strength: float,
+        volatility: float,
+    ) -> str:
         """Xác định regime thị trường"""
-        
+
         # High volatility override
         if volatility > self.high_volatility_threshold:
-            return 'HIGH_VOLATILITY'
-        
+            return "HIGH_VOLATILITY"
+
         # Bear market
         if weekly_change < self.bear_threshold:
-            return 'BEAR'
-        
+            return "BEAR"
+
         # Bull market
-        if trend_direction == 'UP' and trend_strength > 40:
-            return 'BULL'
-        
+        if trend_direction == "UP" and trend_strength > 40:
+            return "BULL"
+
         # Strong downtrend
-        if trend_direction == 'DOWN' and trend_strength > 40:
-            return 'BEAR'
-        
+        if trend_direction == "DOWN" and trend_strength > 40:
+            return "BEAR"
+
         # Default: sideways
-        return 'SIDEWAYS'
+        return "SIDEWAYS"
 
     def _detect_regime_hmm(self, df: pd.DataFrame) -> Optional[Dict]:
         """Sử dụng Hidden Markov Model để phát hiện regime (Bull/Neutral/Bear)."""
@@ -224,14 +224,14 @@ class MarketRegimeAnalyzer:
             return None
 
         try:
-            returns = df['close'].pct_change().dropna()
+            returns = df["close"].pct_change().dropna()
             if len(returns) < 50:
                 return None
 
             returns_array = returns.values.reshape(-1, 1)
             hmm = GaussianHMM(
                 n_components=3,
-                covariance_type='full',
+                covariance_type="full",
                 n_iter=200,
                 random_state=42,
                 verbose=False,
@@ -244,13 +244,13 @@ class MarketRegimeAnalyzer:
 
             order = np.argsort(state_means)
             regime_map = {
-                order[0]: 'BEAR',
-                order[1]: 'SIDEWAYS',
-                order[2]: 'BULL',
+                order[0]: "BEAR",
+                order[1]: "SIDEWAYS",
+                order[2]: "BULL",
             }
 
             current_state = hidden_states[-1]
-            current_regime = regime_map.get(current_state, 'SIDEWAYS')
+            current_regime = regime_map.get(current_state, "SIDEWAYS")
             confidence = float(state_probs[-1, current_state])
 
             covariances = hmm.covars_
@@ -260,117 +260,125 @@ class MarketRegimeAnalyzer:
                 state_vol = covariances.reshape(-1)
 
             return {
-                'state': int(current_state),
-                'regime': current_regime,
-                'confidence': confidence,
-                'probabilities': state_probs[-1].tolist(),
-                'state_means': state_means.tolist(),
-                'state_volatility': state_vol.tolist(),
+                "state": int(current_state),
+                "regime": current_regime,
+                "confidence": confidence,
+                "probabilities": state_probs[-1].tolist(),
+                "state_means": state_means.tolist(),
+                "state_volatility": state_vol.tolist(),
             }
         except Exception as exc:
             logger.debug(f"HMM regime detection failed: {exc}")
             return None
-    
-    def _is_tradeable(self, 
-                      regime: str, 
-                      volatility: float,
-                      weekly_change: float) -> bool:
+
+    def _is_tradeable(
+        self, regime: str, volatility: float, weekly_change: float
+    ) -> bool:
         """
         Quyết định có nên trade hay không
-        
+
         KHÔNG TRADE khi:
         - Bear market
         - High volatility
         - Weekly change quá âm
         """
-        
+
         # Rule 1: Không trade trong bear market
-        if regime == 'BEAR':
+        if regime == "BEAR":
             return False
-        
+
         # Rule 2: Không trade khi volatility quá cao
-        if regime == 'HIGH_VOLATILITY':
+        if regime == "HIGH_VOLATILITY":
             return False
-        
+
         # Rule 3: Không trade khi thị trường giảm mạnh
         if weekly_change < -5:  # -5% trong tuần
             return False
-        
+
         # Rule 4: Chỉ trade trong bull hoặc sideways nhẹ
-        if regime in ['BULL', 'SIDEWAYS']:
+        if regime in ["BULL", "SIDEWAYS"]:
             return True
-        
+
         return False
-    
-    def _calculate_confidence(self,
-                             regime: str,
-                             trend_strength: float,
-                             volatility: float) -> int:
+
+    def _calculate_confidence(
+        self, regime: str, trend_strength: float, volatility: float
+    ) -> int:
         """Tính confidence score cho quyết định"""
-        
+
         base_confidence = {
-            'BULL': 80,
-            'SIDEWAYS': 50,
-            'BEAR': 20,
-            'HIGH_VOLATILITY': 10
+            "BULL": 80,
+            "SIDEWAYS": 50,
+            "BEAR": 20,
+            "HIGH_VOLATILITY": 10,
         }
-        
+
         confidence = base_confidence.get(regime, 50)
-        
+
         # Adjust by trend strength
-        if regime == 'BULL':
+        if regime == "BULL":
             confidence = min(confidence + (trend_strength * 0.2), 100)
-        
+
         # Penalize high volatility
         if volatility > 0.025:
             confidence -= 20
-        
+
         return int(max(0, min(confidence, 100)))
-    
+
     def _generate_message(self, regime: str, tradeable: bool, details: Dict) -> str:
         """Generate human-readable message"""
-        
+
         if not tradeable:
-            if regime == 'BEAR':
-                return f"⛔ THỊ TRƯỜNG GIẢM ĐIỂM - KHÔNG NÊN TRADE\n" \
-                       f"📉 VNINDEX: {details['vnindex_price']:.2f}\n" \
-                       f"📊 Tuần này: {details['weekly_change']:+.2f}%"
-            
-            elif regime == 'HIGH_VOLATILITY':
-                return f"⚠️ THỊ TRƯỜNG BIẾN ĐỘNG MẠNH - RỦI RO CAO\n" \
-                       f"📊 Volatility: {details['volatility']*100:.2f}%\n" \
-                       f"💡 Nên chờ ổn định hơn"
-            
+            if regime == "BEAR":
+                return (
+                    f"⛔ THỊ TRƯỜNG GIẢM ĐIỂM - KHÔNG NÊN TRADE\n"
+                    f"📉 VNINDEX: {details['vnindex_price']:.2f}\n"
+                    f"📊 Tuần này: {details['weekly_change']:+.2f}%"
+                )
+
+            elif regime == "HIGH_VOLATILITY":
+                return (
+                    f"⚠️ THỊ TRƯỜNG BIẾN ĐỘNG MẠNH - RỦI RO CAO\n"
+                    f"📊 Volatility: {details['volatility']*100:.2f}%\n"
+                    f"💡 Nên chờ ổn định hơn"
+                )
+
             else:
-                return f"⏸️ THỊ TRƯỜNG KHÔNG RÕ HƯỚNG\n" \
-                       f"📊 Regime: {regime}\n" \
-                       f"💡 Đợi tín hiệu rõ ràng hơn"
-        
+                return (
+                    f"⏸️ THỊ TRƯỜNG KHÔNG RÕ HƯỚNG\n"
+                    f"📊 Regime: {regime}\n"
+                    f"💡 Đợi tín hiệu rõ ràng hơn"
+                )
+
         else:
-            if regime == 'BULL':
-                return f"✅ THỊ TRƯỜNG TÍCH CỰC - CÓ THỂ TRADE\n" \
-                       f"📈 VNINDEX: {details['vnindex_price']:.2f}\n" \
-                       f"🎯 Xu hướng: {details['trend_direction']} ({details['trend_strength']:.0f}%)"
-            
+            if regime == "BULL":
+                return (
+                    f"✅ THỊ TRƯỜNG TÍCH CỰC - CÓ THỂ TRADE\n"
+                    f"📈 VNINDEX: {details['vnindex_price']:.2f}\n"
+                    f"🎯 Xu hướng: {details['trend_direction']} ({details['trend_strength']:.0f}%)"
+                )
+
             else:  # SIDEWAYS
-                return f"⚡ THỊ TRƯỜNG ĐANG DAO ĐỘNG\n" \
-                       f"📊 VNINDEX: {details['vnindex_price']:.2f}\n" \
-                       f"💡 Trade thận trọng, chọn mã tốt"
-    
+                return (
+                    f"⚡ THỊ TRƯỜNG ĐANG DAO ĐỘNG\n"
+                    f"📊 VNINDEX: {details['vnindex_price']:.2f}\n"
+                    f"💡 Trade thận trọng, chọn mã tốt"
+                )
+
     def _default_regime(self) -> Dict:
         """Default response khi không có dữ liệu"""
         return {
-            'regime': 'UNKNOWN',
-            'tradeable': False,
-            'confidence': 0,
-            'details': {},
-            'message': '⚠️ Không thể xác định tình trạng thị trường'
+            "regime": "UNKNOWN",
+            "tradeable": False,
+            "confidence": 0,
+            "details": {},
+            "message": "⚠️ Không thể xác định tình trạng thị trường",
         }
-    
+
     def get_position_multiplier(self) -> float:
         """
         Trả về multiplier cho position size dựa trên market regime
-        
+
         Returns:
             float: 0.0 - 1.2
                 1.2 = Bull strong (tăng 20% position)
@@ -379,22 +387,22 @@ class MarketRegimeAnalyzer:
                 0.0 = Don't trade
         """
         regime_info = self.analyze_market_regime()
-        
-        if not regime_info['tradeable']:
+
+        if not regime_info["tradeable"]:
             return 0.0
-        
-        regime = regime_info['regime']
-        confidence = regime_info['confidence']
-        
-        if regime == 'BULL':
+
+        regime = regime_info["regime"]
+        confidence = regime_info["confidence"]
+
+        if regime == "BULL":
             if confidence >= 80:
                 return 1.2  # Strong bull → tăng position
             else:
                 return 1.0
-        
-        elif regime == 'SIDEWAYS':
+
+        elif regime == "SIDEWAYS":
             return 0.7  # Giảm position trong sideway
-        
+
         else:
             return 0.5  # Very cautious
 
@@ -403,23 +411,24 @@ class MarketRegimeAnalyzer:
 # INTEGRATION HELPERS
 # ============================================================================
 
+
 def check_market_before_trading() -> Tuple[bool, str]:
     """
     Helper function để check nhanh trước khi trade
-    
+
     Returns:
         (can_trade, message)
     """
     analyzer = MarketRegimeAnalyzer()
     result = analyzer.analyze_market_regime()
-    
-    return result['tradeable'], result['message']
+
+    return result["tradeable"], result["message"]
 
 
 def get_market_position_adjustment() -> float:
     """
     Helper function để lấy multiplier cho position sizing
-    
+
     Returns:
         float: multiplier (0.0 - 1.2)
     """
@@ -433,20 +442,20 @@ def get_market_position_adjustment() -> float:
 
 if __name__ == "__main__":
     # Test market regime analyzer
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("🧪 TESTING MARKET REGIME ANALYZER")
-    print("="*70 + "\n")
-    
+    print("=" * 70 + "\n")
+
     analyzer = MarketRegimeAnalyzer()
     result = analyzer.analyze_market_regime()
-    
+
     print(f"📊 Regime: {result['regime']}")
     print(f"✅ Tradeable: {result['tradeable']}")
     print(f"🎯 Confidence: {result['confidence']}%")
     print(f"\n{result['message']}")
     print(f"\n📈 Details:")
-    for key, value in result['details'].items():
+    for key, value in result["details"].items():
         print(f"  • {key}: {value}")
-    
+
     print(f"\n💰 Position Multiplier: {analyzer.get_position_multiplier():.2f}x")
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)

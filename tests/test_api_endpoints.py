@@ -1,6 +1,7 @@
 """
 Unit tests for FastAPI Endpoints
 """
+
 import pytest
 import sys
 import os
@@ -63,12 +64,7 @@ class TestAPIEndpoints:
     def test_add_to_portfolio_valid(self):
         """Test adding valid position to portfolio"""
         response = self.client.post(
-            "/portfolio/add",
-            params={
-                "symbol": "VCB",
-                "shares": 100,
-                "price": 60000
-            }
+            "/portfolio/add", params={"symbol": "VCB", "shares": 100, "price": 60000}
         )
 
         # API returns 200 even on errors (with status field)
@@ -85,8 +81,8 @@ class TestAPIEndpoints:
             params={
                 "symbol": "",  # Invalid empty symbol
                 "shares": 100,
-                "price": 60000
-            }
+                "price": 60000,
+            },
         )
 
         # API returns 200 with error status instead of HTTP error codes
@@ -101,8 +97,8 @@ class TestAPIEndpoints:
             params={
                 "symbol": "VCB",
                 "shares": -100,  # Invalid negative shares
-                "price": 60000
-            }
+                "price": 60000,
+            },
         )
 
         # API returns 200 with error status instead of HTTP error codes
@@ -117,8 +113,8 @@ class TestAPIEndpoints:
             params={
                 "symbol": "VCB",
                 "shares": 100,
-                "price": -60000  # Invalid negative price
-            }
+                "price": -60000,  # Invalid negative price
+            },
         )
 
         # API returns 200 with error status instead of HTTP error codes
@@ -130,15 +126,11 @@ class TestAPIEndpoints:
         """Test removing position from portfolio"""
         # First add a position
         self.client.post(
-            "/portfolio/add",
-            params={"symbol": "TEST", "shares": 100, "price": 50000}
+            "/portfolio/add", params={"symbol": "TEST", "shares": 100, "price": 50000}
         )
 
         # Then remove it
-        response = self.client.post(
-            "/portfolio/remove",
-            params={"symbol": "TEST"}
-        )
+        response = self.client.post("/portfolio/remove", params={"symbol": "TEST"})
 
         assert response.status_code in [200, 500]
 
@@ -208,5 +200,5 @@ class TestAPIErrorHandling:
         assert response.status_code == 405
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

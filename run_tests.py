@@ -15,17 +15,18 @@ def main():
 
     # Run pytest with verbose output
     args = [
-        'tests/',
-        '-v',
-        '--tb=short',
-        '--color=yes',
-        '-ra'  # Show summary of all test outcomes
+        "tests/",
+        "-v",
+        "--tb=short",
+        "--color=yes",
+        "-ra",  # Show summary of all test outcomes
     ]
 
     # Add coverage if available
     try:
         import pytest_cov
-        args.extend(['--cov=.', '--cov-report=term-missing'])
+
+        args.extend(["--cov=.", "--cov-report=term-missing"])
     except ImportError:
         print("⚠️ pytest-cov not installed. Install with: pip install pytest-cov")
 
@@ -41,5 +42,5 @@ def main():
     return exit_code
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BacktestConfig:
     """Backtesting configuration"""
+
     initial_capital: float = 100_000_000  # 100M VND
     commission_rate: float = 0.0015  # 0.15% per trade
     slippage: float = 0.001  # 0.1% price slippage
@@ -31,6 +32,7 @@ class BacktestConfig:
 @dataclass
 class Trade:
     """Individual trade record"""
+
     symbol: str
     entry_date: datetime
     entry_price: float
@@ -51,8 +53,14 @@ class Trade:
     exit_reason: str = ""
     holding_days: int = 0
 
-    def close_trade(self, exit_date: datetime, exit_price: float,
-                    exit_reason: str, commission_rate: float, slippage: float):
+    def close_trade(
+        self,
+        exit_date: datetime,
+        exit_price: float,
+        exit_reason: str,
+        commission_rate: float,
+        slippage: float,
+    ):
         """Close the trade and calculate PnL"""
         self.exit_date = exit_date
         self.exit_price = exit_price
@@ -76,6 +84,7 @@ class Trade:
 @dataclass
 class BacktestResult:
     """Backtesting results and metrics"""
+
     # Basic info
     start_date: datetime
     end_date: datetime
@@ -146,12 +155,16 @@ class BacktestEngine:
         """Check if we can open a new position"""
         # Check max positions
         if len(self.positions) >= self.config.max_positions:
-            logger.debug(f"Cannot open {symbol}: Max positions ({self.config.max_positions}) reached")
+            logger.debug(
+                f"Cannot open {symbol}: Max positions ({self.config.max_positions}) reached"
+            )
             return False
 
         # Check available capital
         if required_capital > self.capital:
-            logger.debug(f"Cannot open {symbol}: Insufficient capital ({self.capital:,.0f} < {required_capital:,.0f})")
+            logger.debug(
+                f"Cannot open {symbol}: Insufficient capital ({self.capital:,.0f} < {required_capital:,.0f})"
+            )
             return False
 
         # Check if already have position
@@ -161,8 +174,15 @@ class BacktestEngine:
 
         return True
 
-    def open_position(self, symbol: str, date: datetime, entry_price: float,
-                     stop_loss: float, take_profit: float, reason: str = "") -> Optional[Trade]:
+    def open_position(
+        self,
+        symbol: str,
+        date: datetime,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        reason: str = "",
+    ) -> Optional[Trade]:
         """Open a new position"""
         # Calculate position size
         position_capital = self.capital * self.config.position_size_pct
@@ -186,18 +206,21 @@ class BacktestEngine:
             shares=shares,
             stop_loss=stop_loss,
             take_profit=take_profit,
-            entry_reason=reason
+            entry_reason=reason,
         )
 
         # Update capital
         self.capital -= actual_cost
         self.positions[symbol] = trade
 
-        logger.info(f"✅ OPEN {symbol} @ {entry_price:,.0f} x {shares} shares = {actual_cost:,.0f} VND")
+        logger.info(
+            f"✅ OPEN {symbol} @ {entry_price:,.0f} x {shares} shares = {actual_cost:,.0f} VND"
+        )
         return trade
 
-    def close_position(self, symbol: str, date: datetime, exit_price: float,
-                      reason: str = "") -> Optional[Trade]:
+    def close_position(
+        self, symbol: str, date: datetime, exit_price: float, reason: str = ""
+    ) -> Optional[Trade]:
         """Close an existing position"""
         if symbol not in self.positions:
             logger.warning(f"Cannot close {symbol}: No open position")
@@ -211,7 +234,7 @@ class BacktestEngine:
             exit_price=exit_price,
             exit_reason=reason,
             commission_rate=self.config.commission_rate,
-            slippage=self.config.slippage
+            slippage=self.config.slippage,
         )
 
         # Update capital
@@ -223,7 +246,9 @@ class BacktestEngine:
         self.completed_trades.append(trade)
 
         pnl_str = f"+{trade.pnl:,.0f}" if trade.pnl >= 0 else f"{trade.pnl:,.0f}"
-        logger.info(f"❌ CLOSE {symbol} @ {exit_price:,.0f} | PnL: {pnl_str} ({trade.pnl_percent:+.2f}%) | {reason}")
+        logger.info(
+            f"❌ CLOSE {symbol} @ {exit_price:,.0f} | PnL: {pnl_str} ({trade.pnl_percent:+.2f}%) | {reason}"
+        )
 
         return trade
 
@@ -237,17 +262,19 @@ class BacktestEngine:
 
         total_equity = self.capital + positions_value
 
-        self.equity_curve.append({
-            'date': date,
-            'equity': total_equity,
-            'cash': self.capital,
-            'positions_value': positions_value,
-            'num_positions': len(self.positions)
-        })
+        self.equity_curve.append(
+            {
+                "date": date,
+                "equity": total_equity,
+                "cash": self.capital,
+                "positions_value": positions_value,
+                "num_positions": len(self.positions),
+            }
+        )
 
         # Calculate daily return
         if len(self.equity_curve) > 1:
-            prev_equity = self.equity_curve[-2]['equity']
+            prev_equity = self.equity_curve[-2]["equity"]
             daily_return = (total_equity - prev_equity) / prev_equity
             self.daily_returns.append(daily_return)
 
@@ -259,9 +286,9 @@ class BacktestEngine:
         equity_df = pd.DataFrame(self.equity_curve)
 
         # Basic metrics
-        start_date = equity_df['date'].iloc[0]
-        end_date = equity_df['date'].iloc[-1]
-        final_capital = equity_df['equity'].iloc[-1]
+        start_date = equity_df["date"].iloc[0]
+        end_date = equity_df["date"].iloc[-1]
+        final_capital = equity_df["equity"].iloc[-1]
 
         total_return = final_capital - self.initial_capital
         total_return_pct = (total_return / self.initial_capital) * 100
@@ -269,22 +296,34 @@ class BacktestEngine:
         # Annualized return
         days = (end_date - start_date).days
         years = days / 365.25
-        annualized_return = ((final_capital / self.initial_capital) ** (1 / years) - 1) * 100 if years > 0 else 0
+        annualized_return = (
+            ((final_capital / self.initial_capital) ** (1 / years) - 1) * 100
+            if years > 0
+            else 0
+        )
 
         # Sharpe ratio (assuming risk-free rate = 0)
         if len(self.daily_returns) > 0:
             daily_returns_std = np.std(self.daily_returns)
             avg_daily_return = np.mean(self.daily_returns)
-            sharpe_ratio = (avg_daily_return / daily_returns_std) * np.sqrt(252) if daily_returns_std > 0 else 0
+            sharpe_ratio = (
+                (avg_daily_return / daily_returns_std) * np.sqrt(252)
+                if daily_returns_std > 0
+                else 0
+            )
         else:
             sharpe_ratio = 0
 
         # Max drawdown
-        equity_series = equity_df['equity']
+        equity_series = equity_df["equity"]
         rolling_max = equity_series.expanding().max()
         drawdown = equity_series - rolling_max
         max_drawdown = drawdown.min()
-        max_drawdown_pct = (max_drawdown / rolling_max[drawdown.idxmin()]) * 100 if len(rolling_max) > 0 else 0
+        max_drawdown_pct = (
+            (max_drawdown / rolling_max[drawdown.idxmin()]) * 100
+            if len(rolling_max) > 0
+            else 0
+        )
 
         # Trade statistics
         trades = self.completed_trades
@@ -336,24 +375,28 @@ class BacktestEngine:
             total_commission=total_commission,
             total_slippage=total_slippage,
             trades=trades,
-            equity_curve=equity_df
+            equity_curve=equity_df,
         )
 
     def print_results(self, result: BacktestResult):
         """Print formatted backtest results"""
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("BACKTESTING RESULTS")
-        print("="*80)
+        print("=" * 80)
 
         print(f"\n📅 Period: {result.start_date.date()} → {result.end_date.date()}")
         print(f"💰 Initial Capital: {result.initial_capital:,.0f} VND")
         print(f"💰 Final Capital: {result.final_capital:,.0f} VND")
 
         print(f"\n📊 Performance:")
-        print(f"  Total Return: {result.total_return:+,.0f} VND ({result.total_return_pct:+.2f}%)")
+        print(
+            f"  Total Return: {result.total_return:+,.0f} VND ({result.total_return_pct:+.2f}%)"
+        )
         print(f"  Annualized Return: {result.annualized_return:.2f}%")
         print(f"  Sharpe Ratio: {result.sharpe_ratio:.2f}")
-        print(f"  Max Drawdown: {result.max_drawdown:,.0f} VND ({result.max_drawdown_pct:.2f}%)")
+        print(
+            f"  Max Drawdown: {result.max_drawdown:,.0f} VND ({result.max_drawdown_pct:.2f}%)"
+        )
 
         print(f"\n📈 Trade Statistics:")
         print(f"  Total Trades: {result.total_trades}")
@@ -372,4 +415,4 @@ class BacktestEngine:
         print(f"  Total Commission: {result.total_commission:,.0f} VND")
         print(f"  Total Slippage: {result.total_slippage:,.0f} VND")
 
-        print("="*80 + "\n")
+        print("=" * 80 + "\n")
