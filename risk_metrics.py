@@ -130,7 +130,8 @@ def load_returns_dataframe(symbols: List[str], lookback: int = 60) -> pd.DataFra
                 returns = df['close'].pct_change().dropna()
                 if len(returns) >= 20:
                     returns_data[symbol] = returns
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Could not load returns data for {symbol}: {e}")
             continue
 
     if len(returns_data) < 2:

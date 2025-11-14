@@ -58,23 +58,43 @@ class MLPredictor:
             if self.rf_model:
                 joblib.dump(self.rf_model, os.path.join(self.models_dir, 'random_forest.pkl'))
             joblib.dump(self.scaler, os.path.join(self.models_dir, 'scaler.pkl'))
-            
-            # Lưu số features expected
+
+            # Lưu model metadata với feature list
+            metadata = {
+                'expected_features': self.expected_features,
+                'saved_at': pd.Timestamp.now().isoformat()
+            }
+
+            # Save feature names if available
+            try:
+                from features import get_feature_columns
+                metadata['feature_names'] = get_feature_columns()
+            except Exception:
+                pass
+
             with open(os.path.join(self.models_dir, 'model_info.json'), 'w') as f:
                 import json
-                json.dump({'expected_features': self.expected_features}, f)
-                
-            logger.info("✅ Models saved successfully")
+                json.dump(metadata, f, indent=2)
+
+            logger.info(f"✅ Models saved successfully with {self.expected_features} features")
         except Exception as e:
             logger.error(f"❌ Lỗi khi lưu models: {e}")
 
     def train_random_forest(self, X_train, y_train):
         """Train Random Forest với feature validation"""
         logger.info("🌲 Training Random Forest...")
-        
-        # Validate số features
+
+        # Validate số features - STRICT CHECK
         if X_train.shape[1] != self.expected_features:
-            logger.warning(f"⚠️ Training với {X_train.shape[1]} features, nhưng expected {self.expected_features}")
+            from exceptions import ModelPredictionError
+            raise ModelPredictionError(
+                f"Feature count mismatch during training",
+                context={
+                    'got': X_train.shape[1],
+                    'expected': self.expected_features,
+                    'message': 'Please check features.get_feature_columns() and ensure all features are generated'
+                }
+            )
 
         self.rf_model = RandomForestClassifier(
             n_estimators=100,
@@ -128,42 +148,53 @@ class MLPredictor:
     def load_models(self):
         """Load pre-trained models và scaler"""
         self.ensure_models_dir()
-        
+
         models_loaded = False
-        
+
         try:
             rf_path = os.path.join(self.models_dir, 'random_forest.pkl')
             scaler_path = os.path.join(self.models_dir, 'scaler.pkl')
             info_path = os.path.join(self.models_dir, 'model_info.json')
-            
+
             if os.path.exists(rf_path) and os.path.exists(scaler_path):
-                self.rf_model = joblib.load(rf_path)
-                self.scaler = joblib.load(scaler_path)
-                
-                # Load expected features
+                # Load metadata first to validate
                 if os.path.exists(info_path):
                     with open(info_path, 'r') as f:
                         import json
                         info = json.load(f)
-                        # Ưu tiên đồng bộ với features.py nếu có
+                        saved_features = info.get('expected_features', 18)
+
+                        # Check if saved model matches current feature definition
                         try:
                             from features import get_feature_columns
-                            self.expected_features = len(get_feature_columns())
-                        except Exception:
-                            self.expected_features = info.get('expected_features', 18)
-                
+                            current_features = len(get_feature_columns())
+
+                            if saved_features != current_features:
+                                logger.warning(
+                                    f"⚠️ Model feature mismatch: saved={saved_features}, current={current_features}"
+                                )
+                                logger.warning("🔄 Recreating models with current feature set...")
+                                self.create_dummy_models()
+                                return True
+                        except Exception as e:
+                            logger.warning(f"Could not verify features: {e}")
+
+                # Load models
+                self.rf_model = joblib.load(rf_path)
+                self.scaler = joblib.load(scaler_path)
+
                 logger.info(f"✅ Loaded trained models (expecting {self.expected_features} features)")
                 models_loaded = True
             else:
                 logger.warning("ℹ️ Models not found, creating dummy models...")
                 self.create_dummy_models()
                 models_loaded = True
-                
+
         except Exception as e:
             logger.error(f"⚠️ Lỗi khi load models: {e}")
             logger.info("🔄 Creating dummy models as fallback...")
             self.create_dummy_models()
             models_loaded = True
-        
+
         return models_loaded
 # [file content end]

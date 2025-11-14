@@ -181,11 +181,8 @@ def schedule_job():
                 print("\n📊 [17:00] GỬI DAILY SUMMARY")
                 try:
                     from telegram_notifications import send_daily_summary_to_all
-                    # Run async function in new event loop
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(send_daily_summary_to_all())
-                    loop.close()
+                    # Run async function properly in thread-safe manner
+                    asyncio.run(send_daily_summary_to_all())
                     last_daily_summary = current_date
                     print("✅ Đã gửi daily summary")
                 except Exception as e:
@@ -227,7 +224,7 @@ async def lifespan(app: FastAPI):
     print(f"🐍 Python version")
     print(f"⏰ Timezone: {tz}")
     
-    # Validate configuration on startup
+    # Validate configuration on startup - MANDATORY
     try:
         from trading_config import get_config
         from exceptions import ConfigurationError
@@ -235,10 +232,15 @@ async def lifespan(app: FastAPI):
         print("✅ Configuration validated successfully")
         print(config.summary())
     except ConfigurationError as e:
-        print(f"❌ Configuration error: {e}")
-        print("⚠️ Bot will continue but some features may not work correctly")
+        print(f"❌ FATAL: Configuration validation failed: {e}")
+        print("🛑 Bot cannot start without valid configuration")
+        print("📝 Please set required environment variables:")
+        print("   - TELEGRAM_TOKEN")
+        print("   - CHAT_ID")
+        raise
     except Exception as e:
-        print(f"⚠️ Error loading configuration: {e}")
+        print(f"❌ FATAL: Error loading configuration: {e}")
+        raise
     
     print(f"🔧 Starting background services...")
     

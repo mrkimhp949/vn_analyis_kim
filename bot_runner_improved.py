@@ -20,12 +20,11 @@ try:
     )
     print("✅ Import config thành công")
 except ImportError as e:
-    print(f"❌ Lỗi import config: {e}")
-    # Fallback values
-    TICKERS = ['VNM', 'VCB', 'HPG', 'FPT', 'SSI']
-    LOOKBACK = 100
-    CHAT_ID = "5501113513"
-    TELEGRAM_TOKEN = "234790554:AAFbdwZ3zi0ocpELA0gav6qeYqDKXbDg-yI"
+    from exceptions import ConfigurationError
+    raise ConfigurationError(
+        "Failed to import configuration. Please check config.py and environment variables.",
+        context={'error': str(e)}
+    )
 
 # ===== ORIGINAL MODULES =====
 try:
@@ -813,38 +812,46 @@ async def run_bot_with_context(bot_instance, chat_id):
                     print(f"📝 Paper trade: {paper_msg}")
             except Exception as e:
                 log_error(f"Lỗi paper trading: {e}")
-            
-            if position_sizer and symbol not in position_sizer.current_positions:
-                position_sizer.add_position(symbol, position.shares, entry_signal.entry_price)
-                existing_symbols.add(symbol)
-            
+
+            # ===== SAVE POSITION (ATOMIC OPERATION) =====
+            # Save to DB FIRST before modifying in-memory state
+            # This prevents race condition where in-memory state is modified but DB save fails
+            position_saved = False
+            try:
+                save_pending_position(symbol, entry_signal, position)
+                position_saved = True
+            except Exception as e:
+                log_error(f"Lỗi save position {symbol} to DB: {e}")
+                # Cancel position in lock
+                if portfolio_lock:
+                    portfolio_lock.cancel_position(symbol)
+                # Skip this signal - don't modify in-memory state
+                time.sleep(0.5)
+                continue
+
+            # Only update in-memory state if DB save succeeded
+            if position_saved:
+                if position_sizer and symbol not in position_sizer.current_positions:
+                    position_sizer.add_position(symbol, position.shares, entry_signal.entry_price)
+                    existing_symbols.add(symbol)
+
+                # Confirm position in lock
+                if portfolio_lock:
+                    portfolio_lock.confirm_position(symbol)
+
+                signal_count += 1
+                print(f"✅ {symbol}: {entry_signal.signal_type} ({entry_signal.confidence}%)")
+
             # ===== FORMAT MESSAGE =====
             msg = format_entry_recommendation(
-                symbol, 
-                entry_signal, 
+                symbol,
+                entry_signal,
                 position,
                 market_regime,
                 news_context=news_context
             )
-            
+
             await bot_instance.send_message(chat_id, msg, parse_mode='Markdown')
-            
-            # Save to pending positions
-            try:
-                save_pending_position(symbol, entry_signal, position)
-                
-                # Confirm position in lock
-                if portfolio_lock:
-                    portfolio_lock.confirm_position(symbol)
-                
-                signal_count += 1
-                print(f"✅ {symbol}: {entry_signal.signal_type} ({entry_signal.confidence}%)")
-                
-            except Exception as e:
-                log_error(f"Lỗi save position {symbol}: {e}")
-                # Cancel position in lock
-                if portfolio_lock:
-                    portfolio_lock.cancel_position(symbol)
             
             time.sleep(0.5)  # Rate limiting
             

@@ -54,17 +54,20 @@ class ImprovedEntryLogic:
     def __init__(self,
                  min_confidence: int = 60,
                  min_risk_reward: float = 2.0,
+                 support_distance_percent: float = 3.0,
                  require_trend_alignment: bool = True,
                  require_volume_confirmation: bool = True):
         """
         Args:
             min_confidence: Confidence tối thiểu để vào lệnh
             min_risk_reward: R:R ratio tối thiểu
+            support_distance_percent: Khoảng cách tối đa đến support (%)
             require_trend_alignment: Yêu cầu phải theo trend
             require_volume_confirmation: Yêu cầu volume confirm
         """
         self.min_confidence = min_confidence
         self.min_risk_reward = min_risk_reward
+        self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
         self.require_volume_confirmation = require_volume_confirmation
     
@@ -182,24 +185,47 @@ class ImprovedEntryLogic:
         # ===== CALCULATE ENTRY PRICE, SL, TP =====
         entry_price = latest['close']
         atr = latest.get('atr', latest['close'] * 0.02)
-        
-        # Stop Loss: dựa vào ATR và support
-        support_level = sr_check.get('support_level', entry_price - atr * 2)
-        stop_loss = max(support_level, entry_price - atr * 2)
-        
+
+        # Stop Loss: dựa vào ATR và support (for BUY signal, SL must be < entry_price)
+        atr_based_sl = entry_price - atr * 2
+        support_level = sr_check.get('support_level', atr_based_sl)
+
+        # Ensure support level is reasonable (must be below entry price)
+        if support_level >= entry_price:
+            support_level = atr_based_sl
+
+        # Take the higher of support or ATR-based SL (but still below entry)
+        stop_loss = max(support_level, atr_based_sl)
+
+        # VALIDATION: Stop loss must be positive and below entry price
+        if stop_loss <= 0:
+            return self._no_signal(f"Stop loss không hợp lệ: {stop_loss:.0f} <= 0")
+
+        if stop_loss >= entry_price:
+            return self._no_signal(
+                f"Stop loss không hợp lệ: {stop_loss:.0f} >= entry_price {entry_price:.0f}"
+            )
+
         # Take Profit targets
         take_profit_targets = [
             entry_price + atr * 1.5,  # TP1: 1.5R
             entry_price + atr * 3.0,  # TP2: 3R
             entry_price + atr * 5.0   # TP3: 5R (moonshot)
         ]
-        
+
         # ===== RISK/REWARD CHECK =====
         risk = entry_price - stop_loss
-        reward = take_profit_targets[1] - entry_price  # Use TP2 for R:R calc
-        
+
+        # Double check risk (should always be positive now)
         if risk <= 0:
-            return self._no_signal("Stop loss không hợp lệ")
+            return self._no_signal(
+                f"Risk calculation error: risk={risk:.0f} (entry={entry_price:.0f}, sl={stop_loss:.0f})"
+            )
+
+        reward = take_profit_targets[1] - entry_price  # Use TP2 for R:R calc
+
+        if reward <= 0:
+            return self._no_signal(f"Reward không hợp lệ: {reward:.0f}")
         
         risk_reward = reward / risk
         
@@ -299,9 +325,9 @@ class ImprovedEntryLogic:
         
         distance_to_support = ((current_price - support) / support) * 100
         distance_to_resistance = ((resistance - current_price) / current_price) * 100
-        
-        # Near support = trong vòng 3%
-        near_support = distance_to_support <= 3
+
+        # Near support = trong vòng config threshold
+        near_support = distance_to_support <= self.support_distance_percent
         
         # Too close to resistance = trong vòng 2%
         too_close = distance_to_resistance <= 2
