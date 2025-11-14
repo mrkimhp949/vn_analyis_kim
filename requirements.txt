@@ -29,6 +29,7 @@ datasets==2.16.1      # Optional: for fine-tuning PhoBERT
 scipy==1.11.4         # Optional: HRP optimizer distance metrics
 yfinance==0.2.36      # Market data from Yahoo Finance
 prometheus-client==0.19.0  # Prometheus metrics export
+websockets==12.0       # WebSocket client for real-time price feeds
 
 # Development & Testing
 pytest==7.4.3          # Unit testing framework
