@@ -60,14 +60,14 @@ class ImprovedExitStrategy:
                  take_profit_levels: List[float] = [0.10, 0.15, 0.25],  # 10%, 15%, 25%
                  stop_loss_atr_multiplier: float = 2.0,
                  trailing_stop_activation: float = 0.08,  # Kích hoạt trailing khi lời 8%
-                 trailing_stop_distance: float = 0.05,    # Trailing 5% từ đỉnh
+                 trailing_stop_distance_atr: float = 1.5, # Trailing 1.5x ATR từ đỉnh
                  max_holding_days: int = 20,              # Tối đa 20 ngày
                  time_decay_threshold: float = 0.02):     # Nếu <2% lời sau 20 ngày → thoát
         
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
         self.trailing_activation = trailing_stop_activation
-        self.trailing_distance = trailing_stop_distance
+        self.trailing_distance_atr = trailing_stop_distance_atr
         self.max_holding_days = max_holding_days
         self.time_decay_threshold = time_decay_threshold
         
@@ -186,7 +186,8 @@ class ImprovedExitStrategy:
             current_price,
             highest_price,
             pnl_percent,
-            pnl_amount
+            pnl_amount,
+            df.iloc[-1].get('atr', current_price * 0.02) # Pass ATR
         )
         
         if trailing_check['should_exit']:
@@ -342,12 +343,12 @@ class ImprovedExitStrategy:
                             current_price: float,
                             highest_price: float,
                             pnl_percent: float,
-                            pnl_amount: float) -> Dict:
+                            pnl_amount: float,
+                            atr: float) -> Dict:
         """
-        Check trailing stop
-        
+        Check trailing stop based on ATR.
         Kích hoạt khi lời >= 8%
-        Trailing 5% từ đỉnh
+        Trailing stop cách đỉnh 1.5 * ATR.
         """
         
         # Check if trailing should be activated
@@ -358,9 +359,10 @@ class ImprovedExitStrategy:
             return {'should_exit': False}
         
         # Trailing activated - check if price dropped too much from high
-        drawdown_from_high = ((highest_price - current_price) / highest_price)
+        trailing_stop_price = highest_price - (atr * self.trailing_distance_atr)
         
-        if drawdown_from_high >= self.trailing_distance:
+        if current_price <= trailing_stop_price:
+            drawdown_from_high = ((highest_price - current_price) / highest_price) * 100
             return {
                 'should_exit': True,
                 'decision': ExitDecision(
@@ -370,7 +372,7 @@ class ImprovedExitStrategy:
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
-                    message=f"📉 TRAILING STOP: Giảm {drawdown_from_high*100:.1f}% từ đỉnh | "
+                    message=f"📉 TRAILING STOP (ATR): Giảm {drawdown_from_high:.1f}% từ đỉnh | "
                             f"P&L: {pnl_percent:+.2f}%",
                     urgency=4
                 )

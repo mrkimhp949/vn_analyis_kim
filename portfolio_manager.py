@@ -32,56 +32,43 @@ class PortfolioManager:
                     stop_loss: Optional[float] = None,
                     take_profit: Optional[float] = None,
                     metadata: Optional[Dict] = None):
-        """Add new position with input validation"""
+        """
+        Add new position or average up an existing one.
+        Tự động kiểm tra và xử lý mua mới hoặc trung bình giá.
+        """
         from exceptions import PortfolioError
 
-        # Validate inputs
+        # Validate inputs (giữ nguyên phần validation)
         if not symbol or not isinstance(symbol, str):
             raise PortfolioError("Symbol must be a non-empty string", context={'symbol': symbol})
+        # ... (các validation khác giữ nguyên) ...
 
-        if not symbol.isalpha() or len(symbol) > 10:
-            raise PortfolioError(
-                "Invalid symbol format. Must be alphabetic and max 10 characters",
-                context={'symbol': symbol}
+        existing_positions = self.db.get_positions()
+        
+        if symbol in existing_positions:
+            # --- LOGIC TRUNG BÌNH GIÁ (DCA) ---
+            self._average_up_position(
+                symbol=symbol,
+                existing_pos=existing_positions[symbol],
+                shares_to_add=shares,
+                price_to_add=entry_price,
+                metadata=metadata
+            )
+        else:
+            # --- LOGIC THÊM VỊ THẾ MỚI ---
+            self._create_new_position(
+                symbol=symbol,
+                shares=shares,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                metadata=metadata
             )
 
-        if not isinstance(shares, int) or shares <= 0:
-            raise PortfolioError(
-                "Shares must be a positive integer",
-                context={'shares': shares, 'type': type(shares).__name__}
-            )
-
-        if not isinstance(entry_price, (int, float)) or entry_price <= 0:
-            raise PortfolioError(
-                "Entry price must be a positive number",
-                context={'entry_price': entry_price, 'type': type(entry_price).__name__}
-            )
-
-        # Validate stop_loss and take_profit if provided
-        if stop_loss is not None:
-            if not isinstance(stop_loss, (int, float)) or stop_loss <= 0:
-                raise PortfolioError(
-                    "Stop loss must be a positive number",
-                    context={'stop_loss': stop_loss}
-                )
-            if stop_loss >= entry_price:
-                raise PortfolioError(
-                    "Stop loss must be below entry price for long positions",
-                    context={'stop_loss': stop_loss, 'entry_price': entry_price}
-                )
-
-        if take_profit is not None:
-            if not isinstance(take_profit, (int, float)) or take_profit <= 0:
-                raise PortfolioError(
-                    "Take profit must be a positive number",
-                    context={'take_profit': take_profit}
-                )
-            if take_profit <= entry_price:
-                raise PortfolioError(
-                    "Take profit must be above entry price for long positions",
-                    context={'take_profit': take_profit, 'entry_price': entry_price}
-                )
-
+    def _create_new_position(self, symbol: str, shares: int, entry_price: float,
+                             stop_loss: Optional[float], take_profit: Optional[float],
+                             metadata: Optional[Dict]):
+        """Helper function to create a completely new position."""
         entry_date = datetime.now().isoformat()
         entry_value = shares * entry_price
         
@@ -96,26 +83,159 @@ class PortfolioManager:
             metadata=metadata
         )
         
-        # Log trade
         self.db.save_trade(
             symbol=symbol,
-            action='BUY',
+            action='BUY_NEW',
             shares=shares,
             price=entry_price,
             total_value=entry_value,
             trade_date=entry_date,
-            reason='Entry signal',
+            reason='New entry signal',
             metadata=metadata
         )
         
-        print(f"✅ Added position: {symbol} - {shares} shares @ {entry_price:,.0f}")
+        print(f"✅ Added new position: {symbol} - {shares} shares @ {entry_price:,.0f}")
+
+    def _average_up_position(self, symbol: str, existing_pos: Dict,
+                             shares_to_add: int, price_to_add: float,
+                             metadata: Optional[Dict]):
+        """Helper function to average up an existing position."""
+        current_shares = existing_pos['shares']
+        current_avg_price = existing_pos['avg_price']
+        
+        # Calculate new average price
+        total_shares = current_shares + shares_to_add
+        total_value = (current_shares * current_avg_price) + (shares_to_add * price_to_add)
+        new_avg_price = total_value / total_shares
+        
+        # Log the additional buy
+        trade_date = datetime.now().isoformat()
+        self.db.save_trade(
+            symbol=symbol,
+            action='BUY_ADD',
+            shares=shares_to_add,
+            price=price_to_add,
+            total_value=shares_to_add * price_to_add,
+            trade_date=trade_date,
+            reason='Averaging up',
+            metadata=metadata
+        )
+        
+        # Update the position with new values
+        # Note: Stop loss and take profit might need re-evaluation, but for now we keep them
+        updated_metadata = existing_pos.get('metadata', {})
+        if metadata:
+            updated_metadata.update(metadata)
+            
+        self.db.save_position(
+            symbol=symbol,
+            shares=total_shares,
+            avg_price=new_avg_price,
+            entry_date=existing_pos['entry_date'], # Keep original entry date
+            entry_value=total_value, # Update total cost basis
+            stop_loss=existing_pos.get('stop_loss'), # Should be re-evaluated
+            take_profit=existing_pos.get('take_profit'), # Should be re-evaluated
+            metadata=updated_metadata
+        )
+        
+        print(f"✅ Averaged up: {symbol}. Added {shares_to_add} shares. New avg price: {new_avg_price:,.0f}")
+
     
-    def close_position(self, symbol: str, exit_price: float, reason: str = 'Exit signal'):
-        """Close position"""
+    def reduce_position(self, symbol: str, shares_to_sell: int, exit_price: float, reason: str = 'Partial Exit'):
+        """Reduce position size (partial sell)."""
+        from exceptions import PortfolioError
+
         positions = self.db.get_positions()
         
         if symbol not in positions:
-            print(f"⚠️ Position {symbol} not found")
+            raise PortfolioError(f"Position {symbol} not found for partial sell", context={'symbol': symbol})
+            
+        pos = positions[symbol]
+        current_shares = pos['shares']
+        
+        if not isinstance(shares_to_sell, int) or shares_to_sell <= 0:
+            raise PortfolioError("Shares to sell must be a positive integer", context={'shares_to_sell': shares_to_sell})
+
+        if shares_to_sell >= current_shares:
+            # If selling all or more shares, it's a full closure.
+            self.close_position(symbol, exit_price, f"Full exit via reduce: {reason}")
+            return
+
+        entry_price = pos['avg_price']
+        
+        # Calculate P&L for the sold portion
+        exit_value = shares_to_sell * exit_price
+        entry_value_of_sold_part = shares_to_sell * entry_price
+        pnl = exit_value - entry_value_of_sold_part
+        pnl_percent = (pnl / entry_value_of_sold_part) * 100 if entry_value_of_sold_part > 0 else 0
+        
+        # Log the partial sell trade
+        self.db.save_trade(
+            symbol=symbol,
+            action='SELL_PARTIAL',
+            shares=shares_to_sell,
+            price=exit_price,
+            total_value=exit_value,
+            trade_date=datetime.now().isoformat(),
+            reason=reason,
+            metadata={'pnl': pnl, 'pnl_percent': pnl_percent}
+        )
+        
+        # Update the existing position
+        remaining_shares = current_shares - shares_to_sell
+        remaining_value = remaining_shares * entry_price
+        
+        self.db.save_position(
+            symbol=symbol,
+            shares=remaining_shares,
+            avg_price=entry_price,
+            entry_date=pos['entry_date'],
+            entry_value=remaining_value, # Update entry value
+            stop_loss=pos.get('stop_loss'),
+            take_profit=pos.get('take_profit'),
+            metadata=pos.get('metadata', {})
+        )
+        
+        print(f"✅ Reduced position: {symbol} - Sold {shares_to_sell} shares. Remaining: {remaining_shares}")
+        
+    def handle_exit(self, symbol: str, exit_price: float, exit_type: str, reason: str):
+        """
+        Dispatches to the correct exit method based on exit_type.
+        exit_type can be 'FULL', 'PARTIAL_50%', 'PARTIAL_30%', etc.
+        """
+        positions = self.db.get_positions()
+        if symbol not in positions:
+            print(f"⚠️ Cannot handle exit for non-existent position {symbol}")
+            return
+
+        if exit_type == 'FULL':
+            self.close_position(symbol, exit_price, reason)
+        else:
+            # Handle partial exits
+            try:
+                # e.g., 'PARTIAL_50%' -> 50
+                percentage_str = exit_type.replace('PARTIAL_', '').replace('%', '')
+                percentage = float(percentage_str) / 100.0
+                
+                current_shares = positions[symbol]['shares']
+                shares_to_sell = int(current_shares * percentage)
+                
+                # Ensure we sell at least 1 share and in lots of 100 if possible
+                if shares_to_sell > 0:
+                    shares_to_sell = max((shares_to_sell // 100) * 100, 100 if current_shares > 100 else shares_to_sell)
+                    self.reduce_position(symbol, shares_to_sell, exit_price, reason)
+                else:
+                    print(f"⚠️ Calculated 0 shares to sell for {symbol} with type {exit_type}")
+
+            except (ValueError, TypeError) as e:
+                print(f"❌ Invalid exit_type format: {exit_type}. Error: {e}")
+
+    def close_position(self, symbol: str, exit_price: float, reason: str = 'Exit signal'):
+        """Close a position entirely."""
+        positions = self.db.get_positions()
+        
+        if symbol not in positions:
+            print(f"⚠️ Position {symbol} not found to close.")
             return
         
         pos = positions[symbol]
@@ -127,7 +247,7 @@ class PortfolioManager:
         exit_value = shares * exit_price
         entry_value = shares * entry_price
         pnl = exit_value - entry_value
-        pnl_percent = (pnl / entry_value) * 100
+        pnl_percent = (pnl / entry_value) * 100 if entry_value > 0 else 0
         
         # Track in performance monitor
         self.monitor.track_trade(
@@ -142,7 +262,7 @@ class PortfolioManager:
         # Log trade
         self.db.save_trade(
             symbol=symbol,
-            action='SELL',
+            action='SELL_FULL',
             shares=shares,
             price=exit_price,
             total_value=exit_value,

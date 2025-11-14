@@ -27,7 +27,10 @@ if hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-def load_data(symbol, lookback=200, use_cache=True):
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def load_data(symbol, lookback=200, use_cache=True, is_index: bool = False):
     """
     Load dữ liệu từ TCBS API với cache
     
@@ -35,12 +38,18 @@ def load_data(symbol, lookback=200, use_cache=True):
         symbol: Mã cổ phiếu (VD: VCB, FPT, VNM)
         lookback: Số nến cần lấy
         use_cache: Có dùng cache không
+        is_index: Nếu là index, không dùng cache để đảm bảo dữ liệu mới nhất
         
     Returns:
         DataFrame với columns: time, open, high, low, close, volume
     """
+    # Nếu là index, luôn không dùng cache
+    if is_index:
+        use_cache = False
+        
     # Check cache
-    cache_key = f"{symbol}_{lookback}_{datetime.today().strftime('%Y%m%d')}"
+    # ✅ FIX: Cache key không nên phụ thuộc vào ngày, trừ khi dữ liệu thay đổi trong ngày
+    cache_key = f"{symbol}_{lookback}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
     cache_file = os.path.join(DATA_CACHE_DIR, f"{cache_hash}.pkl")
     

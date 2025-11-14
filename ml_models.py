@@ -81,10 +81,9 @@ class MLPredictor:
             logger.error(f"❌ Lỗi khi lưu models: {e}")
 
     def train_random_forest(self, X_train, y_train):
-        """Train Random Forest với feature validation"""
-        logger.info("🌲 Training Random Forest...")
+        """Train Random Forest với class_weight và params tối ưu."""
+        logger.info("🌲 Training Random Forest with optimized parameters...")
 
-        # Validate số features - STRICT CHECK
         if X_train.shape[1] != self.expected_features:
             from exceptions import ModelPredictionError
             raise ModelPredictionError(
@@ -92,14 +91,16 @@ class MLPredictor:
                 context={
                     'got': X_train.shape[1],
                     'expected': self.expected_features,
-                    'message': 'Please check features.get_feature_columns() and ensure all features are generated'
+                    'message': 'Ensure all features are generated before training.'
                 }
             )
 
         self.rf_model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_split=20,
+            n_estimators=200,          # Tăng số lượng cây
+            max_depth=15,              # Tăng độ sâu
+            min_samples_split=10,      # Yêu cầu ít nhất 10 mẫu để split
+            min_samples_leaf=5,        # Yêu cầu ít nhất 5 mẫu ở mỗi leaf
+            class_weight='balanced',   # QUAN TRỌNG: Xử lý mất cân bằng dữ liệu
             random_state=42,
             n_jobs=-1
         )
@@ -107,6 +108,35 @@ class MLPredictor:
         self.rf_model.fit(X_train, y_train)
         self.save_models()
         logger.info("✅ Random Forest trained & saved!")
+
+    def evaluate(self, X_test, y_test):
+        """Đánh giá model trên test set."""
+        if self.rf_model is None:
+            logger.warning("Model not trained yet. Cannot evaluate.")
+            return
+
+        logger.info("📊 Evaluating model performance...")
+        try:
+            from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score
+
+            y_pred = self.rf_model.predict(X_test)
+
+            accuracy = accuracy_score(y_test, y_pred)
+            precision = precision_score(y_test, y_pred, average='weighted')
+            recall = recall_score(y_test, y_pred, average='weighted')
+            f1 = f1_score(y_test, y_pred, average='weighted')
+
+            logger.info(f"   - Accuracy:  {accuracy:.4f}")
+            logger.info(f"   - Precision: {precision:.4f}")
+            logger.info(f"   - Recall:    {recall:.4f}")
+            logger.info(f"   - F1-Score:  {f1:.4f}")
+
+            logger.info("   - Classification Report:")
+            # Dùng print để format đẹp hơn trong log
+            print(classification_report(y_test, y_pred, target_names=['Down/Hold', 'Up']))
+
+        except Exception as e:
+            logger.error(f"❌ Error during model evaluation: {e}")
 
     def predict(self, X):
         """Prediction với feature validation"""

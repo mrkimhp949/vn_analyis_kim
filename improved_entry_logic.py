@@ -172,6 +172,15 @@ class ImprovedEntryLogic:
             warnings.append(f"⚠️ Pattern: {price_action['pattern']}")
             adjustments.append(-10)
         
+        # ===== FILTER 8: SECTOR STRENGTH (NEW) =====
+        sector_strength_check = self._check_sector_strength(df, market_regime)
+        if sector_strength_check['is_leading']:
+            reasons.append(f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)")
+            adjustments.append(+10)
+        elif sector_strength_check['is_lagging']:
+            warnings.append(f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)")
+            adjustments.append(-15)
+
         # ===== CALCULATE ADJUSTED CONFIDENCE =====
         adjusted_confidence = base_confidence + sum(adjustments)
         adjusted_confidence = max(0, min(adjusted_confidence, 100))
@@ -188,14 +197,25 @@ class ImprovedEntryLogic:
 
         # Stop Loss: dựa vào ATR và support (for BUY signal, SL must be < entry_price)
         atr_based_sl = entry_price - atr * 2
-        support_level = sr_check.get('support_level', atr_based_sl)
+        support_level = sr_check.get('support_level', None)
 
-        # Ensure support level is reasonable (must be below entry price)
-        if support_level >= entry_price:
-            support_level = atr_based_sl
+        # Normalize support_level: ignore invalid/NaN values
+        try:
+            if support_level is None or pd.isna(support_level) or support_level <= 0:
+                support_level = None
+        except Exception:
+            support_level = None
 
-        # Take the higher of support or ATR-based SL (but still below entry)
-        stop_loss = max(support_level, atr_based_sl)
+        # Choose stop loss candidate(s). For BUY we want SL strictly below entry_price.
+        # Prefer a tighter stop (closer to entry) but ensure it's below the entry price.
+        if support_level is not None and support_level < entry_price:
+            # support is valid and below entry — prefer the tighter (higher) of support or ATR-based
+            stop_loss_candidate = max(support_level, atr_based_sl)
+        else:
+            # No valid support — use ATR-based stop
+            stop_loss_candidate = atr_based_sl
+
+        stop_loss = stop_loss_candidate
 
         # VALIDATION: Stop loss must be positive and below entry price
         if stop_loss <= 0:
@@ -445,6 +465,31 @@ class ImprovedEntryLogic:
         
         return {'bullish_pattern': False, 'bearish_pattern': False, 'pattern': 'None'}
     
+    def _check_sector_strength(self, df: pd.DataFrame, market_regime: Optional[Dict]) -> Dict:
+        """
+        Kiểm tra sức mạnh của ngành so với thị trường chung (VNINDEX).
+        Sử dụng RS (Relative Strength)
+        """
+        if 'rs' not in df.columns or df['rs'].isnull().all():
+            return {'is_leading': False, 'is_lagging': False, 'sector_perf': 0}
+
+        # RS > 1: Cổ phiếu/ngành mạnh hơn thị trường
+        # RS dốc lên: Sức mạnh đang tăng
+        latest_rs = df['rs'].iloc[-1]
+        rs_trend = df['rs'].rolling(10).mean().iloc[-1] > df['rs'].rolling(30).mean().iloc[-1]
+
+        is_leading = latest_rs > 1.0 and rs_trend
+        is_lagging = latest_rs < 0.95
+
+        # Lấy performance từ market_regime nếu có
+        sector_perf = 0
+        if market_regime and 'sector_performance' in market_regime:
+            # Giả sử df có cột 'sector'
+            sector = df['sector'].iloc[-1] if 'sector' in df.columns else 'UNKNOWN'
+            sector_perf = market_regime['sector_performance'].get(sector, 0)
+
+        return {'is_leading': is_leading, 'is_lagging': is_lagging, 'sector_perf': sector_perf}
+
     # ========================================================================
     # SCORING & DECISION
     # ========================================================================
