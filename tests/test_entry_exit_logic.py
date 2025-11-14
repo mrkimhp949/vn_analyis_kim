@@ -10,7 +10,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from improved_entry_logic import ImprovedEntryLogic, EntrySignal, SignalStrength
-from improved_exit_logic import ImprovedExitLogic, ExitDecision, ExitReason
+from improved_exit_logic import ImprovedExitStrategy, ExitDecision, ExitReason
 
 
 class TestImprovedEntryLogic:
@@ -131,12 +131,12 @@ class TestImprovedEntryLogic:
             assert rr_ratio >= self.entry_logic.min_risk_reward
 
 
-class TestImprovedExitLogic:
-    """Test ImprovedExitLogic class"""
+class TestImprovedExitStrategy:
+    """Test ImprovedExitStrategy class"""
 
     def setup_method(self):
         """Setup for each test"""
-        self.exit_logic = ImprovedExitLogic()
+        self.exit_logic = ImprovedExitStrategy()
 
     def create_position_data(self, entry_price=50000, current_price=55000):
         """Create sample position data"""
@@ -172,7 +172,11 @@ class TestImprovedExitLogic:
 
         decision = self.exit_logic.check_exit(
             symbol='VCB',
-            position=position,
+            entry_price=position['entry_price'],
+            current_price=46000,
+            stop_loss=position['stop_loss'],
+            take_profit_targets=[position['take_profit']],
+            entry_date=pd.Timestamp('2024-01-01'),
             df=df
         )
 
@@ -186,7 +190,11 @@ class TestImprovedExitLogic:
 
         decision = self.exit_logic.check_exit(
             symbol='VCB',
-            position=position,
+            entry_price=position['entry_price'],
+            current_price=58000,
+            stop_loss=position['stop_loss'],
+            take_profit_targets=[position['take_profit']],
+            entry_date=pd.Timestamp('2024-01-01'),
             df=df
         )
 
@@ -201,7 +209,11 @@ class TestImprovedExitLogic:
 
         decision = self.exit_logic.check_exit(
             symbol='VCB',
-            position=position,
+            entry_price=position['entry_price'],
+            current_price=52000,
+            stop_loss=position['stop_loss'],
+            take_profit_targets=[position['take_profit']],
+            entry_date=pd.Timestamp('2024-01-01'),
             df=df
         )
 
@@ -215,7 +227,15 @@ class TestImprovedExitLogic:
         df = self.create_market_data(current_price=56000)
 
         # Track position for trailing stop
-        self.exit_logic.check_exit(symbol='VCB', position=position, df=df)
+        self.exit_logic.check_exit(
+            symbol='VCB',
+            entry_price=position['entry_price'],
+            current_price=56000,
+            stop_loss=position['stop_loss'],
+            take_profit_targets=[position['take_profit']],
+            entry_date=pd.Timestamp('2024-01-01'),
+            df=df
+        )
 
         # Trailing stop should be activated
         assert 'VCB' in self.exit_logic.position_peaks
@@ -227,7 +247,11 @@ class TestImprovedExitLogic:
 
         decision = self.exit_logic.check_exit(
             symbol='VCB',
-            position=position,
+            entry_price=position['entry_price'],
+            current_price=46000,
+            stop_loss=position['stop_loss'],
+            take_profit_targets=[position['take_profit']],
+            entry_date=pd.Timestamp('2024-01-01'),
             df=df
         )
 
