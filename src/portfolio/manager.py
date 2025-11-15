@@ -30,10 +30,10 @@ class PortfolioManager:
         self.db = get_db()
         self.monitor = get_performance_monitor()
         self.config = get_config()
-        
+
         # Thread safety
         self._lock = RLock()  # Reentrant lock for nested calls
-        
+
         logger.info("✅ Portfolio Manager initialized with thread safety")
 
     @contextmanager
@@ -44,7 +44,7 @@ class PortfolioManager:
             yield
         finally:
             self._lock.release()
-    
+
     def get_positions(self) -> Dict:
         """Get all active positions (thread-safe)"""
         with self._lock:
@@ -67,11 +67,18 @@ class PortfolioManager:
 
         # Validate inputs
         if not symbol or not isinstance(symbol, str):
-            raise PortfolioError("Symbol must be a non-empty string", context={"symbol": symbol})
+            raise PortfolioError(
+                "Symbol must be a non-empty string", context={"symbol": symbol}
+            )
         if not isinstance(shares, int) or shares <= 0:
-            raise PortfolioError("Shares must be a positive integer", context={"shares": shares})
+            raise PortfolioError(
+                "Shares must be a positive integer", context={"shares": shares}
+            )
         if not isinstance(entry_price, (int, float)) or entry_price <= 0:
-            raise PortfolioError("Entry price must be a positive number", context={"entry_price": entry_price})
+            raise PortfolioError(
+                "Entry price must be a positive number",
+                context={"entry_price": entry_price},
+            )
 
         # Thread-safe transaction
         with self._transaction():
@@ -404,22 +411,22 @@ class PortfolioManager:
         # Lấy snapshot gần nhất từ DB (thường là cuối ngày hôm qua)
         last_snapshot = self.db.get_last_portfolio_snapshot()
         if not last_snapshot:
-            return 0.0 # Không có snapshot, không thể tính PNL trong ngày
+            return 0.0  # Không có snapshot, không thể tính PNL trong ngày
 
         # Lấy giá trị hiện tại của portfolio
         current_portfolio_value = self.get_portfolio_value().get("total_value", 0.0)
-        
+
         # Lấy tổng vốn từ config (hoặc có thể lấy từ snapshot nếu muốn)
         total_capital = self.config.trading.total_capital
         if total_capital == 0:
             return 0.0
 
         # PNL trong ngày = (Giá trị hiện tại - Giá trị cuối ngày hôm qua)
-        daily_pnl = current_portfolio_value - last_snapshot['total_value']
-        
+        daily_pnl = current_portfolio_value - last_snapshot["total_value"]
+
         # PNL % so với tổng vốn
         daily_pnl_pct = daily_pnl / total_capital
-        
+
         return daily_pnl_pct
 
     def save_portfolio_snapshot(self):

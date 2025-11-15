@@ -41,13 +41,13 @@ def generate_api_key() -> str:
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> str:
     """
     Verify API key from request header
-    
+
     Args:
         api_key: API key from header
-    
+
     Returns:
         API key if valid
-    
+
     Raises:
         HTTPException: If API key is invalid or missing
     """
@@ -55,45 +55,42 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
         # If no API keys configured, allow all (development mode)
         logger.warning("⚠️ No API keys configured - running in development mode")
         return "dev_mode"
-    
+
     if not api_key:
         logger.warning("❌ Missing API key in request")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Missing API key"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Missing API key"
         )
-    
+
     if api_key not in VALID_API_KEYS:
         logger.warning(f"❌ Invalid API key: {api_key[:10]}...")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid API key"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key"
         )
-    
+
     return api_key
 
 
 async def verify_ip_whitelist(request):
     """
     Verify client IP is in whitelist
-    
+
     Args:
         request: FastAPI request object
-    
+
     Raises:
         HTTPException: If IP not in whitelist
     """
     if not IP_WHITELIST:
         # If no whitelist configured, allow all
         return
-    
+
     client_ip = request.client.host
-    
+
     if client_ip not in IP_WHITELIST:
         logger.warning(f"❌ Blocked request from IP: {client_ip}")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="IP not whitelisted"
+            status_code=status.HTTP_403_FORBIDDEN, detail="IP not whitelisted"
         )
 
 
@@ -119,7 +116,9 @@ def add_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains"
+    )
     return response
 
 
@@ -129,7 +128,7 @@ if __name__ == "__main__":
     for i in range(3):
         key = generate_api_key()
         print(f"  Key {i+1}: {key}")
-    
+
     print("\n📝 Add to .env file:")
     print(f"API_KEYS=key1,key2,key3")
     print(f"IP_WHITELIST=127.0.0.1,192.168.1.100")

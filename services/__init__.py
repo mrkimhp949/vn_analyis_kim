@@ -8,8 +8,8 @@ from .exit_service import ExitManagementService
 from .notification_service import NotificationService
 
 __all__ = [
-    'RiskManagementService',
-    'EntrySignalService',
-    'ExitManagementService',
-    'NotificationService',
+    "RiskManagementService",
+    "EntrySignalService",
+    "ExitManagementService",
+    "NotificationService",
 ]

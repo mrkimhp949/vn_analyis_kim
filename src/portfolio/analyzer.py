@@ -279,7 +279,7 @@ class PortfolioAnalyzer:
                     except Exception as e:
                         logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
                         # Tiếp tục với ml_signal = None
-                    
+
                     current_price = df["close"].iloc[-1]
 
                     # Kiểm tra entry signal

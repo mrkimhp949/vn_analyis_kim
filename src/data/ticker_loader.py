@@ -180,7 +180,11 @@ class TickerLoader:
         for i, symbol in enumerate(self.all_tickers):
             # Show progress
             progress = (i + 1) / total_tickers
-            print(f"\r  Validating... [{i+1}/{total_tickers}, {progress:.1%}]", end="", flush=True)
+            print(
+                f"\r  Validating... [{i+1}/{total_tickers}, {progress:.1%}]",
+                end="",
+                flush=True,
+            )
 
             if self.validate_ticker(symbol, min_volume):
                 validated.append(symbol)
@@ -190,8 +194,8 @@ class TickerLoader:
             # Limit if needed
             if max_tickers and len(validated) >= max_tickers:
                 break
-        
-        print() # Newline after progress bar finishes
+
+        print()  # Newline after progress bar finishes
 
         self.validated_tickers = validated
         self.invalid_tickers = invalid
@@ -213,6 +217,7 @@ def get_ticker_loader() -> TickerLoader:
         _loader = TickerLoader()
     return _loader
 
+
 def run_sector_analysis():
     """
     Hàm giả lập cho `run_sector_analysis` để tương thích ngược với `main.py`.
@@ -223,11 +228,13 @@ def run_sector_analysis():
         loader = get_ticker_loader()
         # Lấy các mã đã validate với các tiêu chí cơ bản
         tickers = loader.get_validated_tickers(
-            force_validate=False, # Dùng cache nếu có
+            force_validate=False,  # Dùng cache nếu có
             min_volume=100_000,
-            max_tickers=500 # Lấy nhiều hơn một chút để có lựa chọn
+            max_tickers=500,  # Lấy nhiều hơn một chút để có lựa chọn
         )
-        print(f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning.")
+        print(
+            f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning."
+        )
         return tickers
     except Exception as e:
         print(f"❌ [Compatibility] Error in fake run_sector_analysis: {e}")

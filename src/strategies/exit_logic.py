@@ -569,7 +569,7 @@ class ImprovedExitStrategy:
     def clear_position_tracking(self, symbol: str):
         """
         Dọn dẹp tracking khi đóng vị thế để tránh memory leak
-        
+
         Args:
             symbol: Mã cổ phiếu cần xóa tracking
         """
@@ -582,7 +582,7 @@ class ImprovedExitStrategy:
     def get_tracked_positions(self) -> List[str]:
         """
         Lấy danh sách các vị thế đang được track
-        
+
         Returns:
             List các symbol đang được track
         """

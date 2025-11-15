@@ -260,9 +260,10 @@ class MLPredictor:
             else:
                 # CRITICAL: No models found
                 logger.critical(
-                    "\n" + "="*70 + "\n"
+                    "\n" + "=" * 70 + "\n"
                     "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
-                    + "="*70 + "\n"
+                    + "=" * 70
+                    + "\n"
                     f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
                     "\n"
                     "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
@@ -272,8 +273,7 @@ class MLPredictor:
                     "2. Hoặc: python -m src.ml.training.pipeline\n"
                     "3. Sau khi train xong, khởi động lại bot\n"
                     "\n"
-                    "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n"
-                    + "="*70
+                    "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
                 )
 
                 # DISABLE ML instead of creating dummy models
@@ -283,9 +283,8 @@ class MLPredictor:
 
         except Exception as e:
             logger.critical(
-                "\n" + "="*70 + "\n"
-                "⚠️⚠️⚠️ LỖI KHI LOAD ML MODELS ⚠️⚠️⚠️\n"
-                + "="*70 + "\n"
+                "\n" + "=" * 70 + "\n"
+                "⚠️⚠️⚠️ LỖI KHI LOAD ML MODELS ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
                 f"Lỗi: {e}\n"
                 "\n"
                 "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
@@ -296,8 +295,7 @@ class MLPredictor:
                 "3. Train lại: python scripts/train_models.py\n"
                 "4. Khởi động lại bot\n"
                 "\n"
-                "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n"
-                + "="*70
+                "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
             )
 
             # DISABLE ML instead of creating dummy models

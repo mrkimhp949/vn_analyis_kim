@@ -436,7 +436,9 @@ class EnhancedPositionSizer:
             df2 = loader.load_data(symbol2, days=days)
 
             if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
-                logger.warning(f"Insufficient data for correlation: {symbol1}-{symbol2}")
+                logger.warning(
+                    f"Insufficient data for correlation: {symbol1}-{symbol2}"
+                )
                 return 0.0
 
             # Merge on date to align time series
@@ -500,9 +502,7 @@ class EnhancedPositionSizer:
                 correlations.append(abs(corr))  # Use absolute correlation
                 successful_calcs += 1
 
-                logger.debug(
-                    f"Correlation {symbol}-{pos_symbol}: {corr:.3f}"
-                )
+                logger.debug(f"Correlation {symbol}-{pos_symbol}: {corr:.3f}")
 
             except Exception as e:
                 logger.debug(

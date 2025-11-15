@@ -93,7 +93,7 @@ class ImprovedEntryLogic:
         Returns:
             EntrySignal object với đầy đủ thông tin
         """
-        
+
         # ===== DATA VALIDATION =====
         try:
             DataValidator.validate_dataframe(df, min_rows=50)
@@ -213,28 +213,26 @@ class ImprovedEntryLogic:
         # ===== CALCULATE ENTRY PRICE, SL, TP =====
         entry_price = DataValidator.validate_price(latest["close"], "entry_price")
         atr = IndicatorUtils.get_atr(df)
-        
+
         # Get support level
         support_level = sr_check.get("support_level", None)
-        
+
         # Calculate stop loss using robust calculator
         try:
             stop_loss, sl_reason = StopLossCalculator.calculate_stop_loss(
                 entry_price=entry_price,
                 atr=atr,
                 support_level=support_level,
-                atr_multiplier=2.0
+                atr_multiplier=2.0,
             )
             logger.debug(f"Stop loss calculated: {stop_loss:.0f} ({sl_reason})")
         except ValueError as e:
             return self._no_signal(f"Stop loss calculation failed: {str(e)}")
-        
+
         # Calculate take profit targets
         try:
             take_profit_targets = StopLossCalculator.calculate_take_profit_targets(
-                entry_price=entry_price,
-                atr=atr,
-                risk_reward_ratios=[1.5, 3.0, 5.0]
+                entry_price=entry_price, atr=atr, risk_reward_ratios=[1.5, 3.0, 5.0]
             )
         except ValueError as e:
             return self._no_signal(f"Take profit calculation failed: {str(e)}")
@@ -398,10 +396,10 @@ class ImprovedEntryLogic:
         """
         obv = [0]
         for i in range(1, len(df)):
-            if df['close'].iloc[i] > df['close'].iloc[i-1]:
-                obv.append(obv[-1] + df['volume'].iloc[i])
-            elif df['close'].iloc[i] < df['close'].iloc[i-1]:
-                obv.append(obv[-1] - df['volume'].iloc[i])
+            if df["close"].iloc[i] > df["close"].iloc[i - 1]:
+                obv.append(obv[-1] + df["volume"].iloc[i])
+            elif df["close"].iloc[i] < df["close"].iloc[i - 1]:
+                obv.append(obv[-1] - df["volume"].iloc[i])
             else:
                 obv.append(obv[-1])
 

@@ -63,12 +63,12 @@ def load_data(
     # Handle is_index parameter
     if is_index:
         data_type = "index"
-    
+
     # Handle lookback parameter
     if lookback is not None:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
-    
+
     # Validate that we have start_date and end_date
     if start_date is None or end_date is None:
         raise ValueError("Either provide start_date/end_date or lookback parameter")
@@ -102,11 +102,10 @@ def load_data(
     if df.empty:
         # Don't log a warning if the API simply returned no data for the period
         if "No data available" not in getattr(df, "source_error", ""):
-             logger.warning(
+            logger.warning(
                 f"Insufficient data for {symbol}: got 0 bars, need at least {required_bars}"
-             )
+            )
         return pd.DataFrame()
-
 
     df = df.sort_values("time").reset_index(drop=True)
 
@@ -169,7 +168,7 @@ def _download_from_tcbs(
             params = {
                 "ticker": symbol,
                 "type": data_type,
-                "resolution": resolution.upper(), # API expects uppercase
+                "resolution": resolution.upper(),  # API expects uppercase
                 "from": int(start.timestamp()),
                 "to": int(end.timestamp()),
             }
@@ -177,7 +176,10 @@ def _download_from_tcbs(
             response = requests.get(url, params=params, timeout=10)
 
             if response.status_code != 200:
-                if response.status_code in [429, 500, 502, 503, 504] and attempt < max_retries - 1:
+                if (
+                    response.status_code in [429, 500, 502, 503, 504]
+                    and attempt < max_retries - 1
+                ):
                     logger.warning(
                         f"⚠️ TCBS API error {response.status_code} for {symbol}, retrying in {retry_delays[attempt]}s..."
                     )
@@ -193,14 +195,19 @@ def _download_from_tcbs(
             if not isinstance(data, dict) or "data" not in data:
                 raise DataLoadError(
                     f"TCBS API returned invalid format",
-                    context={"symbol": symbol, "response_keys": list(data.keys()) if isinstance(data, dict) else None},
+                    context={
+                        "symbol": symbol,
+                        "response_keys": (
+                            list(data.keys()) if isinstance(data, dict) else None
+                        ),
+                    },
                 )
 
             bars = data.get("data")
 
             if not bars:
                 df = pd.DataFrame()
-                df.source_error = "No data available" # Attach info for caller
+                df.source_error = "No data available"  # Attach info for caller
                 return df
 
             df = pd.DataFrame(bars)
@@ -220,12 +227,16 @@ def _download_from_tcbs(
                 )
                 time.sleep(retry_delays[attempt])
                 continue
-            raise DataLoadError(f"Network error after {max_retries} retries", context={"symbol": symbol}) from e
+            raise DataLoadError(
+                f"Network error after {max_retries} retries", context={"symbol": symbol}
+            ) from e
 
         except Exception as e:
-            raise DataLoadError(f"Unexpected error during download", context={"symbol": symbol}) from e
+            raise DataLoadError(
+                f"Unexpected error during download", context={"symbol": symbol}
+            ) from e
 
-    return pd.DataFrame() # Return empty df if all retries fail
+    return pd.DataFrame()  # Return empty df if all retries fail
 
 
 # Test function
@@ -248,7 +259,9 @@ if __name__ == "__main__":
             )
             if not df.empty:
                 print(f"✅ {symbol}: {len(df)} rows")
-                print(f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}")
+                print(
+                    f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}"
+                )
                 print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
             else:
                 print(f"⚠️ {symbol}: No data returned.")

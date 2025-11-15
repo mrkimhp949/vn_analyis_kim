@@ -261,9 +261,7 @@ class StopLossTakeProfitExit(ExitStrategy):
     - Trailing stop activated
     """
 
-    def __init__(
-        self, stop_loss_pct: float = 0.05, take_profit_pct: float = 0.10
-    ):
+    def __init__(self, stop_loss_pct: float = 0.05, take_profit_pct: float = 0.10):
         self.stop_loss_pct = stop_loss_pct
         self.take_profit_pct = take_profit_pct
 

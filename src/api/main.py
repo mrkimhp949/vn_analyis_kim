@@ -32,24 +32,29 @@ from auth import (
     add_security_headers,
     rate_limit_strict,
     rate_limit_moderate,
-    rate_limit_relaxed
+    rate_limit_relaxed,
 )
 
 # Import các module của bot - FIXED IMPORT
 try:
     from bot_runner_improved import run_bot_sync
+
     print("✅ Import bot_runner_improved thành công")
 except ImportError as e:
     print(f"❌ Lỗi import bot_runner_improved: {e}")
+
     # Fallback function
     def run_bot_sync():
         print("🤖 Bot runner không khả dụng")
 
+
 try:
     from ticker_loader import run_sector_analysis
+
     print("✅ Import run_sector_analysis từ ticker_loader thành công")
 except ImportError as e:
     print(f"❌ Lỗi import run_sector_analysis: {e}")
+
     def run_sector_analysis():
         print("📊 Sector analyzer không khả dụng")
         return []
@@ -266,16 +271,19 @@ def schedule_job():
                 try:
                     # Record portfolio history
                     from portfolio_manager import PortfolioManager
+
                     pm = PortfolioManager()
                     pm._record_daily_snapshot()
 
                     # Record paper trading PnL
                     from paper_trading import get_paper_account
+
                     paper_account = get_paper_account()
                     paper_account.record_daily_pnl()
-                    
+
                     # Create database backup
                     from backup_manager import scheduled_backup
+
                     scheduled_backup()
 
                     last_pnl_record = current_date
@@ -368,6 +376,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Add security headers middleware
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
@@ -397,25 +406,26 @@ async def health_check():
     from datetime import datetime
     import sys
     from monitoring_enhanced import get_enhanced_monitor
-    
+
     monitor = get_enhanced_monitor()
-    
+
     # Get comprehensive health status
     health_status = monitor.get_health_status()
-    
+
     health_info = {
-        "status": health_status['status'],
+        "status": health_status["status"],
         "timestamp": datetime.now(tz).isoformat(),
-        "uptime_seconds": health_status['uptime_seconds'],
+        "uptime_seconds": health_status["uptime_seconds"],
         "python_version": sys.version.split()[0],
         "platform": sys.platform,
-        "last_scan": health_status['last_scan'],
-        "checks": health_status['checks']
+        "last_scan": health_status["last_scan"],
+        "checks": health_status["checks"],
     }
 
     # Kiểm tra các components
     try:
         from data_loader import load_data
+
         test_data = load_data("VNM", lookback=5, use_cache=True)
         health_info["data_loader"] = "OK"
         health_info["data_points"] = len(test_data)
@@ -425,13 +435,14 @@ async def health_check():
 
     try:
         from ml_models import MLPredictor
+
         predictor = MLPredictor()
         models_loaded = predictor.load_models()
         health_info["ml_models"] = "OK" if models_loaded else "DUMMY_MODELS"
     except Exception as e:
         health_info["ml_models"] = f"ERROR: {str(e)}"
         health_info["status"] = "degraded"
-    
+
     # Update system metrics
     monitor.update_system_metrics()
 
@@ -445,21 +456,18 @@ async def metrics():
 
     monitor = get_enhanced_monitor()
     metrics_data = monitor.export_metrics()
-    
+
     return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/run-bot")
 @rate_limit_strict
-async def run_bot(
-    request: Request,
-    api_key: str = Security(verify_api_key)
-):
+async def run_bot(request: Request, api_key: str = Security(verify_api_key)):
     """Manual trigger - chạy bot ngay (Protected endpoint)"""
     try:
         # Verify IP whitelist
         await verify_ip_whitelist(request)
-        
+
         # Chạy trong thread riêng để không block request
         thread = threading.Thread(target=run_bot_sync, daemon=True)
         thread.start()
@@ -530,7 +538,7 @@ async def add_to_portfolio(symbol: str, shares: int, price: float):
     try:
         from portfolio_manager import PortfolioManager
         from src.utils.validation import InputValidator
-        
+
         # VALIDATE INPUT
         try:
             symbol = InputValidator.validate_symbol(symbol)
@@ -562,7 +570,7 @@ async def remove_from_portfolio(symbol: str, shares: int = None):
     try:
         from portfolio_manager import PortfolioManager
         from src.utils.validation import InputValidator
-        
+
         # VALIDATE INPUT
         try:
             symbol = InputValidator.validate_symbol(symbol)

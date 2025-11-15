@@ -285,9 +285,7 @@ class PositionRepository:
             logger.error(f"Error updating price for {symbol}: {e}")
             return False
 
-    def update_shares(
-        self, symbol: str, shares: int, average_price: float
-    ) -> bool:
+    def update_shares(self, symbol: str, shares: int, average_price: float) -> bool:
         """
         Update shares and average price (for adding to position)
 
@@ -307,9 +305,7 @@ class PositionRepository:
 
         try:
             self.db.execute_update(query, (shares, average_price, symbol))
-            logger.info(
-                f"✅ Updated {symbol}: {shares} shares @ {average_price:,.0f}"
-            )
+            logger.info(f"✅ Updated {symbol}: {shares} shares @ {average_price:,.0f}")
             return True
         except Exception as e:
             logger.error(f"Error updating shares for {symbol}: {e}")

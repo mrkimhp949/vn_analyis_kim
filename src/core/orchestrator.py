@@ -34,7 +34,9 @@ class TradingOrchestrator:
     Lớp điều phối chính, quản lý toàn bộ luồng quét và giao dịch.
     """
 
-    def __init__(self, bot_instance: Bot, chat_id: str, vnindex_df: Optional[pd.DataFrame] = None):
+    def __init__(
+        self, bot_instance: Bot, chat_id: str, vnindex_df: Optional[pd.DataFrame] = None
+    ):
         self.bot = bot_instance
         self.chat_id = chat_id
         self.vnindex_df = vnindex_df  # Lưu trữ vnindex_df ngay khi khởi tạo
@@ -63,10 +65,10 @@ class TradingOrchestrator:
         self.entry_logic = strategies["entry_logic"]
         self.position_sizer = strategies["position_sizer"]
         self.exit_strategy = strategies["exit_strategy"]
-        
+
         # Yêu cầu StrategyManager tự điều chỉnh dựa trên trạng thái thị trường
         self.strategy_manager.apply_market_adjustments(market_regime)
-        
+
         logging.info(
             f"🔧 Đã thiết lập và điều chỉnh chiến lược cho chế độ: {market_regime.get('regime', 'Sideways')}"
         )
@@ -186,13 +188,21 @@ class TradingOrchestrator:
         Chạy quá trình quét toàn diện để tìm kiếm cơ hội và quản lý vị thế.
         """
         # 0. KIỂM TRA NGẮT MẠCH (CIRCUIT BREAKER)
-        vnindex_change = self.vnindex_df['close'].pct_change().iloc[-1] if self.vnindex_df is not None and not self.vnindex_df.empty else 0.0
+        vnindex_change = (
+            self.vnindex_df["close"].pct_change().iloc[-1]
+            if self.vnindex_df is not None and not self.vnindex_df.empty
+            else 0.0
+        )
         # Lấy PNL thực tế từ portfolio manager nếu có
         current_pnl_pct = self.portfolio_manager.get_daily_pnl_pct()
 
-        if self.circuit_breaker.check_and_update(portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change):
+        if self.circuit_breaker.check_and_update(
+            portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change
+        ):
             reason = self.circuit_breaker.tripped_reason
-            logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
+            logging.critical(
+                f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới."
+            )
             await self.bot.send_message(
                 self.chat_id,
                 f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
@@ -228,7 +238,9 @@ class TradingOrchestrator:
         )
 
         # 6. GỬI BÁO CÁO TÓM TẮT
-        await self.send_summary_report(signal_count, watchlist_candidates, market_regime)
+        await self.send_summary_report(
+            signal_count, watchlist_candidates, market_regime
+        )
 
     def get_scan_universe(self) -> List[str]:
         """Lấy danh sách các mã cổ phiếu cần quét."""
@@ -265,16 +277,14 @@ class TradingOrchestrator:
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=f"🔍 Đang quét {len(current_tickers)} mã...\n"
-                     f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
-                     f"Số mã tiềm năng: *{len(current_tickers)}*",
+                f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
+                f"Số mã tiềm năng: *{len(current_tickers)}*",
                 parse_mode="Markdown",
             )
         except Exception as e:
             logging.error(f"Lỗi gửi Telegram (scan start): {e}", exc_info=True)
 
-    async def check_active_positions(
-        self, market_regime: Dict
-    ):
+    async def check_active_positions(self, market_regime: Dict):
         """Kiểm tra và xử lý các vị thế đang nắm giữ."""
         positions = self.portfolio_manager.get_positions()
         if not positions:
@@ -301,7 +311,7 @@ class TradingOrchestrator:
                 return
 
             current_price = df.iloc[-1]["close"]
-            
+
             # ML analysis với error handling
             ml_signal = None
             try:
@@ -327,9 +337,7 @@ class TradingOrchestrator:
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
 
         except Exception as e:
-            logging.error(
-                f"Lỗi khi kiểm tra vị thế {symbol}: {e}", exc_info=True
-            )
+            logging.error(f"Lỗi khi kiểm tra vị thế {symbol}: {e}", exc_info=True)
 
     async def execute_exit(self, symbol, pos_data, exit_decision, current_price):
         """Thực hiện thoát lệnh bán dựa trên quyết định thoát."""
@@ -352,21 +360,23 @@ class TradingOrchestrator:
                 logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
                 if exit_decision.exit_type == "FULL":
                     self.exit_strategy.clear_position_tracking(symbol)
-                
+
                 # GHI NHẬN PNL NGAY LẬP TỨC sau khi thoát lệnh
                 current_pnl = self.portfolio_manager.get_daily_pnl_pct()
                 self.circuit_breaker.record_pnl(current_pnl)
-                
+
                 # Kiểm tra xem circuit breaker có kích hoạt không
                 if self.circuit_breaker.is_active():
-                    logging.warning(f"⚠️ Circuit breaker đã kích hoạt sau khi thoát {symbol}. PnL: {current_pnl:.2%}")
+                    logging.warning(
+                        f"⚠️ Circuit breaker đã kích hoạt sau khi thoát {symbol}. PnL: {current_pnl:.2%}"
+                    )
                     await self.bot.send_message(
                         self.chat_id,
                         f"🚨 *CIRCUIT BREAKER KÍCH HOẠT*\n\n"
                         f"Sau khi thoát {symbol}\n"
                         f"PnL hiện tại: {current_pnl:.2%}\n"
                         f"Lý do: {self.circuit_breaker.tripped_reason}",
-                        parse_mode="Markdown"
+                        parse_mode="Markdown",
                     )
             else:
                 logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
@@ -489,8 +499,11 @@ class TradingOrchestrator:
             # logging.warning(f"[{symbol}] Lỗi tải dữ liệu: {e}") # Giảm log nhiễu
             return None
         except Exception as e:
-            logging.error(f"[{symbol}] Lỗi không xác định trong process_single_ticker_for_entry: {e}")
+            logging.error(
+                f"[{symbol}] Lỗi không xác định trong process_single_ticker_for_entry: {e}"
+            )
             import traceback
+
             logging.error(traceback.format_exc())
             return None
 
@@ -501,14 +514,23 @@ class TradingOrchestrator:
         # Tính toán R:R cho mục tiêu đầu tiên
         try:
             # Đảm bảo take_profit_targets không rỗng và stop_loss khác entry_price
-            if entry_signal.take_profit_targets and entry_signal.entry_price != entry_signal.stop_loss:
-                risk_reward_ratio = (entry_signal.take_profit_targets[0] - entry_signal.entry_price) / (entry_signal.entry_price - entry_signal.stop_loss)
+            if (
+                entry_signal.take_profit_targets
+                and entry_signal.entry_price != entry_signal.stop_loss
+            ):
+                risk_reward_ratio = (
+                    entry_signal.take_profit_targets[0] - entry_signal.entry_price
+                ) / (entry_signal.entry_price - entry_signal.stop_loss)
             else:
                 risk_reward_ratio = 0
         except (ZeroDivisionError, IndexError):
             risk_reward_ratio = 0
-        
-        tp1_target = entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else 0
+
+        tp1_target = (
+            entry_signal.take_profit_targets[0]
+            if entry_signal.take_profit_targets
+            else 0
+        )
 
         message = (
             f"**🚀 TÍN HIỆU MUA MỚI 🚀**\n\n"
@@ -564,29 +586,33 @@ class TradingOrchestrator:
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=f"🔍 Đang quét {len(current_tickers)} mã...\n"
-                     f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
-                     f"Số mã tiềm năng: *{len(current_tickers)}*",
+                f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
+                f"Số mã tiềm năng: *{len(current_tickers)}*",
                 parse_mode="Markdown",
             )
         except Exception as e:
             logging.error(f"Lỗi gửi Telegram (scan start): {e}", exc_info=True)
 
-    async def send_summary_report(self, signal_count, watchlist_candidates, market_regime: Dict):
+    async def send_summary_report(
+        self, signal_count, watchlist_candidates, market_regime: Dict
+    ):
         """Gửi báo cáo tóm tắt cuối phiên quét."""
         try:
             portfolio_summary = self.portfolio_manager.get_detailed_analysis()
-            
+
             summary_msg = f"**--- BÁO CÁO QUÉT ---**\n"
             summary_msg += f"Thời gian: {datetime.now().strftime('%H:%M %d-%m-%Y')}\n"
             summary_msg += f"📊 Thị trường: *{market_regime.get('regime', 'N/A')}* (Conf: {market_regime.get('confidence', 0)}%)\n"
             summary_msg += f"💡 Tín hiệu mua mới: **{signal_count}**\n"
-            
+
             if watchlist_candidates:
                 summary_msg += f"👀 Watchlist: {len(watchlist_candidates)}\n"
 
             summary_msg += "\n" + portfolio_summary
 
-            await self.bot.send_message(self.chat_id, summary_msg, parse_mode="Markdown")
+            await self.bot.send_message(
+                self.chat_id, summary_msg, parse_mode="Markdown"
+            )
         except Exception as e:
             logging.error(f"Lỗi gửi báo cáo tóm tắt: {e}", exc_info=True)
             await self.bot.send_message(self.chat_id, f"Lỗi khi tạo báo cáo: {e}")

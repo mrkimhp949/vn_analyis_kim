@@ -44,7 +44,6 @@ class MarketRegimeAnalyzer:
         self.end_date = config.data.end_date
         self.start_date = config.data.start_date
 
-
     def analyze_market_regime(self) -> Dict:
         """
         Phân tích tình trạng thị trường VNINDEX
@@ -68,7 +67,9 @@ class MarketRegimeAnalyzer:
             )
 
             if vnindex.empty or len(vnindex) < 50:
-                logger.warning(f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}")
+                logger.warning(
+                    f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}"
+                )
                 return self._default_regime()
 
             # Tính các chỉ số

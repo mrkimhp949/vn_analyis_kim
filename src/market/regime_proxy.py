@@ -33,6 +33,7 @@ class ProxyMarketRegimeAnalyzer:
     """
     Lớp Proxy để quản lý và cache kết quả từ MarketRegimeAnalyzer.
     """
+
     _instance = None
 
     def __new__(cls, *args, **kwargs):
@@ -46,21 +47,20 @@ class ProxyMarketRegimeAnalyzer:
         return cls._instance
 
     def __init__(self, analyzer_class=None, **kwargs):
-        if not hasattr(self, 'initialized'):
+        if not hasattr(self, "initialized"):
             self.initialized = True  # Set this first to prevent re-entry
-            
+
             # Initialize the actual analyzer
             if analyzer_class:
                 self.analyzer = analyzer_class(**kwargs)
             else:
                 # Fallback to default if not provided
                 from market_regime import MarketRegimeAnalyzer
-                
+
                 # MarketRegimeAnalyzer hiện tại không cần ticker_list, nó tự load VNINDEX
                 self.analyzer = MarketRegimeAnalyzer()
                 logging.info(f"📊 Khởi tạo Market Regime Analyzer.")
 
-            
             # Initialize cache
             self.cache = SimpleCache()
             logging.info("✅ Market analyzer initialized")
@@ -81,7 +81,10 @@ class ProxyMarketRegimeAnalyzer:
         try:
             if self.analyzer:
                 # Nếu analyzer cần vnindex_df, truyền nó vào
-                if "vnindex_df" in self.analyzer.analyze_market_regime.__code__.co_varnames:
+                if (
+                    "vnindex_df"
+                    in self.analyzer.analyze_market_regime.__code__.co_varnames
+                ):
                     regime = self.analyzer.analyze_market_regime(vnindex_df=vnindex_df)
                 else:
                     # Giữ tương thích với analyzer cũ không cần df
@@ -93,7 +96,9 @@ class ProxyMarketRegimeAnalyzer:
                 # Fallback nếu không có analyzer
                 return {"regime": "UNKNOWN", "confidence": 0, "tradeable": False}
         except Exception as e:
-            logging.error(f"Lỗi khi phân tích trạng thái thị trường: {e}", exc_info=True)
+            logging.error(
+                f"Lỗi khi phân tích trạng thái thị trường: {e}", exc_info=True
+            )
             return {"regime": "ERROR", "confidence": 0, "tradeable": False}
 
 
