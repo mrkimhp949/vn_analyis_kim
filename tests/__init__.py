@@ -1,3 +1,1 @@
-"""
-Test suite for Trading Bot
-"""
+# Tests package

@@ -4,9 +4,12 @@
 # Suppress warnings first
 import suppress_warnings  # noqa: F401
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Security, Request, Depends
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 import uvicorn
 import os
 import threading
@@ -14,6 +17,16 @@ import time
 from datetime import datetime
 import pytz
 import asyncio
+
+# Import authentication
+from auth import (
+    verify_api_key, 
+    verify_ip_whitelist, 
+    limiter, 
+    add_security_headers,
+    rate_limit_strict,
+    rate_limit_moderate
+)
 
 # Import các module của bot - FIXED IMPORT
 try:
@@ -235,31 +248,33 @@ def schedule_job():
                     print(f"❌ Lỗi gửi daily summary: {e}")
                 time.sleep(61)
 
-            # 15:10 - Record daily PnL cho portfolio và paper trading (trước khi đóng cửa)
+            # 15:10 - Record daily PnL và backup database
             elif (
                 is_trading_hour(now)
                 and current_hour == 15
                 and current_minute == 10
                 and last_pnl_record != current_date
             ):
-                print("\n📊 [15:30] GHI LẠI PNL HÀNG NGÀY")
+                print("\n📊 [15:10] GHI LẠI PNL VÀ BACKUP DATABASE")
                 try:
                     # Record portfolio history
                     from portfolio_manager import PortfolioManager
-
                     pm = PortfolioManager()
                     pm._record_daily_snapshot()
 
                     # Record paper trading PnL
                     from paper_trading import get_paper_account
-
                     paper_account = get_paper_account()
                     paper_account.record_daily_pnl()
+                    
+                    # Create database backup
+                    from backup_manager import scheduled_backup
+                    scheduled_backup()
 
                     last_pnl_record = current_date
-                    print("✅ Đã ghi lại PnL hàng ngày")
+                    print("✅ Đã ghi lại PnL và backup database")
                 except Exception as e:
-                    print(f"❌ Lỗi ghi PnL: {e}")
+                    print(f"❌ Lỗi ghi PnL/backup: {e}")
                 time.sleep(61)
 
             # Sleep ngắn hơn trong giờ giao dịch để responsive hơn
@@ -333,6 +348,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure properly in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add security headers middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    return add_security_headers(response)
+
 
 @app.get("/")
 async def read_root():
@@ -350,44 +384,76 @@ async def read_root():
 
 
 @app.get("/health")
+@rate_limit_relaxed
 async def health_check():
-    """Health check chi tiết"""
+    """Health check chi tiết với Prometheus metrics"""
     from datetime import datetime
     import sys
-
+    from monitoring_enhanced import get_enhanced_monitor
+    
+    monitor = get_enhanced_monitor()
+    
+    # Get comprehensive health status
+    health_status = monitor.get_health_status()
+    
     health_info = {
-        "status": "healthy",
+        "status": health_status['status'],
         "timestamp": datetime.now(tz).isoformat(),
-        "python_version": sys.version,
+        "uptime_seconds": health_status['uptime_seconds'],
+        "python_version": sys.version.split()[0],
         "platform": sys.platform,
+        "last_scan": health_status['last_scan'],
+        "checks": health_status['checks']
     }
 
     # Kiểm tra các components
     try:
         from data_loader import load_data
-
-        test_data = load_data("VNM", lookback=5, use_cache=False)
+        test_data = load_data("VNM", lookback=5, use_cache=True)
         health_info["data_loader"] = "OK"
         health_info["data_points"] = len(test_data)
     except Exception as e:
         health_info["data_loader"] = f"ERROR: {str(e)}"
+        health_info["status"] = "degraded"
 
     try:
         from ml_models import MLPredictor
-
         predictor = MLPredictor()
         models_loaded = predictor.load_models()
         health_info["ml_models"] = "OK" if models_loaded else "DUMMY_MODELS"
     except Exception as e:
         health_info["ml_models"] = f"ERROR: {str(e)}"
+        health_info["status"] = "degraded"
+    
+    # Update system metrics
+    monitor.update_system_metrics()
 
     return health_info
 
 
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint"""
+    from monitoring_enhanced import get_enhanced_monitor
+    from fastapi.responses import Response
+    
+    monitor = get_enhanced_monitor()
+    metrics_data = monitor.export_metrics()
+    
+    return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post("/run-bot")
-async def run_bot():
-    """Manual trigger - chạy bot ngay"""
+@rate_limit_strict
+async def run_bot(
+    request: Request,
+    api_key: str = Security(verify_api_key)
+):
+    """Manual trigger - chạy bot ngay (Protected endpoint)"""
     try:
+        # Verify IP whitelist
+        await verify_ip_whitelist(request)
+        
         # Chạy trong thread riêng để không block request
         thread = threading.Thread(target=run_bot_sync, daemon=True)
         thread.start()

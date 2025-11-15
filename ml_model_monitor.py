@@ -1,373 +1,390 @@
+# -*- coding: utf-8 -*-
 """
-ML Model Monitoring - Track performance, calibrate confidence, auto-retrain triggers
+ML Model Performance Monitoring and Drift Detection
 """
-
-import json
-import os
+import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
-import pandas as pd
+from typing import Dict, List, Optional
 import numpy as np
-from exceptions import ModelPredictionError
+from database import get_db
+from monitoring_enhanced import get_enhanced_monitor
 
-
-@dataclass
-class PredictionRecord:
-    """Record một prediction"""
-
-    symbol: str
-    date: str
-    predicted_signal: str  # 'BUY', 'SELL', 'HOLD'
-    predicted_confidence: float
-    actual_price_change: Optional[float] = None  # % change after N days
-    actual_signal: Optional[str] = None  # 'BUY' if price went up, 'SELL' if down
-    correct: Optional[bool] = None
-    model_version: str = "default"
-
-
-@dataclass
-class ModelMetrics:
-    """Metrics cho một model"""
-
-    model_name: str
-    total_predictions: int
-    correct_predictions: int
-    accuracy: float
-    avg_confidence: float
-    avg_confidence_correct: float
-    avg_confidence_incorrect: float
-    calibration_error: float  # Difference between confidence and accuracy
-    last_updated: str
+logger = logging.getLogger(__name__)
 
 
 class MLModelMonitor:
     """
-    Monitor ML model performance:
-    1. Track predictions vs actuals
-    2. Calculate accuracy metrics
-    3. Calibrate confidence scores
-    4. Trigger auto-retrain when performance degrades
+    Monitor ML model performance and detect drift
+    
+    Features:
+    - Track predictions vs actual outcomes
+    - Calculate rolling accuracy
+    - Detect model drift
+    - Trigger retraining when needed
     """
-
+    
     def __init__(
         self,
-        predictions_file: str = "ml_predictions.json",
-        metrics_file: str = "ml_model_metrics.json",
-        min_predictions_for_metrics: int = 50,
-        accuracy_threshold: float = 0.55,  # 55% minimum accuracy
-        calibration_error_threshold: float = 0.15,  # 15% max calibration error
-        retrain_trigger_days: int = 7,
-    ):  # Retrain if accuracy drops for 7 days
-        self.predictions_file = predictions_file
-        self.metrics_file = metrics_file
-        self.min_predictions = min_predictions_for_metrics
-        self.accuracy_threshold = accuracy_threshold
-        self.calibration_error_threshold = calibration_error_threshold
-        self.retrain_trigger_days = retrain_trigger_days
-
-        self.predictions = self._load_predictions()
-        self.metrics = self._load_metrics()
-
-    def _load_predictions(self) -> List[Dict]:
-        """Load predictions từ file"""
-        if os.path.exists(self.predictions_file):
-            try:
-                with open(self.predictions_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data.get("predictions", [])
-            except Exception as e:
-                print(f"⚠️ Error loading predictions: {e}")
-        return []
-
-    def _save_predictions(self):
-        """Save predictions to file"""
-        try:
-            with open(self.predictions_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"predictions": self.predictions}, f, indent=2, ensure_ascii=False
-                )
-        except Exception as e:
-            print(f"⚠️ Error saving predictions: {e}")
-
-    def _load_metrics(self) -> Dict:
-        """Load metrics từ file"""
-        if os.path.exists(self.metrics_file):
-            try:
-                with open(self.metrics_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"⚠️ Error loading metrics: {e}")
-        return {}
-
-    def _save_metrics(self):
-        """Save metrics to file"""
-        try:
-            with open(self.metrics_file, "w", encoding="utf-8") as f:
-                json.dump(self.metrics, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"⚠️ Error saving metrics: {e}")
-
-    def record_prediction(
+        baseline_accuracy: float = 0.60,
+        drift_threshold: float = 0.10,  # 10% drop triggers alert
+        window_days: int = 30
+    ):
+        self.db = get_db()
+        self.monitor = get_enhanced_monitor()
+        self.baseline_accuracy = baseline_accuracy
+        self.drift_threshold = drift_threshold
+        self.window_days = window_days
+        
+        # Create table if not exists
+        self._create_table()
+    
+    def _create_table(self):
+        """Create predictions table"""
+        self.db.conn.execute("""
+            CREATE TABLE IF NOT EXISTS ml_predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                prediction_date TEXT NOT NULL,
+                prediction REAL NOT NULL,
+                predicted_class INTEGER NOT NULL,
+                actual_outcome INTEGER,
+                outcome_date TEXT,
+                confidence REAL,
+                model_version TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        self.db.conn.commit()
+    
+    def log_prediction(
         self,
         symbol: str,
-        predicted_signal: str,
-        predicted_confidence: float,
-        model_version: str = "default",
+        prediction: float,
+        predicted_class: int,
+        confidence: float,
+        model_version: str = "1.0"
     ):
         """
-        Record một prediction
-
+        Log ML prediction for future validation
+        
         Args:
             symbol: Stock symbol
-            predicted_signal: 'BUY', 'SELL', 'HOLD'
-            predicted_confidence: 0-100
+            prediction: Raw prediction score (0-1)
+            predicted_class: Predicted class (0 or 1)
+            confidence: Confidence score
             model_version: Model version identifier
         """
-        record = PredictionRecord(
-            symbol=symbol,
-            date=datetime.now().isoformat(),
-            predicted_signal=predicted_signal,
-            predicted_confidence=predicted_confidence,
-            model_version=model_version,
-        )
-
-        self.predictions.append(asdict(record))
-        self._save_predictions()
-
-    def update_prediction_result(
-        self, symbol: str, date: str, actual_price_change: float, days_forward: int = 5
+        try:
+            self.db.conn.execute("""
+                INSERT INTO ml_predictions 
+                (symbol, prediction_date, prediction, predicted_class, confidence, model_version)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                symbol,
+                datetime.now().isoformat(),
+                prediction,
+                predicted_class,
+                confidence,
+                model_version
+            ))
+            self.db.conn.commit()
+        
+        except Exception as e:
+            logger.error(f"Error logging prediction: {e}")
+    
+    def update_outcome(
+        self,
+        symbol: str,
+        prediction_date: str,
+        actual_outcome: int
     ):
         """
-        Update prediction với actual result
-
+        Update actual outcome for a prediction
+        
         Args:
             symbol: Stock symbol
-            date: Date of prediction (ISO format)
-            actual_price_change: % price change after N days
-            days_forward: Number of days to evaluate
+            prediction_date: Date of prediction
+            actual_outcome: Actual outcome (0 or 1)
         """
-        # Find prediction
-        for pred in self.predictions:
-            if pred["symbol"] == symbol and pred["date"] == date:
-                pred["actual_price_change"] = actual_price_change
-
-                # Determine actual signal
-                if actual_price_change > 0.02:  # > 2% increase
-                    pred["actual_signal"] = "BUY"
-                elif actual_price_change < -0.02:  # < -2% decrease
-                    pred["actual_signal"] = "SELL"
-                else:
-                    pred["actual_signal"] = "HOLD"
-
-                # Check if correct
-                if pred["predicted_signal"] == "HOLD":
-                    pred["correct"] = pred["actual_signal"] == "HOLD"
-                else:
-                    pred["correct"] = pred["predicted_signal"] == pred["actual_signal"]
-
-                self._save_predictions()
-                return
-
-        print(f"⚠️ Prediction not found: {symbol} @ {date}")
-
-    def calculate_metrics(self, model_version: str = "default") -> ModelMetrics:
+        try:
+            self.db.conn.execute("""
+                UPDATE ml_predictions
+                SET actual_outcome = ?, outcome_date = ?
+                WHERE symbol = ? AND prediction_date = ?
+            """, (
+                actual_outcome,
+                datetime.now().isoformat(),
+                symbol,
+                prediction_date
+            ))
+            self.db.conn.commit()
+        
+        except Exception as e:
+            logger.error(f"Error updating outcome: {e}")
+    
+    def calculate_accuracy(self, window_days: Optional[int] = None) -> Dict:
         """
-        Calculate metrics cho model
-
-        Returns:
-            ModelMetrics
-        """
-        # Filter predictions for this model
-        model_predictions = [
-            p
-            for p in self.predictions
-            if p.get("model_version") == model_version and p.get("correct") is not None
-        ]
-
-        if len(model_predictions) < self.min_predictions:
-            return ModelMetrics(
-                model_name=model_version,
-                total_predictions=len(model_predictions),
-                correct_predictions=0,
-                accuracy=0.0,
-                avg_confidence=0.0,
-                avg_confidence_correct=0.0,
-                avg_confidence_incorrect=0.0,
-                calibration_error=0.0,
-                last_updated=datetime.now().isoformat(),
-            )
-
-        # Calculate accuracy
-        correct = sum(1 for p in model_predictions if p.get("correct", False))
-        accuracy = correct / len(model_predictions)
-
-        # Calculate average confidence
-        avg_confidence = np.mean([p["predicted_confidence"] for p in model_predictions])
-
-        # Confidence for correct vs incorrect
-        correct_predictions = [p for p in model_predictions if p.get("correct", False)]
-        incorrect_predictions = [
-            p for p in model_predictions if not p.get("correct", False)
-        ]
-
-        avg_confidence_correct = (
-            np.mean([p["predicted_confidence"] for p in correct_predictions])
-            if correct_predictions
-            else 0
-        )
-        avg_confidence_incorrect = (
-            np.mean([p["predicted_confidence"] for p in incorrect_predictions])
-            if incorrect_predictions
-            else 0
-        )
-
-        # Calibration error: difference between confidence and accuracy
-        # If confidence is 70% but accuracy is 55%, error is 15%
-        calibration_error = abs(avg_confidence / 100.0 - accuracy)
-
-        metrics = ModelMetrics(
-            model_name=model_version,
-            total_predictions=len(model_predictions),
-            correct_predictions=correct,
-            accuracy=accuracy,
-            avg_confidence=avg_confidence,
-            avg_confidence_correct=avg_confidence_correct,
-            avg_confidence_incorrect=avg_confidence_incorrect,
-            calibration_error=calibration_error,
-            last_updated=datetime.now().isoformat(),
-        )
-
-        # Save metrics
-        self.metrics[model_version] = asdict(metrics)
-        self._save_metrics()
-
-        return metrics
-
-    def calibrate_confidence(
-        self, raw_confidence: float, model_version: str = "default"
-    ) -> float:
-        """
-        Calibrate confidence score based on historical performance
-
+        Calculate model accuracy over time window
+        
         Args:
-            raw_confidence: Raw confidence from model (0-100)
-            model_version: Model version
-
+            window_days: Number of days to look back (default: self.window_days)
+        
         Returns:
-            Calibrated confidence (0-100)
+            Dict with accuracy metrics
         """
-        metrics = self.calculate_metrics(model_version)
-
-        if metrics.total_predictions < self.min_predictions:
-            # Not enough data, return raw confidence
-            return raw_confidence
-
-        # Calibration: adjust based on calibration error
-        # If model is overconfident (confidence > accuracy), reduce confidence
-        # If model is underconfident (confidence < accuracy), increase confidence
-
-        calibration_factor = (
-            metrics.accuracy / (metrics.avg_confidence / 100.0)
-            if metrics.avg_confidence > 0
-            else 1.0
-        )
-        calibration_factor = max(
-            0.5, min(calibration_factor, 1.5)
-        )  # Clamp between 0.5x and 1.5x
-
-        calibrated = raw_confidence * calibration_factor
-
-        return max(0, min(calibrated, 100))  # Clamp to 0-100
-
-    def should_retrain(self, model_version: str = "default") -> Tuple[bool, str]:
+        if window_days is None:
+            window_days = self.window_days
+        
+        cutoff_date = (datetime.now() - timedelta(days=window_days)).isoformat()
+        
+        cursor = self.db.conn.execute("""
+            SELECT 
+                predicted_class,
+                actual_outcome,
+                confidence
+            FROM ml_predictions
+            WHERE prediction_date >= ?
+            AND actual_outcome IS NOT NULL
+        """, (cutoff_date,))
+        
+        results = cursor.fetchall()
+        
+        if not results:
+            return {
+                'accuracy': None,
+                'precision': None,
+                'recall': None,
+                'total_predictions': 0,
+                'window_days': window_days
+            }
+        
+        # Calculate metrics
+        predictions = np.array([r[0] for r in results])
+        actuals = np.array([r[1] for r in results])
+        
+        accuracy = (predictions == actuals).mean()
+        
+        # Precision and recall for class 1 (BUY signals)
+        tp = ((predictions == 1) & (actuals == 1)).sum()
+        fp = ((predictions == 1) & (actuals == 0)).sum()
+        fn = ((predictions == 0) & (actuals == 1)).sum()
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        
+        return {
+            'accuracy': float(accuracy),
+            'precision': float(precision),
+            'recall': float(recall),
+            'total_predictions': len(results),
+            'window_days': window_days,
+            'calculated_at': datetime.now().isoformat()
+        }
+    
+    def check_drift(self) -> Dict:
         """
-        Check if model should be retrained
-
+        Check for model drift
+        
         Returns:
-            (should_retrain, reason)
+            Dict with drift status and metrics
         """
-        metrics = self.calculate_metrics(model_version)
-
-        if metrics.total_predictions < self.min_predictions:
-            return False, "Not enough predictions yet"
-
-        reasons = []
-
-        # Check 1: Accuracy below threshold
-        if metrics.accuracy < self.accuracy_threshold:
-            reasons.append(
-                f"Accuracy {metrics.accuracy:.1%} < threshold {self.accuracy_threshold:.1%}"
-            )
-
-        # Check 2: Calibration error too high
-        if metrics.calibration_error > self.calibration_error_threshold:
-            reasons.append(
-                f"Calibration error {metrics.calibration_error:.1%} > threshold {self.calibration_error_threshold:.1%}"
-            )
-
-        # Check 3: Recent performance degradation
-        recent_predictions = [
-            p
-            for p in self.predictions
-            if p.get("model_version") == model_version
-            and p.get("correct") is not None
-            and (datetime.now() - datetime.fromisoformat(p["date"])).days
-            <= self.retrain_trigger_days
-        ]
-
-        if len(recent_predictions) >= 20:  # Need at least 20 recent predictions
-            recent_correct = sum(
-                1 for p in recent_predictions if p.get("correct", False)
-            )
-            recent_accuracy = recent_correct / len(recent_predictions)
-
-            if recent_accuracy < metrics.accuracy * 0.8:  # 20% drop in accuracy
-                reasons.append(
-                    f"Recent accuracy {recent_accuracy:.1%} dropped significantly from {metrics.accuracy:.1%}"
+        # Calculate recent accuracy
+        recent_metrics = self.calculate_accuracy(window_days=self.window_days)
+        
+        if recent_metrics['accuracy'] is None:
+            return {
+                'drift_detected': False,
+                'reason': 'Insufficient data',
+                'recent_accuracy': None,
+                'baseline_accuracy': self.baseline_accuracy
+            }
+        
+        recent_accuracy = recent_metrics['accuracy']
+        
+        # Check if accuracy dropped significantly
+        accuracy_drop = self.baseline_accuracy - recent_accuracy
+        drift_detected = accuracy_drop > self.drift_threshold
+        
+        result = {
+            'drift_detected': drift_detected,
+            'recent_accuracy': recent_accuracy,
+            'baseline_accuracy': self.baseline_accuracy,
+            'accuracy_drop': accuracy_drop,
+            'threshold': self.drift_threshold,
+            'metrics': recent_metrics
+        }
+        
+        if drift_detected:
+            result['reason'] = f"Accuracy dropped by {accuracy_drop:.2%}"
+            logger.warning(f"⚠️ MODEL DRIFT DETECTED: {result['reason']}")
+            
+            # Track in monitoring
+            self.monitor.track_error('model_drift')
+        
+        return result
+    
+    def should_retrain(self) -> bool:
+        """
+        Determine if model should be retrained
+        
+        Returns:
+            True if retraining is recommended
+        """
+        drift_status = self.check_drift()
+        
+        # Retrain if drift detected
+        if drift_status['drift_detected']:
+            return True
+        
+        # Retrain if accuracy is low (even without drift)
+        if drift_status['recent_accuracy'] and drift_status['recent_accuracy'] < 0.55:
+            logger.warning(f"⚠️ Low accuracy: {drift_status['recent_accuracy']:.2%}")
+            return True
+        
+        # Check last retraining date
+        last_retrain = self._get_last_retrain_date()
+        if last_retrain:
+            days_since_retrain = (datetime.now() - last_retrain).days
+            if days_since_retrain > 30:  # Retrain monthly
+                logger.info(f"ℹ️ {days_since_retrain} days since last retrain")
+                return True
+        
+        return False
+    
+    def _get_last_retrain_date(self) -> Optional[datetime]:
+        """Get date of last model retraining"""
+        try:
+            # Check if retraining log exists
+            cursor = self.db.conn.execute("""
+                SELECT MAX(created_at) FROM ml_retraining_log
+            """)
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                return datetime.fromisoformat(result[0])
+        
+        except Exception:
+            # Table doesn't exist yet
+            pass
+        
+        return None
+    
+    def log_retraining(
+        self,
+        model_version: str,
+        metrics: Dict,
+        training_samples: int
+    ):
+        """
+        Log model retraining event
+        
+        Args:
+            model_version: New model version
+            metrics: Training metrics
+            training_samples: Number of training samples
+        """
+        try:
+            # Create table if not exists
+            self.db.conn.execute("""
+                CREATE TABLE IF NOT EXISTS ml_retraining_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_version TEXT NOT NULL,
+                    accuracy REAL,
+                    precision REAL,
+                    recall REAL,
+                    f1_score REAL,
+                    training_samples INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
-
-        if reasons:
-            return True, "; ".join(reasons)
-
-        return False, "Performance OK"
-
-    def get_performance_summary(self, model_version: str = "default") -> str:
-        """Get formatted performance summary"""
-        metrics = self.calculate_metrics(model_version)
-
+            """)
+            
+            self.db.conn.execute("""
+                INSERT INTO ml_retraining_log
+                (model_version, accuracy, precision, recall, f1_score, training_samples)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                model_version,
+                metrics.get('accuracy'),
+                metrics.get('precision'),
+                metrics.get('recall'),
+                metrics.get('f1_score'),
+                training_samples
+            ))
+            self.db.conn.commit()
+            
+            logger.info(f"✅ Logged retraining: {model_version}")
+        
+        except Exception as e:
+            logger.error(f"Error logging retraining: {e}")
+    
+    def get_performance_report(self) -> str:
+        """
+        Generate performance report
+        
+        Returns:
+            Formatted report string
+        """
+        # Recent metrics
+        recent = self.calculate_accuracy(window_days=30)
+        
+        # Drift status
+        drift = self.check_drift()
+        
+        # Build report
         lines = []
-        lines.append(f"📊 **ML MODEL PERFORMANCE - {model_version}**")
+        lines.append("📊 ML MODEL PERFORMANCE REPORT")
         lines.append("=" * 50)
-        lines.append(f"📈 Total Predictions: {metrics.total_predictions}")
-        lines.append(f"✅ Correct: {metrics.correct_predictions}")
-        lines.append(f"🎯 Accuracy: {metrics.accuracy:.1%}")
-        lines.append(f"💪 Avg Confidence: {metrics.avg_confidence:.1f}%")
-        lines.append(
-            f"✅ Avg Confidence (Correct): {metrics.avg_confidence_correct:.1f}%"
-        )
-        lines.append(
-            f"❌ Avg Confidence (Incorrect): {metrics.avg_confidence_incorrect:.1f}%"
-        )
-        lines.append(f"⚖️ Calibration Error: {metrics.calibration_error:.1%}")
-
-        should_retrain, reason = self.should_retrain(model_version)
-        if should_retrain:
-            lines.append(f"\n⚠️ **RETRAIN RECOMMENDED**")
-            lines.append(f"Reason: {reason}")
+        
+        if recent['accuracy'] is not None:
+            lines.append(f"\n📈 Last 30 Days:")
+            lines.append(f"  Accuracy:  {recent['accuracy']:.2%}")
+            lines.append(f"  Precision: {recent['precision']:.2%}")
+            lines.append(f"  Recall:    {recent['recall']:.2%}")
+            lines.append(f"  Predictions: {recent['total_predictions']}")
         else:
-            lines.append(f"\n✅ Performance OK")
-
+            lines.append("\n⚠️ Insufficient data for metrics")
+        
+        lines.append(f"\n🎯 Drift Detection:")
+        lines.append(f"  Baseline: {drift['baseline_accuracy']:.2%}")
+        lines.append(f"  Current:  {drift.get('recent_accuracy', 'N/A')}")
+        
+        if drift['drift_detected']:
+            lines.append(f"  ⚠️ DRIFT DETECTED: {drift['reason']}")
+        else:
+            lines.append(f"  ✅ No drift detected")
+        
+        lines.append(f"\n🔄 Retraining:")
+        if self.should_retrain():
+            lines.append(f"  ⚠️ RETRAINING RECOMMENDED")
+        else:
+            lines.append(f"  ✅ Model performing well")
+        
         return "\n".join(lines)
 
 
 # Singleton
-_monitor = None
-
+_ml_monitor = None
 
 def get_ml_model_monitor() -> MLModelMonitor:
     """Get ML model monitor singleton"""
-    global _monitor
-    if _monitor is None:
-        _monitor = MLModelMonitor()
-    return _monitor
+    global _ml_monitor
+    if _ml_monitor is None:
+        _ml_monitor = MLModelMonitor()
+    return _ml_monitor
+
+
+if __name__ == "__main__":
+    # Test model monitor
+    monitor = get_ml_model_monitor()
+    
+    # Log some predictions
+    monitor.log_prediction('VNM', 0.75, 1, 75, '1.0')
+    monitor.log_prediction('VCB', 0.45, 0, 55, '1.0')
+    
+    # Check drift
+    drift = monitor.check_drift()
+    print(f"Drift detected: {drift['drift_detected']}")
+    
+    # Get report
+    report = monitor.get_performance_report()
+    print(f"\n{report}")
