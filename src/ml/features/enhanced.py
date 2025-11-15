@@ -349,14 +349,14 @@ if __name__ == "__main__":
 
     # Check features
     feature_cols = get_feature_columns()
-    print("📊 Total features: {len(feature_cols)}")
+    print(f"📊 Total features: {len(feature_cols)}")
     print(
         f"📊 Features available: {sum(col in df_enhanced.columns for col in feature_cols)}"
     )
 
     # Check for NaN
     nan_count = df_enhanced[feature_cols].isna().sum().sum()
-    print("📊 NaN values: {nan_count}")
+    print(f"📊 NaN values: {nan_count}")
 
     # Show sample
     print("\n📊 Sample data:")

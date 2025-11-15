@@ -75,7 +75,7 @@ class EnhancedMLSignalGenerator:
                 col for col in feature_cols if col not in df_enhanced.columns
             ]
             if missing_features:
-                logger.warning("Missing features: {missing_features}")
+                logger.warning(f"Missing features: {missing_features}")
                 return self._fallback_technical_analysis(df_enhanced)
 
             # Extract features
@@ -338,15 +338,15 @@ if __name__ == "__main__":
     signal = generator.analyze(df, index_df, explain=True)
 
     # Print result
-    print("📊 Symbol: {symbol}")
-    print("📊 Signal: {signal['signal']}")
+    print(f"📊 Symbol: {symbol}")
+    print(f"📊 Signal: {signal['signal']}")
     print("📊 Confidence: {signal['confidence']}%")
-    print("📊 ML Score: {signal['ml_score']:.4f}")
-    print("📊 Reason: {signal['reason']}")
+    print(f"📊 ML Score: {signal['ml_score']:.4f}")
+    print(f"📊 Reason: {signal['reason']}")
 
     if "explanation" in signal:
         print("\n🔍 Top contributing features:")
         for feature, shap_value in signal["top_features"]:
-            print("   {feature:25s}: {shap_value:+.4f}")
+            print(f"   {feature:25s}: {shap_value:+.4f}")
 
     print("\n✅ Testing complete!")

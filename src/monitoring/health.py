@@ -179,7 +179,7 @@ class HealthChecker:
                 results[name] = {"passed": passed, "message": message}
 
                 "✅" if passed else "❌"
-                print("{emoji} {name:20s} {message}")
+                print(f"{emoji} {name:20s} {message}")
 
                 if passed:
                     self.checks_passed += 1
@@ -194,7 +194,7 @@ class HealthChecker:
         if self.warnings:
             print("\n⚠️  WARNINGS:")
             for warning in self.warnings:
-                print("   - {warning}")
+                print(f"   - {warning}")
 
         # Summary
         print("\n" + "=" * 70)

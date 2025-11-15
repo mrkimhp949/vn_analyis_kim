@@ -89,9 +89,9 @@ def main():
                 print("\n" + "=" * 60)
                 print("✅ HOÀN THÀNH!")
                 print("📊 Return: {result['total_return']:.2f}%")
-                print("🔄 Trades: {result['total_trades']}")
+                print(f"🔄 Trades: {result['total_trades']}")
                 print("🎯 Win Rate: {result['win_rate']:.2f}%")
-                print("⚖️ Sharpe Ratio: {result.get('sharpe_ratio', 0):.2f}")
+                print(f"⚖️ Sharpe Ratio: {result.get('sharpe_ratio', 0):.2f}")
                 print("=" * 60)
 
                 # Biểu đồ
@@ -112,7 +112,7 @@ def main():
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         file = f"backtest_results/{symbol}_trades_{timestamp}.csv"
                         result["trades"].to_csv(file, index=False, encoding="utf-8-sig")
-                        print("💾 Đã lưu: {file}")
+                        print(f"💾 Đã lưu: {file}")
 
         except Exception:
             print("\n❌ Lỗi backtest")
@@ -205,7 +205,7 @@ def main():
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file = f"backtest_results/threshold_comparison_{symbol}_{timestamp}.csv"
             df.to_csv(file, index=False, encoding="utf-8-sig")
-            print("\n💾 Đã lưu kết quả: {file}")
+            print(f"\n💾 Đã lưu kết quả: {file}")
         else:
             print("\n❌ Không có kết quả hợp lệ!")
 

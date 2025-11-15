@@ -141,7 +141,7 @@ class PortfolioManager:
             metadata=metadata,
         )
 
-        print("✅ Added new position: {symbol} - {shares} shares @ {entry_price:,.0f}")
+        print(f"✅ Added new position: {symbol} - {shares} shares @ {entry_price:,.0f}")
 
     def _average_up_position(
         self,
@@ -278,7 +278,7 @@ class PortfolioManager:
         """
         positions = self.db.get_positions()
         if symbol not in positions:
-            print("⚠️ Cannot handle exit for non-existent position {symbol}")
+            print(f"⚠️ Cannot handle exit for non-existent position {symbol}")
             return
 
         if exit_type == "FULL":
@@ -516,11 +516,11 @@ if __name__ == "__main__":
 
     # Test get positions
     positions = manager.get_positions()
-    print("Positions: {positions}")
+    print(f"Positions: {positions}")
 
     # Test portfolio value
     portfolio = manager.get_portfolio_value()
-    print("Portfolio: {portfolio}")
+    print(f"Portfolio: {portfolio}")
 
     # Test analysis
     analysis = manager.get_detailed_analysis()

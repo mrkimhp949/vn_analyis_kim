@@ -217,7 +217,7 @@ class MLModelMonitor:
 
         if drift_detected:
             result["reason"] = f"Accuracy dropped by {accuracy_drop:.2%}"
-            logger.warning("⚠️ MODEL DRIFT DETECTED: {result['reason']}")
+            logger.warning(f"⚠️ MODEL DRIFT DETECTED: {result['reason']}")
 
             # Track in monitoring
             self.monitor.track_error("model_drift")
@@ -239,7 +239,7 @@ class MLModelMonitor:
 
         # Retrain if accuracy is low (even without drift)
         if drift_status["recent_accuracy"] and drift_status["recent_accuracy"] < 0.55:
-            logger.warning("⚠️ Low accuracy: {drift_status['recent_accuracy']:.2%}")
+            logger.warning(f"⚠️ Low accuracy: {drift_status['recent_accuracy']:.2%}")
             return True
 
         # Check last retraining date
@@ -247,7 +247,7 @@ class MLModelMonitor:
         if last_retrain:
             days_since_retrain = (datetime.now() - last_retrain).days
             if days_since_retrain > 30:  # Retrain monthly
-                logger.info("ℹ️ {days_since_retrain} days since last retrain")
+                logger.info(f"ℹ️ {days_since_retrain} days since last retrain")
                 return True
 
         return False
@@ -315,7 +315,7 @@ class MLModelMonitor:
             )
             self.db.conn.commit()
 
-            logger.info("✅ Logged retraining: {model_version}")
+            logger.info(f"✅ Logged retraining: {model_version}")
 
         except Exception:
             logger.error("Error logging retraining")
@@ -387,8 +387,8 @@ if __name__ == "__main__":
 
     # Check drift
     drift = monitor.check_drift()
-    print("Drift detected: {drift['drift_detected']}")
+    print(f"Drift detected: {drift['drift_detected']}")
 
     # Get report
     report = monitor.get_performance_report()
-    print("\n{report}")
+    print(f"\n{report}")

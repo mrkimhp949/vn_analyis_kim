@@ -32,7 +32,7 @@ class MLPredictor:
     def ensure_models_dir(self):
         try:
             os.makedirs(self.models_dir, exist_ok=True)
-            logger.info("✅ Models directory: {os.path.abspath(self.models_dir)}")
+            logger.info(f"✅ Models directory: {os.path.abspath(self.models_dir)}")
         except Exception:
             logger.error("⚠️ Không thể tạo thư mục models")
 
@@ -140,17 +140,17 @@ class MLPredictor:
 
             y_pred = self.rf_model.predict(X_test)
 
-            accuracy_score(y_test, y_pred)
+            _accuracy = accuracy_score(y_test, y_pred)  # noqa: F841
             _precision = precision_score(
                 y_test, y_pred, average="weighted"
             )  # noqa: F841
             _recall = recall_score(y_test, y_pred, average="weighted")  # noqa: F841
             _f1 = f1_score(y_test, y_pred, average="weighted")  # noqa: F841
 
-            logger.info("   - Accuracy:  {accuracy:.4f}")
-            logger.info("   - Precision: {precision:.4f}")
-            logger.info("   - Recall:    {recall:.4f}")
-            logger.info("   - F1-Score:  {f1:.4f}")
+            logger.info(f"   - Accuracy:  {_accuracy:.4f}")
+            logger.info(f"   - Precision: {_precision:.4f}")
+            logger.info(f"   - Recall:    {_recall:.4f}")
+            logger.info(f"   - F1-Score:  {_f1:.4f}")
 
             logger.info("   - Classification Report:")
             # Dùng print để format đẹp hơn trong log

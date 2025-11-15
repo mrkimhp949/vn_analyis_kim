@@ -948,7 +948,2495 @@
     "DND": {
       "reason": "No data",
       "date": "2025-11-15T21:17:48.987944"
+    },
+    "DNL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:20.623589"
+    },
+    "DNM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:20.873631"
+    },
+    "DNP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:21.154807"
+    },
+    "DNT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:21.398477"
+    },
+    "DNW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:21.647042"
+    },
+    "DOC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:21.935826"
+    },
+    "DOP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:22.187907"
+    },
+    "DP3": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:22.431117"
+    },
+    "DPC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:22.683338"
+    },
+    "DPG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:22.920879"
+    },
+    "DPH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:23.172418"
+    },
+    "DPM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:23.419875"
+    },
+    "DPP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:23.686302"
+    },
+    "DPR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:23.935460"
+    },
+    "DPS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:24.215854"
+    },
+    "DQC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:24.493333"
+    },
+    "DRC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:24.763187"
+    },
+    "DRH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:25.014103"
+    },
+    "DRL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:25.294039"
+    },
+    "DSN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:25.545534"
+    },
+    "DST": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:25.795549"
+    },
+    "DTA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:26.062665"
+    },
+    "DTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:26.327373"
+    },
+    "DTG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:26.561201"
+    },
+    "DTH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:26.825919"
+    },
+    "DTK": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:27.092591"
+    },
+    "DTL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:27.342498"
+    },
+    "DTT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:27.586821"
+    },
+    "DVC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:27.837532"
+    },
+    "DVP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:28.092054"
+    },
+    "DXG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:28.350947"
+    },
+    "DXL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:28.606408"
+    },
+    "DXP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:28.903479"
+    },
+    "DXV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:29.132293"
+    },
+    "DZM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:29.383993"
+    },
+    "E1VFVN30": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:29.632911"
+    },
+    "EBS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:29.916935"
+    },
+    "ECI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:30.170709"
+    },
+    "EFI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:30.446439"
+    },
+    "EIB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:30.701571"
+    },
+    "EIC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:30.969239"
+    },
+    "EID": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:31.264100"
+    },
+    "ELC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:31.557616"
+    },
+    "EMG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:31.811026"
+    },
+    "EVE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:32.025882"
+    },
+    "FBA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:32.310842"
+    },
+    "FCC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:32.576054"
+    },
+    "FCM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:32.858991"
+    },
+    "FCN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:33.105306"
+    },
+    "FCS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:33.401946"
+    },
+    "FDC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:33.624345"
+    },
+    "FID": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:33.888179"
+    },
+    "FIT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:34.137373"
+    },
+    "FLC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:34.450198"
+    },
+    "FMC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:34.716481"
+    },
+    "FOC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:35.002213"
+    },
+    "FOX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:35.272299"
+    },
+    "FPT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:35.527462"
+    },
+    "FRC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:35.768951"
+    },
+    "FSO": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:36.034418"
+    },
+    "FTM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:36.299767"
+    },
+    "FTS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:36.565337"
+    },
+    "FUCVREIT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:36.815528"
+    },
+    "G20": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:37.059098"
+    },
+    "G36": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:37.330674"
+    },
+    "GAS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:37.585820"
+    },
+    "GCB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:37.836851"
+    },
+    "GDT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:38.135221"
+    },
+    "GDW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:38.405682"
+    },
+    "GER": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:38.675533"
+    },
+    "GEX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:38.938833"
+    },
+    "GGG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:39.229278"
+    },
+    "GHC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:39.502779"
+    },
+    "GIL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:39.788577"
+    },
+    "GKM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:40.045494"
+    },
+    "GLT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:40.297063"
+    },
+    "GMC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:40.559811"
+    },
+    "GMD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:40.793085"
+    },
+    "GMX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:41.082408"
+    },
+    "GND": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:41.383674"
+    },
+    "GSM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:41.668465"
+    },
+    "GSP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:41.910832"
+    },
+    "GTA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:42.189227"
+    },
+    "GTD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:42.463966"
+    },
+    "GTS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:42.717349"
+    },
+    "GTT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:43.014075"
+    },
+    "GVT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:43.294192"
+    },
+    "H11": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:43.587321"
+    },
+    "HAC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:43.849813"
+    },
+    "HAD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:44.121317"
+    },
+    "HAG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:44.415432"
+    },
+    "HAH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:44.992076"
+    },
+    "HAI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:45.263518"
+    },
+    "HAN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:45.537212"
+    },
+    "HAP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:45.806698"
+    },
+    "HAR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:46.076305"
+    },
+    "HAS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:46.353575"
+    },
+    "HAT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:46.835534"
+    },
+    "HAX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:47.101267"
+    },
+    "HBC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:47.390735"
+    },
+    "HBD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:47.675378"
+    },
+    "HBS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:47.932679"
+    },
+    "HCB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:48.210434"
+    },
+    "HCC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:48.505628"
+    },
+    "HCD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:48.759172"
+    },
+    "HCI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:49.055070"
+    },
+    "HCM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:49.326721"
+    },
+    "HCT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:49.600768"
+    },
+    "HD2": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:49.883645"
+    },
+    "HDA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:50.167023"
+    },
+    "HDC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:50.425177"
+    },
+    "HDG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:50.700915"
+    },
+    "HDM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:50.999791"
+    },
+    "HDO": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:51.264424"
+    },
+    "HDP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:51.551363"
+    },
+    "HEC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:51.836890"
+    },
+    "HES": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:52.110734"
+    },
+    "HEV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:52.388629"
+    },
+    "HFB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:52.623476"
+    },
+    "HFC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:52.881175"
+    },
+    "HFX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:53.168408"
+    },
+    "HGM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:53.451879"
+    },
+    "HHC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:53.740545"
+    },
+    "HHG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:54.014991"
+    },
+    "HHN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:54.326506"
+    },
+    "HHS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:54.592116"
+    },
+    "HHV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:54.873335"
+    },
+    "HID": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:55.149777"
+    },
+    "HIG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:55.421166"
+    },
+    "HJC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:55.732979"
+    },
+    "HJS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:56.015316"
+    },
+    "HKB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:56.295080"
+    },
+    "HKT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:56.544992"
+    },
+    "HLA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:56.842079"
+    },
+    "HLB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:57.138656"
+    },
+    "HLC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:57.488860"
+    },
+    "HLD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:57.966731"
+    },
+    "HLY": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:58.233280"
+    },
+    "HMC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:58.524133"
+    },
+    "HMG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:58.780094"
+    },
+    "HMH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:44:59.059953"
+    },
+    "HNB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:05.842619"
+    },
+    "HND": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:06.107413"
+    },
+    "HNF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:08.655334"
+    },
+    "HNG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:08.877916"
+    },
+    "HNM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:09.173787"
+    },
+    "HNP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:09.441951"
+    },
+    "HOM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:09.696634"
+    },
+    "HOT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:09.970527"
+    },
+    "HPB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:10.245698"
+    },
+    "HPD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:10.546641"
+    },
+    "HPG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:10.822142"
+    },
+    "HPM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:11.107138"
+    },
+    "HPP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:11.374254"
+    },
+    "HPT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:11.669830"
+    },
+    "HPW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:11.920862"
+    },
+    "HQC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:12.212225"
+    },
+    "HRC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:12.497616"
+    },
+    "HRT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:12.760941"
+    },
+    "HSA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:13.038295"
+    },
+    "HSG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:13.311601"
+    },
+    "HSI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:13.572637"
+    },
+    "HSM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:13.858468"
+    },
+    "HT1": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:14.108682"
+    },
+    "HTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:14.373534"
+    },
+    "HTI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:14.648192"
+    },
+    "HTL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:14.914056"
+    },
+    "HTP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:15.200566"
+    },
+    "HTT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:15.474817"
+    },
+    "HTV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:15.764578"
+    },
+    "HU1": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:16.035022"
+    },
+    "HU3": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:16.302121"
+    },
+    "HU4": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:16.556821"
+    },
+    "HU6": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:16.842151"
+    },
+    "HUT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:17.098134"
+    },
+    "HVA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:17.342464"
+    },
+    "HVG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:17.619841"
+    },
+    "HVN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:17.903035"
+    },
+    "HVT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:18.170283"
+    },
+    "HVX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:18.428165"
+    },
+    "IBC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:18.689413"
+    },
+    "ICC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:18.932438"
+    },
+    "ICF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:19.201830"
+    },
+    "ICG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:19.448394"
+    },
+    "ICI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:19.697171"
+    },
+    "ICN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:19.945950"
+    },
+    "IDI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:20.196059"
+    },
+    "IDJ": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:20.404756"
+    },
+    "IDV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:20.662931"
+    },
+    "IFS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:20.893636"
+    },
+    "IHK": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:21.176528"
+    },
+    "IJC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:21.426604"
+    },
+    "ILC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:21.674541"
+    },
+    "IME": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:21.940714"
+    },
+    "IMP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:22.172831"
+    },
+    "IN4": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:22.407484"
+    },
+    "INC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:22.672465"
+    },
+    "INN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:22.906040"
+    },
+    "IPA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:23.136784"
+    },
+    "ISG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:23.366977"
+    },
+    "ISH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:23.570573"
+    },
+    "IST": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:23.819819"
+    },
+    "ITA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:24.069630"
+    },
+    "ITC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:24.302436"
+    },
+    "ITD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:24.553555"
+    },
+    "ITQ": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:24.783709"
+    },
+    "IVS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:25.033572"
+    },
+    "JVC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:25.297072"
+    },
+    "KAC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:25.513345"
+    },
+    "KBC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:25.747822"
+    },
+    "KCB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:26.045650"
+    },
+    "KCE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:26.313331"
+    },
+    "KDC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:26.578672"
+    },
+    "KDH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:26.809593"
+    },
+    "KDM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:27.060623"
+    },
+    "KHL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:27.310319"
+    },
+    "KHP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:27.558130"
+    },
+    "KHW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:27.792352"
+    },
+    "KIP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:28.035839"
+    },
+    "KKC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:28.307621"
+    },
+    "KLB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:28.549614"
+    },
+    "KLF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:28.789021"
+    },
+    "KMR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:29.005398"
+    },
+    "KMT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:29.291340"
+    },
+    "KPF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:29.542419"
+    },
+    "KSB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:29.784575"
+    },
+    "KSD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:30.029050"
+    },
+    "KSH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:30.296570"
+    },
+    "KSQ": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:30.498377"
+    },
+    "KST": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:30.715207"
+    },
+    "KSV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:30.992678"
+    },
+    "KTL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:31.188445"
+    },
+    "KTS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:31.398423"
+    },
+    "KTT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:31.602943"
+    },
+    "KVC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:31.826231"
+    },
+    "L10": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:32.095405"
+    },
+    "L12": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:32.366674"
+    },
+    "L14": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:32.629055"
+    },
+    "L18": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:32.904289"
+    },
+    "L35": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:33.127351"
+    },
+    "L43": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:33.360957"
+    },
+    "L44": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:33.560377"
+    },
+    "L45": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:33.840407"
+    },
+    "L61": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:34.074682"
+    },
+    "L62": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:34.307491"
+    },
+    "L63": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:34.556497"
+    },
+    "LAF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:34.788413"
+    },
+    "LAI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:35.015927"
+    },
+    "LAS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:35.288583"
+    },
+    "LAW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:35.554076"
+    },
+    "LBE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:35.782387"
+    },
+    "LBM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:36.052454"
+    },
+    "LCC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:36.293156"
+    },
+    "LCD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:36.541779"
+    },
+    "LCG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:36.766451"
+    },
+    "LCM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:36.999647"
+    },
+    "LCS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:37.263787"
+    },
+    "LDG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:37.514663"
+    },
+    "LDP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:37.779819"
+    },
+    "LGC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:38.052197"
+    },
+    "LGL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:38.281630"
+    },
+    "LHC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:38.545323"
+    },
+    "LHG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:38.795708"
+    },
+    "LIG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:39.040146"
+    },
+    "LIX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:39.325940"
+    },
+    "LKW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:39.558540"
+    },
+    "LM3": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:39.857629"
+    },
+    "LM7": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:40.139812"
+    },
+    "LM8": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:40.389535"
+    },
+    "LO5": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:40.650876"
+    },
+    "LQN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:40.899346"
+    },
+    "LSS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:41.154477"
+    },
+    "LTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:41.383749"
+    },
+    "LUT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:41.638753"
+    },
+    "MAC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:41.873437"
+    },
+    "MAS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:42.139449"
+    },
+    "MBB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:42.373953"
+    },
+    "MBG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:42.663453"
+    },
+    "MBS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:42.919702"
+    },
+    "MCC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:43.131988"
+    },
+    "MCF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:43.335624"
+    },
+    "MCG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:43.540855"
+    },
+    "MCH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:43.780778"
+    },
+    "MCO": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:43.974904"
+    },
+    "MCP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:44.255398"
+    },
+    "MDC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:44.478413"
+    },
+    "MDF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:51.145668"
+    },
+    "MDG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:45:53.623258"
+    },
+    "MEC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:00.373362"
+    },
+    "MED": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:00.635869"
+    },
+    "MEF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:07.381666"
+    },
+    "MES": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:09.918667"
+    },
+    "MGC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:10.191525"
+    },
+    "MH3": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:10.483333"
+    },
+    "MHC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:10.731486"
+    },
+    "MHL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:10.998717"
+    },
+    "MIC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:11.317365"
+    },
+    "MIE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:11.593528"
+    },
+    "MIM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:11.886861"
+    },
+    "MKP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:12.139461"
+    },
+    "MKV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:12.390718"
+    },
+    "MLS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:12.684292"
+    },
+    "MNB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:12.945585"
+    },
+    "MPC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:13.217669"
+    },
+    "MPT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:13.512205"
+    },
+    "MSH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:13.764304"
+    },
+    "MSN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:14.056251"
+    },
+    "MSR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:14.311055"
+    },
+    "MST": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:14.603465"
+    },
+    "MTA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:14.897736"
+    },
+    "MTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:15.154623"
+    },
+    "MTG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:15.451502"
+    },
+    "MTH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:15.748367"
+    },
+    "MTL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:16.029780"
+    },
+    "MTP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:16.304118"
+    },
+    "MTS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:16.557024"
+    },
+    "MVB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:16.804785"
+    },
+    "MWG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:17.049803"
+    },
+    "NAC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:17.306871"
+    },
+    "NAF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:17.538395"
+    },
+    "NAG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:17.805986"
+    },
+    "NAP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:18.076424"
+    },
+    "NAS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:18.354282"
+    },
+    "NAV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:18.653774"
+    },
+    "NBB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:18.886212"
+    },
+    "NBC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:19.134701"
+    },
+    "NBP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:19.383962"
+    },
+    "NBT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:19.633883"
+    },
+    "NBW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:19.867071"
+    },
+    "NCS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:20.166019"
+    },
+    "NCT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:20.447288"
+    },
+    "ND2": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:20.697757"
+    },
+    "NDC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:21.006862"
+    },
+    "NDF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:21.296056"
+    },
+    "NDN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:21.560724"
+    },
+    "NDP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:21.836203"
+    },
+    "NDX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:22.130267"
+    },
+    "NET": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:22.409969"
+    },
+    "NFC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:22.698583"
+    },
+    "NGC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:22.939373"
+    },
+    "NHA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:23.233558"
+    },
+    "NHC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:23.518714"
+    },
+    "NHP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:23.755003"
+    },
+    "NHV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:24.011886"
+    },
+    "NJC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:24.255056"
+    },
+    "NKG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:24.486015"
+    },
+    "NLG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:24.746072"
+    },
+    "NLS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:25.008066"
+    },
+    "NNC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:25.268815"
+    },
+    "NNT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:25.545551"
+    },
+    "NOS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:25.808805"
+    },
+    "NQB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:26.072371"
+    },
+    "NQT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:26.332225"
+    },
+    "NS2": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:26.615451"
+    },
+    "NSC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:26.897539"
+    },
+    "NSG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:27.179852"
+    },
+    "NST": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:27.462815"
+    },
+    "NT2": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:27.712036"
+    },
+    "NTB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:27.961336"
+    },
+    "NTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:28.260676"
+    },
+    "NTL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:28.509911"
+    },
+    "NTP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:28.807007"
+    },
+    "NTW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:29.040509"
+    },
+    "NUE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:29.311305"
+    },
+    "NVB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:29.599027"
+    },
+    "NVL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:29.837779"
+    },
+    "NVP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:30.054868"
+    },
+    "NVT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:30.304277"
+    },
+    "NWT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:30.553706"
+    },
+    "OCB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:30.802188"
+    },
+    "OCH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:31.070960"
+    },
+    "OGC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:31.369106"
+    },
+    "ONE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:31.634783"
+    },
+    "ONW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:31.917654"
+    },
+    "OPC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:32.181878"
+    },
+    "ORS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:32.449211"
+    },
+    "PAC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:32.731433"
+    },
+    "PAN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:32.997337"
+    },
+    "PAP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:33.280360"
+    },
+    "PBP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:33.545285"
+    },
+    "PC1": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:33.812884"
+    },
+    "PCE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:34.083855"
+    },
+    "PCF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:34.342288"
+    },
+    "PCG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:34.581728"
+    },
+    "PCN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:34.817930"
+    },
+    "PCT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:35.055565"
+    },
+    "PDB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:35.323398"
+    },
+    "PDC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:35.572513"
+    },
+    "PDN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:35.804669"
+    },
+    "PDR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:36.065536"
+    },
+    "PEC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:36.306238"
+    },
+    "PEN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:36.605629"
+    },
+    "PEQ": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:36.868677"
+    },
+    "PET": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:37.147204"
+    },
+    "PFL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:37.419831"
+    },
+    "PGC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:37.701063"
+    },
+    "PGD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:37.967235"
+    },
+    "PGI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:38.233002"
+    },
+    "PGS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:38.489381"
+    },
+    "PGT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:38.776492"
+    },
+    "PHC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:39.053489"
+    },
+    "PHH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:39.323471"
+    },
+    "PHP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:39.577842"
+    },
+    "PHR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:39.857694"
+    },
+    "PHS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:40.114731"
+    },
+    "PIA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:40.401884"
+    },
+    "PIC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:40.654339"
+    },
+    "PID": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:40.924824"
+    },
+    "PIS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:41.205480"
+    },
+    "PIT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:41.448476"
+    },
+    "PIV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:41.733032"
+    },
+    "PJC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:42.037470"
+    },
+    "PJS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:42.319944"
+    },
+    "PJT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:42.566969"
+    },
+    "PLC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:42.858536"
+    },
+    "PLX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:43.130034"
+    },
+    "PMB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:43.404312"
+    },
+    "PMC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:43.652932"
+    },
+    "PMJ": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:43.957631"
+    },
+    "PMP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:44.236999"
+    },
+    "PMS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:44.493305"
+    },
+    "PMT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:44.774002"
+    },
+    "PNC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:45.046621"
+    },
+    "PND": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:45.327067"
+    },
+    "PNG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:45.619354"
+    },
+    "PNJ": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:45.860573"
+    },
+    "PNT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:46.150286"
+    },
+    "POM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:46.415000"
+    },
+    "POT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:46.678956"
+    },
+    "POV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:49.202495"
+    },
+    "PPC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:55.951813"
+    },
+    "PPE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:56.243911"
+    },
+    "PPH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:58.788346"
+    },
+    "PPI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:59.014165"
+    },
+    "PPP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:46:59.295535"
+    },
+    "PPS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:01.811256"
+    },
+    "PPY": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:02.060908"
+    },
+    "PRC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:08.811043"
+    },
+    "PRO": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:09.062857"
+    },
+    "PSB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:09.392519"
+    },
+    "PSC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:09.656257"
+    },
+    "PSD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:09.952105"
+    },
+    "PSE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:10.219872"
+    },
+    "PSG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:10.475890"
+    },
+    "PSI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:10.748424"
+    },
+    "PSL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:11.043561"
+    },
+    "PSN": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:11.295505"
+    },
+    "PSP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:11.608648"
+    },
+    "PSW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:11.873434"
+    },
+    "PTB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:12.154636"
+    },
+    "PTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:12.412158"
+    },
+    "PTD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:12.717289"
+    },
+    "PTE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:12.958976"
+    },
+    "PTG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:13.191871"
+    },
+    "PTH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:13.431540"
+    },
+    "PTI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:13.702064"
+    },
+    "PTL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:13.967656"
+    },
+    "PTP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:14.248499"
+    },
+    "PTS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:14.544992"
+    },
+    "PTT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:14.796183"
+    },
+    "PTV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:15.102688"
+    },
+    "PV2": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:15.369291"
+    },
+    "PVA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:15.639353"
+    },
+    "PVB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:15.944330"
+    },
+    "PVC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:16.225316"
+    },
+    "PVD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:16.489162"
+    },
+    "PVE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:16.774491"
+    },
+    "PVG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:17.033744"
+    },
+    "PVL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:17.316406"
+    },
+    "PVM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:17.592631"
+    },
+    "PVO": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:17.890030"
+    },
+    "PVP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:18.177328"
+    },
+    "PVR": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:18.474120"
+    },
+    "PVS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:18.731506"
+    },
+    "PVT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:19.018321"
+    },
+    "PVV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:19.283884"
+    },
+    "PVX": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:19.545620"
+    },
+    "PX1": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:19.803122"
+    },
+    "PXA": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:20.116975"
+    },
+    "PXC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:20.379328"
+    },
+    "PXI": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:20.650537"
+    },
+    "PXL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:20.939617"
+    },
+    "PXM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:21.225083"
+    },
+    "PXS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:21.483559"
+    },
+    "PXT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:21.731733"
+    },
+    "QBS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:22.015394"
+    },
+    "QCC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:22.300182"
+    },
+    "QCG": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:22.576370"
+    },
+    "QHD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:22.847668"
+    },
+    "QHW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:23.125360"
+    },
+    "QNC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:23.431070"
+    },
+    "QNP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:23.712923"
+    },
+    "QNS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:24.026889"
+    },
+    "QNU": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:24.305666"
+    },
+    "QNW": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:24.595863"
+    },
+    "QPH": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:24.866441"
+    },
+    "QSP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:25.087791"
+    },
+    "QST": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:25.388849"
+    },
+    "QTC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:25.648268"
+    },
+    "RAL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:25.920666"
+    },
+    "RAT": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:26.217242"
+    },
+    "RBC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:26.482582"
+    },
+    "RCC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:26.743028"
+    },
+    "RCD": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:27.024011"
+    },
+    "RCL": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:27.327166"
+    },
+    "RDP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:27.573140"
+    },
+    "REE": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:27.858360"
+    },
+    "RIC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:28.135441"
+    },
+    "RTB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:47:28.419713"
+    },
+    "S12": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:41.577937"
+    },
+    "S27": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:41.811259"
+    },
+    "S4A": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:42.061325"
+    },
+    "S55": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:42.287184"
+    },
+    "S74": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:42.515909"
+    },
+    "S96": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:42.749485"
+    },
+    "S99": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:43.027697"
+    },
+    "SAB": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:43.297889"
+    },
+    "SAC": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:43.526002"
+    },
+    "SAF": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:43.764433"
+    },
+    "SAM": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:44.012626"
+    },
+    "SAP": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:44.278205"
+    },
+    "SAS": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:44.530514"
+    },
+    "SAV": {
+      "reason": "No data",
+      "date": "2025-11-15T21:48:44.753061"
+    },
+    "SB1": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:53.749527"
+    },
+    "SBA": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:54.018335"
+    },
+    "SBD": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:54.326861"
+    },
+    "SBL": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:54.623371"
+    },
+    "SBS": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:54.942822"
+    },
+    "SBT": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:55.203711"
+    },
+    "SC5": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:55.511233"
+    },
+    "SCC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:55.795105"
+    },
+    "SCD": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:56.120007"
+    },
+    "SCI": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:56.415891"
+    },
+    "SCJ": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:56.701618"
+    },
+    "SCL": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:56.983269"
+    },
+    "SCO": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:57.321512"
+    },
+    "SCR": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:57.623886"
+    },
+    "SD1": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:57.913599"
+    },
+    "SD2": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:58.211045"
+    },
+    "SD3": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:58.533642"
+    },
+    "SD4": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:58.837259"
+    },
+    "SD5": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:59.156812"
+    },
+    "SD6": {
+      "reason": "No data",
+      "date": "2025-11-15T22:00:59.467466"
+    },
+    "SD7": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:00.107600"
+    },
+    "SD8": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:00.399659"
+    },
+    "SD9": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:00.686213"
+    },
+    "SDA": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:01.052939"
+    },
+    "SDB": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:01.372302"
+    },
+    "SDC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:01.686651"
+    },
+    "SDD": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:02.014697"
+    },
+    "SDG": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:02.343384"
+    },
+    "SDJ": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:02.623546"
+    },
+    "SDK": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:02.950386"
+    },
+    "SDN": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:03.248915"
+    },
+    "SDP": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:03.561318"
+    },
+    "SDT": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:03.873004"
+    },
+    "SDU": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:04.155787"
+    },
+    "SDV": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:04.479674"
+    },
+    "SDX": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:04.769335"
+    },
+    "SDY": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:05.081372"
+    },
+    "SEA": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:05.379175"
+    },
+    "SEB": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:05.669622"
+    },
+    "SED": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:05.988132"
+    },
+    "SEP": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:06.280876"
+    },
+    "SFC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:06.629255"
+    },
+    "SFG": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:06.945909"
+    },
+    "SFI": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:07.231940"
+    },
+    "SFN": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:07.545090"
+    },
+    "SGC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:07.861848"
+    },
+    "SGD": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:08.190764"
+    },
+    "SGH": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:08.498145"
+    },
+    "SGN": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:08.784370"
+    },
+    "SGP": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:09.076450"
+    },
+    "SGR": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:09.342386"
+    },
+    "SGS": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:09.679836"
+    },
+    "SGT": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:09.937643"
+    },
+    "SHA": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:10.249014"
+    },
+    "SHB": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:10.578680"
+    },
+    "SHC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:10.848397"
+    },
+    "SHG": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:11.152841"
+    },
+    "SHI": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:11.460828"
+    },
+    "SHN": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:11.779527"
+    },
+    "SHP": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:12.079528"
+    },
+    "SHS": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:12.367831"
+    },
+    "SID": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:12.619622"
+    },
+    "SII": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:12.912020"
+    },
+    "SJ1": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:13.201318"
+    },
+    "SJC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:13.538806"
+    },
+    "SJD": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:13.857517"
+    },
+    "SJE": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:14.154857"
+    },
+    "SJF": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:14.452015"
+    },
+    "SJM": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:14.748189"
+    },
+    "SJS": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:15.045887"
+    },
+    "SKG": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:15.326536"
+    },
+    "SLS": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:15.602989"
+    },
+    "SMA": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:15.904373"
+    },
+    "SMB": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:16.217462"
+    },
+    "SMC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:16.528556"
+    },
+    "SMN": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:16.832964"
+    },
+    "SMT": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:17.134683"
+    },
+    "SNC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:17.577673"
+    },
+    "SP2": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:17.858575"
+    },
+    "SPB": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:18.170415"
+    },
+    "SPC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:18.468268"
+    },
+    "SPD": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:18.794209"
+    },
+    "SPH": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:19.093807"
+    },
+    "SPI": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:19.394358"
+    },
+    "SPM": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:19.686559"
+    },
+    "SPV": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:19.966828"
+    },
+    "SQC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:20.273751"
+    },
+    "SRA": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:20.545946"
+    },
+    "SRB": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:20.826307"
+    },
+    "SRC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:21.131790"
+    },
+    "SRF": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:21.438291"
+    },
+    "SRT": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:21.771517"
+    },
+    "SSC": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:22.026758"
+    },
+    "SSF": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:22.323416"
+    },
+    "SSG": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:22.606970"
+    },
+    "SSI": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:22.903364"
+    },
+    "SSM": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:23.382533"
+    },
+    "SSN": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:23.726320"
+    },
+    "ST8": {
+      "reason": "No data",
+      "date": "2025-11-15T22:01:24.129729"
     }
   },
-  "last_updated": "2025-11-15T21:17:48.987944"
+  "last_updated": "2025-11-15T22:01:24.129729"
 }

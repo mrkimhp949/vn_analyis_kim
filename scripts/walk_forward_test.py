@@ -78,7 +78,7 @@ class WalkForwardTester:
         print("   Train: {self.train_period} days")
         print("   Test: {self.test_period} days")
         print("   Step: {self.step} days")
-        print("   Symbols: {len(symbols)}")
+        print(f"   Symbols: {len(symbols)}")
 
         all_results = []
 
@@ -89,7 +89,7 @@ class WalkForwardTester:
                 )
                 all_results.extend(symbol_results)
             except Exception:
-                logger.error("Error testing {symbol}")
+                logger.error(f"Error testing {symbol}")
 
         if not all_results:
             return {"total_windows": 0, "message": "No results"}
@@ -107,7 +107,7 @@ class WalkForwardTester:
         df = load_data(symbol, lookback=500, use_cache=True)
 
         if df.empty or len(df) < self.train_period + self.test_period:
-            logger.warning("Insufficient data for {symbol}")
+            logger.warning(f"Insufficient data for {symbol}")
             return []
 
         results = []
@@ -153,7 +153,7 @@ class WalkForwardTester:
                 window_id += 1
 
             except Exception:
-                logger.error("Error in window {window_id} for {symbol}")
+                logger.error(f"Error in window {window_id} for {symbol}")
 
             # Move forward
             start_idx += self.step

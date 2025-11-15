@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     @tcbs_limiter.limit
     def test_call(i):
-        print("Call {i} at {time.time():.2f}")
+        print(f"Call {i} at {time.time():.2f}")
         return i
 
     start = time.time()

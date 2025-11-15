@@ -87,7 +87,7 @@ def load_data(
                 # logger.info("📁 Loading {symbol} from cache.")
                 return pickle.load(f)
         except Exception:
-            logger.warning("⚠️ Cache load failed for {symbol}. Refetching...")
+            logger.warning(f"⚠️ Cache load failed for {symbol}. Refetching...")
 
     # logger.info("📥 Downloading {symbol} from TCBS API...")
     try:
@@ -95,7 +95,7 @@ def load_data(
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         df = _download_from_tcbs(symbol, start_dt, end_dt, resolution, data_type)
     except Exception:
-        logger.error("Failed to download data for {symbol}", exc_info=False)
+        logger.error(f"Failed to download data for {symbol}", exc_info=False)
         return pd.DataFrame()  # Return empty DataFrame on download failure
 
     # --- Data Validation and Cleaning ---
@@ -139,7 +139,7 @@ def load_data(
             with open(cache_file, "wb") as f:
                 pickle.dump(df, f)
         except Exception:
-            logger.warning("Failed to save cache for {symbol}")
+            logger.warning(f"Failed to save cache for {symbol}")
 
     # logger.info("✅ Successfully loaded {len(df)} bars for {symbol}")
     return df
@@ -167,10 +167,14 @@ def _download_from_tcbs(
 
             url = f"{TCBS_API_BASE}/stock-insight/v1/stock/bars-long-term"
 
+            # Convert resolution format: "1D" -> "D", "1H" -> "H", etc.
+            # TCBS API expects single letter format
+            api_resolution = resolution.upper().replace("1", "")
+
             params = {
                 "ticker": symbol,
                 "type": data_type,
-                "resolution": resolution.upper(),  # API expects uppercase
+                "resolution": api_resolution,
                 "from": int(start.timestamp()),
                 "to": int(end.timestamp()),
             }
@@ -260,12 +264,12 @@ if __name__ == "__main__":
                 use_cache=False,
             )
             if not df.empty:
-                print("✅ {symbol}: {len(df)} rows")
+                print(f"✅ {symbol}: {len(df)} rows")
                 print(
                     f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}"
                 )
-                print("   Latest close: {df['close'].iloc[-1]:,.0f}")
+                print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
             else:
-                print("⚠️ {symbol}: No data returned.")
+                print(f"⚠️ {symbol}: No data returned.")
         except Exception:
-            print("❌ {symbol}")
+            print(f"❌ {symbol}")

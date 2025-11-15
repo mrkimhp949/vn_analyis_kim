@@ -153,7 +153,7 @@ class EmergencyStop:
 
         self._save_events()
 
-        print("🚨 EMERGENCY STOP TRIGGERED: {reason}")
+        print(f"🚨 EMERGENCY STOP TRIGGERED: {reason}")
 
     def resume(self, reason: str = "Manual resume"):
         """Resume trading sau emergency"""
@@ -170,7 +170,7 @@ class EmergencyStop:
 
         self._save_events()
 
-        print("✅ EMERGENCY STOP RESUMED: {reason}")
+        print(f"✅ EMERGENCY STOP RESUMED: {reason}")
 
     def can_trade(self) -> Tuple[bool, str]:
         """
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     # Test 1: Normal check
     print("\n1️⃣ Test normal check:")
     can_trade, reason = stop.can_trade()
-    print("Can trade: {can_trade} - {reason}")
+    print(f"Can trade: {can_trade} - {reason}")
 
     # Test 2: Manual trigger
     print("\n2️⃣ Test manual trigger:")
@@ -271,7 +271,7 @@ if __name__ == "__main__":
     )
 
     can_trade, reason = stop.can_trade()
-    print("Can trade: {can_trade} - {reason}")
+    print(f"Can trade: {can_trade} - {reason}")
 
     # Test 3: Status
     print("\n3️⃣ Status:")
@@ -281,6 +281,6 @@ if __name__ == "__main__":
     print("\n4️⃣ Test resume:")
     stop.resume("Test completed")
     can_trade, reason = stop.can_trade()
-    print("Can trade: {can_trade} - {reason}")
+    print(f"Can trade: {can_trade} - {reason}")
 
     print("\n✅ Test completed!")

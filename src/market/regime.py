@@ -5,6 +5,7 @@ Phát hiện tình trạng thị trường để quyết định có nên trade 
 """
 
 import logging
+import warnings
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -19,6 +20,9 @@ try:
     from hmmlearn.hmm import GaussianHMM  # type: ignore
 
     HMM_AVAILABLE = True
+    
+    # Suppress hmmlearn convergence warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, module="hmmlearn")
 except ImportError:  # pragma: no cover - optional dependency
     HMM_AVAILABLE = False
     logger.info("hmmlearn not installed. HMM-based regime detection disabled.")
@@ -127,7 +131,7 @@ class MarketRegimeAnalyzer:
                 "message": self._generate_message(regime, tradeable, details),
             }
 
-            logger.info("Market Regime: {regime} | Tradeable: {tradeable}")
+            logger.info(f"Market Regime: {regime} | Tradeable: {tradeable}")
             return result
 
         except Exception:
@@ -240,14 +244,21 @@ class MarketRegimeAnalyzer:
                 return None
 
             returns_array = returns.values.reshape(-1, 1)
+            
+            # Configure HMM with better convergence parameters
             hmm = GaussianHMM(
                 n_components=3,
-                covariance_type="full",
-                n_iter=200,
+                covariance_type="diag",  # Changed from "full" for better convergence
+                n_iter=100,  # Reduced iterations (was 200)
+                tol=1e-2,  # Relaxed tolerance for convergence
                 random_state=42,
                 verbose=False,
             )
-            hmm.fit(returns_array)
+            
+            # Fit with convergence monitoring suppressed
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                hmm.fit(returns_array)
 
             hidden_states = hmm.predict(returns_array)
             state_probs = hmm.predict_proba(returns_array)
@@ -460,13 +471,13 @@ if __name__ == "__main__":
     analyzer = MarketRegimeAnalyzer()
     result = analyzer.analyze_market_regime()
 
-    print("📊 Regime: {result['regime']}")
-    print("✅ Tradeable: {result['tradeable']}")
+    print(f"📊 Regime: {result['regime']}")
+    print(f"✅ Tradeable: {result['tradeable']}")
     print("🎯 Confidence: {result['confidence']}%")
-    print("\n{result['message']}")
+    print(f"\n{result['message']}")
     print("\n📈 Details:")
     for key, value in result["details"].items():
-        print("  • {key}: {value}")
+        print(f"  • {key}: {value}")
 
     print("\n💰 Position Multiplier: {analyzer.get_position_multiplier():.2f}x")
     print("\n" + "=" * 70)

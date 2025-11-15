@@ -64,7 +64,7 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
         )
 
     if api_key not in VALID_API_KEYS:
-        logger.warning("❌ Invalid API key: {api_key[:10]}...")
+        logger.warning(f"❌ Invalid API key: {api_key[:10]}...")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key"
         )
@@ -89,7 +89,7 @@ async def verify_ip_whitelist(request):
     client_ip = request.client.host
 
     if client_ip not in IP_WHITELIST:
-        logger.warning("❌ Blocked request from IP: {client_ip}")
+        logger.warning(f"❌ Blocked request from IP: {client_ip}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="IP not whitelisted"
         )
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     print("🔑 Sample API Keys:")
     for i in range(3):
         key = generate_api_key()
-        print("  Key {i+1}: {key}")
+        print(f"  Key {i+1}: {key}")
 
     print("\n📝 Add to .env file:")
     print("API_KEYS=key1,key2,key3")
