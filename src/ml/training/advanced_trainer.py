@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Script để train Enhanced ML Models
-Chạy: python train_enhanced_models.py
+Advanced ML Model Trainer
+Train enhanced ML models with advanced features (RF, XGBoost, LightGBM)
+Chạy: python -m src.ml.training.advanced_trainer
 """
 
 import logging
@@ -142,14 +143,14 @@ def prepare_training_data(
     return X_train, X_val, X_test, y_train, y_val, y_test
 
 
-def train_models(
+def train_advanced_models(
     symbols: List[str],
     lookback: int = 500,
     max_symbols: int = 50,
     tune_hyperparameters: bool = False,
 ):
     """
-    Main training function
+    Main advanced training function
 
     Args:
         symbols: List symbols to train on
@@ -158,7 +159,7 @@ def train_models(
         tune_hyperparameters: Run hyperparameter tuning
     """
     print("\n" + "=" * 70)
-    print("🎓 TRAINING ENHANCED ML MODELS")
+    print("🎓 TRAINING ADVANCED ML MODELS")
     print("=" * 70 + "\n")
 
     # 1. Load data
@@ -277,7 +278,7 @@ if __name__ == "__main__":
             symbols = ["VNM", "VCB", "FPT", "HPG", "VHM", "GAS", "MSN", "MWG"]
 
     # Train
-    train_models(
+    train_advanced_models(
         symbols=symbols,
         lookback=args.lookback,
         max_symbols=args.max_symbols,

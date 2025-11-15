@@ -1,0 +1,43 @@
+{
+  "accuracy": {
+    "mean": 0.4,
+    "std": 0.0
+  },
+  "precision": {
+    "mean": 0.4,
+    "std": 0.0
+  },
+  "recall": {
+    "mean": 1.0,
+    "std": 0.0
+  },
+  "f1": {
+    "mean": 0.5714285714285714,
+    "std": 0.0
+  },
+  "stacking_meta": {
+    "accuracy": 0.6,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "auc_like": 0.48
+  },
+  "BULLISH_regime": {
+    "accuracy": {
+      "mean": 0.4,
+      "std": 0.0
+    },
+    "precision": {
+      "mean": 0.4,
+      "std": 0.0
+    },
+    "recall": {
+      "mean": 1.0,
+      "std": 0.0
+    },
+    "f1": {
+      "mean": 0.5714285714285714,
+      "std": 0.0
+    }
+  }
+}

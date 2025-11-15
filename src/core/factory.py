@@ -24,12 +24,11 @@ def create_data_loader():
     Factory function to create data loader
 
     Returns:
-        TCBSDataLoader instance
+        load_data function from loader module
     """
-    from src.data.loader import TCBSDataLoader
+    from src.data import loader
 
-    loader = TCBSDataLoader()
-    logger.debug("✅ Created TCBSDataLoader")
+    logger.debug("✅ Created data loader module")
     return loader
 
 
@@ -111,12 +110,12 @@ def create_entry_service(config: TradingConfig):
         config: Trading configuration
 
     Returns:
-        EntryService instance
+        EntrySignalService instance
     """
-    from src.services.entry_service import EntryService
+    from src.services.entry_service import EntrySignalService
 
-    service = EntryService(config)
-    logger.debug("✅ Created EntryService")
+    service = EntrySignalService(config)
+    logger.debug("✅ Created EntrySignalService")
     return service
 
 
@@ -125,12 +124,12 @@ def create_exit_service():
     Factory function to create exit service
 
     Returns:
-        ExitService instance
+        ExitManagementService instance
     """
-    from src.services.exit_service import ExitService
+    from src.services.exit_service import ExitManagementService
 
-    service = ExitService()
-    logger.debug("✅ Created ExitService")
+    service = ExitManagementService()
+    logger.debug("✅ Created ExitManagementService")
     return service
 
 
@@ -139,13 +138,12 @@ def create_notification_service():
     Factory function to create notification service
 
     Returns:
-        NotificationService instance
+        Telegram notification module
     """
-    from src.notifications.telegram import get_notification_service
+    from src.notifications import telegram
 
-    service = get_notification_service()
-    logger.debug("✅ Created NotificationService")
-    return service
+    logger.debug("✅ Created notification service")
+    return telegram
 
 
 def create_circuit_breaker():
