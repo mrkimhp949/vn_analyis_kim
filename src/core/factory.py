@@ -4,11 +4,21 @@ Dependency Injection Factory
 This module provides factory functions to create properly configured
 instances of services, avoiding tight coupling in the orchestrator.
 
+✅ Uses refactored TradingOrchestrator with flexible constructor that supports
+   both legacy mode (bot_instance, chat_id) and modern dependency injection.
+
 Usage:
     from src.core.factory import create_orchestrator
 
+    # Creates TradingOrchestrator with all dependencies injected
     orchestrator = create_orchestrator()
-    orchestrator.run_scan()
+
+    # Legacy usage still works
+    from telegram import Bot
+    orchestrator = TradingOrchestrator(Bot(token), chat_id="123")
+
+    # Modern factory usage
+    orchestrator = create_orchestrator()
 """
 
 import logging
@@ -52,7 +62,7 @@ def create_ml_signal_generator(config: TradingConfig):
         logger.warning("Could not create EnhancedMLSignalGenerator")
         from src.ml.signals.generator import MLSignalGenerator
 
-        generator = MLSignalGenerator(config)
+        generator = MLSignalGenerator()  # No config parameter
         logger.debug("✅ Created MLSignalGenerator (fallback)")
         return generator
 
@@ -69,7 +79,7 @@ def create_strategy_manager(config: TradingConfig):
     """
     from src.strategies.manager import StrategyManager
 
-    manager = StrategyManager(config)
+    manager = StrategyManager()  # No config parameter
     logger.debug("✅ Created StrategyManager")
     return manager
 
@@ -114,7 +124,7 @@ def create_entry_service(config: TradingConfig):
     """
     from src.services.entry_service import EntrySignalService
 
-    service = EntrySignalService(config)
+    service = EntrySignalService()  # No config parameter
     logger.debug("✅ Created EntrySignalService")
     return service
 
@@ -212,11 +222,16 @@ def create_orchestrator(config: Optional[TradingConfig] = None):
     circuit_breaker = create_circuit_breaker()
     paper_account = create_paper_trading_account()
 
-    # Import orchestrator
-    from src.core.orchestrator_v2 import TradingOrchestratorV2
+    # Import refactored orchestrator with dependency injection support
+    from src.core.orchestrator import TradingOrchestrator
 
-    # Inject all dependencies
-    orchestrator = TradingOrchestratorV2(
+    # Inject all dependencies using modern pattern
+    orchestrator = TradingOrchestrator(
+        # Legacy params (optional for backward compatibility)
+        bot_instance=None,
+        chat_id=None,
+        vnindex_df=None,
+        # Modern dependency injection
         config=config,
         data_loader=data_loader,
         ml_generator=ml_generator,
@@ -275,9 +290,14 @@ def create_test_orchestrator(
     circuit_breaker = circuit_breaker or create_circuit_breaker()
     paper_account = paper_account or create_paper_trading_account()
 
-    from src.core.orchestrator_v2 import TradingOrchestratorV2
+    from src.core.orchestrator import TradingOrchestrator
 
-    return TradingOrchestratorV2(
+    return TradingOrchestrator(
+        # Legacy params
+        bot_instance=None,
+        chat_id="",
+        vnindex_df=None,
+        # Modern dependency injection
         config=config,
         data_loader=data_loader,
         ml_generator=ml_generator,

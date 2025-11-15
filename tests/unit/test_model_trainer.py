@@ -126,23 +126,48 @@ class TestEnsembleTrainer:
         assert X_seq is None
         assert y_seq is None
 
-    @patch("ml_pipeline.model_trainer.LSTM_AVAILABLE", True)
-    @patch("ml_pipeline.model_trainer.Sequential")
-    @patch("ml_pipeline.model_trainer.LSTM")
-    @patch("ml_pipeline.model_trainer.Dense")
-    @patch("ml_pipeline.model_trainer.Dropout")
-    def test_build_lstm_success(
-        self, mock_dropout, mock_dense, mock_lstm, mock_sequential, trainer
-    ):
+    def test_build_lstm_success(self, trainer):
         """Test successful LSTM model building"""
+        # Create mock layers
+        mock_lstm_layer_1 = Mock()
+        mock_dropout_layer_1 = Mock()
+        mock_lstm_layer_2 = Mock()
+        mock_dropout_layer_2 = Mock()
+        mock_dense_layer_1 = Mock()
+        mock_dense_layer_2 = Mock()
+
+        # Create mock model
         mock_model = Mock()
-        mock_sequential.return_value = mock_model
+        mock_model.compile = Mock()
 
-        result = trainer._build_lstm((10, 3))
+        # Mock the layer constructors to return our mock layers
+        mock_lstm = Mock(side_effect=[mock_lstm_layer_1, mock_lstm_layer_2])
+        mock_dropout = Mock(side_effect=[mock_dropout_layer_1, mock_dropout_layer_2])
+        mock_dense = Mock(side_effect=[mock_dense_layer_1, mock_dense_layer_2])
 
-        assert result == mock_model
-        mock_sequential.assert_called_once()
-        mock_model.compile.assert_called_once()
+        with patch("ml_pipeline.model_trainer.LSTM_AVAILABLE", True), patch(
+            "ml_pipeline.model_trainer.Sequential", return_value=mock_model
+        ) as mock_sequential, patch("ml_pipeline.model_trainer.LSTM", mock_lstm), patch(
+            "ml_pipeline.model_trainer.Dropout", mock_dropout
+        ), patch(
+            "ml_pipeline.model_trainer.Dense", mock_dense
+        ):
+
+            result = trainer._build_lstm((10, 3))
+
+            # Verify the model was created and compiled
+            assert result == mock_model
+            mock_sequential.assert_called_once()
+
+            # Verify the layers were created
+            assert mock_lstm.call_count == 2
+            assert mock_dropout.call_count == 2
+            assert mock_dense.call_count == 2
+
+            # Verify compile was called
+            mock_model.compile.assert_called_once_with(
+                optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"]
+            )
 
     @patch("ml_pipeline.model_trainer.LSTM_AVAILABLE", False)
     def test_build_lstm_not_available(self, trainer):

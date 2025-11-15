@@ -34,23 +34,61 @@ class TradingOrchestrator:
     """
 
     def __init__(
-        self, bot_instance: Bot, chat_id: str, vnindex_df: Optional[pd.DataFrame] = None
+        self,
+        bot_instance: Optional[Bot] = None,
+        chat_id: Optional[str] = None,
+        vnindex_df: Optional[pd.DataFrame] = None,
+        # Dependency injection parameters (optional)
+        config: Optional[Any] = None,
+        data_loader: Optional[Any] = None,
+        ml_generator: Optional[Any] = None,
+        strategy_manager: Optional[Any] = None,
+        portfolio_manager: Optional[Any] = None,
+        risk_service: Optional[Any] = None,
+        entry_service: Optional[Any] = None,
+        exit_service: Optional[Any] = None,
+        notification_service: Optional[Any] = None,
+        circuit_breaker: Optional[Any] = None,
+        paper_account: Optional[Any] = None,
     ):
+        """
+        Initialize TradingOrchestrator with flexible constructor.
+
+        Supports both legacy mode (bot_instance, chat_id) and
+        modern dependency injection mode.
+
+        Legacy usage:
+            orchestrator = TradingOrchestrator(bot, chat_id)
+
+        Modern usage (via factory):
+            orchestrator = create_orchestrator()
+        """
+        # Legacy telegram bot setup
         self.bot = bot_instance
         self.chat_id = chat_id
-        self.vnindex_df = vnindex_df  # Lưu trữ vnindex_df ngay khi khởi tạo
-        self.portfolio_manager = get_portfolio_manager()
+        self.vnindex_df = vnindex_df
+
+        # Use injected dependencies or create defaults
+        self.config = config
+        self.data_loader = data_loader
+        self.portfolio_manager = portfolio_manager or get_portfolio_manager()
         self.portfolio_risk_manager = get_portfolio_risk_manager(
             total_capital=100_000_000
         )
         self.portfolio_lock = get_portfolio_lock()
         self.market_analyzer = ProxyMarketRegimeAnalyzer()
         self.ticker_loader = get_ticker_loader()
-        self.ml_generator = MLSignalGenerator()
-        self.paper_account = get_paper_account()
+        self.ml_generator = ml_generator or MLSignalGenerator()
+        self.paper_account = paper_account or get_paper_account()
         self.ml_monitor = get_ml_model_monitor()
-        self.strategy_manager = get_strategy_manager()
-        self.circuit_breaker = get_circuit_breaker()
+        self.strategy_manager = strategy_manager or get_strategy_manager()
+        self.circuit_breaker = circuit_breaker or get_circuit_breaker()
+
+        # New injected services (optional)
+        self.risk_service = risk_service
+        self.entry_service = entry_service
+        self.exit_service = exit_service
+        self.notification_service = notification_service
 
         # Các thành phần chiến lược sẽ được lấy từ StrategyManager
         self.entry_logic: Optional[Any] = None

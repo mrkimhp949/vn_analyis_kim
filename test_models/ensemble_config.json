@@ -1,17 +1,13 @@
 {
   "base_models_order": [
     "r",
-    "gb",
-    "xgb",
-    "lstm"
+    "gb"
   ],
   "base_weights": {
     "r": 0.35,
-    "gb": 0.25,
-    "xgb": 0.25,
-    "lstm": 0.15
+    "gb": 0.25
   },
-  "lstm_sequence_length": 10,
+  "lstm_sequence_length": null,
   "feature_columns": [
     "feature1",
     "feature2",
