@@ -27,6 +27,10 @@ class MLSignalGenerator:
             # Keep predictor but mark as not loaded — we'll fallback to technical analysis
             self.model_loaded = False
 
+        # ENHANCEMENT: Confidence calibration based on historical accuracy
+        self._confidence_history = []  # Track (predicted_conf, actual_result) pairs
+        self._max_history = 100  # Keep last 100 predictions
+
     def analyze(self, df, index_df=None):
         """Phân tích và tạo tín hiệu từ ML + Technical Analysis"""
         try:
@@ -75,19 +79,22 @@ class MLSignalGenerator:
                     ml_score, tech_score, latest
                 )
 
-                # Calibrate confidence nếu có monitoring
-                calibrated_confidence = confidence
+                # ENHANCEMENT: Calibrate confidence based on historical accuracy
+                calibrated_confidence = self._calibrate_confidence(
+                    confidence, signal, ml_score
+                )
+
+                # Also use ml_monitor if available
                 if use_monitoring and ml_monitor:
                     try:
-                        calibrated_confidence = ml_monitor.calibrate_confidence(
-                            confidence, model_version=self.model_version
+                        monitor_calibrated = ml_monitor.calibrate_confidence(
+                            calibrated_confidence, model_version=self.model_version
                         )
-                        if (
-                            abs(calibrated_confidence - confidence) > 5
-                        ):  # Significant difference
-                            reason += f" | Calibrated: {calibrated_confidence:.0f}%"
+                        if abs(monitor_calibrated - calibrated_confidence) > 5:
+                            calibrated_confidence = monitor_calibrated
+                            reason += f" | Monitor calibrated"
                     except Exception:
-                        print("⚠️ Lỗi calibrate confidence")
+                        print("⚠️ Lỗi calibrate confidence from monitor")
 
                 return {
                     "signal": signal,
@@ -278,6 +285,97 @@ class MLSignalGenerator:
             reasons = [f"ML({ml_score:.2f})", "Neutral"]
 
         return signal, int(confidence), " | ".join(reasons)
+
+    def _calibrate_confidence(
+        self, raw_confidence: float, signal: str, ml_score: float
+    ) -> float:
+        """
+        ENHANCEMENT: Calibrate confidence based on historical performance
+
+        Logic:
+        - If historical accuracy at this confidence level is lower than stated,
+          adjust down
+        - If historical accuracy is higher, adjust up (but conservatively)
+
+        Args:
+            raw_confidence: Raw confidence from model (0-100)
+            signal: Signal type (BUY/SELL/HOLD)
+            ml_score: ML model score (0-1)
+
+        Returns:
+            Calibrated confidence (0-100)
+        """
+        if len(self._confidence_history) < 20:
+            # Not enough history - return raw confidence with conservative adjustment
+            return raw_confidence * 0.95  # Slightly conservative
+
+        # Calculate historical accuracy at similar confidence levels
+        similar_predictions = [
+            (conf, result)
+            for conf, result in self._confidence_history
+            if abs(conf - raw_confidence) < 15  # Within 15% range
+        ]
+
+        if len(similar_predictions) < 5:
+            # Not enough similar predictions
+            return raw_confidence * 0.95
+
+        # Calculate actual accuracy
+        correct_predictions = sum(1 for _, result in similar_predictions if result)
+        historical_accuracy = correct_predictions / len(similar_predictions)
+
+        # Expected accuracy based on confidence (e.g., 70% confidence should be 70% accurate)
+        expected_accuracy = raw_confidence / 100.0
+
+        # Calibration factor
+        if historical_accuracy < expected_accuracy:
+            # Model is overconfident - reduce confidence
+            calibration_factor = historical_accuracy / expected_accuracy
+            calibrated = raw_confidence * calibration_factor
+
+            print(
+                f"📉 Confidence calibrated DOWN: {raw_confidence:.0f}% → {calibrated:.0f}% "
+                f"(historical accuracy: {historical_accuracy:.1%} vs expected: {expected_accuracy:.1%})"
+            )
+        elif historical_accuracy > expected_accuracy * 1.1:
+            # Model is underconfident - increase slightly (conservatively)
+            calibration_factor = min(1.1, historical_accuracy / expected_accuracy)
+            calibrated = raw_confidence * calibration_factor
+
+            print(
+                f"📈 Confidence calibrated UP: {raw_confidence:.0f}% → {calibrated:.0f}% "
+                f"(historical accuracy: {historical_accuracy:.1%} vs expected: {expected_accuracy:.1%})"
+            )
+        else:
+            # Good calibration
+            calibrated = raw_confidence
+
+        # Clamp to valid range
+        return max(0, min(100, calibrated))
+
+    def record_prediction_outcome(self, confidence: float, was_correct: bool):
+        """
+        ENHANCEMENT: Record prediction outcome for calibration
+
+        Args:
+            confidence: The confidence that was predicted
+            was_correct: Whether the prediction was correct
+        """
+        self._confidence_history.append((confidence, was_correct))
+
+        # Limit history size
+        if len(self._confidence_history) > self._max_history:
+            self._confidence_history = self._confidence_history[-self._max_history:]
+
+        # Log statistics periodically
+        if len(self._confidence_history) % 20 == 0:
+            overall_accuracy = sum(
+                1 for _, result in self._confidence_history if result
+            ) / len(self._confidence_history)
+            print(
+                f"📊 ML Signal accuracy (last {len(self._confidence_history)} predictions): "
+                f"{overall_accuracy:.1%}"
+            )
 
     def train_models(self, df):
         """Train models với historical data, sử dụng các feature mới và class_weight."""

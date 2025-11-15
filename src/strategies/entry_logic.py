@@ -65,6 +65,7 @@ class ImprovedEntryLogic:
         support_distance_percent: float = 3.0,
         require_trend_alignment: bool = True,
         require_volume_confirmation: bool = True,
+        portfolio_manager=None,
     ):
         """
         Args:
@@ -73,12 +74,15 @@ class ImprovedEntryLogic:
             support_distance_percent: Khoảng cách tối đa đến support (%)
             require_trend_alignment: Yêu cầu phải theo trend
             require_volume_confirmation: Yêu cầu volume confirm
+            portfolio_manager: Portfolio manager for context-aware decisions
         """
         self.min_confidence = min_confidence
+        self.base_min_confidence = min_confidence  # Store original for dynamic adjustment
         self.min_risk_reward = min_risk_reward
         self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
         self.require_volume_confirmation = require_volume_confirmation
+        self.portfolio_manager = portfolio_manager
 
     def _validate_initial_signal(
         self, df: pd.DataFrame, ml_signal: Dict
@@ -286,6 +290,9 @@ class ImprovedEntryLogic:
         Returns:
             EntrySignal object với đầy đủ thông tin
         """
+        # ENHANCEMENT: Adjust thresholds dynamically based on market regime
+        self._adjust_thresholds_for_market(market_regime)
+
         # Step 1: Validate initial signal
         is_valid, signal_or_reason, base_confidence, current_price = (
             self._validate_initial_signal(df, ml_signal)
@@ -803,6 +810,61 @@ class ImprovedEntryLogic:
 
         # Clamp
         return max(0.3, min(multiplier, 1.5))
+
+    def _adjust_thresholds_for_market(self, market_regime: Optional[Dict]):
+        """
+        ENHANCEMENT: Dynamically adjust confidence thresholds based on market conditions
+
+        Logic:
+        - BULL market: Lower threshold (more opportunities)
+        - BEAR/HIGH_VOLATILITY: Higher threshold (more selective)
+        - Consider portfolio heat
+        """
+        if not market_regime:
+            self.min_confidence = self.base_min_confidence
+            return
+
+        regime = market_regime.get("regime", "SIDEWAYS")
+        regime_confidence = market_regime.get("confidence", 50)
+
+        # Base adjustment by regime type
+        if regime == "BULL" and regime_confidence >= 70:
+            # Strong bull market - can be less strict
+            adjustment = -5
+        elif regime == "BEAR":
+            # Bear market - be more selective
+            adjustment = +10
+        elif regime == "HIGH_VOLATILITY":
+            # High volatility - require higher confidence
+            adjustment = +15
+        else:
+            # SIDEWAYS or unknown
+            adjustment = 0
+
+        # Portfolio heat adjustment
+        if self.portfolio_manager:
+            try:
+                positions = self.portfolio_manager.get_positions()
+                num_positions = len(positions)
+
+                # If portfolio is getting crowded, be more selective
+                if num_positions >= 8:
+                    adjustment += 10
+                    logger.info(f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +10")
+                elif num_positions >= 5:
+                    adjustment += 5
+                    logger.info(f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +5")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check portfolio heat: {e}")
+
+        # Apply adjustment (with limits)
+        self.min_confidence = max(50, min(80, self.base_min_confidence + adjustment))
+
+        if adjustment != 0:
+            logger.info(
+                f"📊 Dynamic threshold adjustment: {self.base_min_confidence} → {self.min_confidence} "
+                f"(regime: {regime}, adj: {adjustment:+d})"
+            )
 
     def _no_signal(self, reason: str) -> EntrySignal:
         """Return no signal"""

@@ -446,6 +446,89 @@ class PortfolioManager:
 
         print("📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
 
+    def get_rebalancing_suggestions(self, target_position_size: float = 0.10) -> Dict:
+        """
+        ENHANCEMENT: Get rebalancing suggestions for portfolio
+
+        Args:
+            target_position_size: Target size for each position (e.g., 0.10 = 10%)
+
+        Returns:
+            Dict with rebalancing recommendations
+        """
+        positions = self.db.get_positions()
+        if not positions:
+            return {"needs_rebalancing": False, "suggestions": []}
+
+        portfolio = self.get_portfolio_value()
+        total_value = portfolio["total_value"]
+
+        if total_value == 0:
+            return {"needs_rebalancing": False, "suggestions": []}
+
+        suggestions = []
+        needs_rebalancing = False
+
+        for symbol, pos in positions.items():
+            shares = pos["shares"]
+            entry_price = pos["avg_price"]
+            current_price = pos.get("metadata", {}).get("last_price", entry_price)
+
+            position_value = shares * current_price
+            position_weight = position_value / total_value
+
+            # Check if position is too large or too small
+            deviation = abs(position_weight - target_position_size)
+
+            if position_weight > target_position_size * 1.5:
+                # Overweight - suggest reducing
+                target_value = total_value * target_position_size
+                excess_value = position_value - target_value
+                shares_to_sell = int(excess_value / current_price)
+
+                suggestions.append({
+                    "symbol": symbol,
+                    "action": "REDUCE",
+                    "current_weight": position_weight,
+                    "target_weight": target_position_size,
+                    "shares_to_sell": shares_to_sell,
+                    "reason": f"Overweight: {position_weight:.1%} vs target {target_position_size:.1%}"
+                })
+                needs_rebalancing = True
+
+            elif position_weight < target_position_size * 0.5 and position_weight > 0.02:
+                # Underweight (but not too small) - suggest increasing
+                target_value = total_value * target_position_size
+                deficit_value = target_value - position_value
+                shares_to_buy = int(deficit_value / current_price)
+
+                suggestions.append({
+                    "symbol": symbol,
+                    "action": "INCREASE",
+                    "current_weight": position_weight,
+                    "target_weight": target_position_size,
+                    "shares_to_buy": shares_to_buy,
+                    "reason": f"Underweight: {position_weight:.1%} vs target {target_position_size:.1%}"
+                })
+                needs_rebalancing = True
+
+            elif position_weight < 0.02:
+                # Too small - suggest closing
+                suggestions.append({
+                    "symbol": symbol,
+                    "action": "CLOSE",
+                    "current_weight": position_weight,
+                    "reason": f"Position too small: {position_weight:.1%}"
+                })
+                needs_rebalancing = True
+
+        return {
+            "needs_rebalancing": needs_rebalancing,
+            "num_positions": len(positions),
+            "total_value": total_value,
+            "suggestions": suggestions
+        }
+
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
         positions = self.db.get_positions()

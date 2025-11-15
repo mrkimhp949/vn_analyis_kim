@@ -50,6 +50,7 @@ class EnhancedPositionSizer:
         max_sector_exposure: float = 0.40,  # 40% max per sector
         use_kelly: bool = True,
         kelly_fraction: float = 0.5,
+        correlation_cache_ttl: int = 3600,  # Cache correlations for 1 hour
     ):  # Half-Kelly
         self.total_capital = total_capital
         self.max_risk_per_trade = max_risk_per_trade
@@ -60,11 +61,17 @@ class EnhancedPositionSizer:
         self.max_sector_exposure = max_sector_exposure
         self.use_kelly = use_kelly
         self.kelly_fraction = kelly_fraction
+        self.correlation_cache_ttl = correlation_cache_ttl
 
         # Tracking
         self.current_positions = {}  # {symbol: position_data}
         self.trade_history = []  # Track trades for win rate calculation
         self.sector_exposure = {}  # Track sector exposure
+
+        # ENHANCEMENT: Correlation cache for performance
+        self._correlation_cache = {}  # {(symbol1, symbol2): (correlation, timestamp)}
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def calculate_position_size(
         self,
@@ -416,7 +423,7 @@ class EnhancedPositionSizer:
         self, symbol1: str, symbol2: str, days: int = 60
     ) -> float:
         """
-        Calculate correlation coefficient between two stocks
+        ENHANCED: Calculate correlation coefficient with caching
 
         Args:
             symbol1: First stock symbol
@@ -426,6 +433,35 @@ class EnhancedPositionSizer:
         Returns:
             Correlation coefficient (-1 to 1), or 0 if calculation fails
         """
+        import time
+
+        # Create cache key (order-independent)
+        cache_key = tuple(sorted([symbol1, symbol2]))
+
+        # Check cache first
+        if cache_key in self._correlation_cache:
+            corr, timestamp = self._correlation_cache[cache_key]
+            age = time.time() - timestamp
+
+            # Use cached value if still valid
+            if age < self.correlation_cache_ttl:
+                self._cache_hits += 1
+                logger.debug(
+                    f"📦 Cache HIT for {symbol1}-{symbol2} correlation "
+                    f"(age: {age:.0f}s, hits: {self._cache_hits})"
+                )
+                return corr
+            else:
+                # Cache expired
+                logger.debug(f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)")
+
+        # Cache miss - calculate correlation
+        self._cache_misses += 1
+        logger.debug(
+            f"📊 Cache MISS for {symbol1}-{symbol2} "
+            f"(misses: {self._cache_misses}, hit rate: {self._get_cache_hit_rate():.1%})"
+        )
+
         try:
             from src.data.loader import TCBSDataLoader
 
@@ -459,13 +495,42 @@ class EnhancedPositionSizer:
             corr = merged["close_1"].corr(merged["close_2"])
 
             if pd.isna(corr):
-                return 0.0
+                corr = 0.0
+
+            # Store in cache
+            self._correlation_cache[cache_key] = (corr, time.time())
+
+            # Limit cache size (keep last 100 entries)
+            if len(self._correlation_cache) > 100:
+                self._prune_cache()
 
             return corr
 
         except Exception:
             logger.warning(f"Error calculating correlation {symbol1}-{symbol2}")
             return 0.0
+
+    def _get_cache_hit_rate(self) -> float:
+        """Calculate cache hit rate for monitoring"""
+        total = self._cache_hits + self._cache_misses
+        return self._cache_hits / total if total > 0 else 0.0
+
+    def _prune_cache(self):
+        """Remove oldest 20% of cache entries"""
+        if not self._correlation_cache:
+            return
+
+        # Sort by timestamp and keep newest 80%
+        sorted_items = sorted(
+            self._correlation_cache.items(),
+            key=lambda x: x[1][1],  # Sort by timestamp
+            reverse=True
+        )
+
+        keep_count = int(len(sorted_items) * 0.8)
+        self._correlation_cache = dict(sorted_items[:keep_count])
+
+        logger.info(f"🧹 Pruned correlation cache to {keep_count} entries")
 
     def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:
         """

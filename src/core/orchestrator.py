@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import numpy as np
 from src.risk.circuit_breaker import get_circuit_breaker
 from src.data.loader import load_data
 from src.config.exceptions import DataLoadError
@@ -224,14 +225,36 @@ class TradingOrchestrator:
         """
         Chạy quá trình quét toàn diện để tìm kiếm cơ hội và quản lý vị thế.
         """
+        # VALIDATION: Validate inputs
+        if not market_regime or not isinstance(market_regime, dict):
+            logging.error("❌ Invalid market_regime provided to run_scan")
+            market_regime = {"regime": "UNKNOWN", "confidence": 0, "tradeable": False}
+
+        # Ensure required keys exist
+        market_regime.setdefault("regime", "SIDEWAYS")
+        market_regime.setdefault("confidence", 50)
+        market_regime.setdefault("tradeable", True)
+
         # 0. KIỂM TRA NGẮT MẠCH (CIRCUIT BREAKER)
-        vnindex_change = (
-            self.vnindex_df["close"].pct_change().iloc[-1]
-            if self.vnindex_df is not None and not self.vnindex_df.empty
-            else 0.0
-        )
+        vnindex_change = 0.0
+        try:
+            if self.vnindex_df is not None and not self.vnindex_df.empty and len(self.vnindex_df) > 1:
+                vnindex_change = self.vnindex_df["close"].pct_change().iloc[-1]
+                if pd.isna(vnindex_change):
+                    vnindex_change = 0.0
+            else:
+                logging.warning("⚠️ VNINDEX data unavailable for circuit breaker check")
+        except Exception as e:
+            logging.error(f"❌ Error calculating VNINDEX change: {e}")
+            vnindex_change = 0.0
+
         # Lấy PNL thực tế từ portfolio manager nếu có
-        current_pnl_pct = self.portfolio_manager.get_daily_pnl_pct()
+        current_pnl_pct = 0.0
+        try:
+            current_pnl_pct = self.portfolio_manager.get_daily_pnl_pct()
+        except Exception as e:
+            logging.error(f"❌ Error getting daily PnL: {e}")
+            current_pnl_pct = 0.0
 
         if self.circuit_breaker.check_and_update(
             portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change
@@ -477,21 +500,29 @@ class TradingOrchestrator:
                 logging.warning(f"⚠️ Lỗi ML analysis cho {symbol} (entry scan)")
                 # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý
 
-            # 1. Entry Logic
+            # 1. Entry Logic with validation
+            if not self.entry_logic:
+                logging.error("❌ Entry logic not initialized")
+                return None
+
             entry_signal = self.entry_logic.analyze_entry(
                 df=df,
                 ml_signal=ml_signal,
                 market_regime=market_regime,
             )
 
+            # Validate entry signal
+            if not entry_signal:
+                return None
+
             # 2. News Analysis (nếu có tín hiệu)
             news_sentiment = {"score": 0.5, "comment": "Neutral"}
-            if entry_signal and entry_signal.should_enter:
+            if entry_signal.should_enter:
                 # news_sentiment = self.news_analyzer.analyze(symbol)
                 pass  # Tạm thời bỏ qua
 
             # 3. Position Sizing
-            if entry_signal and entry_signal.should_enter:
+            if entry_signal.should_enter:
                 # Kiểm tra xem có đủ vốn không
                 if not self.portfolio_risk_manager.can_open_new_position():
                     logging.warning(
