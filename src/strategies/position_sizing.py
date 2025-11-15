@@ -314,6 +314,15 @@ class EnhancedPositionSizer:
             Kelly percentage (0-1), using half-Kelly for safety
         """
         if avg_win_loss_ratio <= 0:
+            logger.warning(
+                f"Invalid win/loss ratio: {avg_win_loss_ratio}. Using conservative sizing."
+            )
+            return 0.0
+
+        if win_rate <= 0 or win_rate >= 1:
+            logger.warning(
+                f"Invalid win rate: {win_rate}. Must be between 0 and 1. Using conservative sizing."
+            )
             return 0.0
 
         kelly = win_rate - ((1 - win_rate) / avg_win_loss_ratio)
