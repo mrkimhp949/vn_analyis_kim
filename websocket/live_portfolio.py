@@ -66,7 +66,7 @@ class LivePortfolioMonitor:
         # Performance tracking
         self.last_portfolio_value = 0
         self.daily_high = 0
-        self.daily_low = float("in")
+        self.daily_low = float("inf")
 
         # Register price callback
         self.price_feed.add_price_callback(self.handle_price_update)
