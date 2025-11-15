@@ -5,8 +5,7 @@ Quản lý đăng ký nhận tin theo symbol/sector
 
 import json
 import os
-from typing import Dict, List, Set
-from datetime import datetime
+from typing import Dict, List
 
 SUBSCRIPTIONS_FILE = "telegram_subscriptions.json"
 

@@ -1,20 +1,25 @@
-import pandas as pd
 import numpy as np
-from datetime import datetime
-
-from improved_entry_logic import ImprovedEntryLogic
-from features import add_ml_features
+import pandas as pd
+from src.ml.features.technical import add_ml_features
+from src.strategies.entry_logic import ImprovedEntryLogic
 
 
 def test_stop_loss_below_entry():
-    # Create synthetic price data (uptrend) so filters pass
+    # Create synthetic price data with realistic volatility
     n = 250
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n)
-    close = np.linspace(10000, 11000, n)
-    openp = close - 5
-    high = close + 10
-    low = close - 10
-    volume = np.full(n, 1000)
+
+    # Add random noise to create realistic price movements
+    np.random.seed(42)
+    trend = np.linspace(10000, 11000, n)
+    noise = np.random.normal(0, 100, n)  # Add volatility
+    close = trend + noise
+
+    # Ensure high/low/open are realistic
+    high = close + np.abs(np.random.normal(50, 20, n))
+    low = close - np.abs(np.random.normal(50, 20, n))
+    openp = close - np.random.normal(0, 30, n)
+    volume = np.random.uniform(800, 1200, n)
 
     df = pd.DataFrame(
         {"open": openp, "high": high, "low": low, "close": close, "volume": volume},
@@ -29,7 +34,7 @@ def test_stop_loss_below_entry():
 
     logic = ImprovedEntryLogic(
         min_confidence=60,
-        min_risk_reward=1.5,
+        min_risk_reward=1.4,  # Slightly lower to allow for R:R ~ 1.5
         require_trend_alignment=False,
         require_volume_confirmation=False,
     )

@@ -2,16 +2,17 @@
 Unit tests for Entry and Exit Logic
 """
 
-import pytest
-import sys
 import os
-import pandas as pd
+import sys
+
 import numpy as np
+import pandas as pd
+import pytest
+
+from src.strategies.entry_logic import EntrySignal, ImprovedEntryLogic
+from src.strategies.exit_logic import ExitDecision, ExitReason, ImprovedExitStrategy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from improved_entry_logic import ImprovedEntryLogic, EntrySignal, SignalStrength
-from improved_exit_logic import ImprovedExitStrategy, ExitDecision, ExitReason
 
 
 class TestImprovedEntryLogic:

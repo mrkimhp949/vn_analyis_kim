@@ -3,8 +3,9 @@ import json
 import logging
 import os
 
-from config import TICKERS
 from features import get_feature_columns
+
+from config import TICKERS
 from ml_pipeline.data_manager import DataIngestionConfig, DataManager
 from ml_pipeline.feature_selection import select_features_with_shap
 from ml_pipeline.model_trainer import EnsembleTrainer, TrainingConfig
@@ -54,8 +55,8 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
         )
         manager = DataManager(ingestion_config)
         dataset = manager.ingest_all()
-    except Exception as e:
-        logger.error(f"Data ingestion failed: {e}", exc_info=True)
+    except Exception:
+        logger.error("Data ingestion failed", exc_info=True)
         raise
 
     if dataset.empty:
@@ -125,8 +126,8 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
                 "version": record.get("version"),
                 "drift": drift_info,
             }
-        except Exception as exc:
-            logger.warning(f"Model monitor failed: {exc}")
+        except Exception:
+            logger.warning("Model monitor failed")
 
     # Save reports
     os.makedirs("reports", exist_ok=True)

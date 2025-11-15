@@ -3,13 +3,14 @@ Incremental Data Cache System
 Cache dữ liệu price intraday và cập nhật incremental thay vì full fetch
 """
 
-import pandas as pd
+import hashlib
 import json
 import os
-from datetime import datetime, timedelta
-from typing import Dict, Optional, List
-import hashlib
 import pickle
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+
+import pandas as pd
 
 INTRADAY_CACHE_DIR = "intraday_cache"
 os.makedirs(INTRADAY_CACHE_DIR, exist_ok=True)
@@ -160,8 +161,8 @@ class IncrementalCache:
                 try:
                     with open(cache_file, "wb") as f:
                         pickle.dump(date_df, f, protocol=pickle.HIGHEST_PROTOCOL)
-                except Exception as e:
-                    print(f"⚠️ Lỗi lưu cache {symbol} {date}: {e}")
+                except Exception:
+                    print(f"⚠️ Lỗi lưu cache {symbol} {date}")
                     continue
 
         # Update metadata

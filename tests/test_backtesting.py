@@ -2,17 +2,16 @@
 Unit tests for Backtesting Engine
 """
 
-import pytest
-import sys
 import os
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime
+
+import pytest
+
+from backtesting.engine import BacktestConfig, BacktestEngine, Trade
+from backtesting.strategy_runner import StrategyRunner
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from backtesting.engine import BacktestEngine, BacktestConfig, Trade
-from backtesting.strategy_runner import StrategyRunner
 
 
 class TestBacktestEngine:

@@ -3,12 +3,12 @@ Enhanced Position Sizing với Kelly Criterion và Portfolio Risk
 Cải thiện từ improved_position_sizing.py
 """
 
-import numpy as np
-import pandas as pd
-from typing import Dict, Optional, List
-from dataclasses import dataclass
 import logging
-from exceptions import PositionSizingError, RiskManagementError
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+import pandas as pd
+from src.config.exceptions import RiskManagementError
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ class EnhancedPositionSizer:
         if risk_per_share <= 0:
             return self._zero_position("Invalid stop loss", warnings)
 
-        risk_reward_ratio = (
+        _risk_reward_ratio = (  # noqa: F841
             reward_per_share / risk_per_share if risk_per_share > 0 else 0
         )
 
@@ -313,25 +313,66 @@ class EnhancedPositionSizer:
         Returns:
             Kelly percentage (0-1), using half-Kelly for safety
         """
+        # VALIDATION: Check avg_win_loss_ratio
         if avg_win_loss_ratio <= 0:
             logger.warning(
-                f"Invalid win/loss ratio: {avg_win_loss_ratio}. Using conservative sizing."
+                f"⚠️ Invalid avg_win_loss_ratio: {avg_win_loss_ratio:.3f}. "
+                "Must be > 0. Using conservative sizing (Kelly = 0)."
             )
             return 0.0
 
+        # VALIDATION: Check win_rate range
         if win_rate <= 0 or win_rate >= 1:
             logger.warning(
-                f"Invalid win rate: {win_rate}. Must be between 0 and 1. Using conservative sizing."
+                f"⚠️ Invalid win_rate: {win_rate:.3f}. "
+                "Must be between 0 and 1. Using conservative sizing (Kelly = 0)."
             )
             return 0.0
 
+        # VALIDATION: Check if win_rate is suspiciously low
+        if win_rate < 0.3:
+            logger.warning(
+                f"⚠️ Low win rate detected: {win_rate:.1%}. "
+                "Consider reviewing strategy before trading."
+            )
+
+        # Calculate Kelly
         kelly = win_rate - ((1 - win_rate) / avg_win_loss_ratio)
+
+        # Log raw Kelly before applying fraction
+        logger.debug(
+            f"📊 Kelly Calculation: win_rate={win_rate:.1%}, "
+            f"win/loss_ratio={avg_win_loss_ratio:.2f}, "
+            f"raw_kelly={kelly:.1%}"
+        )
 
         # Use half-Kelly for safety
         half_kelly = kelly * self.kelly_fraction
 
+        # VALIDATION: Warn if Kelly suggests negative or very large position
+        if kelly < 0:
+            logger.warning(
+                f"⚠️ Negative Kelly ({kelly:.1%}) suggests unfavorable odds. "
+                "Win rate too low or win/loss ratio unfavorable. "
+                "Using Kelly = 0."
+            )
+            return 0.0
+
+        if kelly > 0.5:
+            logger.warning(
+                f"⚠️ Very high Kelly ({kelly:.1%}) detected. "
+                "Clamping to max 25% for safety."
+            )
+
         # Clamp to reasonable range
-        return max(0.0, min(half_kelly, 0.25))  # Max 25% of capital
+        final_kelly = max(0.0, min(half_kelly, 0.25))  # Max 25% of capital
+
+        logger.info(
+            f"✅ Kelly position sizing: {final_kelly:.1%} of capital "
+            f"(win_rate={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
+        )
+
+        return final_kelly
 
     def _calculate_risk_multiplier(
         self, confidence: int, signal_strength: str, market_regime: Optional[Dict]
@@ -371,23 +412,160 @@ class EnhancedPositionSizer:
 
         return max(0.5, min(base * strength_mult * regime_mult, 1.2))
 
+    def _calculate_correlation(
+        self, symbol1: str, symbol2: str, days: int = 60
+    ) -> float:
+        """
+        Calculate correlation coefficient between two stocks
+
+        Args:
+            symbol1: First stock symbol
+            symbol2: Second stock symbol
+            days: Number of days to use for correlation calculation
+
+        Returns:
+            Correlation coefficient (-1 to 1), or 0 if calculation fails
+        """
+        try:
+            from src.data.loader import TCBSDataLoader
+
+            loader = TCBSDataLoader()
+
+            # Load data for both symbols
+            df1 = loader.load_data(symbol1, days=days)
+            df2 = loader.load_data(symbol2, days=days)
+
+            if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
+                logger.warning(
+                    f"Insufficient data for correlation: {symbol1}-{symbol2}"
+                )
+                return 0.0
+
+            # Merge on date to align time series
+            merged = pd.merge(
+                df1[["date", "close"]],
+                df2[["date", "close"]],
+                on="date",
+                suffixes=("_1", "_2"),
+            )
+
+            if len(merged) < 10:
+                logger.warning(
+                    f"Insufficient overlapping dates for {symbol1}-{symbol2}: {len(merged)}"
+                )
+                return 0.0
+
+            # Calculate correlation
+            corr = merged["close_1"].corr(merged["close_2"])
+
+            if pd.isna(corr):
+                return 0.0
+
+            return corr
+
+        except Exception:
+            logger.warning(f"Error calculating correlation {symbol1}-{symbol2}")
+            return 0.0
+
     def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:
-        """Adjust for correlation (simplified - assumes same sector = high correlation)"""
-        if not sector:
+        """
+        ENHANCED: Adjust for correlation using real correlation matrix
+
+        Calculates actual price correlation between the new symbol and
+        existing positions, rather than just counting same-sector positions.
+
+        Logic:
+        1. Calculate correlation with each existing position
+        2. Use average absolute correlation
+        3. Higher correlation → smaller position size
+
+        Adjustment formula:
+        - avg_corr > 0.7 (high): 0.5x (reduce 50%)
+        - avg_corr > 0.5 (medium): 0.75x (reduce 25%)
+        - avg_corr <= 0.5 (low): 1.0x (no reduction)
+
+        Fallback to sector-based if correlation calc fails.
+        """
+        if not self.current_positions:
             return 1.0
 
-        # Count positions in same sector
-        same_sector_count = sum(
-            1 for pos in self.current_positions.values() if pos.get("sector") == sector
-        )
+        # Try to calculate real correlations
+        correlations = []
+        successful_calcs = 0
 
-        # Reduce size if too many in same sector
-        if same_sector_count >= 3:
-            return 0.7  # Reduce 30%
-        elif same_sector_count >= 2:
-            return 0.85  # Reduce 15%
+        for pos_symbol, pos_data in self.current_positions.items():
+            if pos_symbol == symbol:
+                continue
 
-        return 1.0
+            try:
+                corr = self._calculate_correlation(symbol, pos_symbol, days=60)
+                correlations.append(abs(corr))  # Use absolute correlation
+                successful_calcs += 1
+
+                logger.debug(f"Correlation {symbol}-{pos_symbol}: {corr:.3f}")
+
+            except Exception:
+                logger.debug(f"Skipping correlation calc for {symbol}-{pos_symbol}")
+                continue
+
+        # If we successfully calculated at least one correlation, use it
+        if successful_calcs > 0:
+            avg_correlation = sum(correlations) / len(correlations)
+
+            logger.info(
+                f"📊 Average correlation for {symbol}: {avg_correlation:.3f} "
+                f"(calculated with {successful_calcs} positions)"
+            )
+
+            # Determine adjustment based on correlation
+            if avg_correlation > 0.7:
+                adjustment = 0.5  # High correlation - reduce 50%
+                logger.warning(
+                    f"⚠️ High correlation detected ({avg_correlation:.2f}) "
+                    f"for {symbol}. Reducing position size by 50%."
+                )
+            elif avg_correlation > 0.5:
+                adjustment = 0.75  # Medium correlation - reduce 25%
+                logger.info(
+                    f"Medium correlation ({avg_correlation:.2f}) for {symbol}. "
+                    "Reducing position size by 25%."
+                )
+            else:
+                adjustment = 1.0  # Low correlation - no reduction
+
+            return adjustment
+
+        # FALLBACK: Use sector-based correlation (original logic)
+        else:
+            logger.info(
+                f"Using sector-based correlation for {symbol} (data unavailable for real correlation)"
+            )
+
+            if not sector:
+                return 1.0
+
+            # Count positions in same sector
+            same_sector_count = sum(
+                1
+                for pos in self.current_positions.values()
+                if pos.get("sector") == sector
+            )
+
+            # Reduce size if too many in same sector
+            if same_sector_count >= 3:
+                logger.warning(
+                    f"⚠️ {same_sector_count} positions in {sector} sector. "
+                    "Reducing position size by 30%."
+                )
+                return 0.7  # Reduce 30%
+            elif same_sector_count >= 2:
+                logger.info(
+                    f"{same_sector_count} positions in {sector} sector. "
+                    "Reducing position size by 15%."
+                )
+                return 0.85  # Reduce 15%
+
+            return 1.0
 
     def _get_sector_exposure(self, sector: str) -> float:
         """Get current sector exposure as percentage of capital"""

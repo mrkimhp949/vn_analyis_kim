@@ -4,8 +4,8 @@ Prevents hitting API rate limits
 """
 
 import time
-from threading import Lock
 from functools import wraps
+from threading import Lock
 
 
 class RateLimiter:
@@ -60,7 +60,7 @@ yahoo_limiter = RateLimiter(calls_per_second=5)  # Yahoo Finance: 5 calls/sec
 
 # Test
 if __name__ == "__main__":
-    import requests
+    pass
 
     print("Testing rate limiter...")
 
@@ -74,6 +74,6 @@ if __name__ == "__main__":
         test_call(i)
 
     elapsed = time.time() - start
-    print(f"\n15 calls took {elapsed:.2f}s")
-    print(f"Expected: ~1.5s (10 calls/sec)")
-    print(f"Rate: {15/elapsed:.1f} calls/sec")
+    print("\n15 calls took {elapsed:.2f}s")
+    print("Expected: ~1.5s (10 calls/sec)")
+    print("Rate: {15/elapsed:.1f} calls/sec")

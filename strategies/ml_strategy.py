@@ -1,18 +1,19 @@
+import logging
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from typing import Dict, Any, List, Optional
+from features import add_ml_features, get_feature_columns
+from ml_models import MLPredictor
 
 from strategies.base_strategy import BaseStrategy
-from ml_models import MLPredictor
-from features import add_ml_features, get_feature_columns
-import logging
 
 logger = logging.getLogger(__name__)
+
 
 class MlStrategy(BaseStrategy):
     """
     Chiến lược giao dịch dựa trên mô hình Machine Learning (Ensemble).
-    
+
     Kế thừa từ BaseStrategy và triển khai logic tạo tín hiệu cụ thể.
     """
 
@@ -39,7 +40,9 @@ class MlStrategy(BaseStrategy):
             if key not in self.config:
                 raise ValueError(f"Missing required config key in MlStrategy: '{key}'")
 
-    def generate_signals(self, market_data: Dict[str, pd.DataFrame], **kwargs) -> List[Dict[str, Any]]:
+    def generate_signals(
+        self, market_data: Dict[str, pd.DataFrame], **kwargs
+    ) -> List[Dict[str, Any]]:
         """
         Tạo tín hiệu MUA/BÁN dựa trên dự đoán của mô hình ML.
 
@@ -51,28 +54,32 @@ class MlStrategy(BaseStrategy):
             List[Dict[str, Any]]: Danh sách các tín hiệu được tạo ra.
         """
         signals = []
-        vnindex_df = kwargs.get("vnindex_df")
+        vnindex_df = kwargs.get("vnindex_d")
 
         for symbol, df in market_data.items():
             if df.empty or len(df) < 50:
-                logger.warning(f"[{self.name}] Không đủ dữ liệu cho mã {symbol}, bỏ qua.")
+                logger.warning(
+                    f"[{self.name}] Không đủ dữ liệu cho mã {symbol}, bỏ qua."
+                )
                 continue
 
             try:
                 # 1. Thêm features
                 df_with_features = add_ml_features(df, index_df=vnindex_df)
-                
+
                 # Lấy dòng dữ liệu cuối cùng để dự đoán
                 latest_features = df_with_features[self.feature_columns].iloc[-1:]
 
                 if latest_features.isnull().values.any():
-                    logger.warning(f"[{self.name}] Dữ liệu features cho {symbol} có giá trị NaN, bỏ qua.")
+                    logger.warning(
+                        f"[{self.name}] Dữ liệu features cho {symbol} có giá trị NaN, bỏ qua."
+                    )
                     continue
 
                 # 2. Lấy dự đoán từ mô hình
                 confidence = self.predictor.predict(latest_features)[0]
-                
-                current_price = df['close'].iloc[-1]
+
+                current_price = df["close"].iloc[-1]
 
                 # 3. Tạo tín hiệu nếu đủ ngưỡng tin cậy
                 if confidence >= self.config["confidence_threshold"]:
@@ -80,7 +87,10 @@ class MlStrategy(BaseStrategy):
                         "symbol": symbol,
                         "action": "BUY",
                         "confidence": float(confidence),
-                        "reason": f"ML model confidence ({confidence:.2f}) > threshold ({self.config['confidence_threshold']})",
+                        "reason": (
+                            f"ML model confidence ({confidence:.2f}) > "
+                            f"threshold ({self.config['confidence_threshold']})"
+                        ),
                         "entry_price": current_price,
                         "strategy_name": self.name,
                     }
@@ -88,16 +98,21 @@ class MlStrategy(BaseStrategy):
                     # 4. Xác định mức SL/TP
                     exit_levels = self.determine_exit_levels(signal)
                     signal.update(exit_levels)
-                    
+
                     signals.append(signal)
 
-            except Exception as e:
-                logger.error(f"[{self.name}] Lỗi khi tạo tín hiệu cho {symbol}: {e}", exc_info=True)
+            except Exception:
+                logger.error(
+                    f"[{self.name}] Lỗi khi tạo tín hiệu cho {symbol}",
+                    exc_info=True,
+                )
 
         logger.info(f"[{self.name}] Đã tạo ra {len(signals)} tín hiệu MUA.")
         return signals
 
-    def determine_exit_levels(self, signal: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    def determine_exit_levels(
+        self, signal: Dict[str, Any]
+    ) -> Dict[str, Optional[float]]:
         """
         Override logic mặc định để sử dụng SL/TP từ config của chiến lược này.
         """

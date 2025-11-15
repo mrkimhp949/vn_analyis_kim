@@ -5,7 +5,6 @@ Adjust Thresholds
 """
 import argparse
 
-
 RECOMMENDED_THRESHOLDS = {
     "conservative": {
         "description": "An toàn, ít signals nhưng chất lượng cao",
@@ -96,28 +95,28 @@ def show_recommendations():
     print("=" * 60)
 
     for profile, config in RECOMMENDED_THRESHOLDS.items():
-        print(f"\n{profile.upper()}: {config['description']}")
+        print("\n{profile.upper()}: {config['description']}")
         print("-" * 60)
         for regime, settings in config.items():
             if regime == "description":
                 continue
-            print(f"\n  {regime}:")
+            print("\n  {regime}:")
             for key, value in settings.items():
-                print(f"    {key}: {value}")
+                print("    {key}: {value}")
     print()
 
 
 def generate_code(profile: str):
     """Generate code to update bot_runner"""
     if profile not in RECOMMENDED_THRESHOLDS:
-        print(f"❌ Unknown profile: {profile}")
+        print("❌ Unknown profile: {profile}")
         return
 
     config = RECOMMENDED_THRESHOLDS[profile]
 
-    print(f"\n📝 CODE TO UPDATE bot_runner_improved.py")
+    print("\n📝 CODE TO UPDATE bot_runner_improved.py")
     print("=" * 60)
-    print(f"\nProfile: {profile.upper()} - {config['description']}")
+    print("\nProfile: {profile.upper()} - {config['description']}")
     print("\n1. Update default (around line 74):")
     print("-" * 60)
 

@@ -3,14 +3,13 @@
 Smart Caching System
 Cache thông minh với TTL và invalidation
 """
-import time
-import pickle
 import hashlib
-import os
-from datetime import datetime, timedelta
-from typing import Any, Optional, Callable
-from functools import wraps
 import logging
+import os
+import pickle
+import time
+from functools import wraps
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +66,8 @@ class SmartCache:
                 else:
                     # Expired, delete
                     os.remove(cache_file)
-            except Exception as e:
-                logger.error(f"Error loading cache {key}: {e}")
+            except Exception:
+                logger.error(f"Error loading cache {key}")
 
         self.cache_stats["misses"] += 1
         return None
@@ -94,8 +93,8 @@ class SmartCache:
                 with open(cache_file, "wb") as f:
                     pickle.dump((value, timestamp), f, protocol=pickle.HIGHEST_PROTOCOL)
                 self.cache_stats["saves"] += 1
-            except Exception as e:
-                logger.error(f"Error saving cache {key}: {e}")
+            except Exception:
+                logger.error(f"Error saving cache {key}")
 
     def get_or_compute(
         self, key: str, compute_fn: Callable, ttl: int = 3600, save_to_disk: bool = True
@@ -137,8 +136,8 @@ class SmartCache:
         if os.path.exists(cache_file):
             try:
                 os.remove(cache_file)
-            except Exception as e:
-                logger.error(f"Error removing cache {key}: {e}")
+            except Exception:
+                logger.error(f"Error removing cache {key}")
 
     def clear_all(self):
         """Clear all cache"""
@@ -151,8 +150,8 @@ class SmartCache:
                 filepath = os.path.join(CACHE_DIR, filename)
                 if os.path.isfile(filepath):
                     os.remove(filepath)
-        except Exception as e:
-            logger.error(f"Error clearing cache: {e}")
+        except Exception:
+            logger.error("Error clearing cache")
 
     def cleanup_expired(self, ttl: int = 86400):
         """
@@ -181,8 +180,8 @@ class SmartCache:
                     file_age = current_time - os.path.getmtime(filepath)
                     if file_age > ttl:
                         os.remove(filepath)
-        except Exception as e:
-            logger.error(f"Error cleaning up cache: {e}")
+        except Exception:
+            logger.error("Error cleaning up cache")
 
     def get_stats(self) -> dict:
         """Get cache statistics"""

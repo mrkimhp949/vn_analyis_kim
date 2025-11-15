@@ -1,6 +1,6 @@
 {
   "expected_features": 28,
-  "saved_at": "2025-11-14T23:35:19.795575",
+  "saved_at": "2025-11-16T00:59:46.317643",
   "feature_names": [
     "sma20",
     "ema20",
@@ -10,7 +10,7 @@
     "atr",
     "macd",
     "macd_signal",
-    "macd_diff",
+    "macd_dif",
     "macd_signal_line",
     "bb_width",
     "bb_position",

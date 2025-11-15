@@ -2,18 +2,13 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    precision_score,
-    recall_score,
-)
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
@@ -29,15 +24,22 @@ except ImportError:
     logger.warning("XGBoost not available. Install with: pip install xgboost")
 
 try:
-    from tensorflow import keras
-    from tensorflow.keras.models import Sequential
+    pass
+
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    logger.warning("LightGBM not available. Install with: pip install lightgbm")
+
+try:
     from tensorflow.keras.layers import LSTM, Dense, Dropout
+    from tensorflow.keras.models import Sequential
 
     LSTM_AVAILABLE = True
 except ImportError:
     try:
-        from keras.models import Sequential
         from keras.layers import LSTM, Dense, Dropout
+        from keras.models import Sequential
 
         LSTM_AVAILABLE = True
     except ImportError:
@@ -100,8 +102,8 @@ class EnsembleTrainer:
                 optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"]
             )
             return model
-        except Exception as e:
-            logger.warning(f"Failed to build LSTM: {e}")
+        except Exception:
+            logger.warning("Failed to build LSTM")
             return None
 
     def _prepare_lstm_data(
@@ -139,17 +141,17 @@ class EnsembleTrainer:
         X = df[self.config.feature_columns].values
         y = df[self.config.target_column].values.astype(int)
 
-        n_samples = len(df)
+        len(df)
         tscv = TimeSeriesSplit(n_splits=self.config.n_splits)
 
         base_weights = {
-            "rf": 0.35,
+            "r": 0.35,
             "gb": 0.25,
             "xgb": 0.25,
             "lstm": 0.15,
         }
 
-        base_models_order = ["rf", "gb"]
+        base_models_order = ["r", "gb"]
         if XGBOOST_AVAILABLE:
             base_models_order.append("xgb")
         if LSTM_AVAILABLE:
@@ -208,10 +210,8 @@ class EnsembleTrainer:
                         eval_metric="logloss",
                     )
                     xgb_fold.fit(X_train_scaled, y_train)
-                except Exception as e:
-                    logger.warning(
-                        f"XGBoost training failed in fold {fold_idx + 1}: {e}"
-                    )
+                except Exception:
+                    logger.warning(f"XGBoost training failed in fold {fold_idx + 1}")
                     xgb_fold = None
 
             # Prepare meta features for this fold
@@ -222,8 +222,8 @@ class EnsembleTrainer:
             fold_predictions = {}
             # RF predictions
             rf_pred = rf_fold.predict_proba(X_val_scaled)[:, 1]
-            fold_meta[:, base_models_order.index("rf")] = rf_pred
-            fold_predictions["rf"] = rf_pred
+            fold_meta[:, base_models_order.index("r")] = rf_pred
+            fold_predictions["r"] = rf_pred
 
             # GB predictions
             gb_pred = gb_fold.predict_proba(X_val_scaled)[:, 1]
@@ -279,8 +279,8 @@ class EnsembleTrainer:
                                     lstm_pred
                                 )
                                 fold_predictions["lstm"] = lstm_pred
-                except Exception as e:
-                    logger.warning(f"LSTM training failed in fold {fold_idx + 1}: {e}")
+                except Exception:
+                    logger.warning(f"LSTM training failed in fold {fold_idx + 1}")
 
             meta_features_parts.append(fold_meta)
             meta_targets_parts.append(y_val)
@@ -312,7 +312,7 @@ class EnsembleTrainer:
             metrics.append(fold_metrics)
 
             logger.info(
-                "Fold %d/%d - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4f",
+                "Fold %d/%d - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4",
                 fold_idx + 1,
                 self.config.n_splits,
                 fold_metrics["accuracy"],
@@ -365,7 +365,7 @@ class EnsembleTrainer:
             )
 
             logger.info(
-                "Stacking meta-model metrics - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4f",
+                "Stacking meta-model metrics - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4",
                 stacking_metrics["accuracy"],
                 stacking_metrics["f1"],
                 stacking_metrics["precision"],
@@ -425,8 +425,8 @@ class EnsembleTrainer:
                 )
                 xgb_model_final.fit(X_full_scaled, y)
                 self.xgb_model = xgb_model_final
-            except Exception as e:
-                logger.warning(f"Final XGBoost training failed: {e}")
+            except Exception:
+                logger.warning("Final XGBoost training failed")
                 xgb_model_final = None
 
         self.lstm_model = None
@@ -455,8 +455,8 @@ class EnsembleTrainer:
                         self.lstm_model = lstm_model_final
                         self.lstm_sequence_length = sequence_length
                         logger.info("Đã huấn luyện & lưu LSTM cho ensemble.")
-            except Exception as e:
-                logger.warning(f"Final LSTM training failed: {e}")
+            except Exception:
+                logger.warning("Final LSTM training failed")
 
         # Persist models & auxiliary artefacts
         joblib.dump(
@@ -500,7 +500,7 @@ class EnsembleTrainer:
         logger.info(f"✅ Training complete. Metrics saved to {metrics_file}")
         if "accuracy" in metrics_summary:
             logger.info(
-                "Final CV metrics - Accuracy: %.4f ± %.4f | F1: %.4f ± %.4f",
+                "Final CV metrics - Accuracy: %.4f ± %.4f | F1: %.4f ± %.4",
                 metrics_summary["accuracy"]["mean"],
                 metrics_summary["accuracy"]["std"],
                 metrics_summary["f1"]["mean"],

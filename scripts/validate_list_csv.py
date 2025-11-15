@@ -3,21 +3,22 @@ Validate tickers in List.csv against TCBS API
 Check which tickers have data available
 """
 
-import sys
 import os
+import sys
 
 # Fix encoding
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
-    except:
+    except AttributeError:
         pass
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
-from ticker_loader import get_ticker_loader
-from data_loader import load_data
 import time
+
+from src.data.loader import load_data
+from src.data.ticker_loader import get_ticker_loader
 
 
 def validate_tickers(sample_size=None, skip_first=0):
@@ -36,19 +37,19 @@ def validate_tickers(sample_size=None, skip_first=0):
     loader = get_ticker_loader()
     all_tickers = loader.all_tickers
 
-    print(f"\n📊 Total tickers in List.csv: {len(all_tickers)}")
+    print("\n📊 Total tickers in List.csv: {len(all_tickers)}")
 
     # Select tickers to test
     if skip_first > 0:
         all_tickers = all_tickers[skip_first:]
-        print(f"⏭️ Skipping first {skip_first} tickers")
+        print("⏭️ Skipping first {skip_first} tickers")
 
     if sample_size:
         test_tickers = all_tickers[:sample_size]
-        print(f"🧪 Testing {len(test_tickers)} tickers (sample)")
+        print("🧪 Testing {len(test_tickers)} tickers (sample)")
     else:
         test_tickers = all_tickers
-        print(f"🧪 Testing ALL {len(test_tickers)} tickers")
+        print("🧪 Testing ALL {len(test_tickers)} tickers")
 
     print("\n" + "=" * 70)
     print("Starting validation...")
@@ -60,33 +61,33 @@ def validate_tickers(sample_size=None, skip_first=0):
 
     for i, ticker in enumerate(test_tickers, 1):
         try:
-            print(f"({i}/{len(test_tickers)}) Testing {ticker}...", end=" ")
+            print("({i}/{len(test_tickers)}) Testing {ticker}...", end=" ")
 
             # Try to load data
             df = load_data(ticker, lookback=10, use_cache=False)
 
             if df is not None and not df.empty and len(df) > 0:
-                print(f"✅ OK ({len(df)} bars)")
+                print("✅ OK ({len(df)} bars)")
                 valid_tickers.append(ticker)
             else:
-                print(f"❌ No data")
+                print("❌ No data")
                 invalid_tickers.append(ticker)
 
             # Rate limiting
             time.sleep(0.1)
 
-        except ValueError as e:
-            error_msg = str(e)
+        except ValueError:
+            error_msg = str(e)  # noqa: F821
             if "không có dữ liệu" in error_msg or "TCBS không có" in error_msg:
-                print(f"❌ No data in TCBS")
+                print("❌ No data in TCBS")
                 invalid_tickers.append(ticker)
             else:
-                print(f"⚠️ Error: {error_msg[:50]}")
+                print("⚠️{error_msg[:50]}")
                 error_tickers.append((ticker, error_msg))
 
-        except Exception as e:
-            print(f"💥 Exception: {str(e)[:50]}")
-            error_tickers.append((ticker, str(e)))
+        except Exception:
+            print("💥 Exception: {str(e)[:50]}")
+            error_tickers.append((ticker, str(e)))  # noqa: F821
 
     # Summary
     print("\n" + "=" * 70)
@@ -96,24 +97,24 @@ def validate_tickers(sample_size=None, skip_first=0):
     print(
         f"\n✅ Valid tickers: {len(valid_tickers)}/{len(test_tickers)} ({len(valid_tickers)/len(test_tickers)*100:.1f}%)"
     )
-    print(f"❌ Invalid tickers: {len(invalid_tickers)}")
-    print(f"⚠️ Error tickers: {len(error_tickers)}")
+    print("❌ Invalid tickers: {len(invalid_tickers)}")
+    print("⚠️ Error tickers: {len(error_tickers)}")
 
     # Show invalid tickers
     if invalid_tickers:
-        print(f"\n❌ Invalid tickers ({len(invalid_tickers)}):")
+        print("\n❌ Invalid tickers ({len(invalid_tickers)}):")
         for ticker in invalid_tickers[:20]:  # Show first 20
-            print(f"  - {ticker}")
+            print("  - {ticker}")
         if len(invalid_tickers) > 20:
-            print(f"  ... and {len(invalid_tickers) - 20} more")
+            print("  ... and {len(invalid_tickers) - 20} more")
 
     # Show error tickers
     if error_tickers:
-        print(f"\n⚠️ Error tickers ({len(error_tickers)}):")
+        print("\n⚠️ Error tickers ({len(error_tickers)}):")
         for ticker, error in error_tickers[:10]:  # Show first 10
-            print(f"  - {ticker}: {error[:50]}")
+            print("  - {ticker}: {error[:50]}")
         if len(error_tickers) > 10:
-            print(f"  ... and {len(error_tickers) - 10} more")
+            print("  ... and {len(error_tickers) - 10} more")
 
     # Save results
     save_results(valid_tickers, invalid_tickers, error_tickers)
@@ -158,12 +159,12 @@ def save_results(valid, invalid, errors):
                 f.write("ERROR TICKERS\n")
                 f.write("=" * 70 + "\n")
                 for ticker, error in errors:
-                    f.write(f"{ticker}: {error}\n")
+                    f.write(f"{ticker}\n")
 
-        print(f"\n💾 Results saved to: validation_results.txt")
+        print("\n💾 Results saved to: validation_results.txt")
 
-    except Exception as e:
-        print(f"\n⚠️ Could not save results: {e}")
+    except Exception:
+        print("\n⚠️ Could not save results")
 
 
 def main():
@@ -177,7 +178,7 @@ def main():
     if len(sys.argv) > 1:
         try:
             sample_size = int(sys.argv[1])
-        except:
+        except ValueError:
             print("Usage: python validate_list_csv.py [sample_size] [skip_first]")
             print("Example: python validate_list_csv.py 100  # Test first 100")
             print(
@@ -188,7 +189,7 @@ def main():
     if len(sys.argv) > 2:
         try:
             skip_first = int(sys.argv[2])
-        except:
+        except ValueError:
             pass
 
     # Run validation
@@ -196,8 +197,8 @@ def main():
         validate_tickers(sample_size=sample_size, skip_first=skip_first)
     except KeyboardInterrupt:
         print("\n\n⚠️ Validation interrupted by user")
-    except Exception as e:
-        print(f"\n\n❌ Error: {e}")
+    except Exception:
+        print("\n\n❌ Error")
         import traceback
 
         traceback.print_exc()

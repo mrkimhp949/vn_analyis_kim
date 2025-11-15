@@ -4,42 +4,49 @@ Strategy Manager for the trading bot.
 Quản lý và cung cấp các đối tượng chiến lược (entry, exit, sizing).
 """
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
+
+from src.strategies.exit_logic import ImprovedExitStrategy
 
 # Import các lớp chiến lược
-from improved_entry_logic import ImprovedEntryLogic
-from position_sizing_enhanced import EnhancedPositionSizer
-from improved_position_sizing import ConservativePositionSizer
-from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
-from trading_config import get_config
+from src.strategies.entry_logic import ImprovedEntryLogic
+from src.strategies.position_sizing import EnhancedPositionSizer
+from src.config.trading_config import get_config
+
+
+# Risk calculation constants
+RISK_MULTIPLIER = 0.02  # 2% risk multiplier
+RISK_DIVISOR = 0.15  # 15% risk divisor
+
 
 class StrategyManager:
     """
     Lớp chịu trách nhiệm khởi tạo và điều chỉnh các chiến lược
     dựa trên trạng thái thị trường và cấu hình.
     """
+
     def __init__(self):
         self.trading_config = get_config(validate=False)
         self.entry_logic: ImprovedEntryLogic = None
-        self.position_sizer: EnhancedPositionSizer | ConservativePositionSizer = None
-        self.exit_strategy: EnhancedExitStrategy | ImprovedExitStrategy = None
+        self.position_sizer: EnhancedPositionSizer = None
+        self.exit_strategy: ImprovedExitStrategy = None
         self._initialize_strategies()
 
     def _initialize_strategies(self):
         """Khởi tạo các chiến lược với cấu hình mặc định."""
         logging.info("🚀 Khởi tạo các chiến lược trading...")
-        
+
         # 1. Entry Logic
         try:
             self.entry_logic = ImprovedEntryLogic(
                 min_confidence=55,
                 min_risk_reward=1.8,
                 require_trend_alignment=True,
-                require_volume_confirmation=False
+                require_volume_confirmation=False,
             )
             logging.info("✅ EntryLogic initialized (min_conf=55, R:R=1.8)")
-        except Exception as e:
-            logging.critical(f"❌ Không thể khởi tạo ImprovedEntryLogic: {e}", exc_info=True)
+        except Exception:
+            logging.critical("❌ Không thể khởi tạo ImprovedEntryLogic", exc_info=True)
             # Có thể raise exception ở đây để dừng bot nếu logic vào lệnh là bắt buộc
             raise
 
@@ -47,44 +54,28 @@ class StrategyManager:
         try:
             self.position_sizer = EnhancedPositionSizer(
                 total_capital=100_000_000,
-                max_risk_per_trade=self.trading_config.trading.max_position_size * 0.02 / 0.15,
+                max_risk_per_trade=self.trading_config.trading.max_position_size
+                * RISK_MULTIPLIER
+                / RISK_DIVISOR,
                 max_position_size=self.trading_config.trading.max_position_size,
                 min_position_size=self.trading_config.trading.min_position_size,
                 max_total_exposure=0.60,
                 max_portfolio_risk=self.trading_config.trading.max_portfolio_risk,
                 max_sector_exposure=self.trading_config.trading.max_sector_exposure,
                 use_kelly=True,
-                kelly_fraction=0.5
+                kelly_fraction=0.5,
             )
             logging.info("✅ EnhancedPositionSizer initialized (with Kelly Criterion)")
-        except ImportError as e:
-            logging.warning(f"⚠️ EnhancedPositionSizer không khả dụng ({e}), dùng fallback...")
-            self.position_sizer = ConservativePositionSizer(
-                total_capital=100_000_000,
-                max_risk_per_trade=0.02,
-                max_position_size=0.10,
-                max_total_exposure=0.60,
-                min_positions=8
-            )
-            logging.info("✅ ConservativePositionSizer initialized (fallback)")
-        except Exception as e:
-            logging.critical(f"❌ Không thể khởi tạo PositionSizer: {e}", exc_info=True)
+        except Exception:
+            logging.critical("❌ Không thể khởi tạo PositionSizer", exc_info=True)
             raise
 
         # 3. Exit Strategy
         try:
-            self.exit_strategy = EnhancedExitStrategy(
-                use_dynamic_trailing=True,
-                use_breakeven_stop=True,
-                breakeven_activation=0.10
-            )
-            logging.info("✅ EnhancedExitStrategy initialized (dynamic trailing & breakeven)")
-        except ImportError as e:
-            logging.warning(f"⚠️ EnhancedExitStrategy không khả dụng ({e}), dùng fallback...")
             self.exit_strategy = ImprovedExitStrategy()
-            logging.info("✅ ImprovedExitStrategy initialized (fallback)")
-        except Exception as e:
-            logging.critical(f"❌ Không thể khởi tạo ExitStrategy: {e}", exc_info=True)
+            logging.info("✅ ImprovedExitStrategy initialized")
+        except Exception:
+            logging.critical("❌ Không thể khởi tạo ExitStrategy", exc_info=True)
             raise
 
     def get_strategies(self) -> Dict[str, Any]:
@@ -92,7 +83,7 @@ class StrategyManager:
         return {
             "entry_logic": self.entry_logic,
             "position_sizer": self.position_sizer,
-            "exit_strategy": self.exit_strategy
+            "exit_strategy": self.exit_strategy,
         }
 
     def apply_market_adjustments(self, market_regime: Dict):
@@ -101,27 +92,29 @@ class StrategyManager:
         Đây là nơi tập trung logic điều chỉnh động.
         """
         if not self.entry_logic or not self.position_sizer:
-            logging.warning("⚠️ EntryLogic hoặc PositionSizer chưa được khởi tạo, không thể điều chỉnh.")
+            logging.warning(
+                "⚠️ EntryLogic hoặc PositionSizer chưa được khởi tạo, không thể điều chỉnh."
+            )
             return
 
-        regime = (market_regime or {}).get('regime', 'UNKNOWN').upper()
+        regime = (market_regime or {}).get("regime", "UNKNOWN").upper()
         logging.info(f"⚙️ Áp dụng điều chỉnh chiến lược cho thị trường: {regime}")
 
         # DYNAMIC THRESHOLD based on market regime
-        if regime == 'BULL':
+        if regime == "BULL":
             self.entry_logic.min_confidence = 50
             self.entry_logic.min_risk_reward = 1.5
-            if hasattr(self.position_sizer, 'max_total_exposure'):
+            if hasattr(self.position_sizer, "max_total_exposure"):
                 self.position_sizer.max_total_exposure = 0.70
-        elif regime == 'BEAR':
+        elif regime == "BEAR":
             self.entry_logic.min_confidence = 65
             self.entry_logic.min_risk_reward = 2.0
-            if hasattr(self.position_sizer, 'max_total_exposure'):
+            if hasattr(self.position_sizer, "max_total_exposure"):
                 self.position_sizer.max_total_exposure = 0.30
         else:  # SIDEWAYS / UNKNOWN
             self.entry_logic.min_confidence = 55
             self.entry_logic.min_risk_reward = 1.8
-            if hasattr(self.position_sizer, 'max_total_exposure'):
+            if hasattr(self.position_sizer, "max_total_exposure"):
                 self.position_sizer.max_total_exposure = 0.50
 
         logging.info(
@@ -130,8 +123,10 @@ class StrategyManager:
             f"max_exposure={getattr(self.position_sizer, 'max_total_exposure', 0.0)*100:.0f}%"
         )
 
+
 # Singleton instance
 _strategy_manager = None
+
 
 def get_strategy_manager() -> "StrategyManager":
     """

@@ -2,13 +2,10 @@
 Portfolio Risk Manager - Real-time risk calculation, circuit breakers, correlation limits
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
-from exceptions import RiskManagementError
-from risk_metrics import calculate_portfolio_correlation_risk, get_sector_for_symbol
+from typing import Dict, Tuple
+
+from src.risk.metrics import calculate_portfolio_correlation_risk, get_sector_for_symbol
 
 
 @dataclass
@@ -95,7 +92,7 @@ class PortfolioRiskManager:
             shares = pos.get("shares", 0)
             entry_price = pos.get("avg_price", 0)
             stop_loss = pos.get("stop_loss", entry_price * 0.93)  # Default -7%
-            current_price = pos.get("current_price", entry_price)
+            pos.get("current_price", entry_price)
 
             # Risk per share
             risk_per_share = abs(entry_price - stop_loss)
@@ -307,7 +304,7 @@ class PortfolioRiskManager:
 
         # Check 2: Sector exposure
         sector = get_sector_for_symbol(symbol)
-        current_sector_exp = current_metrics.sector_exposure.get(sector, 0)
+        current_metrics.sector_exposure.get(sector, 0)
         new_total_value = current_metrics.total_portfolio_value + position_value
         new_sector_value = (
             current_metrics.sector_exposure.get(sector, 0)
@@ -356,19 +353,19 @@ class PortfolioRiskManager:
         lines.append(f"📊 Risk Status: {metrics.risk_status}")
 
         if metrics.sector_exposure:
-            lines.append(f"\n🏢 **SECTOR EXPOSURE:**")
+            lines.append("\n🏢 **SECTOR EXPOSURE:**")
             for sector, exp in sorted(
                 metrics.sector_exposure.items(), key=lambda x: x[1], reverse=True
             )[:5]:
                 lines.append(f"  {sector}: {exp:.1f}%")
 
-        lines.append(f"\n🔗 **CORRELATION:**")
+        lines.append("\n🔗 **CORRELATION:**")
         lines.append(f"  Avg Correlation: {metrics.correlation_risk:.2f}")
         lines.append(f"  Max Correlation: {metrics.max_correlation:.2f}")
 
         # Circuit breaker check
         can_trade, cb_reason = self.check_circuit_breaker(metrics.total_portfolio_value)
-        lines.append(f"\n🔒 **CIRCUIT BREAKER:**")
+        lines.append("\n🔒 **CIRCUIT BREAKER:**")
         lines.append(f"  {cb_reason}")
 
         return "\n".join(lines)

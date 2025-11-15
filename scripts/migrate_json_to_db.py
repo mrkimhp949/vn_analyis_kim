@@ -3,11 +3,12 @@ Migration Script: JSON → SQLite
 Migrate all JSON data to database
 """
 
-import os
 import json
+import os
 from datetime import datetime
-from database import get_db
-from portfolio_manager import get_portfolio_manager
+
+from src.data.database import get_db
+from src.portfolio.manager import get_portfolio_manager
 
 
 def migrate_positions():
@@ -40,14 +41,14 @@ def migrate_positions():
                     metadata=pos,
                 )
                 count += 1
-            except Exception as e:
-                print(f"❌ Error migrating {symbol}: {e}")
+            except Exception:
+                print(f"❌ Error migrating {symbol}")
 
         print(f"✅ Migrated {count} positions from {json_file}")
         return count
 
-    except Exception as e:
-        print(f"❌ Error reading {json_file}: {e}")
+    except Exception:
+        print(f"❌ Error reading {json_file}")
         return 0
 
 
@@ -78,14 +79,14 @@ def migrate_portfolio_history():
                     metadata=snapshot,
                 )
                 count += 1
-            except Exception as e:
-                print(f"❌ Error migrating snapshot: {e}")
+            except Exception:
+                print("❌ Error migrating snapshot")
 
         print(f"✅ Migrated {count} snapshots from {json_file}")
         return count
 
-    except Exception as e:
-        print(f"❌ Error reading {json_file}: {e}")
+    except Exception:
+        print(f"❌ Error reading {json_file}")
         return 0
 
 
@@ -112,8 +113,8 @@ def backup_json_files():
                 shutil.copy2(filename, backup_path)
                 backed_up.append(filename)
                 print(f"📦 Backed up: {filename} → {backup_path}")
-            except Exception as e:
-                print(f"❌ Error backing up {filename}: {e}")
+            except Exception:
+                print(f"❌ Error backing up {filename}")
 
     return backed_up
 
@@ -182,7 +183,8 @@ def main():
     print("=" * 60)
     print("1. Verify data in database:")
     print(
-        "   python -c 'from portfolio_manager import get_portfolio_manager; print(get_portfolio_manager().get_detailed_analysis())'"
+        "   python -c 'from src.portfolio.manager import get_portfolio_manager; "
+        "print(get_portfolio_manager().get_detailed_analysis())'"
     )
     print("")
     print("2. Update bot_runner_improved.py to use portfolio_manager")

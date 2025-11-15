@@ -1,9 +1,10 @@
 # [file name]: features.py
 # [file content begin]
-import pandas as pd
-import numpy as np
-import ta
 from typing import Optional
+
+import pandas as pd
+import ta
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 
 def add_ml_features(
@@ -26,46 +27,46 @@ def add_ml_features(
     df = df.copy()
 
     # 1. Moving Averages
-    df['sma20'] = df['close'].rolling(20).mean()
-    df['ema20'] = df['close'].ewm(span=20).mean()
-    df['ema50'] = df['close'].ewm(span=50).mean()
-    
+    df["sma20"] = df["close"].rolling(20).mean()
+    df["ema20"] = df["close"].ewm(span=20).mean()
+    df["ema50"] = df["close"].ewm(span=50).mean()
+
     # 2. RSI
-    df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-    df['rsi_signal'] = (df['rsi'] > 30) & (df['rsi'] < 70)
-    
+    df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+    df["rsi_signal"] = (df["rsi"] > 30) & (df["rsi"] < 70)
+
     # 3. ATR
-    df['atr'] = ta.volatility.AverageTrueRange(
-        df['high'], df['low'], df['close'], window=14
+    df["atr"] = ta.volatility.AverageTrueRange(
+        df["high"], df["low"], df["close"], window=14
     ).average_true_range()
-    
+
     # 4. MACD
-    macd = ta.trend.MACD(df['close'])
-    df['macd'] = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
-    df['macd_diff'] = macd.macd_diff()
-    df['macd_signal_line'] = (df['macd'] > df['macd_signal']).astype(int)
-    
+    macd = ta.trend.MACD(df["close"])
+    df["macd"] = macd.macd()
+    df["macd_signal"] = macd.macd_signal()
+    df["macd_dif"] = macd.macd_diff()
+    df["macd_signal_line"] = (df["macd"] > df["macd_signal"]).astype(int)
+
     # 5. Bollinger Bands
-    bb = ta.volatility.BollingerBands(df['close'])
-    df['bb_high'] = bb.bollinger_hband()
-    df['bb_low'] = bb.bollinger_lband()
-    df['bb_mid'] = bb.bollinger_mavg()
-    df['bb_width'] = (df['bb_high'] - df['bb_low']) / df['bb_mid']
-    df['bb_position'] = (df['close'] - df['bb_low']) / (df['bb_high'] - df['bb_low'])
-    
+    bb = ta.volatility.BollingerBands(df["close"])
+    df["bb_high"] = bb.bollinger_hband()
+    df["bb_low"] = bb.bollinger_lband()
+    df["bb_mid"] = bb.bollinger_mavg()
+    df["bb_width"] = (df["bb_high"] - df["bb_low"]) / df["bb_mid"]
+    df["bb_position"] = (df["close"] - df["bb_low"]) / (df["bb_high"] - df["bb_low"])
+
     # 6. Momentum
-    df['momentum_5'] = df['close'].pct_change(5)
-    df['momentum_10'] = df['close'].pct_change(10)
-    df['momentum_20'] = df['close'].pct_change(20)
-    
+    df["momentum_5"] = df["close"].pct_change(5)
+    df["momentum_10"] = df["close"].pct_change(10)
+    df["momentum_20"] = df["close"].pct_change(20)
+
     # 7. Volume
-    df['volume_sma20'] = df['volume'].rolling(20).mean()
-    df['volume_ratio'] = df['volume'] / df['volume_sma20']
-    df['volume_surge'] = (df['volume_ratio'] > 1.5).astype(int)
-    
+    df["volume_sma20"] = df["volume"].rolling(20).mean()
+    df["volume_ratio"] = df["volume"] / df["volume_sma20"]
+    df["volume_surge"] = (df["volume_ratio"] > 1.5).astype(int)
+
     # 8. Volatility
-    df['volatility_20'] = df['close'].pct_change().rolling(20).std()
+    df["volatility_20"] = df["close"].pct_change().rolling(20).std()
 
     # 12. RELATIVE STRENGTH (RS) - TÍNH TOÁN THỰC SỰ
     if index_df is not None and not index_df.empty:
@@ -79,11 +80,15 @@ def add_ml_features(
 
         if not merged_df.empty:
             # Tính performance của stock và index
+            from utils.dataframe_utils import safe_get_latest
+
             stock_perf = (
-                merged_df["close_stock"].iloc[-1] / merged_df["close_stock"].iloc[0]
+                safe_get_latest(merged_df, "close_stock", 0)
+                / merged_df["close_stock"].iloc[0]
             )
             index_perf = (
-                merged_df["close_index"].iloc[-1] / merged_df["close_index"].iloc[0]
+                safe_get_latest(merged_df, "close_index", 0)
+                / merged_df["close_index"].iloc[0]
             )
 
             # RS = perf_stock / perf_index
@@ -98,7 +103,7 @@ def add_ml_features(
     # 13. LAG FEATURES (NEW)
     for lag in [1, 2, 3]:
         df[f"rsi_lag_{lag}"] = df["rsi"].shift(lag)
-        df[f"macd_diff_lag_{lag}"] = df["macd_diff"].shift(lag)
+        df[f"macd_diff_lag_{lag}"] = df["macd_dif"].shift(lag)
         df[f"volume_ratio_lag_{lag}"] = df["volume_ratio"].shift(lag)
 
     # Target: Price direction next day
@@ -124,7 +129,7 @@ def get_feature_columns():
         "atr",
         "macd",
         "macd_signal",
-        "macd_diff",
+        "macd_dif",
         "macd_signal_line",
         "bb_width",
         "bb_position",

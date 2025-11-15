@@ -3,11 +3,12 @@ Ticker Loader - Load và validate tickers từ List.csv
 Validates tickers trước khi scan để tránh mã đã hủy niêm yết
 """
 
-import pandas as pd
-import os
 import json
-from typing import List, Dict
-from datetime import datetime, timedelta
+import os
+from datetime import datetime
+from typing import Dict, List
+
+import pandas as pd
 
 
 class TickerLoader:
@@ -48,7 +49,7 @@ class TickerLoader:
                     cache_time = datetime.fromisoformat(cached_date)
                     age = (datetime.now() - cache_time).days
                     return age < max_age_days
-                except:
+                except (ValueError, TypeError):
                     pass
         return False
 
@@ -78,10 +79,10 @@ class TickerLoader:
             # Remove empty strings
             self.all_tickers = [t for t in self.all_tickers if t]
 
-            print(f"📊 Loaded {len(self.all_tickers)} tickers from {self.csv_file}")
+            print(f"Loaded {len(self.all_tickers)} tickers from {self.csv_file}")
 
-        except Exception as e:
-            print(f"❌ Error loading {self.csv_file}: {e}")
+        except Exception:
+            print(f"Error loading {self.csv_file}")
             self.all_tickers = []
 
     def validate_ticker(self, symbol: str, min_volume: int = 100_000) -> bool:
@@ -99,10 +100,11 @@ class TickerLoader:
             return False
 
         try:
-            from data_loader import load_data
+            from src.data.loader import load_data
 
-            # Try load data, requiring only 5 bars for a basic validity check
-            df = load_data(symbol, lookback=5, use_cache=False, required_bars=5)
+            # Try load data, requiring only 2 bars for a basic validity check
+            # (Some newly listed stocks may have very limited data)
+            df = load_data(symbol, lookback=30, use_cache=False, required_bars=2)
 
             if df.empty or len(df) < 2:
                 self.validation_cache["invalid"][symbol] = {
@@ -180,7 +182,11 @@ class TickerLoader:
         for i, symbol in enumerate(self.all_tickers):
             # Show progress
             progress = (i + 1) / total_tickers
-            print(f"\r  Validating... [{i+1}/{total_tickers}, {progress:.1%}]", end="", flush=True)
+            print(
+                f"\r  Validating... [{i+1}/{total_tickers}, {progress:.1%}]",
+                end="",
+                flush=True,
+            )
 
             if self.validate_ticker(symbol, min_volume):
                 validated.append(symbol)
@@ -190,8 +196,8 @@ class TickerLoader:
             # Limit if needed
             if max_tickers and len(validated) >= max_tickers:
                 break
-        
-        print() # Newline after progress bar finishes
+
+        print()  # Newline after progress bar finishes
 
         self.validated_tickers = validated
         self.invalid_tickers = invalid
@@ -213,6 +219,7 @@ def get_ticker_loader() -> TickerLoader:
         _loader = TickerLoader()
     return _loader
 
+
 def run_sector_analysis():
     """
     Hàm giả lập cho `run_sector_analysis` để tương thích ngược với `main.py`.
@@ -223,14 +230,16 @@ def run_sector_analysis():
         loader = get_ticker_loader()
         # Lấy các mã đã validate với các tiêu chí cơ bản
         tickers = loader.get_validated_tickers(
-            force_validate=False, # Dùng cache nếu có
+            force_validate=False,  # Dùng cache nếu có
             min_volume=100_000,
-            max_tickers=500 # Lấy nhiều hơn một chút để có lựa chọn
+            max_tickers=500,  # Lấy nhiều hơn một chút để có lựa chọn
         )
-        print(f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning.")
+        print(
+            f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning."
+        )
         return tickers
-    except Exception as e:
-        print(f"❌ [Compatibility] Error in fake run_sector_analysis: {e}")
+    except Exception:
+        print("❌ [Compatibility] Error in fake run_sector_analysis")
         # Fallback về danh sách tickers đầy đủ nếu có lỗi
         return get_ticker_loader().all_tickers
 

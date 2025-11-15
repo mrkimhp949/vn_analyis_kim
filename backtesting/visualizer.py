@@ -3,11 +3,12 @@
 Backtest Visualizer - Charts and analysis
 """
 
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from typing import Optional
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from backtesting.engine import BacktestResult
 
@@ -234,7 +235,7 @@ class BacktestVisualizer:
             for j in range(len(pivot_table.columns)):
                 value = pivot_table.values[i, j]
                 if not np.isnan(value):
-                    text = ax.text(
+                    _text = ax.text(  # noqa: F841
                         j,
                         i,
                         f"{value:.1f}%",

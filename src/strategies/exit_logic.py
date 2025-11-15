@@ -4,13 +4,14 @@ improved_exit_logic.py - Smart Exit Strategy
 Chiến lược thoát lệnh chuyên nghiệp với trailing stop, take profit bậc thang
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, Tuple, Optional, List
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-import logging
+from typing import Dict, List, Optional
+
+import pandas as pd
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,22 @@ class ImprovedExitStrategy:
             return tp_check["decision"]
 
         # ====================================================================
-        # CHECK 4: TRAILING STOP
+        # CHECK 4: PROFIT PROTECTION (3-8% profit range)
+        # ====================================================================
+        # NEW: Protect profit before trailing stop activation
+        profit_protection_check = self._check_profit_protection(
+            entry_price,
+            current_price,
+            highest_price,
+            pnl_percent,
+            pnl_amount,
+        )
+
+        if profit_protection_check["should_exit"]:
+            return profit_protection_check["decision"]
+
+        # ====================================================================
+        # CHECK 5: TRAILING STOP (>= 8% profit)
         # ====================================================================
         trailing_check = self._check_trailing_stop(
             entry_price,
@@ -197,7 +213,7 @@ class ImprovedExitStrategy:
             return trailing_check["decision"]
 
         # ====================================================================
-        # CHECK 5: ML SIGNAL SELL
+        # CHECK 6: ML SIGNAL SELL
         # ====================================================================
         if ml_signal and ml_signal.get("signal") == "SELL":
             confidence = ml_signal.get("confidence", 0)
@@ -216,7 +232,7 @@ class ImprovedExitStrategy:
                 )
 
         # ====================================================================
-        # CHECK 6: BEARISH REVERSAL PATTERN
+        # CHECK 7: BEARISH REVERSAL PATTERN
         # ====================================================================
         if len(df) >= 3:
             pattern_check = self._check_reversal_pattern(df, pnl_percent, pnl_amount)
@@ -225,7 +241,7 @@ class ImprovedExitStrategy:
                 return pattern_check["decision"]
 
         # ====================================================================
-        # CHECK 7: SUPPORT BREAKDOWN
+        # CHECK 8: SUPPORT BREAKDOWN
         # ====================================================================
         breakdown_check = self._check_support_breakdown(
             df, current_price, entry_price, pnl_percent, pnl_amount
@@ -235,7 +251,7 @@ class ImprovedExitStrategy:
             return breakdown_check["decision"]
 
         # ====================================================================
-        # CHECK 8: TIME DECAY
+        # CHECK 9: TIME DECAY
         # ====================================================================
         if days_held >= self.max_holding_days:
             # Nếu giữ quá lâu mà lời < threshold → thoát
@@ -339,6 +355,69 @@ class ImprovedExitStrategy:
 
         return {"should_exit": False}
 
+    def _check_profit_protection(
+        self,
+        entry_price: float,
+        current_price: float,
+        highest_price: float,
+        pnl_percent: float,
+        pnl_amount: float,
+    ) -> Dict:
+        """
+        NEW: Protect profit in the 3-8% profit range.
+
+        This prevents giving back all profits before trailing stop activates at 8%.
+
+        Logic:
+        - If profit is between 3-8%:
+          - Calculate a dynamic stop based on profit level
+          - 3-5% profit: Protect 50% of profit
+          - 5-8% profit: Protect 60% of profit
+        - Uses highest price to track maximum profit achieved
+
+        Returns:
+            Dict with should_exit flag and decision
+        """
+        # Only activate in 3-8% profit range (before trailing stop)
+        if pnl_percent < 3.0 or pnl_percent >= self.trailing_activation * 100:
+            return {"should_exit": False}
+
+        # Calculate maximum profit achieved
+        max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
+
+        # Dynamic protection based on profit level
+        if 3.0 <= pnl_percent < 5.0:
+            # Protect 50% of maximum profit
+            protection_pct = 0.50
+            stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_pct)
+        elif 5.0 <= pnl_percent < self.trailing_activation * 100:
+            # Protect 60% of maximum profit
+            protection_pct = 0.60
+            stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_pct)
+        else:
+            return {"should_exit": False}
+
+        # Check if current price dropped below protection level
+        if current_price <= stop_price:
+            profit_given_back = max_profit_pct - pnl_percent
+            return {
+                "should_exit": True,
+                "decision": ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.TRAILING_STOP,  # Use same reason for consistency
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=f"💰 PROFIT PROTECTION: Bảo vệ {protection_pct*100:.0f}% lợi nhuận | "
+                    f"Max profit: {max_profit_pct:.1f}% → Current: {pnl_percent:.1f}% "
+                    f"(Gave back {profit_given_back:.1f}%)",
+                    urgency=4,
+                ),
+            }
+
+        return {"should_exit": False}
+
     def _check_trailing_stop(
         self,
         entry_price: float,
@@ -394,6 +473,10 @@ class ImprovedExitStrategy:
         """
 
         if len(df) < 3:
+            return {"should_exit": False}
+
+        # Use safe access instead of df.iloc[-1]
+        if len(df) < 2:
             return {"should_exit": False}
 
         latest = df.iloc[-1]
@@ -468,7 +551,8 @@ class ImprovedExitStrategy:
         # Nếu giá break support với volume cao
         if current_price < support:
             volume_surge = (
-                df["volume"].iloc[-1] > df["volume"].rolling(20).mean().iloc[-1] * 1.5
+                safe_get_latest(df, "volume", 0)
+                > safe_rolling_operation(df, "volume", 20, "mean", 0) * 1.5
             )
 
             if volume_surge:
@@ -491,7 +575,7 @@ class ImprovedExitStrategy:
     def clear_position_tracking(self, symbol: str):
         """
         Dọn dẹp tracking khi đóng vị thế để tránh memory leak
-        
+
         Args:
             symbol: Mã cổ phiếu cần xóa tracking
         """
@@ -504,7 +588,7 @@ class ImprovedExitStrategy:
     def get_tracked_positions(self) -> List[str]:
         """
         Lấy danh sách các vị thế đang được track
-        
+
         Returns:
             List các symbol đang được track
         """
@@ -542,9 +626,10 @@ class ImprovedExitStrategy:
 # ============================================================================
 
 if __name__ == "__main__":
-    from data_loader import load_data
-    from features import add_ml_features
-    from ml_signals import MLSignalGenerator
+    from src.data.loader import load_data
+    from src.ml.features.technical import add_ml_features
+    from src.ml.signals.generator import MLSignalGenerator
+    from utils.dataframe_utils import safe_get_latest
 
     print("\n" + "=" * 70)
     print("🧪 TESTING IMPROVED EXIT STRATEGY")

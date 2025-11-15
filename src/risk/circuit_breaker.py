@@ -5,9 +5,9 @@ Bảo vệ khỏi lỗi logic hoặc market anomaly
 
 import json
 import os
-from datetime import datetime, date
-from typing import Tuple, Dict
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from datetime import date, datetime
+from typing import Dict, Tuple
 
 
 @dataclass
@@ -36,20 +36,20 @@ class CircuitBreaker:
         max_trades_per_day: int = 10,
         max_loss_per_day_pct: float = 0.05,  # 5% vốn
         max_consecutive_losses: int = 5,
-        vnindex_drop_threshold: float = -2.5, # Ngưỡng VNINDEX giảm để ngắt (%)
+        vnindex_drop_threshold: float = -2.5,  # Ngưỡng VNINDEX giảm để ngắt (%)
         total_capital: float = 100_000_000,
         stats_file: str = "circuit_breaker_stats.json",
     ):
         self.max_trades_per_day = max_trades_per_day
         self.max_loss_per_day_pct = max_loss_per_day_pct
         self.max_consecutive_losses = max_consecutive_losses
-        self.vnindex_drop_threshold = vnindex_drop_threshold / 100.0 # Convert to float
+        self.vnindex_drop_threshold = vnindex_drop_threshold / 100.0  # Convert to float
         self.total_capital = total_capital
         self.stats_file = stats_file
 
         self.stats = self._load_stats()
         self._check_new_day()
-        
+
         # Trạng thái ngắt mạch
         self.tripped = False
         self.tripped_reason = ""
@@ -103,7 +103,9 @@ class CircuitBreaker:
             self.tripped_reason = ""
             self._save_stats()
 
-    def check_and_update(self, portfolio_pnl_pct: float, vnindex_change_pct: float) -> bool:
+    def check_and_update(
+        self, portfolio_pnl_pct: float, vnindex_change_pct: float
+    ) -> bool:
         """
         Kiểm tra các điều kiện ngắt mạch và cập nhật trạng thái.
         Đây là phương thức chính để gọi từ orchestrator.
@@ -116,28 +118,41 @@ class CircuitBreaker:
             bool: True nếu ngắt mạch được kích hoạt, False nếu không.
         """
         if self.tripped:
-            return True # Nếu đã ngắt thì không cần check lại
+            return True  # Nếu đã ngắt thì không cần check lại
 
         # Validate input parameters
         if not isinstance(portfolio_pnl_pct, (int, float)):
-            raise ValueError(f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}")
+            raise ValueError(
+                f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}"
+            )
         if not isinstance(vnindex_change_pct, (int, float)):
-            raise ValueError(f"vnindex_change_pct phải là số, nhận được: {type(vnindex_change_pct)}")
+            raise ValueError(
+                f"vnindex_change_pct phải là số, nhận được: {type(vnindex_change_pct)}"
+            )
 
         # Check 1: Max loss per day
-        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
+        if (
+            portfolio_pnl_pct < 0
+            and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct
+        ):
             self.tripped = True
-            self.tripped_reason = f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            self.tripped_reason = (
+                f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
+                f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            )
             self._save_stats()
             return True
 
         # Check 2: VNINDEX giảm sâu
         if vnindex_change_pct < self.vnindex_drop_threshold:
             self.tripped = True
-            self.tripped_reason = f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
+            self.tripped_reason = (
+                f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) "
+                f"vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
+            )
             self._save_stats()
             return True
-            
+
         # Check 3: Max trades per day
         if self.stats["today"]["trades_count"] >= self.max_trades_per_day:
             self.tripped = True
@@ -157,7 +172,7 @@ class CircuitBreaker:
     def is_active(self) -> bool:
         """
         Kiểm tra xem circuit breaker có đang kích hoạt không.
-        
+
         Returns:
             bool: True nếu circuit breaker đang kích hoạt, False nếu không.
         """
@@ -170,13 +185,16 @@ class CircuitBreaker:
         """
         if self.tripped:
             return False, self.tripped_reason
-        
+
         # This part is now mostly redundant as checks are in check_and_update
         today_stats = self.stats["today"]
         if today_stats["trades_count"] >= self.max_trades_per_day:
             return False, f"🚫 Max trades per day reached ({self.max_trades_per_day})"
         if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
-            return False, f"🚫 Too many consecutive losses ({self.stats['consecutive_losses']})"
+            return (
+                False,
+                f"🚫 Too many consecutive losses ({self.stats['consecutive_losses']})",
+            )
 
         return True, "✅ OK to trade"
 
@@ -219,15 +237,21 @@ class CircuitBreaker:
             portfolio_pnl_pct (float): P&L hiện tại của portfolio (dạng float, vd: -0.01 cho -1%)
         """
         self._check_new_day()
-        
+
         # Lưu PnL vào stats để tracking
         self.stats["today"]["last_updated"] = datetime.now().isoformat()
-        
+
         # Kiểm tra ngay xem có cần kích hoạt circuit breaker không
-        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
+        if (
+            portfolio_pnl_pct < 0
+            and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct
+        ):
             self.tripped = True
-            self.tripped_reason = f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
-        
+            self.tripped_reason = (
+                f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
+                f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            )
+
         self._save_stats()
 
     def get_daily_stats(self) -> DailyStats:
@@ -253,7 +277,9 @@ class CircuitBreaker:
             f"⚠️ Consecutive losses: {self.stats.get('consecutive_losses', 0)}/{self.max_consecutive_losses}"
         )
         msg.append("")
-        msg.append(f"Status: {'TRIPPED - ' + self.tripped_reason if self.tripped else 'OK'}")
+        msg.append(
+            f"Status: {'TRIPPED - ' + self.tripped_reason if self.tripped else 'OK'}"
+        )
 
         return "\n".join(msg)
 

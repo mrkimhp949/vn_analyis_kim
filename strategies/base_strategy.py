@@ -1,7 +1,8 @@
-
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
-from typing import Dict, Any, List, Optional
+
 
 class BaseStrategy(ABC):
     """
@@ -30,10 +31,11 @@ class BaseStrategy(ABC):
         (Tùy chọn) Kiểm tra xem cấu hình chiến lược có hợp lệ không.
         Nên được override bởi các lớp con.
         """
-        pass
 
     @abstractmethod
-    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+    def generate_signals(
+        self, market_data: Dict[str, pd.DataFrame]
+    ) -> List[Dict[str, Any]]:
         """
         Phương thức cốt lõi để tạo ra các tín hiệu giao dịch.
 
@@ -61,7 +63,9 @@ class BaseStrategy(ABC):
         """
         raise NotImplementedError("Subclasses must implement generate_signals.")
 
-    def calculate_position_size(self, signal: Dict[str, Any], portfolio_context: Dict[str, Any]) -> int:
+    def calculate_position_size(
+        self, signal: Dict[str, Any], portfolio_context: Dict[str, Any]
+    ) -> int:
         """
         Tính toán kích thước vị thế dựa trên tín hiệu và rủi ro danh mục.
 
@@ -75,24 +79,32 @@ class BaseStrategy(ABC):
             int: Số lượng cổ phiếu cần mua/bán. Trả về 0 nếu không nên giao dịch.
         """
         # Logic mặc định: sử dụng một phần trăm cố định của vốn
-        risk_per_trade = portfolio_context.get("risk_per_trade", 0.02) # 2% risk
+        risk_per_trade = portfolio_context.get("risk_per_trade", 0.02)  # 2% risk
         total_equity = portfolio_context.get("total_equity", 0)
         entry_price = signal.get("entry_price")
         stop_loss_price = signal.get("stop_loss")
 
-        if not all([total_equity > 0, entry_price > 0, stop_loss_price > 0, entry_price > stop_loss_price]):
+        if not all(
+            [
+                total_equity > 0,
+                entry_price > 0,
+                stop_loss_price > 0,
+                entry_price > stop_loss_price,
+            ]
+        ):
             return 0
 
         risk_amount_per_share = entry_price - stop_loss_price
         total_risk_capital = total_equity * risk_per_trade
-        
+
         shares = int(total_risk_capital / risk_amount_per_share)
-        
+
         # Làm tròn xuống theo lô 100
         return (shares // 100) * 100
 
-
-    def determine_exit_levels(self, signal: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    def determine_exit_levels(
+        self, signal: Dict[str, Any]
+    ) -> Dict[str, Optional[float]]:
         """
         Xác định các mức dừng lỗ (stop-loss) và chốt lời (take-profit).
 

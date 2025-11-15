@@ -3,7 +3,7 @@ Custom Exceptions for Trading Bot
 Structured error handling với context
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 
 class TradingBotError(Exception):
@@ -24,52 +24,34 @@ class TradingBotError(Exception):
 class ConfigurationError(TradingBotError):
     """Error in configuration"""
 
-    pass
-
 
 class DataLoadError(TradingBotError):
     """Error loading market data"""
-
-    pass
 
 
 class DataQualityError(TradingBotError):
     """Error in data quality (outliers, missing data, etc.)"""
 
-    pass
-
 
 class SignalValidationError(TradingBotError):
     """Error validating trading signal"""
-
-    pass
 
 
 class PositionSizingError(TradingBotError):
     """Error calculating position size"""
 
-    pass
-
 
 class RiskManagementError(TradingBotError):
     """Error in risk management (limits exceeded, etc.)"""
-
-    pass
 
 
 class APIConnectionError(TradingBotError):
     """Error connecting to API"""
 
-    pass
-
 
 class ModelPredictionError(TradingBotError):
     """Error in ML model prediction"""
 
-    pass
-
 
 class PortfolioError(TradingBotError):
     """Error in portfolio operations"""
-
-    pass

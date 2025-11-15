@@ -5,9 +5,9 @@ Bảo vệ khỏi các sự kiện bất thường
 
 import json
 import os
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from typing import Tuple, Dict, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -91,7 +91,7 @@ class EmergencyStop:
             (is_crash, reason)
         """
         try:
-            from data_loader import load_data
+            from src.data.loader import load_data
 
             # Load VNINDEX
             vnindex = load_data("VNINDEX", lookback=10, use_cache=False)
@@ -112,8 +112,8 @@ class EmergencyStop:
 
             return False, None
 
-        except Exception as e:
-            print(f"⚠️ Lỗi check market crash: {e}")
+        except Exception:
+            print("⚠️ Lỗi check market crash")
             return False, None
 
     def is_emergency_active(self) -> bool:
@@ -208,7 +208,7 @@ class EmergencyStop:
 
         if self.is_emergency_active():
             event = EmergencyEvent(**self.events["active_emergency"])
-            msg.append(f"⚠️ **EMERGENCY ACTIVE**")
+            msg.append("⚠️ **EMERGENCY ACTIVE**")
             msg.append(f"Type: {event.event_type}")
             msg.append(f"Reason: {event.reason}")
             msg.append(f"Triggered: {event.timestamp[:16]}")

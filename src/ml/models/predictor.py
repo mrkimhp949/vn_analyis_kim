@@ -1,11 +1,11 @@
+import logging
+import os
+
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-import joblib
-import os
-import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,12 @@ class MLPredictor:
         self.rf_model = None
         self.scaler = StandardScaler()
         self.models_dir = "models"
+        self.ml_enabled = True  # NEW: Flag to track if ML is usable
+        self.using_dummy_models = False  # NEW: Flag to track dummy models
         self.ensure_models_dir()
         # Đồng bộ số features mong đợi với features.get_feature_columns()
         try:
-            from features import (
+            from src.ml.features.technical import (
                 get_feature_columns,
             )  # tránh import vòng bằng cách import khi cần
 
@@ -31,8 +33,8 @@ class MLPredictor:
         try:
             os.makedirs(self.models_dir, exist_ok=True)
             logger.info(f"✅ Models directory: {os.path.abspath(self.models_dir)}")
-        except Exception as e:
-            logger.error(f"⚠️ Không thể tạo thư mục models: {e}")
+        except Exception:
+            logger.error("⚠️ Không thể tạo thư mục models")
 
     def create_dummy_models(self):
         """Tạo models mẫu với ĐÚNG 18 features"""
@@ -73,7 +75,7 @@ class MLPredictor:
 
             # Save feature names if available
             try:
-                from features import get_feature_columns
+                from src.ml.features.technical import get_feature_columns
 
                 metadata["feature_names"] = get_feature_columns()
             except Exception:
@@ -87,18 +89,18 @@ class MLPredictor:
             logger.info(
                 f"✅ Models saved successfully with {self.expected_features} features"
             )
-        except Exception as e:
-            logger.error(f"❌ Lỗi khi lưu models: {e}")
+        except Exception:
+            logger.error("❌ Lỗi khi lưu models")
 
     def train_random_forest(self, X_train, y_train):
         """Train Random Forest với class_weight và params tối ưu."""
         logger.info("🌲 Training Random Forest with optimized parameters...")
 
         if X_train.shape[1] != self.expected_features:
-            from exceptions import ModelPredictionError
+            from src.config.exceptions import ModelPredictionError
 
             raise ModelPredictionError(
-                f"Feature count mismatch during training",
+                "Feature count mismatch during training",
                 context={
                     "got": X_train.shape[1],
                     "expected": self.expected_features,
@@ -129,24 +131,26 @@ class MLPredictor:
         logger.info("📊 Evaluating model performance...")
         try:
             from sklearn.metrics import (
-                classification_report,
                 accuracy_score,
+                classification_report,
+                f1_score,
                 precision_score,
                 recall_score,
-                f1_score,
             )
 
             y_pred = self.rf_model.predict(X_test)
 
-            accuracy = accuracy_score(y_test, y_pred)
-            precision = precision_score(y_test, y_pred, average="weighted")
-            recall = recall_score(y_test, y_pred, average="weighted")
-            f1 = f1_score(y_test, y_pred, average="weighted")
+            _accuracy = accuracy_score(y_test, y_pred)  # noqa: F841
+            _precision = precision_score(
+                y_test, y_pred, average="weighted"
+            )  # noqa: F841
+            _recall = recall_score(y_test, y_pred, average="weighted")  # noqa: F841
+            _f1 = f1_score(y_test, y_pred, average="weighted")  # noqa: F841
 
-            logger.info(f"   - Accuracy:  {accuracy:.4f}")
-            logger.info(f"   - Precision: {precision:.4f}")
-            logger.info(f"   - Recall:    {recall:.4f}")
-            logger.info(f"   - F1-Score:  {f1:.4f}")
+            logger.info(f"   - Accuracy:  {_accuracy:.4f}")
+            logger.info(f"   - Precision: {_precision:.4f}")
+            logger.info(f"   - Recall:    {_recall:.4f}")
+            logger.info(f"   - F1-Score:  {_f1:.4f}")
 
             logger.info("   - Classification Report:")
             # Dùng print để format đẹp hơn trong log
@@ -154,11 +158,22 @@ class MLPredictor:
                 classification_report(y_test, y_pred, target_names=["Down/Hold", "Up"])
             )
 
-        except Exception as e:
-            logger.error(f"❌ Error during model evaluation: {e}")
+        except Exception:
+            logger.error("❌ Error during model evaluation")
 
     def predict(self, X):
-        """Prediction với feature validation"""
+        """
+        Prediction với feature validation
+
+        NEW: Checks if ML is enabled before predicting
+        """
+        # NEW: Check if ML is enabled
+        if not self.ml_enabled:
+            raise ValueError(
+                "ML predictions disabled: Models not loaded. "
+                "Train models first: python scripts/train_models.py"
+            )
+
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X_arr = X.values
         else:
@@ -181,8 +196,8 @@ class MLPredictor:
                 X_scaled = self.scaler.transform(X_arr)
             else:
                 X_scaled = X_arr
-        except Exception as e:
-            logger.error(f"⚠️ Lỗi scaling: {e}")
+        except Exception:
+            logger.error("⚠️ Lỗi scaling")
             X_scaled = X_arr
 
         # RF prediction
@@ -190,11 +205,11 @@ class MLPredictor:
             try:
                 rf_pred = self.rf_model.predict_proba(X_scaled)[:, 1]
                 return rf_pred
-            except Exception as e:
-                logger.error(f"⚠️ RF predict error: {e}")
-                return np.random.uniform(0.3, 0.7, n)
+            except Exception:
+                logger.error("⚠️ RF predict error")
+                raise ValueError("Model prediction failed")
         else:
-            return np.random.uniform(0.3, 0.7, n)
+            raise ValueError("RF model not initialized")
 
     def load_models(self):
         """Load pre-trained models và scaler"""
@@ -218,7 +233,7 @@ class MLPredictor:
 
                         # Check if saved model matches current feature definition
                         try:
-                            from features import get_feature_columns
+                            from src.ml.features.technical import get_feature_columns
 
                             current_features = len(get_feature_columns())
 
@@ -231,8 +246,8 @@ class MLPredictor:
                                 )
                                 self.create_dummy_models()
                                 return True
-                        except Exception as e:
-                            logger.warning(f"Could not verify features: {e}")
+                        except Exception:
+                            logger.warning("Could not verify features")
 
                 # Load models
                 self.rf_model = joblib.load(rf_path)
@@ -242,16 +257,53 @@ class MLPredictor:
                     f"✅ Loaded trained models (expecting {self.expected_features} features)"
                 )
                 models_loaded = True
+                self.ml_enabled = True
+                self.using_dummy_models = False
             else:
-                logger.warning("ℹ️ Models not found, creating dummy models...")
-                self.create_dummy_models()
-                models_loaded = True
+                # CRITICAL: No models found
+                logger.critical(
+                    "\n" + "=" * 70 + "\n"
+                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
+                    + "=" * 70
+                    + "\n"
+                    f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
+                    "\n"
+                    "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
+                    "\n"
+                    "🔧 ĐỂ SỬA LỖI NÀY:\n"
+                    "1. Chạy lệnh: python scripts/train_models.py\n"
+                    "2. Hoặc: python -m src.ml.training.pipeline\n"
+                    "3. Sau khi train xong, khởi động lại bot\n"
+                    "\n"
+                    "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
+                )
 
-        except Exception as e:
-            logger.error(f"⚠️ Lỗi khi load models: {e}")
-            logger.info("🔄 Creating dummy models as fallback...")
-            self.create_dummy_models()
-            models_loaded = True
+                # DISABLE ML instead of creating dummy models
+                self.ml_enabled = False
+                self.using_dummy_models = False
+                models_loaded = False
+
+        except Exception:
+            logger.critical(
+                "\n" + "=" * 70 + "\n"
+                "⚠️⚠️⚠️ LỖI KHI LOAD ML MODELS ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
+                "Lỗi\n"
+                "\n"
+                "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
+                "\n"
+                "🔧 ĐỂ SỬA LỖI NÀY:\n"
+                "1. Kiểm tra log chi tiết ở trên\n"
+                "2. Xóa models cũ (nếu bị corrupt): rm -rf models/\n"
+                "3. Train lại: python scripts/train_models.py\n"
+                "4. Khởi động lại bot\n"
+                "\n"
+                "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
+            )
+
+            # DISABLE ML instead of creating dummy models
+            self.ml_enabled = False
+            self.using_dummy_models = False
+            models_loaded = False
 
         return models_loaded
 

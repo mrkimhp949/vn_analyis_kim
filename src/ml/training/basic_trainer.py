@@ -1,17 +1,19 @@
 """
-Script để train ML models
-Chạy lệnh: python train_models.py
+Basic ML Model Trainer
+Train basic ML models (Random Forest + LSTM)
+Chạy lệnh: python -m src.ml.training.basic_trainer
 """
 
-from data_loader import load_data
-from ml_signals import MLSignalGenerator
-from config import TICKERS
 import pandas as pd
+from src.data.loader import load_data
+from src.ml.signals.generator import MLSignalGenerator
+
+from src.config.legacy_config import TICKERS
 
 
-def train_models():
+def train_basic_models():
     print("=" * 60)
-    print("🎓 TRAINING ML MODELS")
+    print("🎓 TRAINING BASIC ML MODELS")
     print("=" * 60)
 
     # Load data từ nhiều cổ phiếu để train tốt hơn
@@ -23,8 +25,8 @@ def train_models():
             df = load_data(symbol, lookback=500)  # Load nhiều data hơn
             all_data.append(df)
             print(f"✅ Đã tải {len(df)} nến")
-        except Exception as e:
-            print(f"❌ Lỗi tải {symbol}: {e}")
+        except Exception:
+            print(f"❌ Lỗi tải {symbol}")
 
     # Combine tất cả data
     print(f"\n📊 Tổng hợp dữ liệu từ {len(all_data)} cổ phiếu...")
@@ -46,4 +48,4 @@ def train_models():
 
 
 if __name__ == "__main__":
-    train_models()
+    train_basic_models()

@@ -3,12 +3,12 @@
 Walk-Forward Testing
 Test chiến lược với out-of-sample data để tránh overfitting
 """
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import List, Dict, Tuple
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+from typing import Dict, List
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +74,10 @@ class WalkForwardTester:
         Returns:
             Dict với kết quả tổng hợp
         """
-        print(f"🔄 Starting Walk-Forward Test...")
-        print(f"   Train: {self.train_period} days")
-        print(f"   Test: {self.test_period} days")
-        print(f"   Step: {self.step} days")
+        print("🔄 Starting Walk-Forward Test...")
+        print("   Train: {self.train_period} days")
+        print("   Test: {self.test_period} days")
+        print("   Step: {self.step} days")
         print(f"   Symbols: {len(symbols)}")
 
         all_results = []
@@ -88,8 +88,8 @@ class WalkForwardTester:
                     symbol, strategy_function, initial_capital
                 )
                 all_results.extend(symbol_results)
-            except Exception as e:
-                logger.error(f"Error testing {symbol}: {e}")
+            except Exception:
+                logger.error(f"Error testing {symbol}")
 
         if not all_results:
             return {"total_windows": 0, "message": "No results"}
@@ -101,7 +101,7 @@ class WalkForwardTester:
         self, symbol: str, strategy_function: callable, initial_capital: float
     ) -> List[WalkForwardResult]:
         """Test một symbol với walk-forward"""
-        from data_loader import load_data
+        from src.data.loader import load_data
 
         # Load full history
         df = load_data(symbol, lookback=500, use_cache=True)
@@ -152,8 +152,8 @@ class WalkForwardTester:
                 results.append(result)
                 window_id += 1
 
-            except Exception as e:
-                logger.error(f"Error in window {window_id} for {symbol}: {e}")
+            except Exception:
+                logger.error(f"Error in window {window_id} for {symbol}")
 
             # Move forward
             start_idx += self.step
@@ -340,7 +340,7 @@ def example_strategy(train_data: pd.DataFrame, test_data: pd.DataFrame) -> List[
     Returns:
         List of trades với format: {'entry_date', 'exit_date', 'pnl'}
     """
-    from ml_signals import MLSignalGenerator
+    from src.ml.signals.generator import MLSignalGenerator
 
     ml_gen = MLSignalGenerator()
     trades = []

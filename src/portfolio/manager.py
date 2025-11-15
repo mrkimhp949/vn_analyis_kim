@@ -4,14 +4,16 @@ Thay thế JSON files bằng database
 Thread-safe với locking mechanism
 """
 
-from datetime import datetime
-from typing import Dict, List, Optional
-from threading import Lock, RLock
-from contextlib import contextmanager
-from database import get_db
-from monitoring import get_performance_monitor
-from trading_config import get_config
 import logging
+from contextlib import contextmanager
+from datetime import datetime
+from threading import RLock
+from typing import Dict, Optional
+
+from src.data.database import get_db
+from src.config.trading_config import get_config
+
+from src.monitoring.performance import get_performance_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +32,10 @@ class PortfolioManager:
         self.db = get_db()
         self.monitor = get_performance_monitor()
         self.config = get_config()
-        
+
         # Thread safety
         self._lock = RLock()  # Reentrant lock for nested calls
-        
+
         logger.info("✅ Portfolio Manager initialized with thread safety")
 
     @contextmanager
@@ -44,7 +46,7 @@ class PortfolioManager:
             yield
         finally:
             self._lock.release()
-    
+
     def get_positions(self) -> Dict:
         """Get all active positions (thread-safe)"""
         with self._lock:
@@ -63,15 +65,22 @@ class PortfolioManager:
         Add new position or average up an existing one (thread-safe).
         Tự động kiểm tra và xử lý mua mới hoặc trung bình giá.
         """
-        from exceptions import PortfolioError
+        from src.config.exceptions import PortfolioError
 
         # Validate inputs
         if not symbol or not isinstance(symbol, str):
-            raise PortfolioError("Symbol must be a non-empty string", context={"symbol": symbol})
+            raise PortfolioError(
+                "Symbol must be a non-empty string", context={"symbol": symbol}
+            )
         if not isinstance(shares, int) or shares <= 0:
-            raise PortfolioError("Shares must be a positive integer", context={"shares": shares})
+            raise PortfolioError(
+                "Shares must be a positive integer", context={"shares": shares}
+            )
         if not isinstance(entry_price, (int, float)) or entry_price <= 0:
-            raise PortfolioError("Entry price must be a positive number", context={"entry_price": entry_price})
+            raise PortfolioError(
+                "Entry price must be a positive number",
+                context={"entry_price": entry_price},
+            )
 
         # Thread-safe transaction
         with self._transaction():
@@ -195,7 +204,7 @@ class PortfolioManager:
         reason: str = "Partial Exit",
     ):
         """Reduce position size (partial sell)."""
-        from exceptions import PortfolioError
+        from src.config.exceptions import PortfolioError
 
         positions = self.db.get_positions()
 
@@ -296,8 +305,8 @@ class PortfolioManager:
                         f"⚠️ Calculated 0 shares to sell for {symbol} with type {exit_type}"
                     )
 
-            except (ValueError, TypeError) as e:
-                print(f"❌ Invalid exit_type format: {exit_type}. Error: {e}")
+            except (ValueError, TypeError):
+                print("❌ Invalid exit_type format: {exit_type}.")
 
     def close_position(
         self, symbol: str, exit_price: float, reason: str = "Exit signal"
@@ -306,7 +315,7 @@ class PortfolioManager:
         positions = self.db.get_positions()
 
         if symbol not in positions:
-            print(f"⚠️ Position {symbol} not found to close.")
+            print("⚠️ Position {symbol} not found to close.")
             return
 
         pos = positions[symbol]
@@ -345,7 +354,7 @@ class PortfolioManager:
         # Delete position
         self.db.delete_position(symbol)
 
-        print(f"✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
+        print("✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
 
     def update_position_price(self, symbol: str, current_price: float):
         """Update current price for position"""
@@ -404,22 +413,22 @@ class PortfolioManager:
         # Lấy snapshot gần nhất từ DB (thường là cuối ngày hôm qua)
         last_snapshot = self.db.get_last_portfolio_snapshot()
         if not last_snapshot:
-            return 0.0 # Không có snapshot, không thể tính PNL trong ngày
+            return 0.0  # Không có snapshot, không thể tính PNL trong ngày
 
         # Lấy giá trị hiện tại của portfolio
         current_portfolio_value = self.get_portfolio_value().get("total_value", 0.0)
-        
+
         # Lấy tổng vốn từ config (hoặc có thể lấy từ snapshot nếu muốn)
         total_capital = self.config.trading.total_capital
         if total_capital == 0:
             return 0.0
 
         # PNL trong ngày = (Giá trị hiện tại - Giá trị cuối ngày hôm qua)
-        daily_pnl = current_portfolio_value - last_snapshot['total_value']
-        
+        daily_pnl = current_portfolio_value - last_snapshot["total_value"]
+
         # PNL % so với tổng vốn
         daily_pnl_pct = daily_pnl / total_capital
-        
+
         return daily_pnl_pct
 
     def save_portfolio_snapshot(self):
@@ -435,7 +444,7 @@ class PortfolioManager:
             num_positions=portfolio["num_positions"],
         )
 
-        print(f"📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
+        print("📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
 
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
@@ -457,7 +466,7 @@ class PortfolioManager:
 
         # Individual positions
         if positions:
-            lines.append(f"\n🎯 *POSITIONS:*")
+            lines.append("\n🎯 *POSITIONS:*")
             for symbol, pos in positions.items():
                 shares = pos["shares"]
                 entry_price = pos["avg_price"]
@@ -475,7 +484,7 @@ class PortfolioManager:
 
         # Performance metrics
         if metrics["total_trades"] > 0:
-            lines.append(f"\n📊 *PERFORMANCE:*")
+            lines.append("\n📊 *PERFORMANCE:*")
             lines.append(f"• Total Trades: {metrics['total_trades']}")
             lines.append(f"• Win Rate: {metrics['win_rate']:.1f}%")
             lines.append(f"• Avg Profit: {metrics['avg_profit']:,.0f} VNĐ")

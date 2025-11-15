@@ -4,8 +4,7 @@ Portfolio Lock - Prevent race conditions
 """
 
 import threading
-from typing import Tuple, Optional
-from datetime import datetime
+from typing import Tuple
 
 
 class PortfolioLock:

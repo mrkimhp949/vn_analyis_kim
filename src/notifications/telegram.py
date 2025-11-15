@@ -3,14 +3,11 @@ Telegram Notifications Helper
 Gửi notifications cho subscribers khi có tin tức/signals mới
 """
 
-import asyncio
-from typing import List, Optional
 from telegram import Bot
 from telegram.error import TelegramError
 
 try:
-    from telegram_subscriptions import SubscriptionManager
-    from config import TELEGRAM_TOKEN
+    from src.notifications.subscriptions import SubscriptionManager
 
     subscription_manager = SubscriptionManager()
     bot_instance = None  # Will be set by main app
@@ -64,13 +61,13 @@ async def send_notification_to_subscribers(
                     reply_markup=reply_markup,
                     parse_mode="Markdown",
                 )
-            except TelegramError as e:
-                print(f"⚠️ Không thể gửi notification cho user {user_id}: {e}")
-            except Exception as e:
-                print(f"❌ Lỗi gửi notification: {e}")
+            except TelegramError:
+                print(f"⚠️ Không thể gửi notification cho user {user_id}")
+            except Exception:
+                print("❌ Lỗi gửi notification")
 
-    except Exception as e:
-        print(f"❌ Lỗi send_notification_to_subscribers: {e}")
+    except Exception:
+        print("❌ Lỗi send_notification_to_subscribers")
 
 
 async def send_daily_summary_to_user(user_id: int):
@@ -79,7 +76,7 @@ async def send_daily_summary_to_user(user_id: int):
         return
 
     try:
-        from tg_listener import generate_daily_summary
+        from src.notifications.listener import generate_daily_summary
 
         summary = await generate_daily_summary()
 
@@ -99,8 +96,8 @@ async def send_daily_summary_to_user(user_id: int):
             parse_mode="Markdown",
             reply_markup=reply_markup,
         )
-    except Exception as e:
-        print(f"❌ Lỗi gửi daily summary cho user {user_id}: {e}")
+    except Exception:
+        print(f"❌ Lỗi gửi daily summary cho user {user_id}")
 
 
 async def send_daily_summary_to_all():
@@ -110,7 +107,6 @@ async def send_daily_summary_to_all():
 
     try:
         # Lấy tất cả users có subscription
-        all_users = set()
         for user_data in subscription_manager.subscriptions.get("users", {}).values():
             # This is a bit hacky, but we need to get user IDs
             pass
@@ -127,7 +123,7 @@ async def send_daily_summary_to_all():
             user_ids.update(subscribers)
 
         # Also include default chat_id if no subscriptions
-        from config import CHAT_ID
+        from src.config.legacy_config import CHAT_ID
 
         if CHAT_ID:
             user_ids.add(str(CHAT_ID))
@@ -139,11 +135,11 @@ async def send_daily_summary_to_all():
                 await send_daily_summary_to_user(user_id)
             except ValueError:
                 continue
-            except Exception as e:
-                print(f"⚠️ Lỗi gửi summary cho user {user_id_str}: {e}")
+            except Exception:
+                print(f"⚠️ Lỗi gửi summary cho user {user_id_str}")
 
-    except Exception as e:
-        print(f"❌ Lỗi send_daily_summary_to_all: {e}")
+    except Exception:
+        print("❌ Lỗi send_daily_summary_to_all")
 
 
 def set_bot_instance(bot: Bot):

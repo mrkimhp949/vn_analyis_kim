@@ -9,15 +9,16 @@ Features:
 - Risk alerts
 """
 
-import logging
-from typing import Dict, Optional, Callable, List
-from datetime import datetime
-from dataclasses import dataclass
 import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable, Dict, List
+
+from src.strategies.exit_logic import ImprovedExitStrategy
+from src.portfolio.manager import PortfolioManager
 
 from websocket.price_feed import PriceFeedClient, PriceUpdate, WebSocketConfig
-from portfolio_manager import PortfolioManager
-from improved_exit_logic import ImprovedExitStrategy, ExitDecision
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class LivePortfolioMonitor:
 
         # Get position details
         entry_price = position["avg_price"]
-        entry_date = position.get("entry_date", datetime.now())
+        position.get("entry_date", datetime.now())
         stop_loss = position.get("stop_loss", entry_price * 0.95)
         take_profit = position.get("take_profit", entry_price * 1.15)
 
@@ -193,8 +194,8 @@ class LivePortfolioMonitor:
         for callback in self.alert_callbacks:
             try:
                 callback(alert)
-            except Exception as e:
-                logger.error(f"Error in alert callback: {e}")
+            except Exception:
+                logger.error("Error in alert callback")
 
     def update_portfolio_tracking(self):
         """Update portfolio performance tracking"""
@@ -211,8 +212,8 @@ class LivePortfolioMonitor:
 
             self.last_portfolio_value = current_value
 
-        except Exception as e:
-            logger.error(f"Error updating portfolio tracking: {e}")
+        except Exception:
+            logger.error("Error updating portfolio tracking")
 
     def start(self, symbols: List[str] = None):
         """Start live monitoring"""
@@ -297,7 +298,7 @@ class LivePortfolioMonitor:
 
         for symbol, pos in summary["positions"].items():
             pnl_str = f"+{pos['pnl']:,.0f}" if pos["pnl"] >= 0 else f"{pos['pnl']:,.0f}"
-            pnl_pct_str = f"({pos['pnl_percent']:+.2f}%)"
+            _pnl_pct_str = f"({pos['pnl_percent']:+.2f}%)"  # noqa: F841
             today_str = f"{pos['change_today']:+.2f}%"
 
             print(

@@ -2,14 +2,15 @@
 Unit tests for FastAPI Endpoints
 """
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.api.main import app
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from fastapi.testclient import TestClient
-from main import app
 
 
 class TestAPIEndpoints:
@@ -18,7 +19,9 @@ class TestAPIEndpoints:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup test client"""
-        self.client = TestClient(app)
+        with TestClient(app) as client:
+            self.client = client
+            yield
 
     def test_root_endpoint(self):
         """Test root endpoint returns correct response"""
@@ -177,7 +180,9 @@ class TestAPIErrorHandling:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup test client"""
-        self.client = TestClient(app)
+        with TestClient(app) as client:
+            self.client = client
+            yield
 
     def test_invalid_endpoint_returns_404(self):
         """Test invalid endpoint returns 404"""

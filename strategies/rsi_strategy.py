@@ -1,11 +1,13 @@
+import logging
+from typing import Any, Dict, List
 
-from strategies.base_strategy import BaseStrategy
-from typing import Dict, Any, List
 import pandas as pd
 import ta
-import logging
+
+from strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
+
 
 class RsiStrategy(BaseStrategy):
     """
@@ -15,12 +17,20 @@ class RsiStrategy(BaseStrategy):
     """
 
     def _validate_config(self):
-        required_keys = ["rsi_period", "buy_threshold", "sell_threshold", "sl_pct", "tp_pct"]
+        required_keys = [
+            "rsi_period",
+            "buy_threshold",
+            "sell_threshold",
+            "sl_pct",
+            "tp_pct",
+        ]
         for key in required_keys:
             if key not in self.config:
                 raise ValueError(f"Missing required config key in RsiStrategy: '{key}'")
 
-    def generate_signals(self, market_data: Dict[str, pd.DataFrame], **kwargs) -> List[Dict[str, Any]]:
+    def generate_signals(
+        self, market_data: Dict[str, pd.DataFrame], **kwargs
+    ) -> List[Dict[str, Any]]:
         """
         Tạo tín hiệu dựa trên RSI.
         """
@@ -30,16 +40,21 @@ class RsiStrategy(BaseStrategy):
                 continue
 
             # Tính RSI
-            rsi = ta.momentum.RSIIndicator(close=df["close"], window=self.config["rsi_period"]).rsi()
+            rsi = ta.momentum.RSIIndicator(
+                close=df["close"], window=self.config["rsi_period"]
+            ).rsi()
             latest_rsi = rsi.iloc[-1]
-            current_price = df['close'].iloc[-1]
+            current_price = df["close"].iloc[-1]
 
             # Tạo tín hiệu MUA
             if latest_rsi < self.config["buy_threshold"]:
                 signal = {
                     "symbol": symbol,
                     "action": "BUY",
-                    "confidence": 1 - (latest_rsi / self.config["buy_threshold"]), # Confidence cao hơn khi RSI càng thấp
+                    "confidence": 1
+                    - (
+                        latest_rsi / self.config["buy_threshold"]
+                    ),  # Confidence cao hơn khi RSI càng thấp
                     "reason": f"RSI({self.config['rsi_period']}) is {latest_rsi:.2f} < {self.config['buy_threshold']}",
                     "entry_price": current_price,
                     "strategy_name": self.name,
@@ -47,7 +62,7 @@ class RsiStrategy(BaseStrategy):
                 exit_levels = self.determine_exit_levels(signal)
                 signal.update(exit_levels)
                 signals.append(signal)
-            
+
             # Logic tạo tín hiệu BÁN (để đóng vị thế) có thể được thêm ở đây
             # Ví dụ:
             # if latest_rsi > self.config["sell_threshold"]:

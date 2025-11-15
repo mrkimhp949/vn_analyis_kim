@@ -5,9 +5,10 @@ All trading parameters in one place
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 from datetime import datetime, timedelta
-from exceptions import ConfigurationError
+from typing import Optional
+
+from src.config.exceptions import ConfigurationError
 
 
 @dataclass
@@ -219,10 +220,26 @@ class TelegramConfig:
 
     def validate(self):
         """Validate telegram config"""
-        if not self.token:
-            raise ValueError("TELEGRAM_TOKEN not set")
-        if not self.chat_id:
-            raise ValueError("CHAT_ID not set")
+        if not self.token or self.token.strip() == "":
+            raise ConfigurationError(
+                "TELEGRAM_TOKEN not set or empty. Get your token from https://t.me/Botfather",
+                context={
+                    "config": "telegram",
+                    "field": "token",
+                    "value": self.token,
+                    "help": "Set TELEGRAM_TOKEN in .env file or environment variable",
+                },
+            )
+        if not self.chat_id or self.chat_id.strip() == "":
+            raise ConfigurationError(
+                "CHAT_ID not set or empty",
+                context={
+                    "config": "telegram",
+                    "field": "chat_id",
+                    "value": self.chat_id,
+                    "help": "Set CHAT_ID in .env file or environment variable",
+                },
+            )
 
 
 @dataclass
@@ -292,8 +309,8 @@ class Config:
         if self.telegram.enabled:
             try:
                 self.telegram.validate()
-            except ValueError as e:
-                errors.append(f"Telegram: {e}")
+            except (ValueError, ConfigurationError) as e:
+                errors.append(f"Telegram: {str(e)}")
 
         # Validate API config
         if self.api.tcbs_rate_limit < 1:
@@ -391,5 +408,5 @@ if __name__ == "__main__":
     try:
         config.validate()
         print("\n✅ Configuration valid!")
-    except ValueError as e:
-        print(f"\n❌ Configuration error: {e}")
+    except ValueError:
+        print("\n❌ Configuration error")

@@ -1,8 +1,12 @@
+import logging
+import math
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
-import math
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 # Sector mapping for Vietnamese stocks
@@ -94,9 +98,9 @@ SECTOR_MAP = {
     "MCH": "FOOD_BEVERAGE",
     "KDC": "FOOD_BEVERAGE",
     "QNS": "FOOD_BEVERAGE",
-    "SBT": "FOOD_BEVERAGE",
+    # "SBT": "FOOD_BEVERAGE",  # Duplicate - see below
     "VCF": "FOOD_BEVERAGE",
-    "BAF": "FOOD_BEVERAGE",
+    # "BAF": "FOOD_BEVERAGE",  # Duplicate - see below
     "ANV": "FOOD_BEVERAGE",
     "MML": "FOOD_BEVERAGE",
     # Oil & Gas
@@ -104,11 +108,11 @@ SECTOR_MAP = {
     "PLX": "OIL_GAS",
     "PVS": "OIL_GAS",
     "PVD": "OIL_GAS",
-    "PVT": "OIL_GAS",
+    # "PVT": "OIL_GAS",  # Duplicate - see below
     "PVC": "OIL_GAS",
     "PVG": "OIL_GAS",
     "BSR": "OIL_GAS",
-    "POW": "OIL_GAS",
+    # "POW": "OIL_GAS",  # Duplicate - keep UTILITIES
     "PVB": "OIL_GAS",
     # Steel & Materials
     "HPG": "STEEL_MATERIALS",
@@ -120,12 +124,12 @@ SECTOR_MAP = {
     "DTL": "STEEL_MATERIALS",
     "VIS": "STEEL_MATERIALS",
     "SMC": "STEEL_MATERIALS",
-    "TNG": "STEEL_MATERIALS",
+    # "TNG": "STEEL_MATERIALS",  # Duplicate - see below
     "VCS": "STEEL_MATERIALS",
     # Construction
     "CTD": "CONSTRUCTION",
     "HBC": "CONSTRUCTION",
-    "PC1": "CONSTRUCTION",
+    # "PC1": "CONSTRUCTION",  # Duplicate - see below
     "LCG": "CONSTRUCTION",
     "HT1": "CONSTRUCTION",
     "VCG": "CONSTRUCTION",
@@ -139,7 +143,7 @@ SECTOR_MAP = {
     "NT2": "UTILITIES",
     "GEG": "UTILITIES",
     "REE": "UTILITIES",
-    "PC1": "UTILITIES",
+    # "PC1": "UTILITIES",  # Duplicate - final assignment is CONSTRUCTION (line 189)
     "VSH": "UTILITIES",
     "BWE": "UTILITIES",
     # Healthcare
@@ -158,18 +162,18 @@ SECTOR_MAP = {
     "HAH": "TRANSPORTATION",
     "VOS": "TRANSPORTATION",
     "VSC": "TRANSPORTATION",
-    "PVT": "TRANSPORTATION",
+    "PVT": "TRANSPORTATION",  # Final assignment for PVT
     # Agriculture
     "HAG": "AGRICULTURE",
     "HNG": "AGRICULTURE",
-    "SBT": "AGRICULTURE",
-    "BAF": "AGRICULTURE",
+    "SBT": "AGRICULTURE",  # Final assignment for SBT
+    "BAF": "AGRICULTURE",  # Final assignment for BAF
     "NSC": "AGRICULTURE",
     "LSS": "AGRICULTURE",
     "HVG": "AGRICULTURE",
     # Textile
     "MSH": "TEXTILE",
-    "TNG": "TEXTILE",
+    "TNG": "TEXTILE",  # Final assignment for TNG
     "STK": "TEXTILE",
     "VGT": "TEXTILE",
     "TCM": "TEXTILE",
@@ -181,6 +185,8 @@ SECTOR_MAP = {
     "BFC": "CHEMICALS",
     "CSV": "CHEMICALS",
     "LAS": "CHEMICALS",
+    # Construction (additional)
+    "PC1": "CONSTRUCTION",  # Final assignment for PC1
     # Insurance
     "BVH": "INSURANCE",
     "BMI": "INSURANCE",
@@ -228,7 +234,7 @@ def check_sector_overweight(
 
 def load_returns_dataframe(symbols: List[str], lookback: int = 60) -> pd.DataFrame:
     """Load daily returns for given symbols."""
-    from data_loader import load_data
+    from src.data.loader import load_data
 
     returns_data = {}
 
@@ -239,8 +245,8 @@ def load_returns_dataframe(symbols: List[str], lookback: int = 60) -> pd.DataFra
                 returns = df["close"].pct_change().dropna()
                 if len(returns) >= 20:
                     returns_data[symbol] = returns
-        except Exception as e:
-            logger.warning(f"Could not load returns data for {symbol}: {e}")
+        except Exception:
+            logger.warning(f"Could not load returns data for {symbol}")
             continue
 
     if len(returns_data) < 2:

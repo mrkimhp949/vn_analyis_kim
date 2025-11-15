@@ -4,7 +4,8 @@ Lịch chạy theo giờ giao dịch VN, tránh gọi trong giờ nghỉ T3/T7
 """
 
 from datetime import datetime, time, timedelta
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
 import pytz
 
 # Timezone VN

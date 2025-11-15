@@ -1,7 +1,7 @@
 """SHAP-based feature selection utilities."""
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -42,8 +42,8 @@ def _compute_shap_importance(
         ).sort_values("shap_importance", ascending=False)
 
         return df_importance.reset_index(drop=True)
-    except Exception as exc:  # pragma: no cover - shap fallback
-        logger.warning(f"Không thể tính SHAP values: {exc}")
+    except Exception:  # pragma: no cover - shap fallback
+        logger.warning("Không thể tính SHAP values")
         return None
 
 

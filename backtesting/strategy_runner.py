@@ -3,16 +3,15 @@
 Strategy Runner - Run backtests with actual trading logic
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime, timedelta
+from typing import List
 
-from backtesting.engine import BacktestEngine, BacktestConfig, BacktestResult
-from improved_entry_logic import ImprovedEntryLogic
-from improved_exit_logic import ImprovedExitStrategy
-from data_loader import load_data
+from src.data.loader import load_data
+from src.strategies.entry_logic import ImprovedEntryLogic
+from src.strategies.exit_logic import ImprovedExitStrategy
+
+from backtesting.engine import BacktestConfig, BacktestEngine, BacktestResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,148 @@ class StrategyRunner:
 
         logger.info("Strategy runner initialized")
 
+    def _load_symbol_data(
+        self, symbols: List[str], start_date: datetime, end_date: datetime
+    ) -> dict:
+        """Load historical data for all symbols"""
+        data_cache = {}
+        for symbol in symbols:
+            try:
+                days_diff = (end_date - start_date).days
+                lookback = int(days_diff * 1.5)  # Add 50% buffer
+
+                df = load_data(symbol=symbol, lookback=lookback, use_cache=True)
+                if df is not None and len(df) > 0:
+                    df = df[df["time"] <= end_date].copy()
+                    data_cache[symbol] = df
+                    logger.info(f"Loaded {len(df)} bars for {symbol}")
+                else:
+                    logger.warning(f"No data for {symbol}")
+            except Exception:
+                logger.error(f"Error loading {symbol}")
+        return data_cache
+
+    def _get_trading_dates(
+        self, data_cache: dict, start_date: datetime, end_date: datetime
+    ) -> List:
+        """Extract and sort unique trading dates from data"""
+        all_dates = set()
+        for df in data_cache.values():
+            all_dates.update(df["time"].dt.date)
+        trading_dates = sorted(list(all_dates))
+        return [d for d in trading_dates if start_date.date() <= d <= end_date.date()]
+
+    def _check_exits_for_date(
+        self, current_date, data_cache: dict, current_prices: dict
+    ):
+        """Check exit conditions for all open positions"""
+        for symbol in list(self.engine.positions.keys()):
+            if symbol not in data_cache:
+                continue
+
+            df = data_cache[symbol]
+            df_up_to_date = df[df["time"].dt.date <= current_date].copy()
+
+            if len(df_up_to_date) < 50:
+                continue
+
+            current_price = df_up_to_date["close"].iloc[-1]
+            current_prices[symbol] = current_price
+
+            trade = self.engine.positions[symbol]
+
+            exit_decision = self.exit_logic.check_exit(
+                symbol=symbol,
+                entry_price=trade.entry_price,
+                current_price=current_price,
+                stop_loss=trade.stop_loss,
+                take_profit_targets=[trade.take_profit],
+                entry_date=trade.entry_date,
+                df=df_up_to_date,
+            )
+
+            if exit_decision.should_exit:
+                self.engine.close_position(
+                    symbol=symbol,
+                    date=datetime.combine(current_date, datetime.min.time()),
+                    exit_price=current_price,
+                    reason=(
+                        exit_decision.exit_reason.value
+                        if exit_decision.exit_reason
+                        else "Unknown"
+                    ),
+                )
+
+    def _check_entries_for_date(
+        self,
+        current_date,
+        symbols: List[str],
+        data_cache: dict,
+        current_prices: dict,
+        use_ml_signals: bool,
+    ):
+        """Check entry conditions for symbols without positions"""
+        for symbol in symbols:
+            if symbol not in data_cache:
+                continue
+
+            if symbol in self.engine.positions:
+                continue
+
+            df = data_cache[symbol]
+            df_up_to_date = df[df["time"].dt.date <= current_date].copy()
+
+            if len(df_up_to_date) < 200:
+                continue
+
+            current_price = df_up_to_date["close"].iloc[-1]
+            current_prices[symbol] = current_price
+
+            ml_signal = None
+            if use_ml_signals:
+                ml_signal = {
+                    "signal": "HOLD",
+                    "confidence": 50,
+                    "reason": "Backtest",
+                }
+
+            try:
+                entry_signal = self.entry_logic.analyze_entry(df_up_to_date, ml_signal)
+
+                if entry_signal.signal_type == "BUY":
+                    self.engine.open_position(
+                        symbol=symbol,
+                        date=datetime.combine(current_date, datetime.min.time()),
+                        entry_price=entry_signal.entry_price,
+                        stop_loss=entry_signal.stop_loss,
+                        take_profit=(
+                            entry_signal.take_profit_targets[1]
+                            if len(entry_signal.take_profit_targets) > 1
+                            else entry_signal.entry_price * 1.15
+                        ),
+                        reason=(
+                            f"{entry_signal.strength.value}: "
+                            f"{', '.join(entry_signal.reasons)}"
+                        ),
+                    )
+            except Exception:
+                logger.error(f"Error analyzing {symbol}")
+
+    def _close_remaining_positions(self, data_cache: dict, end_date: datetime):
+        """Close any remaining open positions at backtest end"""
+        for symbol in list(self.engine.positions.keys()):
+            if symbol in data_cache:
+                df = data_cache[symbol]
+                final_price = df[df["time"].dt.date <= end_date.date()]["close"].iloc[
+                    -1
+                ]
+                self.engine.close_position(
+                    symbol=symbol,
+                    date=end_date,
+                    exit_price=final_price,
+                    reason="End of backtest",
+                )
+
     def run_backtest(
         self,
         symbols: List[str],
@@ -48,7 +189,7 @@ class StrategyRunner:
             symbols: List of stock symbols
             start_date: Backtest start date
             end_date: Backtest end date
-            use_ml_signals: Whether to use ML predictions (if False, uses technical only)
+            use_ml_signals: Whether to use ML predictions
 
         Returns:
             BacktestResult with all metrics
@@ -56,131 +197,26 @@ class StrategyRunner:
         logger.info(f"Starting backtest: {start_date.date()} → {end_date.date()}")
         logger.info(f"Symbols: {', '.join(symbols)}")
 
-        # Load historical data for all symbols
-        data_cache = {}
-        for symbol in symbols:
-            try:
-                # Calculate lookback bars (estimate ~250 trading days per year)
-                days_diff = (end_date - start_date).days
-                lookback = int(days_diff * 1.5)  # Add 50% buffer for indicators
-
-                df = load_data(symbol=symbol, lookback=lookback, use_cache=True)
-                if df is not None and len(df) > 0:
-                    # Filter to date range
-                    df = df[df["time"] <= end_date].copy()
-                    data_cache[symbol] = df
-                    logger.info(f"Loaded {len(df)} bars for {symbol}")
-                else:
-                    logger.warning(f"No data for {symbol}")
-            except Exception as e:
-                logger.error(f"Error loading {symbol}: {e}")
-
+        # Step 1: Load historical data
+        data_cache = self._load_symbol_data(symbols, start_date, end_date)
         if not data_cache:
             raise ValueError("No data loaded for any symbol")
 
-        # Get all unique trading dates
-        all_dates = set()
-        for df in data_cache.values():
-            all_dates.update(df["time"].dt.date)
-        trading_dates = sorted(list(all_dates))
-        trading_dates = [
-            d for d in trading_dates if start_date.date() <= d <= end_date.date()
-        ]
-
+        # Step 2: Get trading dates
+        trading_dates = self._get_trading_dates(data_cache, start_date, end_date)
         logger.info(f"Simulating {len(trading_dates)} trading days...")
 
-        # Simulate each trading day
+        # Step 3: Simulate each trading day
         for current_date in trading_dates:
             current_prices = {}
 
-            # Check exits first (using previous day's close)
-            for symbol in list(self.engine.positions.keys()):
-                if symbol not in data_cache:
-                    continue
+            # Check exits first
+            self._check_exits_for_date(current_date, data_cache, current_prices)
 
-                df = data_cache[symbol]
-                df_up_to_date = df[df["time"].dt.date <= current_date].copy()
-
-                if len(df_up_to_date) < 50:  # Need enough history
-                    continue
-
-                current_price = df_up_to_date["close"].iloc[-1]
-                current_prices[symbol] = current_price
-
-                trade = self.engine.positions[symbol]
-
-                # Check exit conditions
-                exit_decision = self.exit_logic.check_exit(
-                    symbol=symbol,
-                    entry_price=trade.entry_price,
-                    current_price=current_price,
-                    stop_loss=trade.stop_loss,
-                    take_profit_targets=[trade.take_profit],
-                    entry_date=trade.entry_date,
-                    df=df_up_to_date,
-                )
-
-                if exit_decision.should_exit:
-                    self.engine.close_position(
-                        symbol=symbol,
-                        date=datetime.combine(current_date, datetime.min.time()),
-                        exit_price=current_price,
-                        reason=(
-                            exit_decision.exit_reason.value
-                            if exit_decision.exit_reason
-                            else "Unknown"
-                        ),
-                    )
-
-            # Check entries (look for new opportunities)
-            for symbol in symbols:
-                if symbol not in data_cache:
-                    continue
-
-                # Skip if already have position
-                if symbol in self.engine.positions:
-                    continue
-
-                df = data_cache[symbol]
-                df_up_to_date = df[df["time"].dt.date <= current_date].copy()
-
-                if len(df_up_to_date) < 200:  # Need enough history for indicators
-                    continue
-
-                current_price = df_up_to_date["close"].iloc[-1]
-                current_prices[symbol] = current_price
-
-                # Generate entry signal
-                ml_signal = None
-                if use_ml_signals:
-                    # In real backtest, you'd use actual ML predictions here
-                    # For now, we'll just use technical analysis
-                    ml_signal = {
-                        "signal": "HOLD",
-                        "confidence": 50,
-                        "reason": "Backtest",
-                    }
-
-                try:
-                    entry_signal = self.entry_logic.analyze_entry(
-                        df_up_to_date, ml_signal
-                    )
-
-                    if entry_signal.signal_type == "BUY":
-                        self.engine.open_position(
-                            symbol=symbol,
-                            date=datetime.combine(current_date, datetime.min.time()),
-                            entry_price=entry_signal.entry_price,
-                            stop_loss=entry_signal.stop_loss,
-                            take_profit=(
-                                entry_signal.take_profit_targets[1]
-                                if len(entry_signal.take_profit_targets) > 1
-                                else entry_signal.entry_price * 1.15
-                            ),
-                            reason=f"{entry_signal.strength.value}: {', '.join(entry_signal.reasons)}",
-                        )
-                except Exception as e:
-                    logger.error(f"Error analyzing {symbol}: {e}")
+            # Check entries
+            self._check_entries_for_date(
+                current_date, symbols, data_cache, current_prices, use_ml_signals
+            )
 
             # Update equity curve
             self.engine.update_equity(
@@ -188,19 +224,8 @@ class StrategyRunner:
                 current_prices=current_prices,
             )
 
-        # Close any remaining positions at end
-        for symbol in list(self.engine.positions.keys()):
-            if symbol in data_cache:
-                df = data_cache[symbol]
-                final_price = df[df["time"].dt.date <= end_date.date()]["close"].iloc[
-                    -1
-                ]
-                self.engine.close_position(
-                    symbol=symbol,
-                    date=datetime.combine(end_date.date(), datetime.min.time()),
-                    exit_price=final_price,
-                    reason="Backtest End",
-                )
+        # Step 4: Close remaining positions
+        self._close_remaining_positions(data_cache, end_date)
 
         # Calculate and return results
         results = self.engine.calculate_results()

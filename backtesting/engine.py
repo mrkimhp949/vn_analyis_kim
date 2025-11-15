@@ -3,12 +3,13 @@
 Backtesting Engine - Test Trading Strategies with Historical Data
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -385,34 +386,34 @@ class BacktestEngine:
         print("=" * 80)
 
         print(f"\n📅 Period: {result.start_date.date()} → {result.end_date.date()}")
-        print(f"💰 Initial Capital: {result.initial_capital:,.0f} VND")
-        print(f"💰 Final Capital: {result.final_capital:,.0f} VND")
+        print("💰 Initial Capital: {result.initial_capital:,.0f} VND")
+        print("💰 Final Capital: {result.final_capital:,.0f} VND")
 
-        print(f"\n📊 Performance:")
+        print("\n📊 Performance:")
         print(
             f"  Total Return: {result.total_return:+,.0f} VND ({result.total_return_pct:+.2f}%)"
         )
-        print(f"  Annualized Return: {result.annualized_return:.2f}%")
+        print("  Annualized Return: {result.annualized_return:.2f}%")
         print(f"  Sharpe Ratio: {result.sharpe_ratio:.2f}")
         print(
             f"  Max Drawdown: {result.max_drawdown:,.0f} VND ({result.max_drawdown_pct:.2f}%)"
         )
 
-        print(f"\n📈 Trade Statistics:")
+        print("\n📈 Trade Statistics:")
         print(f"  Total Trades: {result.total_trades}")
-        print(f"  Winning Trades: {result.winning_trades} ({result.win_rate:.1f}%)")
+        print("  Winning Trades: {result.winning_trades} ({result.win_rate:.1f}%)")
         print(f"  Losing Trades: {result.losing_trades}")
         print(f"  Profit Factor: {result.profit_factor:.2f}")
 
-        print(f"\n💵 Win/Loss Analysis:")
-        print(f"  Average Win: {result.avg_win:+,.0f} VND")
-        print(f"  Average Loss: {result.avg_loss:+,.0f} VND")
-        print(f"  Largest Win: {result.largest_win:+,.0f} VND")
-        print(f"  Largest Loss: {result.largest_loss:+,.0f} VND")
+        print("\n💵 Win/Loss Analysis:")
+        print("  Average Win: {result.avg_win:+,.0f} VND")
+        print("  Average Loss: {result.avg_loss:+,.0f} VND")
+        print("  Largest Win: {result.largest_win:+,.0f} VND")
+        print("  Largest Loss: {result.largest_loss:+,.0f} VND")
 
-        print(f"\n⏱️  Other Metrics:")
+        print("\n⏱️  Other Metrics:")
         print(f"  Avg Holding Days: {result.avg_holding_days:.1f}")
-        print(f"  Total Commission: {result.total_commission:,.0f} VND")
-        print(f"  Total Slippage: {result.total_slippage:,.0f} VND")
+        print("  Total Commission: {result.total_commission:,.0f} VND")
+        print("  Total Slippage: {result.total_slippage:,.0f} VND")
 
         print("=" * 80 + "\n")

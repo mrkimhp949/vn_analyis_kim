@@ -10,13 +10,14 @@ Supports:
 """
 
 import asyncio
-import websockets
 import json
 import logging
-from typing import Dict, List, Callable, Optional
-from datetime import datetime
-from dataclasses import dataclass, field
 import threading
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Callable, Dict, List, Optional
+
+import websockets
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +120,8 @@ class PriceFeedClient:
             # Send subscription message
             await self.send_subscription()
 
-        except Exception as e:
-            logger.error(f"Connection error: {e}")
+        except Exception:
+            logger.error("Connection error")
             self.connected = False
             raise
 
@@ -140,8 +141,8 @@ class PriceFeedClient:
             logger.info(
                 f"Sent subscription for {len(self.config.subscribe_channels)} symbols"
             )
-        except Exception as e:
-            logger.error(f"Failed to send subscription: {e}")
+        except Exception:
+            logger.error("Failed to send subscription")
 
     async def handle_message(self, message: str):
         """Handle incoming WebSocket message"""
@@ -155,8 +156,8 @@ class PriceFeedClient:
 
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON: {message[:100]}")
-        except Exception as e:
-            logger.error(f"Error handling message: {e}")
+        except Exception:
+            logger.error("Error handling message")
 
     def process_price_update(self, data: Dict):
         """Process price update from WebSocket"""
@@ -188,11 +189,11 @@ class PriceFeedClient:
             for callback in self.price_callbacks:
                 try:
                     callback(update)
-                except Exception as e:
-                    logger.error(f"Error in callback {callback.__name__}: {e}")
+                except Exception:
+                    logger.error(f"Error in callback {callback.__name__}")
 
-        except Exception as e:
-            logger.error(f"Error processing price update: {e}")
+        except Exception:
+            logger.error("Error processing price update")
 
     async def receive_loop(self):
         """Main receive loop"""
@@ -204,8 +205,8 @@ class PriceFeedClient:
             logger.warning("WebSocket connection closed")
             self.connected = False
 
-        except Exception as e:
-            logger.error(f"Error in receive loop: {e}")
+        except Exception:
+            logger.error("Error in receive loop")
             self.connected = False
 
     async def reconnect(self):
@@ -224,8 +225,8 @@ class PriceFeedClient:
 
         try:
             await self.connect()
-        except Exception as e:
-            logger.error(f"Reconnection failed: {e}")
+        except Exception:
+            logger.error("Reconnection failed")
             await self.reconnect()
 
     async def run(self):
@@ -243,21 +244,30 @@ class PriceFeedClient:
                 if self.running:
                     await self.reconnect()
 
-            except Exception as e:
-                logger.error(f"Error in run loop: {e}")
+            except Exception:
+                logger.error("Error in run loop")
                 if self.running:
                     await self.reconnect()
 
     def start(self):
         """Start the WebSocket client in a background thread"""
+        if hasattr(self, "_thread") and self._thread and self._thread.is_alive():
+            logger.warning("WebSocket client already running")
+            return
 
         def run_async_loop():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self.run())
+            try:
+                loop.run_until_complete(self.run())
+            except Exception as e:
+                logger.error(f"Error in WebSocket loop: {e}")
+            finally:
+                loop.close()
 
-        thread = threading.Thread(target=run_async_loop, daemon=True)
-        thread.start()
+        self._thread = threading.Thread(target=run_async_loop)
+        self._thread.daemon = False  # Allow proper shutdown
+        self._thread.start()
         logger.info("WebSocket client started in background")
 
     async def stop(self):
@@ -270,6 +280,16 @@ class PriceFeedClient:
 
         self.connected = False
         logger.info("WebSocket client stopped")
+
+    def stop_sync(self):
+        """Synchronous stop method for proper shutdown"""
+        self.running = False
+        if hasattr(self, "_thread") and self._thread and self._thread.is_alive():
+            logger.info("Waiting for WebSocket thread to finish...")
+            self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                logger.warning("WebSocket thread did not stop gracefully")
+        logger.info("WebSocket client stopped synchronously")
 
     def get_price(self, symbol: str) -> Optional[PriceUpdate]:
         """Get latest price for a symbol"""

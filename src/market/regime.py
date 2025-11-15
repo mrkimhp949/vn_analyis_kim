@@ -4,15 +4,15 @@ market_regime.py - Market Regime Detection
 Phát hiện tình trạng thị trường để quyết định có nên trade hay không
 """
 
-from datetime import datetime, timedelta
 import logging
-from typing import Dict, Tuple, Optional
+import warnings
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
-from data_loader import load_data
-from trading_config import get_config
+from src.data.loader import load_data
+from src.config.trading_config import get_config
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 config = get_config()
 logger = logging.getLogger(__name__)
@@ -21,6 +21,9 @@ try:
     from hmmlearn.hmm import GaussianHMM  # type: ignore
 
     HMM_AVAILABLE = True
+
+    # Suppress hmmlearn convergence warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, module="hmmlearn")
 except ImportError:  # pragma: no cover - optional dependency
     HMM_AVAILABLE = False
     logger.info("hmmlearn not installed. HMM-based regime detection disabled.")
@@ -43,7 +46,6 @@ class MarketRegimeAnalyzer:
         self.trend_period = trend_period
         self.end_date = config.data.end_date
         self.start_date = config.data.start_date
-
 
     def analyze_market_regime(self) -> Dict:
         """
@@ -68,7 +70,9 @@ class MarketRegimeAnalyzer:
             )
 
             if vnindex.empty or len(vnindex) < 50:
-                logger.warning(f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}")
+                logger.warning(
+                    f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}"
+                )
                 return self._default_regime()
 
             # Tính các chỉ số
@@ -131,8 +135,8 @@ class MarketRegimeAnalyzer:
             logger.info(f"Market Regime: {regime} | Tradeable: {tradeable}")
             return result
 
-        except Exception as e:
-            logger.error(f"Lỗi phân tích market regime: {e}")
+        except Exception:
+            logger.error("Lỗi phân tích market regime")
             return self._default_regime()
 
     def _calculate_weekly_change(self, df: pd.DataFrame) -> float:
@@ -140,7 +144,7 @@ class MarketRegimeAnalyzer:
         if len(df) < 6:
             return 0.0
 
-        current_close = df["close"].iloc[-1]
+        current_close = safe_get_latest(df, "close", 0)
         week_ago_close = df["close"].iloc[-6]
 
         change = (current_close / week_ago_close - 1) * 100
@@ -156,7 +160,7 @@ class MarketRegimeAnalyzer:
         """
         sma20 = df["close"].rolling(20).mean()
         sma50 = df["close"].rolling(50).mean()
-        current_close = df["close"].iloc[-1]
+        current_close = safe_get_latest(df, "close", 0)
 
         sma20_val = sma20.iloc[-1]
         sma50_val = sma50.iloc[-1]
@@ -196,8 +200,8 @@ class MarketRegimeAnalyzer:
             atr = true_range.rolling(14).mean()
             df["atr"] = atr
 
-        current_atr = df["atr"].iloc[-1]
-        current_price = df["close"].iloc[-1]
+        current_atr = safe_get_latest(df, "atr", 0)
+        current_price = safe_get_latest(df, "close", 0)
 
         volatility = current_atr / current_price
         return volatility
@@ -241,14 +245,21 @@ class MarketRegimeAnalyzer:
                 return None
 
             returns_array = returns.values.reshape(-1, 1)
+
+            # Configure HMM with better convergence parameters
             hmm = GaussianHMM(
                 n_components=3,
-                covariance_type="full",
-                n_iter=200,
+                covariance_type="diag",  # Changed from "full" for better convergence
+                n_iter=100,  # Reduced iterations (was 200)
+                tol=1e-2,  # Relaxed tolerance for convergence
                 random_state=42,
                 verbose=False,
             )
-            hmm.fit(returns_array)
+
+            # Fit with convergence monitoring suppressed
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                hmm.fit(returns_array)
 
             hidden_states = hmm.predict(returns_array)
             state_probs = hmm.predict_proba(returns_array)
@@ -279,8 +290,8 @@ class MarketRegimeAnalyzer:
                 "state_means": state_means.tolist(),
                 "state_volatility": state_vol.tolist(),
             }
-        except Exception as exc:
-            logger.debug(f"HMM regime detection failed: {exc}")
+        except Exception:
+            logger.debug("HMM regime detection failed")
             return None
 
     def _is_tradeable(
@@ -343,38 +354,38 @@ class MarketRegimeAnalyzer:
         if not tradeable:
             if regime == "BEAR":
                 return (
-                    f"⛔ THỊ TRƯỜNG GIẢM ĐIỂM - KHÔNG NÊN TRADE\n"
+                    "⛔ THỊ TRƯỜNG GIẢM ĐIỂM - KHÔNG NÊN TRADE\n"
                     f"📉 VNINDEX: {details['vnindex_price']:.2f}\n"
                     f"📊 Tuần này: {details['weekly_change']:+.2f}%"
                 )
 
             elif regime == "HIGH_VOLATILITY":
                 return (
-                    f"⚠️ THỊ TRƯỜNG BIẾN ĐỘNG MẠNH - RỦI RO CAO\n"
+                    "⚠️ THỊ TRƯỜNG BIẾN ĐỘNG MẠNH - RỦI RO CAO\n"
                     f"📊 Volatility: {details['volatility']*100:.2f}%\n"
-                    f"💡 Nên chờ ổn định hơn"
+                    "💡 Nên chờ ổn định hơn"
                 )
 
             else:
                 return (
-                    f"⏸️ THỊ TRƯỜNG KHÔNG RÕ HƯỚNG\n"
+                    "⏸️ THỊ TRƯỜNG KHÔNG RÕ HƯỚNG\n"
                     f"📊 Regime: {regime}\n"
-                    f"💡 Đợi tín hiệu rõ ràng hơn"
+                    "💡 Đợi tín hiệu rõ ràng hơn"
                 )
 
         else:
             if regime == "BULL":
                 return (
-                    f"✅ THỊ TRƯỜNG TÍCH CỰC - CÓ THỂ TRADE\n"
+                    "✅ THỊ TRƯỜNG TÍCH CỰC - CÓ THỂ TRADE\n"
                     f"📈 VNINDEX: {details['vnindex_price']:.2f}\n"
                     f"🎯 Xu hướng: {details['trend_direction']} ({details['trend_strength']:.0f}%)"
                 )
 
             else:  # SIDEWAYS
                 return (
-                    f"⚡ THỊ TRƯỜNG ĐANG DAO ĐỘNG\n"
+                    "⚡ THỊ TRƯỜNG ĐANG DAO ĐỘNG\n"
                     f"📊 VNINDEX: {details['vnindex_price']:.2f}\n"
-                    f"💡 Trade thận trọng, chọn mã tốt"
+                    "💡 Trade thận trọng, chọn mã tốt"
                 )
 
     def _default_regime(self) -> Dict:
@@ -463,11 +474,11 @@ if __name__ == "__main__":
 
     print(f"📊 Regime: {result['regime']}")
     print(f"✅ Tradeable: {result['tradeable']}")
-    print(f"🎯 Confidence: {result['confidence']}%")
+    print("🎯 Confidence: {result['confidence']}%")
     print(f"\n{result['message']}")
-    print(f"\n📈 Details:")
+    print("\n📈 Details:")
     for key, value in result["details"].items():
         print(f"  • {key}: {value}")
 
-    print(f"\n💰 Position Multiplier: {analyzer.get_position_multiplier():.2f}x")
+    print("\n💰 Position Multiplier: {analyzer.get_position_multiplier():.2f}x")
     print("\n" + "=" * 70)
