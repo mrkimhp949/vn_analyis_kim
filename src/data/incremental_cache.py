@@ -86,7 +86,7 @@ class IncrementalCache:
         # Load và merge các cache files
         dfs = []
         for date in sorted(cached_dates)[
-            -lookback // 30:
+            -lookback // 30 :
         ]:  # Load khoảng 30 ngày gần nhất
             cache_file = self._get_cache_file(symbol, date)
             if os.path.exists(cache_file):

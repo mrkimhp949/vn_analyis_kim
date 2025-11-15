@@ -505,9 +505,7 @@ class EnhancedPositionSizer:
                 logger.debug(f"Correlation {symbol}-{pos_symbol}: {corr:.3f}")
 
             except Exception:
-                logger.debug(
-                    f"Skipping correlation calc for {symbol}-{pos_symbol}"
-                )
+                logger.debug(f"Skipping correlation calc for {symbol}-{pos_symbol}")
                 continue
 
         # If we successfully calculated at least one correlation, use it

@@ -3,7 +3,9 @@
 Unit tests for ConservativePositionSizer
 """
 import pytest
-from src.strategies.position_sizing import EnhancedPositionSizer as ConservativePositionSizer
+from src.strategies.position_sizing import (
+    EnhancedPositionSizer as ConservativePositionSizer,
+)
 
 
 class TestConservativePositionSizer:
@@ -38,7 +40,9 @@ class TestConservativePositionSizer:
         assert position.shares % 100 == 0  # Multiple of 100
         assert position.risk_percent <= 2.0  # Max 2% risk
 
-    @pytest.mark.skip(reason="EnhancedPositionSizer accepts SL above entry (calculates risk differently)")
+    @pytest.mark.skip(
+        reason="EnhancedPositionSizer accepts SL above entry (calculates risk differently)"
+    )
     def test_invalid_stop_loss(self, sizer):
         """Test with invalid stop loss (stop loss below entry for long position)"""
         position = sizer.calculate_position_size(
@@ -54,7 +58,9 @@ class TestConservativePositionSizer:
         # (SL above entry means negative risk)
         assert position.shares == 0 or position.risk_percent == 0
 
-    @pytest.mark.skip(reason="EnhancedPositionSizer calculates exposure differently, need to update test logic")
+    @pytest.mark.skip(
+        reason="EnhancedPositionSizer calculates exposure differently, need to update test logic"
+    )
     def test_max_exposure_reached(self, sizer):
         """Test when max exposure is reached"""
         # Add existing positions to hit exposure limit
@@ -84,7 +90,9 @@ class TestConservativePositionSizer:
         # May return 0 shares or have warnings about exposure
         assert position.shares == 0 or len(position.warnings) > 0
 
-    @pytest.mark.skip(reason="Method _calculate_risk_multiplier may not exist or have different signature")
+    @pytest.mark.skip(
+        reason="Method _calculate_risk_multiplier may not exist or have different signature"
+    )
     def test_risk_multiplier_bull_market(self, sizer):
         """Test risk multiplier in bull market"""
         market_regime = {"regime": "BULL", "tradeable": True}
@@ -96,7 +104,9 @@ class TestConservativePositionSizer:
         assert multiplier > 1.0  # Should be aggressive in bull
         assert multiplier <= 1.2  # But capped at 1.2
 
-    @pytest.mark.skip(reason="Method _calculate_risk_multiplier may not exist or have different signature")
+    @pytest.mark.skip(
+        reason="Method _calculate_risk_multiplier may not exist or have different signature"
+    )
     def test_risk_multiplier_bear_market(self, sizer):
         """Test risk multiplier in bear market"""
         market_regime = {"regime": "BEAR", "tradeable": False}
@@ -119,7 +129,9 @@ class TestConservativePositionSizer:
         assert entries[0]["percent"] == 50
         assert sum(e["shares"] for e in entries) <= 1000
 
-    @pytest.mark.skip(reason="Methods add_position, update_position_price not in EnhancedPositionSizer")
+    @pytest.mark.skip(
+        reason="Methods add_position, update_position_price not in EnhancedPositionSizer"
+    )
     def test_add_and_update_position(self, sizer):
         """Test adding and updating position"""
         sizer.add_position("VNM", 500, 80000)
@@ -141,7 +153,9 @@ class TestConservativePositionSizer:
         assert "VNM" not in sizer.current_positions
         assert sizer.realized_pnl == 2500000  # 500 * (85000 - 80000)
 
-    @pytest.mark.skip(reason="Methods get_portfolio_status not in EnhancedPositionSizer")
+    @pytest.mark.skip(
+        reason="Methods get_portfolio_status not in EnhancedPositionSizer"
+    )
     def test_portfolio_status(self, sizer):
         """Test portfolio status calculation"""
         sizer.add_position("VNM", 500, 80000)

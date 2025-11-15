@@ -13,6 +13,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+
 # from slowapi import _rate_limit_exceeded_handler
 # from slowapi.errors import RateLimitExceeded
 
@@ -291,15 +292,18 @@ def _check_pnl_record(now, current_hour, current_minute, last_pnl_record):
 def _update_last_trackers(new_val, trackers):
     """Update all last_* tracker variables based on new_val type"""
     if isinstance(new_val, tuple):
-        trackers['last_news_refresh'] = new_val
+        trackers["last_news_refresh"] = new_val
     elif isinstance(new_val, datetime.date) or (
-        getattr(new_val, '__class__', None).__name__ == 'date'
+        getattr(new_val, "__class__", None).__name__ == "date"
     ):
         # Update all date trackers
         for key in [
-            'last_sector_analysis', 'last_signal_scan',
-            'last_portfolio_check', 'last_daily_summary',
-            'last_pnl_record', 'last_model_retrain'
+            "last_sector_analysis",
+            "last_signal_scan",
+            "last_portfolio_check",
+            "last_daily_summary",
+            "last_pnl_record",
+            "last_model_retrain",
         ]:
             if trackers[key] != new_val:
                 trackers[key] = new_val
@@ -318,13 +322,13 @@ def schedule_job():
 
     # Track last execution times
     trackers = {
-        'last_sector_analysis': None,
-        'last_signal_scan': None,
-        'last_portfolio_check': None,
-        'last_news_refresh': None,
-        'last_daily_summary': None,
-        'last_pnl_record': None,
-        'last_model_retrain': None,
+        "last_sector_analysis": None,
+        "last_signal_scan": None,
+        "last_portfolio_check": None,
+        "last_news_refresh": None,
+        "last_daily_summary": None,
+        "last_pnl_record": None,
+        "last_model_retrain": None,
     }
 
     while True:
@@ -336,11 +340,14 @@ def schedule_job():
 
             # Quick check for weekly retrain first
             ran, sleep_sec, new_retrain = _check_weekly_retrain(
-                now, current_weekday, current_hour, current_minute,
-                trackers['last_model_retrain']
+                now,
+                current_weekday,
+                current_hour,
+                current_minute,
+                trackers["last_model_retrain"],
             )
             if ran:
-                trackers['last_model_retrain'] = new_retrain
+                trackers["last_model_retrain"] = new_retrain
                 time.sleep(sleep_sec)
                 continue
 
@@ -356,30 +363,47 @@ def schedule_job():
 
             # Run scheduled checks in order
             checks = [
-                (lambda: _check_sector_analysis(
-                    now, current_weekday, current_hour, current_minute,
-                    trackers['last_sector_analysis']
-                )),
-                (lambda: _check_signal_scan(
-                    now, current_hour, current_minute,
-                    trackers['last_signal_scan']
-                )),
-                (lambda: _check_portfolio(
-                    now, current_weekday, current_hour, current_minute,
-                    trackers['last_portfolio_check']
-                )),
-                (lambda: _check_news_refresh(
-                    now, current_hour, current_minute,
-                    trackers['last_news_refresh']
-                )),
-                (lambda: _check_daily_summary(
-                    now, current_hour, current_minute,
-                    trackers['last_daily_summary']
-                )),
-                (lambda: _check_pnl_record(
-                    now, current_hour, current_minute,
-                    trackers['last_pnl_record']
-                )),
+                (
+                    lambda: _check_sector_analysis(
+                        now,
+                        current_weekday,
+                        current_hour,
+                        current_minute,
+                        trackers["last_sector_analysis"],
+                    )
+                ),
+                (
+                    lambda: _check_signal_scan(
+                        now, current_hour, current_minute, trackers["last_signal_scan"]
+                    )
+                ),
+                (
+                    lambda: _check_portfolio(
+                        now,
+                        current_weekday,
+                        current_hour,
+                        current_minute,
+                        trackers["last_portfolio_check"],
+                    )
+                ),
+                (
+                    lambda: _check_news_refresh(
+                        now, current_hour, current_minute, trackers["last_news_refresh"]
+                    )
+                ),
+                (
+                    lambda: _check_daily_summary(
+                        now,
+                        current_hour,
+                        current_minute,
+                        trackers["last_daily_summary"],
+                    )
+                ),
+                (
+                    lambda: _check_pnl_record(
+                        now, current_hour, current_minute, trackers["last_pnl_record"]
+                    )
+                ),
             ]
 
             for check in checks:
@@ -701,13 +725,13 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 8080))  # Changed from 8000 to 8080
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("🚀 KHỞI ĐỘNG BOT TRADING - PYTHON 3.11.0")
-    print("="*70)
+    print("=" * 70)
     print(f"🔗 API: http://0.0.0.0:{port}")
     print(f"📚 Docs: http://0.0.0.0:{port}/docs")
     print(f"📊 Health: http://0.0.0.0:{port}/health")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 # [file content end]

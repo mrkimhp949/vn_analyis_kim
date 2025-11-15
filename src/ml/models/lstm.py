@@ -115,11 +115,11 @@ class LSTMPredictor:
             )
 
         # Create sequences
-        X_seq = np.array([X[i:i + self.sequence_length] for i in range(n_sequences)])
+        X_seq = np.array([X[i : i + self.sequence_length] for i in range(n_sequences)])
 
         if y is not None:
             # Take label from last timestep of each sequence
-            y_seq = y[self.sequence_length - 1:]
+            y_seq = y[self.sequence_length - 1 :]
             return X_seq, y_seq
 
         return X_seq, None

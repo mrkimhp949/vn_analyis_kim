@@ -109,8 +109,11 @@ class ImprovedEntryLogic:
         return (True, signal_type, base_confidence, latest["close"])
 
     def _run_all_filters(
-        self, df: pd.DataFrame, signal_type: str, current_price: float,
-        market_regime: Optional[Dict]
+        self,
+        df: pd.DataFrame,
+        signal_type: str,
+        current_price: float,
+        market_regime: Optional[Dict],
     ) -> tuple[bool, list, list, list]:
         """
         Run all entry filters
@@ -152,9 +155,7 @@ class ImprovedEntryLogic:
             )
             adjustments.append(-15)
         elif sr_check["near_support"]:
-            reasons.append(
-                f"✅ Gần support (+{sr_check['distance_to_support']:.1f}%)"
-            )
+            reasons.append(f"✅ Gần support (+{sr_check['distance_to_support']:.1f}%)")
             adjustments.append(+10)
 
         # FILTER 4: VOLUME CONFIRMATION
@@ -240,9 +241,7 @@ class ImprovedEntryLogic:
         # Calculate take profit targets
         try:
             take_profit_targets = StopLossCalculator.calculate_take_profit_targets(
-                entry_price=entry_price,
-                atr=atr,
-                risk_reward_ratios=[1.5, 3.0, 5.0]
+                entry_price=entry_price, atr=atr, risk_reward_ratios=[1.5, 3.0, 5.0]
             )
         except ValueError as e:
             return (False, f"Take profit calculation failed: {str(e)}", 0, 0, [], 0)
@@ -263,8 +262,7 @@ class ImprovedEntryLogic:
         risk_reward = reward / risk
         if risk_reward < self.min_risk_reward:
             error_msg = (
-                f"R:R ratio thấp: {risk_reward:.2f} < "
-                f"{self.min_risk_reward:.2f}"
+                f"R:R ratio thấp: {risk_reward:.2f} < " f"{self.min_risk_reward:.2f}"
             )
             return (False, error_msg, 0, 0, [], 0)
 
@@ -298,7 +296,9 @@ class ImprovedEntryLogic:
             df, signal_type, current_price, market_regime
         )
         if not passed:
-            regime_name = market_regime.get('regime', 'UNKNOWN') if market_regime else 'N/A'
+            regime_name = (
+                market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
+            )
             return self._no_signal(f"Thị trường: {regime_name}")
 
         # Step 3: Calculate adjusted confidence

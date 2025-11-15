@@ -8,6 +8,7 @@ from telegram.error import TelegramError
 
 try:
     from src.notifications.subscriptions import SubscriptionManager
+
     subscription_manager = SubscriptionManager()
     bot_instance = None  # Will be set by main app
 except ImportError:

@@ -413,9 +413,7 @@ class TradingOrchestrator:
                         watchlist_candidates.append(entry_result)
 
             except Exception:
-                logging.error(
-                    f"Lỗi nghiêm trọng khi quét mã {symbol}", exc_info=True
-                )
+                logging.error(f"Lỗi nghiêm trọng khi quét mã {symbol}", exc_info=True)
 
         tasks = [_scan_ticker(symbol) for symbol in current_tickers]
         await asyncio.gather(*tasks)

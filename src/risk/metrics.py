@@ -361,7 +361,7 @@ def check_high_correlation(
         symbols_to_check = correlation_matrix.columns.tolist()
 
     for i, symbol1 in enumerate(symbols_to_check):
-        for symbol2 in symbols_to_check[i + 1:]:
+        for symbol2 in symbols_to_check[i + 1 :]:
             if (
                 symbol1 in correlation_matrix.index
                 and symbol2 in correlation_matrix.columns
@@ -386,7 +386,7 @@ def check_high_distance_correlation(
 
     pairs = []
     for i, sym_i in enumerate(symbols):
-        for sym_j in symbols[i + 1:]:
+        for sym_j in symbols[i + 1 :]:
             if sym_j in distance_matrix.columns:
                 value = distance_matrix.loc[sym_i, sym_j]
                 if not np.isnan(value) and value >= threshold:
@@ -407,7 +407,7 @@ def check_high_copula_correlation(
 
     pairs = []
     for i, sym_i in enumerate(symbols):
-        for sym_j in symbols[i + 1:]:
+        for sym_j in symbols[i + 1 :]:
             if sym_j in copula_matrix.columns:
                 value = copula_matrix.loc[sym_i, sym_j]
                 if not np.isnan(value) and abs(value) >= threshold:

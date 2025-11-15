@@ -62,9 +62,7 @@ class StrategyRunner:
         for df in data_cache.values():
             all_dates.update(df["time"].dt.date)
         trading_dates = sorted(list(all_dates))
-        return [
-            d for d in trading_dates if start_date.date() <= d <= end_date.date()
-        ]
+        return [d for d in trading_dates if start_date.date() <= d <= end_date.date()]
 
     def _check_exits_for_date(
         self, current_date, data_cache: dict, current_prices: dict
@@ -141,9 +139,7 @@ class StrategyRunner:
                 }
 
             try:
-                entry_signal = self.entry_logic.analyze_entry(
-                    df_up_to_date, ml_signal
-                )
+                entry_signal = self.entry_logic.analyze_entry(df_up_to_date, ml_signal)
 
                 if entry_signal.signal_type == "BUY":
                     self.engine.open_position(

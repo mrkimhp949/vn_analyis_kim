@@ -141,7 +141,9 @@ class MLPredictor:
             y_pred = self.rf_model.predict(X_test)
 
             accuracy_score(y_test, y_pred)
-            _precision = precision_score(y_test, y_pred, average="weighted")  # noqa: F841
+            _precision = precision_score(
+                y_test, y_pred, average="weighted"
+            )  # noqa: F841
             _recall = recall_score(y_test, y_pred, average="weighted")  # noqa: F841
             _f1 = f1_score(y_test, y_pred, average="weighted")  # noqa: F841
 

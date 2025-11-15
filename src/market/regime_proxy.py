@@ -93,9 +93,7 @@ class ProxyMarketRegimeAnalyzer:
                 # Fallback nếu không có analyzer
                 return {"regime": "UNKNOWN", "confidence": 0, "tradeable": False}
         except Exception:
-            logging.error(
-                "Lỗi khi phân tích trạng thái thị trường", exc_info=True
-            )
+            logging.error("Lỗi khi phân tích trạng thái thị trường", exc_info=True)
             return {"regime": "ERROR", "confidence": 0, "tradeable": False}
 
 

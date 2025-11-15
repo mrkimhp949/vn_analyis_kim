@@ -116,7 +116,7 @@ class EnsembleTrainer:
         X_seq = []
         y_seq = []
         for i in range(sequence_length, len(X)):
-            X_seq.append(X[i - sequence_length:i])
+            X_seq.append(X[i - sequence_length : i])
             y_seq.append(y[i])  # Use actual target, not feature values
 
         return np.array(X_seq), np.array(y_seq)
@@ -211,9 +211,7 @@ class EnsembleTrainer:
                     )
                     xgb_fold.fit(X_train_scaled, y_train)
                 except Exception:
-                    logger.warning(
-                        f"XGBoost training failed in fold {fold_idx + 1}"
-                    )
+                    logger.warning(f"XGBoost training failed in fold {fold_idx + 1}")
                     xgb_fold = None
 
             # Prepare meta features for this fold

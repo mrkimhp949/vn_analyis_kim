@@ -90,7 +90,11 @@ class TestImprovedExitStrategy:
         # Should trigger trailing stop since price dropped from high
         # Or may trigger TP1/TP2 if not yet exited
         assert decision.should_exit is True
-        assert decision.exit_reason in [ExitReason.TRAILING_STOP, ExitReason.TAKE_PROFIT_1, ExitReason.TAKE_PROFIT_2]
+        assert decision.exit_reason in [
+            ExitReason.TRAILING_STOP,
+            ExitReason.TAKE_PROFIT_1,
+            ExitReason.TAKE_PROFIT_2,
+        ]
 
     def test_ml_signal_sell(self, exit_strategy, sample_ohlcv_data):
         """Test ML SELL signal trigger"""

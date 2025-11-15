@@ -218,7 +218,7 @@ class AnalyticsDashboard:
             # Send
             if len(report) > 4000:
                 # Split into chunks
-                chunks = [report[i:i + 4000] for i in range(0, len(report), 4000)]
+                chunks = [report[i : i + 4000] for i in range(0, len(report), 4000)]
                 for chunk in chunks:
                     await bot.send_message(chat_id, chunk, parse_mode="Markdown")
             else:

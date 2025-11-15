@@ -513,7 +513,7 @@ class EnhancedMLPredictor:
             explanation = {
                 "shap_values": dict(zip(self.feature_names, sample_shap)),
                 "base_value": self.shap_explainer.expected_value,
-                "prediction": self.predict(X[sample_idx:sample_idx + 1])[0],
+                "prediction": self.predict(X[sample_idx : sample_idx + 1])[0],
             }
 
             # Sort by absolute SHAP value

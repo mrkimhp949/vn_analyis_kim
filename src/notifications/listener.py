@@ -92,7 +92,7 @@ async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Chia nhỏ message nếu cần
         if len(analysis_report) > 4000:
             parts = [
-                analysis_report[i:i + 4000]
+                analysis_report[i : i + 4000]
                 for i in range(0, len(analysis_report), 4000)
             ]
             for part in parts:
@@ -278,18 +278,14 @@ async def _handle_portfolio_action(query, context):
         analysis_report = manager.get_detailed_analysis()
 
         if len(analysis_report) > 4000:
-            await query.edit_message_text(
-                analysis_report[:4000], parse_mode="Markdown"
-            )
+            await query.edit_message_text(analysis_report[:4000], parse_mode="Markdown")
             await context.bot.send_message(
                 query.message.chat_id,
                 analysis_report[4000:],
                 parse_mode="Markdown",
             )
         else:
-            await query.edit_message_text(
-                analysis_report, parse_mode="Markdown"
-            )
+            await query.edit_message_text(analysis_report, parse_mode="Markdown")
     except Exception:
         await query.edit_message_text("❌ Lỗi")
 
@@ -396,9 +392,7 @@ async def _handle_paperaccount_action(query):
                 InlineKeyboardButton(
                     "📊 Trade History", callback_data="action:papertrades"
                 ),
-                InlineKeyboardButton(
-                    "📈 Performance", callback_data="action:paperper"
-                ),
+                InlineKeyboardButton("📈 Performance", callback_data="action:paperper"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -606,9 +600,7 @@ async def paper_account_command(update: Update, context: ContextTypes.DEFAULT_TY
                 InlineKeyboardButton(
                     "📊 Trade History", callback_data="action:papertrades"
                 ),
-                InlineKeyboardButton(
-                    "📈 Performance", callback_data="action:paperper"
-                ),
+                InlineKeyboardButton("📈 Performance", callback_data="action:paperper"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)

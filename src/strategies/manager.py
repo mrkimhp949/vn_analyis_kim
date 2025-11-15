@@ -10,7 +10,10 @@ from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
 
 # Import các lớp chiến lược
 from src.strategies.entry_logic import ImprovedEntryLogic
-from src.strategies.position_sizing import ConservativePositionSizer, EnhancedPositionSizer
+from src.strategies.position_sizing import (
+    ConservativePositionSizer,
+    EnhancedPositionSizer,
+)
 from src.config.trading_config import get_config
 
 
@@ -41,9 +44,7 @@ class StrategyManager:
             )
             logging.info("✅ EntryLogic initialized (min_conf=55, R:R=1.8)")
         except Exception:
-            logging.critical(
-                "❌ Không thể khởi tạo ImprovedEntryLogic", exc_info=True
-            )
+            logging.critical("❌ Không thể khởi tạo ImprovedEntryLogic", exc_info=True)
             # Có thể raise exception ở đây để dừng bot nếu logic vào lệnh là bắt buộc
             raise
 
