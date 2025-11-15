@@ -29,6 +29,14 @@ except ImportError:
     logger.warning("XGBoost not available. Install with: pip install xgboost")
 
 try:
+    import lightgbm as lgb
+
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    logger.warning("LightGBM not available. Install with: pip install lightgbm")
+
+try:
     from tensorflow import keras
     from tensorflow.keras.models import Sequential
     from tensorflow.keras.layers import LSTM, Dense, Dropout

@@ -4,8 +4,8 @@
 # Suppress warnings first
 import suppress_warnings  # noqa: F401
 
-from fastapi import FastAPI, Security, Request, Depends
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Security, Request, Depends, HTTPException
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from slowapi import _rate_limit_exceeded_handler
@@ -18,14 +18,21 @@ from datetime import datetime
 import pytz
 import asyncio
 
+# Import for Prometheus metrics
+try:
+    from prometheus_client import CONTENT_TYPE_LATEST
+except ImportError:
+    CONTENT_TYPE_LATEST = "text/plain"  # Fallback if prometheus_client not installed
+
 # Import authentication
 from auth import (
-    verify_api_key, 
-    verify_ip_whitelist, 
-    limiter, 
+    verify_api_key,
+    verify_ip_whitelist,
+    limiter,
     add_security_headers,
     rate_limit_strict,
-    rate_limit_moderate
+    rate_limit_moderate,
+    rate_limit_relaxed
 )
 
 # Import các module của bot - FIXED IMPORT
@@ -435,8 +442,7 @@ async def health_check():
 async def metrics():
     """Prometheus metrics endpoint"""
     from monitoring_enhanced import get_enhanced_monitor
-    from fastapi.responses import Response
-    
+
     monitor = get_enhanced_monitor()
     metrics_data = monitor.export_metrics()
     

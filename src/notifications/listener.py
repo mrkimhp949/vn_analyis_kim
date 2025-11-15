@@ -1,10 +1,13 @@
 import asyncio
 import time
+import logging
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import NetworkError as TgNetworkError
 from config import TELEGRAM_TOKEN, CHAT_ID
 from bot_runner_improved import run_bot_with_context
+
+logger = logging.getLogger(__name__)
 
 try:
     from news_analyzer import format_news_brief, get_hot_news

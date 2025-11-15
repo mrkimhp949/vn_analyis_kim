@@ -3,6 +3,9 @@ from typing import Dict, List, Optional, Tuple
 import math
 import pandas as pd
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Sector mapping for Vietnamese stocks
