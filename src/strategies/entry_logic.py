@@ -14,6 +14,7 @@ import pandas as pd
 # Import utilities
 from src.utils.indicators import IndicatorUtils, StopLossCalculator
 from src.utils.validation import DataValidator
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +317,8 @@ class ImprovedEntryLogic:
 
         # Step 4: Calculate prices and risk/reward
         # Use safe access instead of df.iloc[-1]
-        entry_price = DataValidator.validate_price(latest["close"], "entry_price")
+        close_price = safe_get_latest(df, "close", 0)
+        entry_price = DataValidator.validate_price(close_price, "entry_price")
         sr_check = self._check_support_resistance(df, current_price)
 
         success, error_msg, stop_loss, reward, take_profit_targets, risk_reward = (
@@ -598,8 +600,8 @@ class ImprovedEntryLogic:
         > 4%: Too high (risky)
         """
         # Use safe access instead of df.iloc[-1]
-        atr = latest.get("atr", 0)
-        price = latest["close"]
+        atr = safe_get_latest(df, "atr", 0)
+        price = safe_get_latest(df, "close", 0)
 
         if price == 0:
             return {"too_high": False, "optimal": True, "value": 0}

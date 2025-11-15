@@ -83,18 +83,20 @@ class TestEnhancedRiskManager:
         factor = risk_manager._calculate_confidence_factor(30)
         assert factor == 0.3
 
+    @patch("utils.dataframe_utils.safe_get_latest")
     @patch("src.data.loader.load_data")
-    def test_market_regime_factor_bull(self, mock_load_data, risk_manager):
+    def test_market_regime_factor_bull(self, mock_load_data, mock_safe_get_latest, risk_manager):
         """Test market regime factor in bull market"""
         # Mock VNINDEX data showing bull market (>2% gain)
         mock_df = Mock()
         mock_df.__len__ = Mock(return_value=50)
-        mock_df.__getitem__ = Mock(
-            return_value=Mock(
-                iloc=Mock(__getitem__=Mock(side_effect=[110, 100]))  # 10% gain
-            )
-        )
+        # Mock the "close" column access for iloc[-20]
+        close_column_mock = Mock()
+        close_column_mock.iloc = Mock()
+        close_column_mock.iloc.__getitem__ = Mock(return_value=100)  # Past close (20 days ago)
+        mock_df.__getitem__ = Mock(return_value=close_column_mock)
         mock_load_data.return_value = mock_df
+        mock_safe_get_latest.return_value = 110  # Current close price
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 1.1
@@ -115,18 +117,20 @@ class TestEnhancedRiskManager:
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 0.6
 
+    @patch("utils.dataframe_utils.safe_get_latest")
     @patch("src.data.loader.load_data")
-    def test_market_regime_factor_sideway(self, mock_load_data, risk_manager):
+    def test_market_regime_factor_sideway(self, mock_load_data, mock_safe_get_latest, risk_manager):
         """Test market regime factor in sideway market"""
         # Mock VNINDEX data showing sideway market (-2% to 2%)
         mock_df = Mock()
         mock_df.__len__ = Mock(return_value=50)
-        mock_df.__getitem__ = Mock(
-            return_value=Mock(
-                iloc=Mock(__getitem__=Mock(side_effect=[101, 100]))  # 1% gain
-            )
-        )
+        # Mock the "close" column access for iloc[-20]
+        close_column_mock = Mock()
+        close_column_mock.iloc = Mock()
+        close_column_mock.iloc.__getitem__ = Mock(return_value=100)  # Past close (20 days ago)
+        mock_df.__getitem__ = Mock(return_value=close_column_mock)
         mock_load_data.return_value = mock_df
+        mock_safe_get_latest.return_value = 101  # Current close price
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 0.8
