@@ -160,8 +160,13 @@ class PortfolioAnalyzer:
             pnl_amount = current_value - entry_value
             pnl_percent = (pnl_amount / entry_value) * 100 if entry_value > 0 else 0
 
-            # Phân tích ML signal
-            ml_signal = self.ml_generator.analyze(df)
+            # Phân tích ML signal với error handling
+            ml_signal = None
+            try:
+                ml_signal = self.ml_generator.analyze(df)
+            except Exception as e:
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
+                # Tiếp tục với ml_signal = None
 
             # Kiểm tra exit nhưng chỉ lấy thông tin đơn giản
             exit_decision = self.exit_strategy.check_exit(
@@ -267,7 +272,14 @@ class PortfolioAnalyzer:
                         safe_print(f"       ⚠️ {symbol}: Không đủ dữ liệu")
                         continue
 
-                    ml_signal = self.ml_generator.analyze(df)
+                    # ML analysis với error handling
+                    ml_signal = None
+                    try:
+                        ml_signal = self.ml_generator.analyze(df)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
+                        # Tiếp tục với ml_signal = None
+                    
                     current_price = df["close"].iloc[-1]
 
                     # Kiểm tra entry signal

@@ -108,8 +108,13 @@ class ExitManagementService:
             # Get current price
             current_price = df.iloc[-1]['close']
             
-            # ML signal
-            ml_signal = self.ml_generator.analyze(df, vnindex_df)
+            # ML signal với error handling
+            ml_signal = None
+            try:
+                ml_signal = self.ml_generator.analyze(df, vnindex_df)
+            except Exception as e:
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
+                # Tiếp tục với ml_signal = None
             
             # Check exit
             exit_decision = self.exit_strategy.check_exit(

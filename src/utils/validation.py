@@ -231,6 +231,62 @@ class InputValidator:
             raise ValueError(f"R:R must be positive, got {rr}")
         
         return float(rr)
+    
+    @staticmethod
+    def validate_shares(shares: int, max_shares: int = 1_000_000) -> int:
+        """
+        Validate số lượng cổ phiếu
+        
+        Args:
+            shares: Số lượng cổ phiếu
+            max_shares: Số lượng tối đa cho phép
+            
+        Returns:
+            int: Số lượng đã validate
+            
+        Raises:
+            ValueError: Nếu shares không hợp lệ
+        """
+        if not isinstance(shares, (int, float)):
+            raise ValueError(f"Shares must be numeric, got {type(shares)}")
+        
+        shares = int(shares)
+        
+        if shares <= 0:
+            raise ValueError(f"Shares must be positive, got {shares}")
+        
+        if shares > max_shares:
+            raise ValueError(f"Shares exceeds maximum ({max_shares}), got {shares}")
+        
+        return shares
+    
+    @staticmethod
+    def validate_price(price: float, max_price: float = 10_000_000) -> float:
+        """
+        Validate giá cổ phiếu
+        
+        Args:
+            price: Giá cổ phiếu
+            max_price: Giá tối đa cho phép (VNĐ)
+            
+        Returns:
+            float: Giá đã validate
+            
+        Raises:
+            ValueError: Nếu price không hợp lệ
+        """
+        if not isinstance(price, (int, float)):
+            raise ValueError(f"Price must be numeric, got {type(price)}")
+        
+        price = float(price)
+        
+        if price <= 0:
+            raise ValueError(f"Price must be positive, got {price}")
+        
+        if price > max_price:
+            raise ValueError(f"Price exceeds maximum ({max_price:,.0f} VNĐ), got {price:,.0f}")
+        
+        return price
 
 
 # Singleton instances

@@ -19,17 +19,9 @@ from src.config.legacy_config import CHAT_ID, TELEGRAM_TOKEN, LOOKBACK
 from src.config.exceptions import ConfigurationError
 from src.data.loader import load_data
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
+from src.core.orchestrator import TradingOrchestrator
 
-# Feature flag for orchestrator version
-USE_ORCHESTRATOR_V2 = os.getenv('USE_ORCHESTRATOR_V2', 'false').lower() == 'true'
-
-if USE_ORCHESTRATOR_V2:
-    from src.core.orchestrator_v2 import TradingOrchestratorV2 as TradingOrchestrator
-    logging.info("🚀 Using Orchestrator V2 (Service-Oriented)")
-else:
-    from src.core.orchestrator import TradingOrchestrator
-    logging.info("📌 Using Orchestrator V1 (Legacy)")
-    logger.info("📌 Using Orchestrator V1 (Legacy)")
+logging.info("✅ Using TradingOrchestrator")
 
 # Khởi tạo các đối tượng toàn cục
 try:
@@ -58,8 +50,7 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
         logging.critical("❌ Bot instance không khả dụng, không thể chạy.")
         return
 
-    version = "V2" if USE_ORCHESTRATOR_V2 else "V1"
-    logging.info("\n" + "="*50 + f"\n🤖 BẮT ĐẦU PHIÊN QUÉT MỚI (Orchestrator {version})\n" + "="*50)
+    logging.info("\n" + "="*50 + "\n🤖 BẮT ĐẦU PHIÊN QUÉT MỚI\n" + "="*50)
 
     # 1. Tải dữ liệu VNINDEX trước để dùng chung
     vnindex_df = None

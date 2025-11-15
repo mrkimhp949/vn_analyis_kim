@@ -566,6 +566,34 @@ class ImprovedExitStrategy:
 
         return {"should_exit": False}
 
+    def clear_position_tracking(self, symbol: str):
+        """
+        Dọn dẹp tracking khi đóng vị thế để tránh memory leak
+        
+        Args:
+            symbol: Mã cổ phiếu cần xóa tracking
+        """
+        if symbol in self.position_highs:
+            del self.position_highs[symbol]
+            logger.debug(f"✅ Cleared position tracking for {symbol}")
+        else:
+            logger.debug(f"⚠️ No tracking found for {symbol}")
+
+    def get_tracked_positions(self) -> List[str]:
+        """
+        Lấy danh sách các vị thế đang được track
+        
+        Returns:
+            List các symbol đang được track
+        """
+        return list(self.position_highs.keys())
+
+    def clear_all_tracking(self):
+        """Xóa toàn bộ tracking (dùng khi reset hoặc end of day)"""
+        count = len(self.position_highs)
+        self.position_highs.clear()
+        logger.info(f"🧹 Cleared tracking for {count} positions")
+
     def format_exit_message(self, symbol: str, decision: ExitDecision) -> str:
         """Format exit decision thành message"""
 
