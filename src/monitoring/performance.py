@@ -7,8 +7,8 @@ import functools
 import json
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Dict, List
 
 
 @dataclass
@@ -259,8 +259,8 @@ def monitor_api_call(api_name: str):
                 result = func(*args, **kwargs)
                 success = True
                 return result
-            except Exception as e:
-                monitor.track_error(api_name, str(e))
+            except Exception:
+                monitor.track_error(api_name, str(e))  # noqa: F821
                 raise
             finally:
                 duration = time.time() - start_time

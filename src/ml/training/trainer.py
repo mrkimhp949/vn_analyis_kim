@@ -4,10 +4,10 @@ Chạy lệnh: python train_models.py
 """
 
 import pandas as pd
-from data_loader import load_data
-from ml_signals import MLSignalGenerator
+from src.data.loader import load_data
+from src.ml.signals.generator import MLSignalGenerator
 
-from config import TICKERS
+from src.config.legacy_config import TICKERS
 
 
 def train_models():
@@ -24,8 +24,8 @@ def train_models():
             df = load_data(symbol, lookback=500)  # Load nhiều data hơn
             all_data.append(df)
             print(f"✅ Đã tải {len(df)} nến")
-        except Exception as e:
-            print(f"❌ Lỗi tải {symbol}: {e}")
+        except Exception:
+            print(f"❌ Lỗi tải {symbol}")
 
     # Combine tất cả data
     print(f"\n📊 Tổng hợp dữ liệu từ {len(all_data)} cổ phiếu...")

@@ -3,21 +3,24 @@ DEPRECATED: Use trading_config.py instead
 This file is kept for backward compatibility only
 """
 
+import codecs
 import os
 import sys
 import warnings
 from typing import List
 
+from dotenv import load_dotenv
+
+from src.config.trading_config import get_config
+
 warnings.warn(
-    "config.py is deprecated. Use 'from trading_config import get_config' instead",
+    "config.py is deprecated. Use 'from src.config.trading_config import get_config' instead",
     DeprecationWarning,
     stacklevel=2,
 )
 
 # Load .env file
 try:
-    from dotenv import load_dotenv
-
     load_dotenv()
 except ImportError:
     print("⚠️ python-dotenv not installed. Install: pip install python-dotenv")
@@ -27,13 +30,9 @@ if sys.stdout.encoding != "utf-8":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
-        import codecs
-
         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
 
 # Import from new config
-from trading_config import get_config
-
 _config = get_config()
 
 # Backward compatibility exports
@@ -60,7 +59,7 @@ def get_tickers() -> List[str]:
 
     # Load TẤT CẢ từ List.csv
     try:
-        from ticker_loader import get_ticker_loader
+        from src.data.ticker_loader import get_ticker_loader
 
         loader = get_ticker_loader()
         tickers = loader.all_tickers
@@ -71,8 +70,8 @@ def get_tickers() -> List[str]:
         print(f"📊 Loaded {len(tickers)} mã từ List.csv")
         return tickers
 
-    except Exception as e:
-        print(f"❌ Lỗi load từ List.csv: {e}")
+    except Exception:
+        print("❌ Lỗi load từ List.csv")
         # Fallback to empty list - user must fix List.csv
         print("⚠️ Không có tickers! Vui lòng kiểm tra List.csv")
         return []

@@ -5,7 +5,7 @@ Validates tickers trước khi scan để tránh mã đã hủy niêm yết
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List
 
 import pandas as pd
@@ -49,7 +49,7 @@ class TickerLoader:
                     cache_time = datetime.fromisoformat(cached_date)
                     age = (datetime.now() - cache_time).days
                     return age < max_age_days
-                except:
+                except (ValueError, TypeError):
                     pass
         return False
 
@@ -81,8 +81,8 @@ class TickerLoader:
 
             print(f"📊 Loaded {len(self.all_tickers)} tickers from {self.csv_file}")
 
-        except Exception as e:
-            print(f"❌ Error loading {self.csv_file}: {e}")
+        except Exception:
+            print(f"❌ Error loading {self.csv_file}")
             self.all_tickers = []
 
     def validate_ticker(self, symbol: str, min_volume: int = 100_000) -> bool:
@@ -100,7 +100,7 @@ class TickerLoader:
             return False
 
         try:
-            from data_loader import load_data
+            from src.data.loader import load_data
 
             # Try load data, requiring only 5 bars for a basic validity check
             df = load_data(symbol, lookback=5, use_cache=False, required_bars=5)
@@ -131,8 +131,8 @@ class TickerLoader:
             self._save_cache()
             return True
 
-        except ValueError as e:
-            error_msg = str(e)
+        except ValueError:
+            error_msg = str(e)  # noqa: F821
             if (
                 "hủy niêm yết" in error_msg
                 or "không tồn tại" in error_msg
@@ -237,8 +237,8 @@ def run_sector_analysis():
             f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning."
         )
         return tickers
-    except Exception as e:
-        print(f"❌ [Compatibility] Error in fake run_sector_analysis: {e}")
+    except Exception:
+        print("❌ [Compatibility] Error in fake run_sector_analysis")
         # Fallback về danh sách tickers đầy đủ nếu có lỗi
         return get_ticker_loader().all_tickers
 

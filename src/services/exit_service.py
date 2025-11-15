@@ -9,14 +9,14 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import pandas as pd
-from data_loader import load_data
-from exceptions import DataQualityError
-from improved_exit_logic import ImprovedExitStrategy
-from ml_signals_enhanced import EnhancedMLSignalGenerator
-from paper_trading import get_paper_account
-from portfolio_manager import get_portfolio_manager
+from src.data.loader import load_data
+from src.config.exceptions import DataQualityError
+from src.strategies.exit_logic import ImprovedExitStrategy
+from src.ml.signals.enhanced import EnhancedMLSignalGenerator
+from src.portfolio.paper_trading import get_paper_account
+from src.portfolio.manager import get_portfolio_manager
 
-from utils.validation import DataValidator
+from src.utils.validation import DataValidator
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +98,8 @@ class ExitManagementService:
             # Validate data
             try:
                 DataValidator.validate_dataframe(df, min_rows=20)
-            except DataQualityError as e:
-                logger.warning(f"[{symbol}] Data validation failed: {e}")
+            except DataQualityError:
+                logger.warning(f"[{symbol}] Data validation failed")
                 return None
 
             # Get current price
@@ -109,8 +109,8 @@ class ExitManagementService:
             ml_signal = None
             try:
                 ml_signal = self.ml_generator.analyze(df, vnindex_df)
-            except Exception as e:
-                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
+            except Exception:
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}")
                 # Tiếp tục với ml_signal = None
 
             # Check exit
@@ -137,8 +137,8 @@ class ExitManagementService:
 
             return None
 
-        except Exception as e:
-            logger.error(f"[{symbol}] Error checking exit: {e}", exc_info=True)
+        except Exception:
+            logger.error(f"[{symbol}] Error checking exit", exc_info=True)
             return None
 
     async def execute_exit(
@@ -160,7 +160,7 @@ class ExitManagementService:
             pos_data = exit_decision["position"]
 
             # Calculate P&L for circuit breaker
-            pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
+            (current_price - pos_data["avg_price"]) * pos_data["shares"]
 
             # Execute paper trade
             success, message, _ = self.paper_account.execute_sell(
@@ -182,8 +182,8 @@ class ExitManagementService:
                 logger.error(f"❌ Exit failed: {symbol} - {message}")
                 return False
 
-        except Exception as e:
-            logger.error(f"❌ Error executing exit for {symbol}: {e}", exc_info=True)
+        except Exception:
+            logger.error(f"❌ Error executing exit for {symbol}", exc_info=True)
             return False
 
 

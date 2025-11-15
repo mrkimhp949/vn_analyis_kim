@@ -1,4 +1,4 @@
-# 📊 BÁO CÁO PHÂN TÍCH VÀ CẢI THIỆN DỰ ÁN TRADING BOT
+ # 📊 BÁO CÁO PHÂN TÍCH VÀ CẢI THIỆN DỰ ÁN TRADING BOT
 
 **Ngày:** 15/11/2025
 **Phiên bản:** 2.0

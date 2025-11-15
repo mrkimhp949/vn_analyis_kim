@@ -7,7 +7,6 @@ import logging
 from collections import defaultdict
 from typing import Dict, List
 
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +34,9 @@ class NoSignalAnalyzer:
         """
         Phân tích kết quả scan để hiểu tại sao không có signals
         """
-        from data_loader import load_data
+        from src.data.loader import load_data
 
-        from config import LOOKBACK
+        from src.config.legacy_config import LOOKBACK
 
         print(f"\n🔍 Analyzing {len(symbols)} symbols...")
 
@@ -136,8 +135,8 @@ class NoSignalAnalyzer:
                     if not entry_signal.warnings:
                         results["entry_filters"]["failed_other"] += 1
 
-            except Exception as e:
-                logger.error(f"Error analyzing {symbol}: {e}")
+            except Exception:
+                logger.error(f"Error analyzing {symbol}")
                 results["data_issues"] += 1
 
         # Calculate averages
@@ -298,11 +297,11 @@ def analyze_no_signals():
     print("🔍 Analyzing why no signals...")
 
     try:
-        from improved_entry_logic import ImprovedEntryLogic
-        from market_regime_proxy import ProxyMarketRegimeAnalyzer
-        from ml_signals import MLSignalGenerator
+        from src.strategies.entry_logic import ImprovedEntryLogic
+        from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
+        from src.ml.signals.generator import MLSignalGenerator
 
-        from config import TICKERS
+        from src.config.legacy_config import TICKERS
 
         # Initialize
         ml_generator = MLSignalGenerator()
@@ -334,8 +333,8 @@ def analyze_no_signals():
             f.write(report)
         print(f"\n✅ Saved to {filename}")
 
-    except Exception as e:
-        print(f"❌ Error: {e}")
+    except Exception:
+        print("❌ Error")
         import traceback
 
         traceback.print_exc()

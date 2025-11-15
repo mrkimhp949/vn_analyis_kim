@@ -23,8 +23,11 @@ class VietnameseSentimentAnalyzer:
             "PHOBERT_FINE_TUNED_PATH", "models/phobert_vi_financial"
         )
         try:
-            from transformers import (AutoModelForSequenceClassification,
-                                      AutoTokenizer, pipeline)
+            from transformers import (
+                AutoModelForSequenceClassification,
+                AutoTokenizer,
+                pipeline,
+            )
 
             if os.path.isdir(custom_model_path):
                 try:
@@ -89,9 +92,9 @@ class VietnameseSentimentAnalyzer:
                         logger.warning(
                             f"ViBERT/Multilingual model not available: {e2}. Fallback keyword scoring."
                         )
-        except Exception as e:
+        except Exception:
             logger.warning(
-                f"Không thể load transformer model: {e}. Fallback keyword scoring."
+                "Không thể load transformer model. Fallback keyword scoring."
             )
 
         self.positive_keywords = [
@@ -150,8 +153,8 @@ class VietnameseSentimentAnalyzer:
                         # Unknown label - treat as neutral
                         score += 0.0
                 return max(min(score / max(len(results), 1), 1.0), -1.0)
-            except Exception as e:
-                logger.warning(f"Transformer scoring failed: {e}")
+            except Exception:
+                logger.warning("Transformer scoring failed")
 
         score = 0.0
         for text in texts:

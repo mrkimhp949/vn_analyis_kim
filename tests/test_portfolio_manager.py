@@ -16,8 +16,8 @@ class TestPortfolioManagerValidation:
 
     def test_validation_imports(self):
         """Test that portfolio manager imports correctly"""
-        from exceptions import PortfolioError
-        from portfolio_manager import PortfolioManager
+        from src.config.exceptions import PortfolioError
+        from src.portfolio.manager import PortfolioManager
 
         # Just verify imports work
         assert PortfolioManager is not None

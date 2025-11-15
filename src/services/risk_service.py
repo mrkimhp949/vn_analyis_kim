@@ -6,9 +6,9 @@ Centralized risk checks and circuit breaker logic
 import logging
 from typing import Dict, Tuple
 
-from circuit_breaker import get_circuit_breaker
-from emergency_stop import get_emergency_stop
-from portfolio_manager import get_portfolio_manager
+from src.risk.circuit_breaker import get_circuit_breaker
+from src.risk.emergency_stop import get_emergency_stop
+from src.portfolio.manager import get_portfolio_manager
 
 logger = logging.getLogger(__name__)
 

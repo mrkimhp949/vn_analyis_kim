@@ -136,14 +136,20 @@ class CircuitBreaker:
             and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct
         ):
             self.tripped = True
-            self.tripped_reason = f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            self.tripped_reason = (
+                f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
+                f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            )
             self._save_stats()
             return True
 
         # Check 2: VNINDEX giảm sâu
         if vnindex_change_pct < self.vnindex_drop_threshold:
             self.tripped = True
-            self.tripped_reason = f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
+            self.tripped_reason = (
+                f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) "
+                f"vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
+            )
             self._save_stats()
             return True
 
@@ -241,7 +247,10 @@ class CircuitBreaker:
             and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct
         ):
             self.tripped = True
-            self.tripped_reason = f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            self.tripped_reason = (
+                f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
+                f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+            )
 
         self._save_stats()
 

@@ -7,13 +7,13 @@ Thread-safe với locking mechanism
 import logging
 from contextlib import contextmanager
 from datetime import datetime
-from threading import Lock, RLock
-from typing import Dict, List, Optional
+from threading import RLock
+from typing import Dict, Optional
 
-from database import get_db
-from trading_config import get_config
+from src.data.database import get_db
+from src.config.trading_config import get_config
 
-from monitoring import get_performance_monitor
+from src.monitoring.performance import get_performance_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class PortfolioManager:
         Add new position or average up an existing one (thread-safe).
         Tự động kiểm tra và xử lý mua mới hoặc trung bình giá.
         """
-        from exceptions import PortfolioError
+        from src.config.exceptions import PortfolioError
 
         # Validate inputs
         if not symbol or not isinstance(symbol, str):
@@ -141,7 +141,7 @@ class PortfolioManager:
             metadata=metadata,
         )
 
-        print(f"✅ Added new position: {symbol} - {shares} shares @ {entry_price:,.0f}")
+        print("✅ Added new position: {symbol} - {shares} shares @ {entry_price:,.0f}")
 
     def _average_up_position(
         self,
@@ -204,7 +204,7 @@ class PortfolioManager:
         reason: str = "Partial Exit",
     ):
         """Reduce position size (partial sell)."""
-        from exceptions import PortfolioError
+        from src.config.exceptions import PortfolioError
 
         positions = self.db.get_positions()
 
@@ -278,7 +278,7 @@ class PortfolioManager:
         """
         positions = self.db.get_positions()
         if symbol not in positions:
-            print(f"⚠️ Cannot handle exit for non-existent position {symbol}")
+            print("⚠️ Cannot handle exit for non-existent position {symbol}")
             return
 
         if exit_type == "FULL":
@@ -305,8 +305,8 @@ class PortfolioManager:
                         f"⚠️ Calculated 0 shares to sell for {symbol} with type {exit_type}"
                     )
 
-            except (ValueError, TypeError) as e:
-                print(f"❌ Invalid exit_type format: {exit_type}. Error: {e}")
+            except (ValueError, TypeError):
+                print("❌ Invalid exit_type format: {exit_type}.")
 
     def close_position(
         self, symbol: str, exit_price: float, reason: str = "Exit signal"
@@ -315,7 +315,7 @@ class PortfolioManager:
         positions = self.db.get_positions()
 
         if symbol not in positions:
-            print(f"⚠️ Position {symbol} not found to close.")
+            print("⚠️ Position {symbol} not found to close.")
             return
 
         pos = positions[symbol]
@@ -354,7 +354,7 @@ class PortfolioManager:
         # Delete position
         self.db.delete_position(symbol)
 
-        print(f"✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
+        print("✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
 
     def update_position_price(self, symbol: str, current_price: float):
         """Update current price for position"""
@@ -444,7 +444,7 @@ class PortfolioManager:
             num_positions=portfolio["num_positions"],
         )
 
-        print(f"📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
+        print("📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
 
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
@@ -466,7 +466,7 @@ class PortfolioManager:
 
         # Individual positions
         if positions:
-            lines.append(f"\n🎯 *POSITIONS:*")
+            lines.append("\n🎯 *POSITIONS:*")
             for symbol, pos in positions.items():
                 shares = pos["shares"]
                 entry_price = pos["avg_price"]
@@ -484,7 +484,7 @@ class PortfolioManager:
 
         # Performance metrics
         if metrics["total_trades"] > 0:
-            lines.append(f"\n📊 *PERFORMANCE:*")
+            lines.append("\n📊 *PERFORMANCE:*")
             lines.append(f"• Total Trades: {metrics['total_trades']}")
             lines.append(f"• Win Rate: {metrics['win_rate']:.1f}%")
             lines.append(f"• Avg Profit: {metrics['avg_profit']:,.0f} VNĐ")
@@ -516,11 +516,11 @@ if __name__ == "__main__":
 
     # Test get positions
     positions = manager.get_positions()
-    print(f"Positions: {positions}")
+    print("Positions: {positions}")
 
     # Test portfolio value
     portfolio = manager.get_portfolio_value()
-    print(f"Portfolio: {portfolio}")
+    print("Portfolio: {portfolio}")
 
     # Test analysis
     analysis = manager.get_detailed_analysis()

@@ -7,8 +7,7 @@ Note: Các test này verify rằng code có try-catch cho ML analysis.
 Không test integration vì có dependency issues.
 """
 
-from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -41,7 +40,6 @@ def test_ml_error_handling_code_exists():
     Test verify rằng code có try-catch cho ML analysis.
     Đây là static test kiểm tra code structure.
     """
-    import inspect
 
     # Test orchestrator có try-catch
     with open("src/core/orchestrator.py", "r", encoding="utf-8") as f:
@@ -50,7 +48,7 @@ def test_ml_error_handling_code_exists():
     # Kiểm tra có try-catch cho ML analysis
     assert "try:" in orchestrator_code
     assert "ml_signal = self.ml_generator.analyze" in orchestrator_code
-    assert "except Exception as e:" in orchestrator_code
+    assert "except Exception:" in orchestrator_code
     assert "Lỗi ML analysis" in orchestrator_code
 
     # Test services có try-catch
@@ -59,14 +57,14 @@ def test_ml_error_handling_code_exists():
 
     assert "try:" in entry_service_code
     assert "ml_signal = self.ml_generator.analyze" in entry_service_code
-    assert "except Exception as e:" in entry_service_code
+    assert "except Exception:" in entry_service_code
 
     with open("src/services/exit_service.py", "r", encoding="utf-8") as f:
         exit_service_code = f.read()
 
     assert "try:" in exit_service_code
     assert "ml_signal = self.ml_generator.analyze" in exit_service_code
-    assert "except Exception as e:" in exit_service_code
+    assert "except Exception:" in exit_service_code
 
 
 def test_ml_error_sets_signal_to_none():

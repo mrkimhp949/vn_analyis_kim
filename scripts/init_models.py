@@ -6,12 +6,9 @@ Chạy: python scripts/init_models.py
 import os
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from src.ml.models.predictor import MLPredictor
 
-import pandas as pd
-from data_loader import load_data
-from features import add_ml_features
-from ml_models import MLPredictor
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 def init_models():

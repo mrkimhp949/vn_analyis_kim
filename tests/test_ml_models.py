@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config.exceptions import ModelPredictionError
+from src.ml.models.predictor import MLPredictor
 
-from exceptions import ModelPredictionError
-from ml_models import MLPredictor
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestMLPredictor:
@@ -105,7 +105,7 @@ class TestMLPredictor:
         assert "Feature count mismatch" in str(exc_info.value)
 
     def test_load_models_creates_dummy_if_not_exists(self):
-        """Test load_models creates dummy models if files don't exist"""
+        """Test load_models returns False if files don't exist (no longer creates dummy models)"""
         # Ensure models directory exists but is empty
         import shutil
 
@@ -120,8 +120,9 @@ class TestMLPredictor:
             predictor = MLPredictor()
             loaded = predictor.load_models()
 
-            assert loaded is True
-            assert predictor.rf_model is not None
+            # Should return False when no models exist (changed behavior)
+            assert loaded is False
+            assert predictor.ml_enabled is False
 
         finally:
             # Restore original models

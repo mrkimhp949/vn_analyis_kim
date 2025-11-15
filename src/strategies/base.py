@@ -13,7 +13,6 @@ Benefits:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -122,12 +121,10 @@ class EntryStrategy(ABC):
             >>> if result.should_enter:
             >>>     print(f"Enter at {result.entry_price}, SL: {result.stop_loss}")
         """
-        pass
 
     @abstractmethod
     def get_strategy_name(self) -> str:
         """Return strategy name for logging/identification"""
-        pass
 
 
 class TrendFollowingEntry(EntryStrategy):
@@ -243,12 +240,10 @@ class ExitStrategy(ABC):
             >>> if signal.should_exit:
             >>>     print(f"Exit: {signal.reason}")
         """
-        pass
 
     @abstractmethod
     def get_strategy_name(self) -> str:
         """Return strategy name for logging/identification"""
-        pass
 
 
 class StopLossTakeProfitExit(ExitStrategy):
@@ -370,12 +365,10 @@ class PositionSizingStrategy(ABC):
             >>> )
             >>> print(f"Buy {result.shares} shares")
         """
-        pass
 
     @abstractmethod
     def get_strategy_name(self) -> str:
         """Return strategy name for logging/identification"""
-        pass
 
 
 class FixedRiskSizing(PositionSizingStrategy):

@@ -4,11 +4,11 @@ ML Model Performance Monitoring and Drift Detection
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import numpy as np
-from database import get_db
-from monitoring_enhanced import get_enhanced_monitor
+from src.data.database import get_db
+from src.monitoring.enhanced import get_enhanced_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class MLModelMonitor:
         try:
             self.db.conn.execute(
                 """
-                INSERT INTO ml_predictions 
+                INSERT INTO ml_predictions
                 (symbol, prediction_date, prediction, predicted_class, confidence, model_version)
                 VALUES (?, ?, ?, ?, ?, ?)
             """,
@@ -95,8 +95,8 @@ class MLModelMonitor:
             )
             self.db.conn.commit()
 
-        except Exception as e:
-            logger.error(f"Error logging prediction: {e}")
+        except Exception:
+            logger.error("Error logging prediction")
 
     def update_outcome(self, symbol: str, prediction_date: str, actual_outcome: int):
         """
@@ -118,8 +118,8 @@ class MLModelMonitor:
             )
             self.db.conn.commit()
 
-        except Exception as e:
-            logger.error(f"Error updating outcome: {e}")
+        except Exception:
+            logger.error("Error updating outcome")
 
     def calculate_accuracy(self, window_days: Optional[int] = None) -> Dict:
         """
@@ -135,10 +135,9 @@ class MLModelMonitor:
             window_days = self.window_days
 
         cutoff_date = (datetime.now() - timedelta(days=window_days)).isoformat()
-
         cursor = self.db.conn.execute(
             """
-            SELECT 
+            SELECT
                 predicted_class,
                 actual_outcome,
                 confidence
@@ -218,7 +217,7 @@ class MLModelMonitor:
 
         if drift_detected:
             result["reason"] = f"Accuracy dropped by {accuracy_drop:.2%}"
-            logger.warning(f"⚠️ MODEL DRIFT DETECTED: {result['reason']}")
+            logger.warning("⚠️ MODEL DRIFT DETECTED: {result['reason']}")
 
             # Track in monitoring
             self.monitor.track_error("model_drift")
@@ -240,7 +239,7 @@ class MLModelMonitor:
 
         # Retrain if accuracy is low (even without drift)
         if drift_status["recent_accuracy"] and drift_status["recent_accuracy"] < 0.55:
-            logger.warning(f"⚠️ Low accuracy: {drift_status['recent_accuracy']:.2%}")
+            logger.warning("⚠️ Low accuracy: {drift_status['recent_accuracy']:.2%}")
             return True
 
         # Check last retraining date
@@ -248,7 +247,7 @@ class MLModelMonitor:
         if last_retrain:
             days_since_retrain = (datetime.now() - last_retrain).days
             if days_since_retrain > 30:  # Retrain monthly
-                logger.info(f"ℹ️ {days_since_retrain} days since last retrain")
+                logger.info("ℹ️ {days_since_retrain} days since last retrain")
                 return True
 
         return False
@@ -316,10 +315,10 @@ class MLModelMonitor:
             )
             self.db.conn.commit()
 
-            logger.info(f"✅ Logged retraining: {model_version}")
+            logger.info("✅ Logged retraining: {model_version}")
 
-        except Exception as e:
-            logger.error(f"Error logging retraining: {e}")
+        except Exception:
+            logger.error("Error logging retraining")
 
     def get_performance_report(self) -> str:
         """
@@ -340,7 +339,7 @@ class MLModelMonitor:
         lines.append("=" * 50)
 
         if recent["accuracy"] is not None:
-            lines.append(f"\n📈 Last 30 Days:")
+            lines.append("\n📈 Last 30 Days:")
             lines.append(f"  Accuracy:  {recent['accuracy']:.2%}")
             lines.append(f"  Precision: {recent['precision']:.2%}")
             lines.append(f"  Recall:    {recent['recall']:.2%}")
@@ -348,20 +347,20 @@ class MLModelMonitor:
         else:
             lines.append("\n⚠️ Insufficient data for metrics")
 
-        lines.append(f"\n🎯 Drift Detection:")
+        lines.append("\n🎯 Drift Detection:")
         lines.append(f"  Baseline: {drift['baseline_accuracy']:.2%}")
         lines.append(f"  Current:  {drift.get('recent_accuracy', 'N/A')}")
 
         if drift["drift_detected"]:
             lines.append(f"  ⚠️ DRIFT DETECTED: {drift['reason']}")
         else:
-            lines.append(f"  ✅ No drift detected")
+            lines.append("  ✅ No drift detected")
 
-        lines.append(f"\n🔄 Retraining:")
+        lines.append("\n🔄 Retraining:")
         if self.should_retrain():
-            lines.append(f"  ⚠️ RETRAINING RECOMMENDED")
+            lines.append("  ⚠️ RETRAINING RECOMMENDED")
         else:
-            lines.append(f"  ✅ Model performing well")
+            lines.append("  ✅ Model performing well")
 
         return "\n".join(lines)
 
@@ -388,8 +387,8 @@ if __name__ == "__main__":
 
     # Check drift
     drift = monitor.check_drift()
-    print(f"Drift detected: {drift['drift_detected']}")
+    print("Drift detected: {drift['drift_detected']}")
 
     # Get report
     report = monitor.get_performance_report()
-    print(f"\n{report}")
+    print("\n{report}")

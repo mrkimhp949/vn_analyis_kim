@@ -7,11 +7,11 @@ import logging
 from typing import Any, Dict
 
 from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
+
 # Import các lớp chiến lược
-from improved_entry_logic import ImprovedEntryLogic
-from improved_position_sizing import ConservativePositionSizer
-from position_sizing_enhanced import EnhancedPositionSizer
-from trading_config import get_config
+from src.strategies.entry_logic import ImprovedEntryLogic
+from src.strategies.position_sizing import ConservativePositionSizer, EnhancedPositionSizer
+from src.config.trading_config import get_config
 
 
 class StrategyManager:
@@ -40,9 +40,9 @@ class StrategyManager:
                 require_volume_confirmation=False,
             )
             logging.info("✅ EntryLogic initialized (min_conf=55, R:R=1.8)")
-        except Exception as e:
+        except Exception:
             logging.critical(
-                f"❌ Không thể khởi tạo ImprovedEntryLogic: {e}", exc_info=True
+                "❌ Không thể khởi tạo ImprovedEntryLogic", exc_info=True
             )
             # Có thể raise exception ở đây để dừng bot nếu logic vào lệnh là bắt buộc
             raise
@@ -63,9 +63,9 @@ class StrategyManager:
                 kelly_fraction=0.5,
             )
             logging.info("✅ EnhancedPositionSizer initialized (with Kelly Criterion)")
-        except ImportError as e:
+        except ImportError:
             logging.warning(
-                f"⚠️ EnhancedPositionSizer không khả dụng ({e}), dùng fallback..."
+                "⚠️ EnhancedPositionSizer không khả dụng (), dùng fallback..."
             )
             self.position_sizer = ConservativePositionSizer(
                 total_capital=100_000_000,
@@ -75,8 +75,8 @@ class StrategyManager:
                 min_positions=8,
             )
             logging.info("✅ ConservativePositionSizer initialized (fallback)")
-        except Exception as e:
-            logging.critical(f"❌ Không thể khởi tạo PositionSizer: {e}", exc_info=True)
+        except Exception:
+            logging.critical("❌ Không thể khởi tạo PositionSizer", exc_info=True)
             raise
 
         # 3. Exit Strategy
@@ -89,14 +89,14 @@ class StrategyManager:
             logging.info(
                 "✅ EnhancedExitStrategy initialized (dynamic trailing & breakeven)"
             )
-        except ImportError as e:
+        except ImportError:
             logging.warning(
-                f"⚠️ EnhancedExitStrategy không khả dụng ({e}), dùng fallback..."
+                "⚠️ EnhancedExitStrategy không khả dụng (), dùng fallback..."
             )
             self.exit_strategy = ImprovedExitStrategy()
             logging.info("✅ ImprovedExitStrategy initialized (fallback)")
-        except Exception as e:
-            logging.critical(f"❌ Không thể khởi tạo ExitStrategy: {e}", exc_info=True)
+        except Exception:
+            logging.critical("❌ Không thể khởi tạo ExitStrategy", exc_info=True)
             raise
 
     def get_strategies(self) -> Dict[str, Any]:

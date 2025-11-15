@@ -5,8 +5,8 @@ Monitor trading bot status and critical components
 """
 import os
 import sys
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
+from datetime import datetime
+from typing import Dict, Tuple
 
 import requests
 
@@ -30,13 +30,13 @@ class HealthChecker:
                 return False, f"API server returned status {response.status_code}"
         except requests.exceptions.ConnectionError:
             return False, "Cannot connect to API server"
-        except Exception as e:
-            return False, f"API check failed: {e}"
+        except Exception:
+            return False, "API check failed"
 
     def check_database(self) -> Tuple[bool, str]:
         """Check database connectivity and integrity"""
         try:
-            from database import get_db
+            from src.data.database import get_db
 
             db = get_db()
 
@@ -45,13 +45,13 @@ class HealthChecker:
                 count = cursor.fetchone()[0]
 
             return True, f"Database OK ({count} active positions)"
-        except Exception as e:
-            return False, f"Database check failed: {e}"
+        except Exception:
+            return False, "Database check failed"
 
     def check_models(self) -> Tuple[bool, str]:
         """Check if ML models are loaded"""
         try:
-            from ml_models import MLPredictor
+            from src.ml.models.predictor import MLPredictor
 
             predictor = MLPredictor()
             loaded = predictor.load_models()
@@ -61,21 +61,21 @@ class HealthChecker:
             else:
                 self.warnings.append("ML models using dummy fallback")
                 return True, "ML models available (dummy mode)"
-        except Exception as e:
-            return False, f"Model check failed: {e}"
+        except Exception:
+            return False, "Model check failed"
 
     def check_configuration(self) -> Tuple[bool, str]:
         """Check configuration validity"""
         try:
-            from exceptions import ConfigurationError
-            from trading_config import get_config
+            from src.config.exceptions import ConfigurationError
+            from src.config.trading_config import get_config
 
-            config = get_config(validate=True)
+            _config = get_config(validate=True)  # noqa: F841
             return True, "Configuration is valid"
-        except ConfigurationError as e:
-            return False, f"Configuration invalid: {e}"
-        except Exception as e:
-            return False, f"Configuration check failed: {e}"
+        except ConfigurationError:
+            return False, "Configuration invalid"
+        except Exception:
+            return False, "Configuration check failed"
 
     def check_disk_space(self) -> Tuple[bool, str]:
         """Check available disk space"""
@@ -93,8 +93,8 @@ class HealthChecker:
                 return True, f"Disk space OK: {free_gb}GB ({free_percent:.1f}%)"
             else:
                 return True, f"Disk space OK: {free_gb}GB ({free_percent:.1f}%)"
-        except Exception as e:
-            return False, f"Disk space check failed: {e}"
+        except Exception:
+            return False, "Disk space check failed"
 
     def check_data_freshness(self) -> Tuple[bool, str]:
         """Check if cached data is fresh"""
@@ -124,13 +124,13 @@ class HealthChecker:
                 return True, f"Cache exists but old ({age_hours:.1f}h)"
             else:
                 return True, f"Cache is fresh ({age_hours:.1f}h old)"
-        except Exception as e:
-            return False, f"Data freshness check failed: {e}"
+        except Exception:
+            return False, "Data freshness check failed"
 
     def check_portfolio_risk(self) -> Tuple[bool, str]:
         """Check portfolio risk metrics"""
         try:
-            from portfolio_manager import get_portfolio_manager
+            from src.portfolio.manager import get_portfolio_manager
 
             manager = get_portfolio_manager()
             positions = manager.get_positions()
@@ -149,9 +149,9 @@ class HealthChecker:
                 self.warnings.append(f"Large drawdown: {pnl_percent:.1f}%")
 
             return True, status
-        except Exception as e:
+        except Exception:
             # Portfolio check is optional
-            self.warnings.append(f"Could not check portfolio: {e}")
+            self.warnings.append("Could not check portfolio")
             return True, "Portfolio check skipped"
 
     def run_all_checks(self) -> Dict:
@@ -171,35 +171,35 @@ class HealthChecker:
         print("=" * 70)
         print("🏥 HEALTH CHECK REPORT")
         print("=" * 70)
-        print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        print("Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
         for name, check_func in checks:
             try:
                 passed, message = check_func()
                 results[name] = {"passed": passed, "message": message}
 
-                emoji = "✅" if passed else "❌"
-                print(f"{emoji} {name:20s} {message}")
+                "✅" if passed else "❌"
+                print("{emoji} {name:20s} {message}")
 
                 if passed:
                     self.checks_passed += 1
                 else:
                     self.checks_failed += 1
-            except Exception as e:
-                results[name] = {"passed": False, "message": f"Error: {e}"}
-                print(f"❌ {name:20s} Error: {e}")
+            except Exception:
+                results[name] = {"passed": False, "message": "Error"}
+                print("❌ {name:20s} Error")
                 self.checks_failed += 1
 
         # Print warnings
         if self.warnings:
-            print(f"\n⚠️  WARNINGS:")
+            print("\n⚠️  WARNINGS:")
             for warning in self.warnings:
-                print(f"   - {warning}")
+                print("   - {warning}")
 
         # Summary
         print("\n" + "=" * 70)
-        total = self.checks_passed + self.checks_failed
-        print(f"📊 SUMMARY: {self.checks_passed}/{total} checks passed")
+        self.checks_passed + self.checks_failed
+        print("📊 SUMMARY: {self.checks_passed}/{total} checks passed")
 
         if self.checks_failed == 0 and not self.warnings:
             print("🎉 All systems operational!")

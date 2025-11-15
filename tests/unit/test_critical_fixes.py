@@ -3,17 +3,16 @@ Unit tests for critical fixes
 Tests for stop loss calculation, thread safety, and data validation
 """
 
-import time
 from threading import Thread
 
 import numpy as np
 import pandas as pd
 import pytest
-from portfolio_manager import PortfolioManager
+from src.portfolio.manager import PortfolioManager
 
 # Import modules to test
-from utils.indicators import IndicatorUtils, StopLossCalculator
-from utils.validation import DataValidator, InputValidator
+from src.utils.indicators import IndicatorUtils, StopLossCalculator
+from src.utils.validation import DataValidator
 
 
 class TestStopLossCalculator:
@@ -213,8 +212,8 @@ class TestPortfolioManagerThreadSafety:
         def add_position_worker(symbol, shares):
             try:
                 manager.add_position(symbol=symbol, shares=shares, entry_price=100_000)
-            except Exception as e:
-                errors.append(e)
+            except Exception as ex:
+                errors.append(str(ex))
 
         # Create multiple threads adding positions
         threads = []
@@ -241,7 +240,7 @@ class TestPortfolioManagerThreadSafety:
         for i in range(5):
             try:
                 manager.add_position(f"TESTREAD{i}", 100, 100_000)
-            except:
+            except Exception:
                 pass  # May fail due to test DB
 
         results = []
@@ -251,8 +250,8 @@ class TestPortfolioManagerThreadSafety:
             try:
                 pos = manager.get_positions()
                 results.append(len(pos))
-            except Exception as e:
-                errors.append(e)
+            except Exception as ex:
+                errors.append(str(ex))
 
         # Create multiple threads reading positions
         threads = []

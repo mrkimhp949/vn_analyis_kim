@@ -26,7 +26,7 @@ Usage:
 """
 
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -167,8 +167,8 @@ class PositionRepository:
             positions = [Position.from_db_row(dict(row)) for row in rows]
             logger.debug(f"Retrieved {len(positions)} active positions")
             return positions
-        except Exception as e:
-            logger.error(f"Error getting active positions: {e}")
+        except Exception:
+            logger.error("Error getting active positions")
             return []
 
     def get_by_symbol(self, symbol: str) -> Optional[Position]:
@@ -194,8 +194,8 @@ class PositionRepository:
                 logger.debug(f"Retrieved position for {symbol}")
                 return position
             return None
-        except Exception as e:
-            logger.error(f"Error getting position for {symbol}: {e}")
+        except Exception:
+            logger.error(f"Error getting position for {symbol}")
             return None
 
     def get_by_id(self, position_id: int) -> Optional[Position]:
@@ -215,8 +215,8 @@ class PositionRepository:
             if rows:
                 return Position.from_db_row(dict(rows[0]))
             return None
-        except Exception as e:
-            logger.error(f"Error getting position {position_id}: {e}")
+        except Exception:
+            logger.error(f"Error getting position {position_id}")
             return None
 
     def create(self, position: Position) -> Optional[int]:
@@ -256,8 +256,8 @@ class PositionRepository:
             position_id = self.db.execute_update(query, params)
             logger.info(f"✅ Created position {position.symbol} (ID: {position_id})")
             return position_id
-        except Exception as e:
-            logger.error(f"Error creating position {position.symbol}: {e}")
+        except Exception:
+            logger.error(f"Error creating position {position.symbol}")
             return None
 
     def update_price(self, symbol: str, current_price: float) -> bool:
@@ -281,8 +281,8 @@ class PositionRepository:
             self.db.execute_update(query, (current_price, symbol))
             logger.debug(f"Updated price for {symbol}: {current_price:,.0f}")
             return True
-        except Exception as e:
-            logger.error(f"Error updating price for {symbol}: {e}")
+        except Exception:
+            logger.error(f"Error updating price for {symbol}")
             return False
 
     def update_shares(self, symbol: str, shares: int, average_price: float) -> bool:
@@ -307,8 +307,8 @@ class PositionRepository:
             self.db.execute_update(query, (shares, average_price, symbol))
             logger.info(f"✅ Updated {symbol}: {shares} shares @ {average_price:,.0f}")
             return True
-        except Exception as e:
-            logger.error(f"Error updating shares for {symbol}: {e}")
+        except Exception:
+            logger.error(f"Error updating shares for {symbol}")
             return False
 
     def close_position(self, symbol: str, exit_price: float) -> bool:
@@ -332,8 +332,8 @@ class PositionRepository:
             self.db.execute_update(query, (exit_price, symbol))
             logger.info(f"✅ Closed position {symbol} @ {exit_price:,.0f}")
             return True
-        except Exception as e:
-            logger.error(f"Error closing position {symbol}: {e}")
+        except Exception:
+            logger.error(f"Error closing position {symbol}")
             return False
 
     def get_total_value(self) -> float:
@@ -354,8 +354,8 @@ class PositionRepository:
             if rows and rows[0]["total"]:
                 return float(rows[0]["total"])
             return 0.0
-        except Exception as e:
-            logger.error(f"Error getting total value: {e}")
+        except Exception:
+            logger.error("Error getting total value")
             return 0.0
 
     def get_by_sector(self, sector: str) -> List[Position]:
@@ -377,8 +377,8 @@ class PositionRepository:
         try:
             rows = self.db.execute_query(query, (sector,))
             return [Position.from_db_row(dict(row)) for row in rows]
-        except Exception as e:
-            logger.error(f"Error getting positions for sector {sector}: {e}")
+        except Exception:
+            logger.error(f"Error getting positions for sector {sector}")
             return []
 
     def get_sector_exposure(self, sector: str) -> float:
@@ -402,8 +402,8 @@ class PositionRepository:
             if rows and rows[0]["total"]:
                 return float(rows[0]["total"])
             return 0.0
-        except Exception as e:
-            logger.error(f"Error getting sector exposure for {sector}: {e}")
+        except Exception:
+            logger.error(f"Error getting sector exposure for {sector}")
             return 0.0
 
     def batch_update_prices(self, price_updates: Dict[str, float]) -> int:

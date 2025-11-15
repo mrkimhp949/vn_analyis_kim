@@ -1,11 +1,10 @@
-import numpy as np
-from data_loader import load_data
-from features import add_ml_features, get_feature_columns
-from ml_models import MLPredictor
+from src.data.loader import load_data
+from src.ml.features.technical import add_ml_features, get_feature_columns
+from src.ml.models.predictor import MLPredictor
 
 # ML Model Monitor
 try:
-    from ml_model_monitor import get_ml_model_monitor
+    from src.ml.monitor import get_ml_model_monitor
 
     ml_monitor = get_ml_model_monitor()
     use_monitoring = True
@@ -22,8 +21,8 @@ class MLSignalGenerator:
             self.predictor.load_models()
             self.model_version = "default"
             self.model_loaded = True
-        except Exception as e:
-            print(f"⚠️ ML model load failed: {e}")
+        except Exception:
+            print("⚠️ ML model load failed")
             # Keep predictor but mark as not loaded — we'll fallback to technical analysis
             self.model_loaded = False
 
@@ -56,8 +55,8 @@ class MLSignalGenerator:
                     try:
                         ml_scores = self.predictor.predict(X)
                         ml_score = ml_scores[-1] if len(ml_scores) > 0 else 0.5
-                    except Exception as e:
-                        print(f"⚠️ ML prediction failed: {e}")
+                    except Exception:
+                        print("⚠️ ML prediction failed")
                         ml_score = 0.5
                 else:
                     # Model not available — use neutral ML score and rely on technical ensemble
@@ -83,8 +82,8 @@ class MLSignalGenerator:
                             abs(calibrated_confidence - confidence) > 5
                         ):  # Significant difference
                             reason += f" | Calibrated: {calibrated_confidence:.0f}%"
-                    except Exception as e:
-                        print(f"⚠️ Lỗi calibrate confidence: {e}")
+                    except Exception:
+                        print("⚠️ Lỗi calibrate confidence")
 
                 return {
                     "signal": signal,
@@ -104,12 +103,13 @@ class MLSignalGenerator:
             else:
                 missing_features = set(feature_cols) - set(available_features)
                 print(
-                    f"⚠️ Không đủ features cho ML ({len(available_features)}/{len(feature_cols)}), thiếu: {missing_features}. Dùng technical analysis."
+                    f"⚠️ Không đủ features cho ML ({len(available_features)}/{len(feature_cols)}), "
+                    f"thiếu: {missing_features}. Dùng technical analysis."
                 )
                 return self._fallback_technical_analysis(df)
 
-        except Exception as e:
-            print(f"⚠️ Lỗi ML analysis: {e}")
+        except Exception:
+            print("⚠️ Lỗi ML analysis")
             return self._fallback_technical_analysis(df)
 
     def _fallback_technical_analysis(self, df):
@@ -149,7 +149,7 @@ class MLSignalGenerator:
                 reasons.append(f"RSI potential peak ({rsi:.1f})")
 
             # MACD
-            macd_diff = latest.get("macd_diff", 0)
+            macd_diff = latest.get("macd_dif", 0)
             if macd_diff > 0:
                 confidence += 10
                 reasons.append("MACD bullish")
@@ -167,8 +167,8 @@ class MLSignalGenerator:
                 "rsi": rsi,
                 "ema_trend": "UP" if ema20 > ema50 else "DOWN",
             }
-        except Exception as e:
-            print(f"⚠️ Lỗi fallback analysis: {e}")
+        except Exception:
+            print("⚠️ Lỗi fallback analysis")
             # Return default values
             return {
                 "signal": "HOLD",
@@ -205,8 +205,8 @@ class MLSignalGenerator:
             # Volatility Score (ATR)
             volatility = latest.get("volatility", 0)
             score["volatility"] = min(volatility * 10, 1)  # Normalize
-        except Exception as e:
-            print(f"⚠️ Lỗi tính technical score: {e}")
+        except Exception:
+            print("⚠️ Lỗi tính technical score")
 
         return score
 
@@ -243,15 +243,15 @@ class MLSignalGenerator:
                 reasons.append(f"Momentum Down ({tech_score['momentum']:.2f})")
 
             # MACD
-            macd_diff = latest.get("macd_diff", 0)
+            macd_diff = latest.get("macd_dif", 0)
             if macd_diff > 0:
                 tech_signal += 0.5
                 reasons.append("MACD Bullish")
             else:
                 tech_signal -= 0.5
                 reasons.append("MACD Bearish")
-        except Exception as e:
-            print(f"⚠️ Lỗi tính tech signal: {e}")
+        except Exception:
+            print("⚠️ Lỗi tính tech signal")
 
         # Combined Signal
         # Trọng số ML cao hơn
@@ -335,8 +335,8 @@ class MLSignalGenerator:
             print("✅ Training và đánh giá hoàn tất!")
             self.model_loaded = True  # Đảm bảo model được đánh dấu là đã load
 
-        except Exception as e:
-            print(f"❌ Lỗi training models: {e}")
+        except Exception:
+            print("❌ Lỗi training models")
             import traceback
 
             traceback.print_exc()

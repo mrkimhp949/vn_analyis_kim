@@ -12,6 +12,7 @@ Suppresses:
     - TensorFlow logging (chỉ hiện ERROR)
 """
 
+import logging
 import os
 import warnings
 
@@ -27,8 +28,6 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # 0=ALL, 1=INFO, 2=WARNING, 3=ERROR
 os.environ["TF_CPP_MIN_VLOG_LEVEL"] = "3"
 
 # Disable TensorFlow warnings về deprecated APIs
-import logging
-
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 logging.getLogger("tensorflow").propagate = False
 

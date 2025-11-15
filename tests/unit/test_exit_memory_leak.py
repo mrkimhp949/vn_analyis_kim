@@ -40,7 +40,7 @@ def test_position_tracking_added_on_check_exit(exit_strategy, sample_df):
     assert symbol not in exit_strategy.position_highs
 
     # Gọi check_exit
-    decision = exit_strategy.check_exit(
+    _decision = exit_strategy.check_exit(  # noqa: F841
         symbol=symbol,
         entry_price=100,
         current_price=110,

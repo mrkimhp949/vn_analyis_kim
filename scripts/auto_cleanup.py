@@ -3,7 +3,6 @@ Automatic Cleanup Script - Removes old files without confirmation
 USE WITH CAUTION!
 """
 
-import os
 import shutil
 from pathlib import Path
 
@@ -115,8 +114,8 @@ def main():
             file.unlink()
             print(f"🗑️  Removed: {file_path}")
             removed += 1
-        except Exception as e:
-            error_msg = f"❌ Error: {file_path} - {e}"
+        except Exception:
+            error_msg = f"❌{file_path} -"
             print(error_msg)
             errors.append(error_msg)
 
@@ -130,8 +129,8 @@ def main():
                 if not contents or all(item.name == "__pycache__" for item in contents):
                     shutil.rmtree(dir)
                     print(f"🗑️  Removed directory: {dir_path}")
-            except Exception as e:
-                print(f"⚠️  Could not remove {dir_path}: {e}")
+            except Exception:
+                print(f"⚠️  Could not remove {dir_path}")
 
     print("\n" + "=" * 70)
     print("✅ CLEANUP COMPLETED!")
@@ -143,7 +142,7 @@ def main():
     if errors:
         print("\n❌ Errors:")
         for error in errors:
-            print(f"  {error}")
+            print(" ")
         return 1
 
     return 0

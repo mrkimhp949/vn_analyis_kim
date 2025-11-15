@@ -8,9 +8,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -621,9 +620,9 @@ class ImprovedExitStrategy:
 # ============================================================================
 
 if __name__ == "__main__":
-    from data_loader import load_data
-    from features import add_ml_features
-    from ml_signals import MLSignalGenerator
+    from src.data.loader import load_data
+    from src.ml.features.technical import add_ml_features
+    from src.ml.signals.generator import MLSignalGenerator
 
     print("\n" + "=" * 70)
     print("🧪 TESTING IMPROVED EXIT STRATEGY")

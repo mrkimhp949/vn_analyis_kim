@@ -9,11 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.strategies.entry_logic import EntrySignal, ImprovedEntryLogic
+from src.strategies.exit_logic import ExitDecision, ExitReason, ImprovedExitStrategy
 
-from improved_entry_logic import (EntrySignal, ImprovedEntryLogic,
-                                  SignalStrength)
-from improved_exit_logic import ExitDecision, ExitReason, ImprovedExitStrategy
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestImprovedEntryLogic:

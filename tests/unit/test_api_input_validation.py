@@ -6,7 +6,6 @@ Kiểm tra validation cho API endpoints
 Note: Test verify code có validation, không test runtime vì có dependency issues
 """
 
-import re
 
 import pytest
 
@@ -35,8 +34,8 @@ class TestAPIValidationCodeExists:
         assert "InputValidator.validate_shares(shares)" in api_code
         assert "InputValidator.validate_price(price)" in api_code
 
-        # Kiểm tra có raise HTTPException
-        assert "raise HTTPException(status_code=400" in api_code
+        # Kiểm tra có handle validation error (return error response)
+        assert 'return {"status": "error"' in api_code
 
     def test_remove_portfolio_has_validation(self):
         """Test /portfolio/remove endpoint có validation"""
@@ -81,13 +80,13 @@ class TestAPIValidationCodeExists:
         assert "raise ValueError" in validation_code
 
     def test_api_catches_validation_errors(self):
-        """Test API catch validation errors và return 400"""
+        """Test API catch validation errors và return error response"""
         with open("src/api/main.py", "r", encoding="utf-8") as f:
             api_code = f.read()
 
-        # Pattern: try-except ValueError -> HTTPException 400
-        assert "except ValueError as e:" in api_code
-        assert "raise HTTPException(status_code=400" in api_code
+        # Pattern: try-except ValueError -> return error
+        assert "except ValueError:" in api_code
+        assert 'return {"status": "error"' in api_code
 
 
 if __name__ == "__main__":

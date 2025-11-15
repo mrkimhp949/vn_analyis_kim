@@ -6,11 +6,16 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 
 import psutil
-from prometheus_client import (CONTENT_TYPE_LATEST, Counter, Gauge, Histogram,
-                               Info, generate_latest)
+from prometheus_client import (
+    Counter,
+    Gauge,
+    Histogram,
+    Info,
+    generate_latest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +166,8 @@ class EnhancedMonitor:
 
             system_cpu_percent.set(cpu_percent)
             system_memory_percent.set(memory_percent)
-        except Exception as e:
-            logger.error(f"Error updating system metrics: {e}")
+        except Exception:
+            logger.error("Error updating system metrics")
 
     # ========================================================================
     # HEALTH CHECK

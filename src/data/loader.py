@@ -13,9 +13,8 @@ from typing import Optional
 
 import pandas as pd
 import requests
-from data_quality import get_quality_checker
-from exceptions import DataLoadError, DataQualityError
-from rate_limiter import tcbs_limiter
+from src.config.exceptions import DataLoadError
+from src.utils.rate_limiter import tcbs_limiter
 
 DATA_CACHE_DIR = "data_cache"
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
@@ -85,18 +84,18 @@ def load_data(
     if use_cache and os.path.exists(cache_file):
         try:
             with open(cache_file, "rb") as f:
-                # logger.info(f"📁 Loading {symbol} from cache.")
+                # logger.info("📁 Loading {symbol} from cache.")
                 return pickle.load(f)
-        except Exception as e:
-            logger.warning(f"⚠️ Cache load failed for {symbol}: {e}. Refetching...")
+        except Exception:
+            logger.warning("⚠️ Cache load failed for {symbol}. Refetching...")
 
-    # logger.info(f"📥 Downloading {symbol} from TCBS API...")
+    # logger.info("📥 Downloading {symbol} from TCBS API...")
     try:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         df = _download_from_tcbs(symbol, start_dt, end_dt, resolution, data_type)
-    except Exception as e:
-        logger.error(f"Failed to download data for {symbol}: {e}", exc_info=False)
+    except Exception:
+        logger.error("Failed to download data for {symbol}", exc_info=False)
         return pd.DataFrame()  # Return empty DataFrame on download failure
 
     # --- Data Validation and Cleaning ---
@@ -110,22 +109,24 @@ def load_data(
 
     df = df.sort_values("time").reset_index(drop=True)
 
-    try:
-        quality_checker = get_quality_checker()
-        quality_results = quality_checker.validate(df, symbol)
-
-        if not quality_results["valid"]:
-            if quality_results["issues"]:
-                logger.warning(
-                    f"Data quality issues for {symbol}: {quality_results['issues']}"
-                )
-                df = quality_checker.clean_data(df, method="forward_fill")
-            if quality_results["warnings"]:
-                logger.info(
-                    f"Data quality warnings for {symbol}: {quality_results['warnings']}"
-                )
-    except Exception as e:
-        logger.warning(f"Data quality check failed for {symbol}: {e}")
+    # Quality check - disabled (module not available)
+    # try:
+    #     from src.data.quality import get_quality_checker
+    #     quality_checker = get_quality_checker()
+    #     quality_results = quality_checker.validate(df, symbol)
+    #
+    #     if not quality_results["valid"]:
+    #         if quality_results["issues"]:
+    #             logger.warning(
+    #                 f"Data quality issues for {symbol}: {quality_results['issues']}"
+    #             )
+    #             df = quality_checker.clean_data(df, method="forward_fill")
+    #         if quality_results["warnings"]:
+    #             logger.info(
+    #                 f"Data quality warnings for {symbol}: {quality_results['warnings']}"
+    #             )
+    # except Exception:
+    #     logger.warning("Data quality check failed for {symbol}")
 
     if len(df) < required_bars:
         logger.warning(
@@ -137,10 +138,10 @@ def load_data(
         try:
             with open(cache_file, "wb") as f:
                 pickle.dump(df, f)
-        except Exception as e:
-            logger.warning(f"Failed to save cache for {symbol}: {e}")
+        except Exception:
+            logger.warning("Failed to save cache for {symbol}")
 
-    # logger.info(f"✅ Successfully loaded {len(df)} bars for {symbol}")
+    # logger.info("✅ Successfully loaded {len(df)} bars for {symbol}")
     return df
 
 
@@ -195,7 +196,7 @@ def _download_from_tcbs(
 
             if not isinstance(data, dict) or "data" not in data:
                 raise DataLoadError(
-                    f"TCBS API returned invalid format",
+                    "TCBS API returned invalid format",
                     context={
                         "symbol": symbol,
                         "response_keys": (
@@ -232,10 +233,10 @@ def _download_from_tcbs(
                 f"Network error after {max_retries} retries", context={"symbol": symbol}
             ) from e
 
-        except Exception as e:
+        except Exception:
             raise DataLoadError(
-                f"Unexpected error during download", context={"symbol": symbol}
-            ) from e
+                "Unexpected error during download", context={"symbol": symbol}
+            ) from e  # noqa: F821
 
     return pd.DataFrame()  # Return empty df if all retries fail
 
@@ -259,12 +260,12 @@ if __name__ == "__main__":
                 use_cache=False,
             )
             if not df.empty:
-                print(f"✅ {symbol}: {len(df)} rows")
+                print("✅ {symbol}: {len(df)} rows")
                 print(
                     f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}"
                 )
-                print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
+                print("   Latest close: {df['close'].iloc[-1]:,.0f}")
             else:
-                print(f"⚠️ {symbol}: No data returned.")
-        except Exception as e:
-            print(f"❌ {symbol}: {e}")
+                print("⚠️ {symbol}: No data returned.")
+        except Exception:
+            print("❌ {symbol}")

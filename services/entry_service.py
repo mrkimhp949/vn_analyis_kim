@@ -8,14 +8,13 @@ import logging
 from typing import Dict, List, Optional
 
 import pandas as pd
-from data_loader import load_data
-from exceptions import DataQualityError
-from improved_entry_logic import ImprovedEntryLogic
-from ml_signals_enhanced import EnhancedMLSignalGenerator
-from portfolio_lock import get_portfolio_lock
-from position_sizing_enhanced import EnhancedPositionSizer
-
-from utils.validation import DataValidator
+from src.data.loader import load_data
+from src.config.exceptions import DataQualityError
+from src.strategies.entry_logic import ImprovedEntryLogic
+from src.ml.signals.enhanced import EnhancedMLSignalGenerator
+from src.portfolio.lock import get_portfolio_lock
+from src.strategies.position_sizing import EnhancedPositionSizer
+from src.utils.validation import DataValidator
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +103,8 @@ class EntrySignalService:
             # Validate data
             try:
                 DataValidator.validate_dataframe(df, min_rows=50)
-            except DataQualityError as e:
-                logger.debug(f"[{symbol}] Data validation failed: {e}")
+            except DataQualityError:
+                logger.debug(f"[{symbol}] Data validation failed")
                 return None
 
             # ML analysis
@@ -146,8 +145,8 @@ class EntrySignalService:
                 "ml_signal": ml_signal,
             }
 
-        except Exception as e:
-            logger.error(f"[{symbol}] Error scanning: {e}", exc_info=True)
+        except Exception:
+            logger.error(f"[{symbol}] Error scanning", exc_info=True)
             return None
 
     def filter_and_rank_signals(

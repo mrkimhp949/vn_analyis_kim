@@ -9,9 +9,9 @@ from typing import List
 
 import numpy as np
 import pandas as pd
-from data_loader import load_data
-from features_enhanced import add_enhanced_features, get_feature_columns
-from ml_models_enhanced import EnhancedMLPredictor
+from src.data.loader import load_data
+from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+from src.ml.models.ensemble import EnhancedMLPredictor
 from sklearn.model_selection import train_test_split
 
 logging.basicConfig(
@@ -44,8 +44,8 @@ def load_training_data(
         logger.info("   Loading VNINDEX...")
         index_df = load_data("VNINDEX", lookback=lookback, is_index=True)
         logger.info(f"   ✅ VNINDEX: {len(index_df)} candles")
-    except Exception as e:
-        logger.warning(f"   ⚠️ Could not load VNINDEX: {e}")
+    except Exception:
+        logger.warning("   ⚠️ Could not load VNINDEX")
 
     # Load symbols
     for i, symbol in enumerate(symbols[:max_symbols], 1):
@@ -68,8 +68,8 @@ def load_training_data(
             all_data.append(df_with_features)
             logger.info(f"      ✅ {symbol}: {len(df_with_features)} candles")
 
-        except Exception as e:
-            logger.error(f"      ❌ {symbol}: {e}")
+        except Exception:
+            logger.error(f"      ❌ {symbol}")
             continue
 
     if not all_data:
@@ -270,7 +270,7 @@ if __name__ == "__main__":
         symbols = [s.strip().upper() for s in args.symbols.split(",")]
     else:
         try:
-            from config import TICKERS
+            from src.config.legacy_config import TICKERS
 
             symbols = TICKERS
         except ImportError:

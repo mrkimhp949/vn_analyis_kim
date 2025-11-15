@@ -54,7 +54,7 @@ class MlStrategy(BaseStrategy):
             List[Dict[str, Any]]: Danh sách các tín hiệu được tạo ra.
         """
         signals = []
-        vnindex_df = kwargs.get("vnindex_df")
+        vnindex_df = kwargs.get("vnindex_d")
 
         for symbol, df in market_data.items():
             if df.empty or len(df) < 50:
@@ -87,7 +87,10 @@ class MlStrategy(BaseStrategy):
                         "symbol": symbol,
                         "action": "BUY",
                         "confidence": float(confidence),
-                        "reason": f"ML model confidence ({confidence:.2f}) > threshold ({self.config['confidence_threshold']})",
+                        "reason": (
+                            f"ML model confidence ({confidence:.2f}) > "
+                            f"threshold ({self.config['confidence_threshold']})"
+                        ),
                         "entry_price": current_price,
                         "strategy_name": self.name,
                     }
@@ -98,9 +101,9 @@ class MlStrategy(BaseStrategy):
 
                     signals.append(signal)
 
-            except Exception as e:
+            except Exception:
                 logger.error(
-                    f"[{self.name}] Lỗi khi tạo tín hiệu cho {symbol}: {e}",
+                    f"[{self.name}] Lỗi khi tạo tín hiệu cho {symbol}",
                     exc_info=True,
                 )
 

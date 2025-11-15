@@ -95,42 +95,40 @@ def show_recommendations():
     print("=" * 60)
 
     for profile, config in RECOMMENDED_THRESHOLDS.items():
-        print(f"\n{profile.upper()}: {config['description']}")
+        print("\n{profile.upper()}: {config['description']}")
         print("-" * 60)
         for regime, settings in config.items():
             if regime == "description":
                 continue
-            print(f"\n  {regime}:")
+            print("\n  {regime}:")
             for key, value in settings.items():
-                print(f"    {key}: {value}")
+                print("    {key}: {value}")
     print()
 
 
 def generate_code(profile: str):
     """Generate code to update bot_runner"""
     if profile not in RECOMMENDED_THRESHOLDS:
-        print(f"❌ Unknown profile: {profile}")
+        print("❌ Unknown profile: {profile}")
         return
 
     config = RECOMMENDED_THRESHOLDS[profile]
 
-    print(f"\n📝 CODE TO UPDATE bot_runner_improved.py")
+    print("\n📝 CODE TO UPDATE bot_runner_improved.py")
     print("=" * 60)
-    print(f"\nProfile: {profile.upper()} - {config['description']}")
+    print("\nProfile: {profile.upper()} - {config['description']}")
     print("\n1. Update default (around line 74):")
     print("-" * 60)
 
     default = config["SIDEWAYS"]  # Use SIDEWAYS as default
-    print(
-        f"""
+    print(f"""
 entry_logic = ImprovedEntryLogic(
     min_confidence={default['min_confidence']},
     min_risk_reward={default['min_risk_reward']},
     require_trend_alignment={default['require_trend_alignment']},
     require_volume_confirmation={default['require_volume_confirmation']}
 )
-"""
-    )
+""")
 
     print("\n2. Update dynamic adjustments (around line 294):")
     print("-" * 60)
@@ -138,36 +136,30 @@ entry_logic = ImprovedEntryLogic(
     for regime in ["BULL", "SIDEWAYS", "BEAR"]:
         settings = config[regime]
         if regime == "BULL":
-            print(
-                f"""
+            print(f"""
 if regime == 'BULL':
     entry_logic.min_confidence = {settings['min_confidence']}
     entry_logic.min_risk_reward = {settings['min_risk_reward']}
     entry_logic.require_trend_alignment = {settings['require_trend_alignment']}
     position_sizer.max_total_exposure = 0.70
     position_sizer.min_positions = 6
-"""
-            )
+""")
         elif regime == "BEAR":
-            print(
-                f"""elif regime == 'BEAR':
+            print(f"""elif regime == 'BEAR':
     entry_logic.min_confidence = {settings['min_confidence']}
     entry_logic.min_risk_reward = {settings['min_risk_reward']}
     entry_logic.require_trend_alignment = {settings['require_trend_alignment']}
     position_sizer.max_total_exposure = 0.30
     position_sizer.min_positions = 2
-"""
-            )
+""")
         else:  # SIDEWAYS
-            print(
-                f"""else:  # SIDEWAYS / UNKNOWN
+            print(f"""else:  # SIDEWAYS / UNKNOWN
     entry_logic.min_confidence = {settings['min_confidence']}
     entry_logic.min_risk_reward = {settings['min_risk_reward']}
     entry_logic.require_trend_alignment = {settings['require_trend_alignment']}
     position_sizer.max_total_exposure = 0.50
     position_sizer.min_positions = 4
-"""
-            )
+""")
 
     print("\n✅ Copy and paste the code above into bot_runner_improved.py")
     print()

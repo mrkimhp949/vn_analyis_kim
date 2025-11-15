@@ -67,7 +67,7 @@ def add_enhanced_features(
     macd = ta.trend.MACD(df["close"])
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
-    df["macd_diff"] = macd.macd_diff()
+    df["macd_dif"] = macd.macd_diff()
     df["macd_signal_line"] = (df["macd"] > df["macd_signal"]).astype(int)
 
     # 5. Bollinger Bands
@@ -177,8 +177,8 @@ def add_enhanced_features(
             else:
                 df["rs"] = 1.0
                 df["rs_momentum"] = 0.0
-        except Exception as e:
-            logger.warning(f"Error calculating RS: {e}")
+        except Exception:
+            logger.warning("Error calculating RS")
             df["rs"] = 1.0
             df["rs_momentum"] = 0.0
     else:
@@ -272,7 +272,7 @@ def get_feature_columns() -> list:
         "atr",
         "macd",
         "macd_signal",
-        "macd_diff",
+        "macd_dif",
         "macd_signal_line",
         "bb_width",
         "bb_position",
@@ -331,7 +331,7 @@ def get_all_feature_columns() -> list:
 # ============================================================================
 
 if __name__ == "__main__":
-    from data_loader import load_data
+    from src.data.loader import load_data
 
     print("\n" + "=" * 70)
     print("🧪 TESTING ENHANCED FEATURES")
@@ -349,17 +349,17 @@ if __name__ == "__main__":
 
     # Check features
     feature_cols = get_feature_columns()
-    print(f"📊 Total features: {len(feature_cols)}")
+    print("📊 Total features: {len(feature_cols)}")
     print(
         f"📊 Features available: {sum(col in df_enhanced.columns for col in feature_cols)}"
     )
 
     # Check for NaN
     nan_count = df_enhanced[feature_cols].isna().sum().sum()
-    print(f"📊 NaN values: {nan_count}")
+    print("📊 NaN values: {nan_count}")
 
     # Show sample
-    print(f"\n📊 Sample data:")
+    print("\n📊 Sample data:")
     print(df_enhanced[feature_cols].tail())
 
     print("\n✅ Testing complete!")

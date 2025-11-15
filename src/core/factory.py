@@ -49,8 +49,8 @@ def create_ml_signal_generator(config: TradingConfig):
         generator = EnhancedMLSignalGenerator(config)
         logger.debug("✅ Created EnhancedMLSignalGenerator")
         return generator
-    except Exception as e:
-        logger.warning(f"Could not create EnhancedMLSignalGenerator: {e}")
+    except Exception:
+        logger.warning("Could not create EnhancedMLSignalGenerator")
         from src.ml.signals.generator import MLSignalGenerator
 
         generator = MLSignalGenerator(config)

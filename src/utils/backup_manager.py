@@ -67,8 +67,8 @@ class BackupManager:
 
             return str(backup_path)
 
-        except Exception as e:
-            logger.error(f"❌ Backup failed: {e}", exc_info=True)
+        except Exception:
+            logger.error("❌ Backup failed", exc_info=True)
             return None
 
     def cleanup_old_backups(self):
@@ -93,8 +93,8 @@ class BackupManager:
                     # Skip files with invalid format
                     continue
 
-        except Exception as e:
-            logger.error(f"Error cleaning up backups: {e}")
+        except Exception:
+            logger.error("Error cleaning up backups")
 
     def restore_backup(self, backup_path: str) -> bool:
         """
@@ -131,8 +131,8 @@ class BackupManager:
             logger.info(f"✅ Database restored from: {backup_path}")
             return True
 
-        except Exception as e:
-            logger.error(f"❌ Restore failed: {e}", exc_info=True)
+        except Exception:
+            logger.error("❌ Restore failed", exc_info=True)
             return False
 
     def list_backups(self) -> list:
@@ -180,8 +180,8 @@ class BackupManager:
 
             except ImportError:
                 logger.warning("boto3 not installed. Install: pip install boto3")
-            except Exception as e:
-                logger.error(f"S3 upload failed: {e}")
+            except Exception:
+                logger.error("S3 upload failed")
 
         elif provider == "gcs":
             # Google Cloud Storage upload
@@ -201,8 +201,8 @@ class BackupManager:
 
             except ImportError:
                 logger.warning("google-cloud-storage not installed")
-            except Exception as e:
-                logger.error(f"GCS upload failed: {e}")
+            except Exception:
+                logger.error("GCS upload failed")
 
 
 # Singleton

@@ -7,11 +7,11 @@ import sys
 
 import pytest
 
+from src.config.exceptions import ConfigurationError
+from src.config.trading_config import Config, TradingConfig
+
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from exceptions import ConfigurationError
-from trading_config import Config, TradingConfig
 
 
 class TestTradingConfig:

@@ -8,17 +8,14 @@ import os
 from typing import Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 # Try to import TensorFlow
 try:
-    import tensorflow as tf
     from tensorflow import keras
     from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-    from tensorflow.keras.layers import (LSTM, BatchNormalization, Dense,
-                                         Dropout)
+    from tensorflow.keras.layers import LSTM, BatchNormalization, Dense, Dropout
     from tensorflow.keras.models import Sequential, load_model
     from tensorflow.keras.optimizers import Adam
 
@@ -118,11 +115,11 @@ class LSTMPredictor:
             )
 
         # Create sequences
-        X_seq = np.array([X[i : i + self.sequence_length] for i in range(n_sequences)])
+        X_seq = np.array([X[i:i + self.sequence_length] for i in range(n_sequences)])
 
         if y is not None:
             # Take label from last timestep of each sequence
-            y_seq = y[self.sequence_length - 1 :]
+            y_seq = y[self.sequence_length - 1:]
             return X_seq, y_seq
 
         return X_seq, None
@@ -240,8 +237,8 @@ class LSTMPredictor:
             self.model = load_model(self.model_path)
             logger.info(f"✅ Model loaded from {self.model_path}")
             return True
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
+        except Exception:
+            logger.error("Error loading model")
             return False
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> dict:
@@ -300,17 +297,17 @@ class EnsembleWithLSTM:
             try:
                 self.lstm = LSTMPredictor()
                 self.lstm.load_model()
-            except Exception as e:
-                logger.warning(f"Could not load LSTM: {e}")
+            except Exception:
+                logger.warning("Could not load LSTM")
 
         # Load traditional models
         try:
-            from ml_models_enhanced import EnhancedMLPredictor
+            from src.ml.models.ensemble import EnhancedMLPredictor
 
             self.traditional_models = EnhancedMLPredictor()
             self.traditional_models.load_models()
-        except Exception as e:
-            logger.warning(f"Could not load traditional models: {e}")
+        except Exception:
+            logger.warning("Could not load traditional models")
 
     def predict(self, X: np.ndarray, lstm_weight: float = 0.3) -> np.ndarray:
         """
@@ -332,8 +329,8 @@ class EnsembleWithLSTM:
                 lstm_pred = self.lstm.predict(X)
                 predictions.append(lstm_pred)
                 weights.append(lstm_weight)
-            except Exception as e:
-                logger.warning(f"LSTM prediction failed: {e}")
+            except Exception:
+                logger.warning("LSTM prediction failed")
 
         # Traditional models prediction
         if self.traditional_models:
@@ -341,8 +338,8 @@ class EnsembleWithLSTM:
                 trad_pred = self.traditional_models.predict(X, use_ensemble=True)
                 predictions.append(trad_pred)
                 weights.append(1 - lstm_weight)
-            except Exception as e:
-                logger.warning(f"Traditional prediction failed: {e}")
+            except Exception:
+                logger.warning("Traditional prediction failed")
 
         if not predictions:
             # Fallback to random

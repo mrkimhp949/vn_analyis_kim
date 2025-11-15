@@ -5,7 +5,7 @@ Handles all Telegram notifications
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from telegram import Bot
 
@@ -37,7 +37,7 @@ class NotificationService:
             confidence = market_regime.get("confidence", 50)
 
             message = (
-                f"🔍 **BẮT ĐẦU QUÉT**\n\n"
+                "🔍 **BẮT ĐẦU QUÉT**\n\n"
                 f"Số mã: {ticker_count}\n"
                 f"Thị trường: *{regime_text}* ({confidence}%)\n"
                 f"Thời gian: {datetime.now().strftime('%H:%M %d/%m/%Y')}"
@@ -46,8 +46,8 @@ class NotificationService:
             await self.bot.send_message(
                 chat_id=self.chat_id, text=message, parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Error sending scan start: {e}")
+        except Exception:
+            logger.error("Error sending scan start")
 
     async def send_entry_signal(self, signal_data: Dict) -> None:
         """Send entry signal notification"""
@@ -62,7 +62,7 @@ class NotificationService:
             rr_ratio = reward / risk if risk > 0 else 0
 
             message = (
-                f"🚀 **TÍN HIỆU MUA MỚI**\n\n"
+                "🚀 **TÍN HIỆU MUA MỚI**\n\n"
                 f"**Mã:** `{symbol}`\n"
                 f"**Giá vào:** `{signal.entry_price:,.0f}`\n"
                 f"**Stop Loss:** `{signal.stop_loss:,.0f}`\n"
@@ -70,7 +70,7 @@ class NotificationService:
                 f"**R:R:** `{rr_ratio:.2f}`\n\n"
                 f"**Confidence:** {signal.confidence}%\n"
                 f"**Strength:** {signal.strength.name}\n\n"
-                f"**--- Quản lý vốn ---**\n"
+                "**--- Quản lý vốn ---**\n"
                 f"**Số CP:** `{position_size.shares:,}`\n"
                 f"**Giá trị:** `{position_size.value:,.0f} VNĐ`\n"
                 f"**Rủi ro:** `{position_size.risk_amount:,.0f} VNĐ` "
@@ -81,8 +81,8 @@ class NotificationService:
             await self.bot.send_message(
                 chat_id=self.chat_id, text=message, parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Error sending entry signal: {e}")
+        except Exception:
+            logger.error("Error sending entry signal")
 
     async def send_exit_signal(self, exit_data: Dict) -> None:
         """Send exit signal notification"""
@@ -108,8 +108,8 @@ class NotificationService:
             await self.bot.send_message(
                 chat_id=self.chat_id, text=message, parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Error sending exit signal: {e}")
+        except Exception:
+            logger.error("Error sending exit signal")
 
     async def send_scan_summary(
         self,
@@ -124,7 +124,7 @@ class NotificationService:
             confidence = market_regime.get("confidence", 0)
 
             message = (
-                f"📊 **BÁO CÁO QUÉT**\n\n"
+                "📊 **BÁO CÁO QUÉT**\n\n"
                 f"Thời gian: {datetime.now().strftime('%H:%M %d/%m/%Y')}\n"
                 f"Thị trường: *{regime_text}* ({confidence}%)\n\n"
                 f"💡 Tín hiệu mua: **{signal_count}**\n"
@@ -137,14 +137,14 @@ class NotificationService:
             await self.bot.send_message(
                 chat_id=self.chat_id, text=message, parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Error sending summary: {e}")
+        except Exception:
+            logger.error("Error sending summary")
 
     async def send_risk_alert(self, alert_type: str, message: str) -> None:
         """Send risk alert"""
         try:
             alert_message = (
-                f"🚨 **CẢNH BÁO RỦI RO**\n\n"
+                "🚨 **CẢNH BÁO RỦI RO**\n\n"
                 f"**Loại:** {alert_type}\n"
                 f"**Chi tiết:** {message}\n"
                 f"**Thời gian:** {datetime.now().strftime('%H:%M %d/%m/%Y')}"
@@ -153,8 +153,8 @@ class NotificationService:
             await self.bot.send_message(
                 chat_id=self.chat_id, text=alert_message, parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Error sending risk alert: {e}")
+        except Exception:
+            logger.error("Error sending risk alert")
 
 
 def get_notification_service(bot: Bot, chat_id: str) -> NotificationService:

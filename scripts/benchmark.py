@@ -88,7 +88,7 @@ class Benchmark:
 
 def benchmark_ml_prediction():
     """Benchmark ML model prediction"""
-    from ml_models import MLPredictor
+    from src.ml.models.predictor import MLPredictor
 
     predictor = MLPredictor()
     predictor.load_models()
@@ -103,7 +103,7 @@ def benchmark_ml_prediction():
 
 def benchmark_data_loading():
     """Benchmark data loading"""
-    from data_loader import load_data
+    from src.data.loader import load_data
 
     def load():
         try:
@@ -116,7 +116,7 @@ def benchmark_data_loading():
 
 def benchmark_technical_indicators():
     """Benchmark technical indicators calculation"""
-    from features import add_ml_features
+    from src.ml.features.technical import add_ml_features
 
     # Create sample data
     dates = pd.date_range("2024-01-01", periods=100, freq="D")
@@ -139,7 +139,7 @@ def benchmark_technical_indicators():
 
 def benchmark_entry_logic():
     """Benchmark entry logic analysis"""
-    from improved_entry_logic import ImprovedEntryLogic
+    from src.strategies.entry_logic import ImprovedEntryLogic
 
     logic = ImprovedEntryLogic()
 
@@ -173,7 +173,7 @@ def benchmark_entry_logic():
 
 def benchmark_database_operations():
     """Benchmark database operations"""
-    from database import get_db
+    from src.data.database import get_db
 
     db = get_db()
 
@@ -187,7 +187,7 @@ def benchmark_database_operations():
 
 def benchmark_portfolio_calculation():
     """Benchmark portfolio value calculation"""
-    from portfolio_manager import get_portfolio_manager
+    from src.portfolio.manager import get_portfolio_manager
 
     manager = get_portfolio_manager()
 

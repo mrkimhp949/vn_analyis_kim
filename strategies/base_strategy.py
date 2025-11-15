@@ -31,7 +31,6 @@ class BaseStrategy(ABC):
         (Tùy chọn) Kiểm tra xem cấu hình chiến lược có hợp lệ không.
         Nên được override bởi các lớp con.
         """
-        pass
 
     @abstractmethod
     def generate_signals(

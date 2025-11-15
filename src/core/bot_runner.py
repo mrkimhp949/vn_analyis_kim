@@ -10,12 +10,11 @@ Version 2.0: Support for both old and new orchestrator with feature flag
 """
 import asyncio
 import logging
-import os
 
-import pandas as pd
 from telegram import Bot
 
 from src.config.exceptions import ConfigurationError
+
 # Import các thành phần cần thiết
 from src.config.legacy_config import CHAT_ID, LOOKBACK, TELEGRAM_TOKEN
 from src.core.orchestrator import TradingOrchestrator
@@ -28,15 +27,15 @@ logging.info("✅ Using TradingOrchestrator")
 try:
     bot = Bot(token=TELEGRAM_TOKEN)
     logging.info("✅ Telegram bot initialized")
-except Exception as e:
-    logging.critical(f"❌ Lỗi khởi tạo Telegram bot: {e}")
+except Exception:
+    logging.critical("❌ Lỗi khởi tạo Telegram bot")
     bot = None
 
 try:
     market_analyzer = ProxyMarketRegimeAnalyzer()
     logging.info("✅ Market analyzer initialized")
-except ImportError as e:
-    logging.error(f"⚠️ Không có market analyzer: {e}")
+except ImportError:
+    logging.error("⚠️ Không có market analyzer")
     market_analyzer = None
 
 
@@ -65,8 +64,8 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
         )
         if vnindex_df.empty:
             logging.warning("⚠️ Không tải được dữ liệu VNINDEX.")
-    except Exception as e:
-        logging.error(f"❌ Lỗi khi tải dữ liệu VNINDEX: {e}", exc_info=True)
+    except Exception:
+        logging.error("❌ Lỗi khi tải dữ liệu VNINDEX", exc_info=True)
         # Có thể quyết định dừng nếu dữ liệu VNINDEX là bắt buộc
 
     # 2. Khởi tạo Orchestrator với context cần thiết
@@ -77,10 +76,10 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
             vnindex_df=vnindex_df,  # Truyền vnindex_df vào
         )
         logging.info("✅ Trading Orchestrator initialized.")
-    except Exception as e:
-        logging.critical(f"❌ Lỗi khởi tạo TradingOrchestrator: {e}", exc_info=True)
+    except Exception:
+        logging.critical("❌ Lỗi khởi tạo TradingOrchestrator", exc_info=True)
         await bot_instance.send_message(
-            chat_id, f"FATAL: Không thể khởi tạo Orchestrator: {e}"
+            chat_id, "FATAL: Không thể khởi tạo Orchestrator"
         )
         return
 
@@ -91,22 +90,23 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
             # Giờ market_analyzer có thể dùng vnindex_df đã được tải sẵn nếu cần
             market_regime = market_analyzer.analyze_market_regime(vnindex_df=vnindex_df)
             logging.info(
-                f"📊 Trạng thái thị trường: {market_regime.get('regime', 'N/A')} (Confidence: {market_regime.get('confidence', 0)}%)"
+                f"📊 Trạng thái thị trường: {market_regime.get('regime', 'N/A')} "
+                f"(Confidence: {market_regime.get('confidence', 0)}%)"
             )
-    except Exception as e:
-        logging.error(f"❌ Lỗi khi phân tích thị trường: {e}", exc_info=True)
-        await bot_instance.send_message(chat_id, f"Lỗi phân tích thị trường: {e}")
+    except Exception:
+        logging.error("❌ Lỗi khi phân tích thị trường", exc_info=True)
+        await bot_instance.send_message(chat_id, "Lỗi phân tích thị trường")
         # Vẫn tiếp tục với market_regime rỗng, Orchestrator sẽ xử lý
 
     # 4. Chạy Orchestrator
     try:
         await orchestrator.run_scan(market_regime=market_regime)
-    except Exception as e:
+    except Exception:
         logging.critical(
-            f"❌ Lỗi nghiêm trọng trong quá trình quét của Orchestrator: {e}",
+            "❌ Lỗi nghiêm trọng trong quá trình quét của Orchestrator",
             exc_info=True,
         )
-        await bot_instance.send_message(chat_id, f"Lỗi nghiêm trọng khi đang quét: {e}")
+        await bot_instance.send_message(chat_id, "Lỗi nghiêm trọng khi đang quét")
 
     logging.info("\n" + "=" * 50 + "\n🏁 KẾT THÚC PHIÊN QUÉT\n" + "=" * 50)
 
@@ -117,11 +117,11 @@ def run_bot_sync():
     """
     try:
         asyncio.run(run_bot_with_context(bot, CHAT_ID))
-    except ConfigurationError as e:
-        logging.critical(f"CRITICAL CONFIG ERROR: {e.message}")
+    except ConfigurationError:
+        logging.critical(f"CRITICAL CONFIG ERROR: {e.message}")  # noqa: F821
         # Maybe send a notification through a different channel if Telegram bot failed
-    except Exception as e:
-        logging.critical(f"❌ Lỗi không xác định khi chạy bot: {e}", exc_info=True)
+    except Exception:
+        logging.critical("❌ Lỗi không xác định khi chạy bot", exc_info=True)
 
 
 # Các hàm cũ như run_sector_analysis, analyze_current_portfolio không còn cần thiết ở đây

@@ -5,7 +5,7 @@ Dự báo biến động để điều chỉnh position size
 
 import logging
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict
 
 import joblib
 import numpy as np
@@ -288,7 +288,7 @@ class VolatilityForecaster:
                 self.scaler = joblib.load(scaler_path)
                 logger.info("Volatility model loaded")
                 return True
-            except Exception as e:
-                logger.warning(f"Failed to load volatility model: {e}")
+            except Exception:
+                logger.warning("Failed to load volatility model")
                 return False
         return False

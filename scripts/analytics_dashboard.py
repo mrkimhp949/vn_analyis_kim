@@ -6,7 +6,7 @@ Tổng hợp tất cả analytics và monitoring
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +51,14 @@ class AnalyticsDashboard:
             attribution = analyzer.analyze_full_attribution(days=90)
 
             return {"status": "success", "data": attribution}
-        except Exception as e:
-            logger.error(f"Error getting performance attribution: {e}")
-            return {"status": "error", "error": str(e)}
+        except Exception:
+            logger.error("Error getting performance attribution")
+            return {"status": "error", "error": str(e)}  # noqa: F821
 
     def _get_portfolio_analysis(self) -> Dict:
         """Get portfolio analysis"""
         try:
-            from portfolio_manager import get_portfolio_manager
+            from src.portfolio.manager import get_portfolio_manager
 
             pm = get_portfolio_manager()
             positions = pm.get_positions()
@@ -73,27 +73,27 @@ class AnalyticsDashboard:
                     "total_return_pct": portfolio_value["total_return_pct"],
                 },
             }
-        except Exception as e:
-            logger.error(f"Error getting portfolio analysis: {e}")
-            return {"status": "error", "error": str(e)}
+        except Exception:
+            logger.error("Error getting portfolio analysis")
+            return {"status": "error", "error": str(e)}  # noqa: F821
 
     def _get_cache_stats(self) -> Dict:
         """Get cache statistics"""
         try:
-            from smart_cache import get_cache
+            from src.data.cache import get_cache
 
             cache = get_cache()
             stats = cache.get_stats()
 
             return {"status": "success", "data": stats}
-        except Exception as e:
-            logger.error(f"Error getting cache stats: {e}")
-            return {"status": "error", "error": str(e)}
+        except Exception:
+            logger.error("Error getting cache stats")
+            return {"status": "error", "error": str(e)}  # noqa: F821
 
     def _get_system_health(self) -> Dict:
         """Get system health"""
         try:
-            from monitoring import get_system_monitor
+            from src.monitoring.performance import get_system_monitor
 
             monitor = get_system_monitor()
             api_stats = monitor.get_api_stats()
@@ -102,9 +102,9 @@ class AnalyticsDashboard:
                 "status": "success",
                 "data": {"api_stats": api_stats, "error_count": len(monitor.errors)},
             }
-        except Exception as e:
-            logger.error(f"Error getting system health: {e}")
-            return {"status": "error", "error": str(e)}
+        except Exception:
+            logger.error("Error getting system health")
+            return {"status": "error", "error": str(e)}  # noqa: F821
 
     def _get_monitoring_status(self) -> Dict:
         """Get monitoring status"""
@@ -115,9 +115,9 @@ class AnalyticsDashboard:
             status = monitor.get_monitoring_status()
 
             return {"status": "success", "data": status}
-        except Exception as e:
-            logger.error(f"Error getting monitoring status: {e}")
-            return {"status": "error", "error": str(e)}
+        except Exception:
+            logger.error("Error getting monitoring status")
+            return {"status": "error", "error": str(e)}  # noqa: F821
 
     def format_dashboard_report(self, dashboard: Dict) -> str:
         """Format dashboard report"""
@@ -205,7 +205,7 @@ class AnalyticsDashboard:
         try:
             from telegram import Bot
 
-            from config import TELEGRAM_TOKEN
+            from src.config.legacy_config import TELEGRAM_TOKEN
 
             bot = Bot(token=TELEGRAM_TOKEN)
 
@@ -218,7 +218,7 @@ class AnalyticsDashboard:
             # Send
             if len(report) > 4000:
                 # Split into chunks
-                chunks = [report[i : i + 4000] for i in range(0, len(report), 4000)]
+                chunks = [report[i:i + 4000] for i in range(0, len(report), 4000)]
                 for chunk in chunks:
                     await bot.send_message(chat_id, chunk, parse_mode="Markdown")
             else:
@@ -226,8 +226,8 @@ class AnalyticsDashboard:
 
             print("✅ Dashboard sent to Telegram")
 
-        except Exception as e:
-            logger.error(f"Error sending dashboard to Telegram: {e}")
+        except Exception:
+            logger.error("Error sending dashboard to Telegram")
 
 
 # Singleton

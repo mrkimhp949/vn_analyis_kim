@@ -3,11 +3,9 @@ Prometheus Metrics Exporter
 Export trading bot metrics for Prometheus monitoring
 """
 
-import time
 from typing import Dict, Optional
 
-from prometheus_client import (REGISTRY, Counter, Gauge, Histogram, Info,
-                               generate_latest)
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram, Info, generate_latest
 
 # ============================================================================
 # TRADING METRICS
@@ -195,37 +193,37 @@ def collect_all_metrics() -> None:
     """Collect all current metrics from the trading bot"""
     try:
         # Portfolio metrics
-        from portfolio_manager import get_portfolio_manager
+        from src.portfolio.manager import get_portfolio_manager
 
         manager = get_portfolio_manager()
         portfolio = manager.get_portfolio_value()
         update_portfolio_metrics(portfolio)
 
-    except Exception as e:
-        record_error("portfolio", type(e).__name__)
+    except Exception:
+        record_error("portfolio", type(e).__name__)  # noqa: F821
 
     try:
         # Paper trading metrics
-        from paper_trading import get_paper_account
+        from src.portfolio.paper_trading import get_paper_account
 
         account = get_paper_account()
         stats = account.get_statistics()
         if stats:
             update_paper_trading_metrics(stats)
 
-    except Exception as e:
-        record_error("paper_trading", type(e).__name__)
+    except Exception:
+        record_error("paper_trading", type(e).__name__)  # noqa: F821
 
     try:
         # ML model metrics
-        from ml_models import MLPredictor
+        from src.ml.models.predictor import MLPredictor
 
         predictor = MLPredictor()
         if predictor.rf_model is not None:
             update_ml_accuracy("random_forest", 0.75)  # Placeholder
 
-    except Exception as e:
-        record_error("ml_models", type(e).__name__)
+    except Exception:
+        record_error("ml_models", type(e).__name__)  # noqa: F821
 
 
 # ============================================================================
@@ -238,7 +236,7 @@ def add_metrics_endpoint(app):
     Add Prometheus metrics endpoint to FastAPI app
 
     Usage:
-        from prometheus_metrics import add_metrics_endpoint
+        from src.monitoring.prometheus import add_metrics_endpoint
         add_metrics_endpoint(app)
 
     Then access metrics at: http://localhost:8080/metrics

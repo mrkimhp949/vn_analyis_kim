@@ -9,8 +9,8 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
-from features_enhanced import add_enhanced_features, get_feature_columns
-from ml_models_enhanced import EnhancedMLPredictor
+from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+from src.ml.models.ensemble import EnhancedMLPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,8 @@ class EnhancedMLSignalGenerator:
                 logger.info("✅ Enhanced ML models loaded successfully")
             else:
                 logger.warning("⚠️ Enhanced models not found, will use fallback")
-        except Exception as e:
-            logger.error(f"❌ Error loading enhanced models: {e}")
+        except Exception:
+            logger.error("❌ Error loading enhanced models")
             self.model_loaded = False
 
     def analyze(
@@ -75,7 +75,7 @@ class EnhancedMLSignalGenerator:
                 col for col in feature_cols if col not in df_enhanced.columns
             ]
             if missing_features:
-                logger.warning(f"Missing features: {missing_features}")
+                logger.warning("Missing features: {missing_features}")
                 return self._fallback_technical_analysis(df_enhanced)
 
             # Extract features
@@ -91,8 +91,8 @@ class EnhancedMLSignalGenerator:
                 try:
                     ml_scores = self.predictor.predict(X, use_ensemble=True)
                     ml_score = ml_scores[-1]
-                except Exception as e:
-                    logger.error(f"ML prediction error: {e}")
+                except Exception:
+                    logger.error("ML prediction error")
                     ml_score = 0.5
             else:
                 ml_score = 0.5
@@ -127,13 +127,13 @@ class EnhancedMLSignalGenerator:
                     if explanation:
                         result["explanation"] = explanation
                         result["top_features"] = explanation["top_features"]
-                except Exception as e:
-                    logger.warning(f"Could not explain prediction: {e}")
+                except Exception:
+                    logger.warning("Could not explain prediction")
 
             return result
 
-        except Exception as e:
-            logger.error(f"Error in enhanced ML analysis: {e}", exc_info=True)
+        except Exception:
+            logger.error("Error in enhanced ML analysis", exc_info=True)
             return self._fallback_technical_analysis(df)
 
     def _calculate_technical_score(self, latest: pd.Series) -> Dict:
@@ -163,8 +163,8 @@ class EnhancedMLSignalGenerator:
             volume_ratio = latest.get("volume_ratio", 1.0)
             score["volume"] = obv_signal * min(volume_ratio / 1.5, 1.0)
 
-        except Exception as e:
-            logger.error(f"Error calculating technical score: {e}")
+        except Exception:
+            logger.error("Error calculating technical score")
 
         return score
 
@@ -270,7 +270,7 @@ class EnhancedMLSignalGenerator:
                 reasons.append(f"RSI overbought ({rsi:.1f})")
 
             # MACD
-            macd_diff = latest.get("macd_diff", 0)
+            macd_diff = latest.get("macd_dif", 0)
             if macd_diff > 0:
                 confidence += 10
                 reasons.append("MACD bullish")
@@ -294,8 +294,8 @@ class EnhancedMLSignalGenerator:
                 "ema_trend": "UP" if ema20 > ema50 else "DOWN",
             }
 
-        except Exception as e:
-            logger.error(f"Error in fallback analysis: {e}")
+        except Exception:
+            logger.error("Error in fallback analysis")
             return self._default_signal()
 
     def _default_signal(self) -> Dict:
@@ -322,7 +322,7 @@ class EnhancedMLSignalGenerator:
 # ============================================================================
 
 if __name__ == "__main__":
-    from data_loader import load_data
+    from src.data.loader import load_data
 
     print("\n" + "=" * 70)
     print("🧪 TESTING ENHANCED ML SIGNAL GENERATOR")
@@ -338,15 +338,15 @@ if __name__ == "__main__":
     signal = generator.analyze(df, index_df, explain=True)
 
     # Print result
-    print(f"📊 Symbol: {symbol}")
-    print(f"📊 Signal: {signal['signal']}")
-    print(f"📊 Confidence: {signal['confidence']}%")
-    print(f"📊 ML Score: {signal['ml_score']:.4f}")
-    print(f"📊 Reason: {signal['reason']}")
+    print("📊 Symbol: {symbol}")
+    print("📊 Signal: {signal['signal']}")
+    print("📊 Confidence: {signal['confidence']}%")
+    print("📊 ML Score: {signal['ml_score']:.4f}")
+    print("📊 Reason: {signal['reason']}")
 
     if "explanation" in signal:
-        print(f"\n🔍 Top contributing features:")
+        print("\n🔍 Top contributing features:")
         for feature, shap_value in signal["top_features"]:
-            print(f"   {feature:25s}: {shap_value:+.4f}")
+            print("   {feature:25s}: {shap_value:+.4f}")
 
     print("\n✅ Testing complete!")

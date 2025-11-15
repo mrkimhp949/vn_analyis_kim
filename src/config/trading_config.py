@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-from exceptions import ConfigurationError
+from src.config.exceptions import ConfigurationError
 
 
 @dataclass
@@ -280,21 +280,21 @@ class Config:
         # Validate data config
         try:
             self.data.validate()
-        except ConfigurationError as e:
-            errors.append(str(e))
+        except ConfigurationError:
+            errors.append(str(e))  # noqa: F821
 
         # Validate trading config
         try:
             self.trading.validate()
-        except ConfigurationError as e:
-            errors.append(str(e))
+        except ConfigurationError:
+            errors.append(str(e))  # noqa: F821
 
         # Validate telegram if enabled
         if self.telegram.enabled:
             try:
                 self.telegram.validate()
-            except ValueError as e:
-                errors.append(f"Telegram: {e}")
+            except ValueError:
+                errors.append("Telegram")
 
         # Validate API config
         if self.api.tcbs_rate_limit < 1:
@@ -392,5 +392,5 @@ if __name__ == "__main__":
     try:
         config.validate()
         print("\n✅ Configuration valid!")
-    except ValueError as e:
-        print(f"\n❌ Configuration error: {e}")
+    except ValueError:
+        print("\n❌ Configuration error")

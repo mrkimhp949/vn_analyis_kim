@@ -3,8 +3,6 @@ Enhanced Risk Management
 Quản lý rủi ro nâng cao với volatility adjustment và correlation penalty
 """
 
-import numpy as np
-import pandas as pd
 from risk_management import RiskManager
 
 
@@ -118,7 +116,7 @@ class EnhancedRiskManager(RiskManager):
         # Trong thực tế, cần phân tích trend VNINDEX
         # Tạm thời giả lập:
         try:
-            from data_loader import load_data
+            from src.data.loader import load_data
 
             vnindex_data = load_data("VNINDEX", lookback=50)
             if len(vnindex_data) > 20:
@@ -132,7 +130,7 @@ class EnhancedRiskManager(RiskManager):
                     return 0.6  # Bear market -> giảm mạnh
                 else:
                     return 0.8  # Sideway -> giảm nhẹ
-        except:
+        except Exception:
             pass
 
         return 1.0  # Default
@@ -141,7 +139,7 @@ class EnhancedRiskManager(RiskManager):
         self, current_price, atr, signal="BUY", confidence=50
     ):
         """Đề xuất limit orders nâng cao"""
-        base_orders = super().suggest_limit_orders(current_price, atr, signal)
+        super().suggest_limit_orders(current_price, atr, signal)
 
         # Điều chỉnh theo confidence
         confidence_adjustment = confidence / 100

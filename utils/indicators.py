@@ -6,7 +6,6 @@ Eliminates duplicate code and ensures consistency
 import logging
 from typing import Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -37,8 +36,8 @@ class IndicatorUtils:
             price = df["close"].iloc[-1]
             return float(price * default_pct)
 
-        except Exception as e:
-            logger.warning(f"Error getting ATR: {e}")
+        except Exception:
+            logger.warning("Error getting ATR")
             return float(df["close"].iloc[-1] * default_pct)
 
     @staticmethod
@@ -50,8 +49,8 @@ class IndicatorUtils:
                 if pd.notna(rsi) and 0 <= rsi <= 100:
                     return float(rsi)
             return default
-        except Exception as e:
-            logger.warning(f"Error getting RSI: {e}")
+        except Exception:
+            logger.warning("Error getting RSI")
             return default
 
     @staticmethod
@@ -84,8 +83,8 @@ class IndicatorUtils:
 
             return support, resistance
 
-        except Exception as e:
-            logger.warning(f"Error calculating S/R: {e}")
+        except Exception:
+            logger.warning("Error calculating S/R")
             return None, None
 
 

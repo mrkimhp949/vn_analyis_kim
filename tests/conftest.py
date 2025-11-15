@@ -4,7 +4,6 @@ Pytest configuration and fixtures
 """
 import os
 import sys
-from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -66,7 +65,7 @@ def sample_market_regime():
 @pytest.fixture
 def mock_config():
     """Mock configuration for testing"""
-    from trading_config import DataConfig, TradingConfig
+    from src.config.trading_config import DataConfig, TradingConfig
 
     trading = TradingConfig(
         max_scan_universe=10,

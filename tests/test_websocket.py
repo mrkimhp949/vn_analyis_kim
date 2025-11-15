@@ -5,14 +5,14 @@ Unit tests for WebSocket Module
 import os
 import sys
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from websocket.live_portfolio import LivePortfolioMonitor, PositionAlert
 from websocket.price_feed import PriceFeedClient, PriceUpdate, WebSocketConfig
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestPriceFeedClient:

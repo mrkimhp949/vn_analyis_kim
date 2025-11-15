@@ -121,8 +121,8 @@ class TradeRepository:
                 f"{trade_data.get('symbol')} @ {trade_data.get('price'):,.0f}"
             )
             return trade_id
-        except Exception as e:
-            logger.error(f"Error creating trade: {e}")
+        except Exception:
+            logger.error("Error creating trade")
             return None
 
     def get_recent_trades(self, limit: int = 100) -> List[Trade]:
@@ -146,8 +146,8 @@ class TradeRepository:
             trades = [Trade.from_db_row(dict(row)) for row in rows]
             logger.debug(f"Retrieved {len(trades)} recent trades")
             return trades
-        except Exception as e:
-            logger.error(f"Error getting recent trades: {e}")
+        except Exception:
+            logger.error("Error getting recent trades")
             return []
 
     def get_by_symbol(self, symbol: str, limit: int = 50) -> List[Trade]:
@@ -171,8 +171,8 @@ class TradeRepository:
         try:
             rows = self.db.execute_query(query, (symbol, limit))
             return [Trade.from_db_row(dict(row)) for row in rows]
-        except Exception as e:
-            logger.error(f"Error getting trades for {symbol}: {e}")
+        except Exception:
+            logger.error(f"Error getting trades for {symbol}")
             return []
 
     def get_by_date_range(
@@ -197,8 +197,8 @@ class TradeRepository:
         try:
             rows = self.db.execute_query(query, (start_date, end_date))
             return [Trade.from_db_row(dict(row)) for row in rows]
-        except Exception as e:
-            logger.error(f"Error getting trades by date range: {e}")
+        except Exception:
+            logger.error("Error getting trades by date range")
             return []
 
     def get_statistics(self, days: int = 30) -> Dict[str, Any]:
@@ -241,8 +241,8 @@ class TradeRepository:
                     "period_days": days,
                 }
             return {}
-        except Exception as e:
-            logger.error(f"Error getting trade statistics: {e}")
+        except Exception:
+            logger.error("Error getting trade statistics")
             return {}
 
     def get_win_rate(self, days: int = 90) -> Dict[str, float]:
@@ -291,6 +291,6 @@ class TradeRepository:
                     "win_loss_ratio": win_loss_ratio,
                 }
             return {}
-        except Exception as e:
-            logger.error(f"Error calculating win rate: {e}")
+        except Exception:
+            logger.error("Error calculating win rate")
             return {}

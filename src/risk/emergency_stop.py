@@ -91,7 +91,7 @@ class EmergencyStop:
             (is_crash, reason)
         """
         try:
-            from data_loader import load_data
+            from src.data.loader import load_data
 
             # Load VNINDEX
             vnindex = load_data("VNINDEX", lookback=10, use_cache=False)
@@ -112,8 +112,8 @@ class EmergencyStop:
 
             return False, None
 
-        except Exception as e:
-            print(f"⚠️ Lỗi check market crash: {e}")
+        except Exception:
+            print("⚠️ Lỗi check market crash")
             return False, None
 
     def is_emergency_active(self) -> bool:
@@ -153,7 +153,7 @@ class EmergencyStop:
 
         self._save_events()
 
-        print(f"🚨 EMERGENCY STOP TRIGGERED: {reason}")
+        print("🚨 EMERGENCY STOP TRIGGERED: {reason}")
 
     def resume(self, reason: str = "Manual resume"):
         """Resume trading sau emergency"""
@@ -170,7 +170,7 @@ class EmergencyStop:
 
         self._save_events()
 
-        print(f"✅ EMERGENCY STOP RESUMED: {reason}")
+        print("✅ EMERGENCY STOP RESUMED: {reason}")
 
     def can_trade(self) -> Tuple[bool, str]:
         """
@@ -208,7 +208,7 @@ class EmergencyStop:
 
         if self.is_emergency_active():
             event = EmergencyEvent(**self.events["active_emergency"])
-            msg.append(f"⚠️ **EMERGENCY ACTIVE**")
+            msg.append("⚠️ **EMERGENCY ACTIVE**")
             msg.append(f"Type: {event.event_type}")
             msg.append(f"Reason: {event.reason}")
             msg.append(f"Triggered: {event.timestamp[:16]}")
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     # Test 1: Normal check
     print("\n1️⃣ Test normal check:")
     can_trade, reason = stop.can_trade()
-    print(f"Can trade: {can_trade} - {reason}")
+    print("Can trade: {can_trade} - {reason}")
 
     # Test 2: Manual trigger
     print("\n2️⃣ Test manual trigger:")
@@ -271,7 +271,7 @@ if __name__ == "__main__":
     )
 
     can_trade, reason = stop.can_trade()
-    print(f"Can trade: {can_trade} - {reason}")
+    print("Can trade: {can_trade} - {reason}")
 
     # Test 3: Status
     print("\n3️⃣ Status:")
@@ -281,6 +281,6 @@ if __name__ == "__main__":
     print("\n4️⃣ Test resume:")
     stop.resume("Test completed")
     can_trade, reason = stop.can_trade()
-    print(f"Can trade: {can_trade} - {reason}")
+    print("Can trade: {can_trade} - {reason}")
 
     print("\n✅ Test completed!")

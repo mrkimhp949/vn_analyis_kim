@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from portfolio_manager import get_portfolio_manager
+from src.portfolio.manager import get_portfolio_manager
 
 PAPER_TRADING_FILE = "paper_trading.json"
 
@@ -146,8 +146,8 @@ class PaperTradingAccount:
                     "signal_reason": signal_reason,
                 },
             )
-        except Exception as e:
-            return False, f"Lỗi DB khi thêm vị thế {symbol}: {e}", None
+        except Exception:
+            return False, f"Lỗi DB khi thêm vị thế {symbol}", None
 
         # Update cash
         self.account["cash"] -= total_cost
@@ -192,7 +192,7 @@ class PaperTradingAccount:
         # Get current price if not provided
         if price is None:
             try:
-                from data_loader import load_data
+                from src.data.loader import load_data
 
                 df = load_data(symbol, lookback=5, use_cache=True)
                 if df.empty:
@@ -250,8 +250,8 @@ class PaperTradingAccount:
                 trade,
             )
 
-        except Exception as e:
-            return False, f"Lỗi khi xử lý lệnh bán {symbol}: {e}", None
+        except Exception:
+            return False, f"Lỗi khi xử lý lệnh bán {symbol}", None
 
     def get_portfolio_value(self) -> Dict:
         """
@@ -351,7 +351,9 @@ class PaperTradingAccount:
             f"💵 Tiền mặt (ước tính): {current_cash:,.0f} VNĐ",
             f"📈 Giá trị vị thế: {portfolio_value.get('total_positions_value', 0):,.0f} VNĐ",
             f"💼 Tổng giá trị: {total_value:,.0f} VNĐ",
-            f"{'📈' if portfolio_value.get('total_pnl', 0) >= 0 else '📉'} P&L: {portfolio_value.get('total_pnl', 0):+,.0f} VNĐ ({portfolio_value.get('total_pnl_percent', 0):+.2f}%)",
+            f"{'📈' if portfolio_value.get('total_pnl', 0) >= 0 else '📉'} P&L: "
+            f"{portfolio_value.get('total_pnl', 0):+,.0f} VNĐ "
+            f"({portfolio_value.get('total_pnl_percent', 0):+.2f}%)",
             f"📊 Số vị thế: {portfolio_value.get('num_positions', 0)}",
             f"🔄 Tổng giao dịch: {stats.get('total_trades', 0)}",
             f"💸 Tổng phí (ước tính): {stats.get('total_commission', 0):,.0f} VNĐ",

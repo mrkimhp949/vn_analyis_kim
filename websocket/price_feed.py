@@ -120,8 +120,8 @@ class PriceFeedClient:
             # Send subscription message
             await self.send_subscription()
 
-        except Exception as e:
-            logger.error(f"Connection error: {e}")
+        except Exception:
+            logger.error("Connection error")
             self.connected = False
             raise
 
@@ -141,8 +141,8 @@ class PriceFeedClient:
             logger.info(
                 f"Sent subscription for {len(self.config.subscribe_channels)} symbols"
             )
-        except Exception as e:
-            logger.error(f"Failed to send subscription: {e}")
+        except Exception:
+            logger.error("Failed to send subscription")
 
     async def handle_message(self, message: str):
         """Handle incoming WebSocket message"""
@@ -156,8 +156,8 @@ class PriceFeedClient:
 
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON: {message[:100]}")
-        except Exception as e:
-            logger.error(f"Error handling message: {e}")
+        except Exception:
+            logger.error("Error handling message")
 
     def process_price_update(self, data: Dict):
         """Process price update from WebSocket"""
@@ -189,11 +189,11 @@ class PriceFeedClient:
             for callback in self.price_callbacks:
                 try:
                     callback(update)
-                except Exception as e:
-                    logger.error(f"Error in callback {callback.__name__}: {e}")
+                except Exception:
+                    logger.error(f"Error in callback {callback.__name__}")
 
-        except Exception as e:
-            logger.error(f"Error processing price update: {e}")
+        except Exception:
+            logger.error("Error processing price update")
 
     async def receive_loop(self):
         """Main receive loop"""
@@ -205,8 +205,8 @@ class PriceFeedClient:
             logger.warning("WebSocket connection closed")
             self.connected = False
 
-        except Exception as e:
-            logger.error(f"Error in receive loop: {e}")
+        except Exception:
+            logger.error("Error in receive loop")
             self.connected = False
 
     async def reconnect(self):
@@ -225,8 +225,8 @@ class PriceFeedClient:
 
         try:
             await self.connect()
-        except Exception as e:
-            logger.error(f"Reconnection failed: {e}")
+        except Exception:
+            logger.error("Reconnection failed")
             await self.reconnect()
 
     async def run(self):
@@ -244,8 +244,8 @@ class PriceFeedClient:
                 if self.running:
                     await self.reconnect()
 
-            except Exception as e:
-                logger.error(f"Error in run loop: {e}")
+            except Exception:
+                logger.error("Error in run loop")
                 if self.running:
                     await self.reconnect()
 

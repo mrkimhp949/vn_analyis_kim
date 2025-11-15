@@ -5,8 +5,8 @@ Display trading bot performance metrics
 """
 import os
 import sys
-from datetime import datetime, timedelta
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def get_portfolio_metrics() -> Dict:
     """Get portfolio performance metrics"""
-    from portfolio_manager import get_portfolio_manager
+    from src.portfolio.manager import get_portfolio_manager
 
     manager = get_portfolio_manager()
     positions = manager.get_positions()
@@ -32,7 +32,7 @@ def get_portfolio_metrics() -> Dict:
 
 def get_trade_statistics() -> Dict:
     """Get trade statistics from database"""
-    from database import get_db
+    from src.data.database import get_db
 
     db = get_db()
 
@@ -85,7 +85,7 @@ def get_trade_statistics() -> Dict:
 def get_paper_trading_stats() -> Dict:
     """Get paper trading statistics"""
     try:
-        from paper_trading import get_paper_account
+        from src.portfolio.paper_trading import get_paper_account
 
         account = get_paper_account()
         stats = account.get_statistics()
@@ -100,7 +100,7 @@ def display_dashboard():
     print("=" * 80)
     print("📊 TRADING BOT PERFORMANCE DASHBOARD")
     print("=" * 80)
-    print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    print("Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     # Portfolio Metrics
     try:
@@ -109,22 +109,22 @@ def display_dashboard():
 
         portfolio = get_portfolio_metrics()
 
-        print(f"Positions:     {portfolio['num_positions']}")
-        print(f"Total Value:   {portfolio['total_value']:,.0f} VNĐ")
-        print(f"Total Cost:    {portfolio['total_cost']:,.0f} VNĐ")
+        print("Positions:     {portfolio['num_positions']}")
+        print("Total Value:   {portfolio['total_value']:,.0f} VNĐ")
+        print("Total Cost:    {portfolio['total_cost']:,.0f} VNĐ")
         print(
             f"P&L:           {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.2f}%)"
         )
 
         if portfolio["positions"]:
-            print(f"\nCurrent Positions:")
+            print("\nCurrent Positions:")
             for symbol, pos in portfolio["positions"].items():
-                shares = pos["shares"]
-                avg_price = pos["avg_price"]
-                print(f"  • {symbol:6s} {shares:>6,} shares @ {avg_price:>10,.0f} VNĐ")
+                pos["shares"]
+                pos["avg_price"]
+                print("  • {symbol:6s} {shares:>6,} shares @ {avg_price:>10,.0f} VNĐ")
 
-    except Exception as e:
-        print(f"❌ Error loading portfolio metrics: {e}")
+    except Exception:
+        print("❌ Error loading portfolio metrics")
 
     print()
 
@@ -135,12 +135,12 @@ def display_dashboard():
 
         trades = get_trade_statistics()
 
-        print(f"Total Trades:  {trades['total_trades']}")
-        print(f"  - Buy:       {trades['buy_trades']}")
-        print(f"  - Sell:      {trades['sell_trades']}")
+        print("Total Trades:  {trades['total_trades']}")
+        print("  - Buy:       {trades['buy_trades']}")
+        print("  - Sell:      {trades['sell_trades']}")
 
         if trades["recent_trades"]:
-            print(f"\nRecent Trades (last 10):")
+            print("\nRecent Trades (last 10):")
             for trade in trades["recent_trades"]:
                 action_emoji = "🟢" if trade["action"] == "BUY" else "🔴"
                 date = trade["date"][:10] if trade["date"] else "N/A"
@@ -150,8 +150,8 @@ def display_dashboard():
                     f"- {trade['reason']}"
                 )
 
-    except Exception as e:
-        print(f"❌ Error loading trade statistics: {e}")
+    except Exception:
+        print("❌ Error loading trade statistics")
 
     print()
 
@@ -163,17 +163,17 @@ def display_dashboard():
         paper = get_paper_trading_stats()
 
         if paper:
-            print(f"Balance:       {paper.get('balance', 0):,.0f} VNĐ")
-            print(f"Total P&L:     {paper.get('total_pnl', 0):+,.0f} VNĐ")
-            print(f"Total Trades:  {paper.get('total_trades', 0)}")
-            print(f"Win Rate:      {paper.get('win_rate', 0):.1f}%")
-            print(f"Avg Profit:    {paper.get('avg_profit', 0):,.0f} VNĐ")
-            print(f"Avg Loss:      {paper.get('avg_loss', 0):,.0f} VNĐ")
+            print("Balance:       {paper.get('balance', 0):,.0f} VNĐ")
+            print("Total P&L:     {paper.get('total_pnl', 0):+,.0f} VNĐ")
+            print("Total Trades:  {paper.get('total_trades', 0)}")
+            print("Win Rate:      {paper.get('win_rate', 0):.1f}%")
+            print("Avg Profit:    {paper.get('avg_profit', 0):,.0f} VNĐ")
+            print("Avg Loss:      {paper.get('avg_loss', 0):,.0f} VNĐ")
         else:
             print("No paper trading data available")
 
-    except Exception as e:
-        print(f"❌ Error loading paper trading stats: {e}")
+    except Exception:
+        print("❌ Error loading paper trading stats")
 
     print()
 
@@ -183,28 +183,28 @@ def display_dashboard():
         print("-" * 80)
 
         # Check models
-        from ml_models import MLPredictor
+        from src.ml.models.predictor import MLPredictor
 
         predictor = MLPredictor()
         loaded = predictor.load_models()
 
-        model_status = "Loaded" if loaded and predictor.rf_model else "Dummy Mode"
-        print(f"ML Models:     {model_status}")
+        "Loaded" if loaded and predictor.rf_model else "Dummy Mode"
+        print("ML Models:     {model_status}")
 
         # Check database size
         import os
 
         if os.path.exists("trading.db"):
-            db_size = os.path.getsize("trading.db") / (1024 * 1024)  # MB
-            print(f"Database Size: {db_size:.2f} MB")
+            _db_size = os.path.getsize("trading.db") / (1024 * 1024)  # MB  # noqa: F841
+            print("Database Size: {db_size:.2f} MB")
 
         # Check cache
         if os.path.exists("data_cache"):
-            cache_files = [f for f in os.listdir("data_cache") if f.endswith(".pkl")]
-            print(f"Cached Tickers: {len(cache_files)}")
+            [f for f in os.listdir("data_cache") if f.endswith(".pkl")]
+            print("Cached Tickers: {len(cache_files)}")
 
-    except Exception as e:
-        print(f"❌ Error loading system info: {e}")
+    except Exception:
+        print("❌ Error loading system info")
 
     print("\n" + "=" * 80)
 
@@ -239,7 +239,7 @@ def main():
         if args.export:
             with open(args.export, "w") as f:
                 f.write(json_output)
-            print(f"✅ Metrics exported to {args.export}")
+            print("✅ Metrics exported to {args.export}")
         else:
             print(json_output)
     else:

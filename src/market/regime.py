@@ -5,13 +5,12 @@ Phát hiện tình trạng thị trường để quyết định có nên trade 
 """
 
 import logging
-from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from data_loader import load_data
-from trading_config import get_config
+from src.data.loader import load_data
+from src.config.trading_config import get_config
 
 config = get_config()
 logger = logging.getLogger(__name__)
@@ -128,11 +127,11 @@ class MarketRegimeAnalyzer:
                 "message": self._generate_message(regime, tradeable, details),
             }
 
-            logger.info(f"Market Regime: {regime} | Tradeable: {tradeable}")
+            logger.info("Market Regime: {regime} | Tradeable: {tradeable}")
             return result
 
-        except Exception as e:
-            logger.error(f"Lỗi phân tích market regime: {e}")
+        except Exception:
+            logger.error("Lỗi phân tích market regime")
             return self._default_regime()
 
     def _calculate_weekly_change(self, df: pd.DataFrame) -> float:
@@ -279,8 +278,8 @@ class MarketRegimeAnalyzer:
                 "state_means": state_means.tolist(),
                 "state_volatility": state_vol.tolist(),
             }
-        except Exception as exc:
-            logger.debug(f"HMM regime detection failed: {exc}")
+        except Exception:
+            logger.debug("HMM regime detection failed")
             return None
 
     def _is_tradeable(
@@ -343,38 +342,38 @@ class MarketRegimeAnalyzer:
         if not tradeable:
             if regime == "BEAR":
                 return (
-                    f"⛔ THỊ TRƯỜNG GIẢM ĐIỂM - KHÔNG NÊN TRADE\n"
+                    "⛔ THỊ TRƯỜNG GIẢM ĐIỂM - KHÔNG NÊN TRADE\n"
                     f"📉 VNINDEX: {details['vnindex_price']:.2f}\n"
                     f"📊 Tuần này: {details['weekly_change']:+.2f}%"
                 )
 
             elif regime == "HIGH_VOLATILITY":
                 return (
-                    f"⚠️ THỊ TRƯỜNG BIẾN ĐỘNG MẠNH - RỦI RO CAO\n"
+                    "⚠️ THỊ TRƯỜNG BIẾN ĐỘNG MẠNH - RỦI RO CAO\n"
                     f"📊 Volatility: {details['volatility']*100:.2f}%\n"
-                    f"💡 Nên chờ ổn định hơn"
+                    "💡 Nên chờ ổn định hơn"
                 )
 
             else:
                 return (
-                    f"⏸️ THỊ TRƯỜNG KHÔNG RÕ HƯỚNG\n"
+                    "⏸️ THỊ TRƯỜNG KHÔNG RÕ HƯỚNG\n"
                     f"📊 Regime: {regime}\n"
-                    f"💡 Đợi tín hiệu rõ ràng hơn"
+                    "💡 Đợi tín hiệu rõ ràng hơn"
                 )
 
         else:
             if regime == "BULL":
                 return (
-                    f"✅ THỊ TRƯỜNG TÍCH CỰC - CÓ THỂ TRADE\n"
+                    "✅ THỊ TRƯỜNG TÍCH CỰC - CÓ THỂ TRADE\n"
                     f"📈 VNINDEX: {details['vnindex_price']:.2f}\n"
                     f"🎯 Xu hướng: {details['trend_direction']} ({details['trend_strength']:.0f}%)"
                 )
 
             else:  # SIDEWAYS
                 return (
-                    f"⚡ THỊ TRƯỜNG ĐANG DAO ĐỘNG\n"
+                    "⚡ THỊ TRƯỜNG ĐANG DAO ĐỘNG\n"
                     f"📊 VNINDEX: {details['vnindex_price']:.2f}\n"
-                    f"💡 Trade thận trọng, chọn mã tốt"
+                    "💡 Trade thận trọng, chọn mã tốt"
                 )
 
     def _default_regime(self) -> Dict:
@@ -461,13 +460,13 @@ if __name__ == "__main__":
     analyzer = MarketRegimeAnalyzer()
     result = analyzer.analyze_market_regime()
 
-    print(f"📊 Regime: {result['regime']}")
-    print(f"✅ Tradeable: {result['tradeable']}")
-    print(f"🎯 Confidence: {result['confidence']}%")
-    print(f"\n{result['message']}")
-    print(f"\n📈 Details:")
+    print("📊 Regime: {result['regime']}")
+    print("✅ Tradeable: {result['tradeable']}")
+    print("🎯 Confidence: {result['confidence']}%")
+    print("\n{result['message']}")
+    print("\n📈 Details:")
     for key, value in result["details"].items():
-        print(f"  • {key}: {value}")
+        print("  • {key}: {value}")
 
-    print(f"\n💰 Position Multiplier: {analyzer.get_position_multiplier():.2f}x")
+    print("\n💰 Position Multiplier: {analyzer.get_position_multiplier():.2f}x")
     print("\n" + "=" * 70)

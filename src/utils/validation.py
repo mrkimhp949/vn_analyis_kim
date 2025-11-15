@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from exceptions import DataQualityError
+from src.config.exceptions import DataQualityError
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +313,8 @@ if __name__ == "__main__":
     try:
         data_validator.validate_dataframe(df, min_rows=3)
         print("✅ Test 1 passed: Valid DataFrame")
-    except DataQualityError as e:
-        print(f"❌ Test 1 failed: {e}")
+    except DataQualityError:
+        print("❌ Test 1 failed")
 
     # Test 2: Empty DataFrame
     df_empty = pd.DataFrame()
@@ -336,7 +336,7 @@ if __name__ == "__main__":
         conf = input_validator.validate_confidence(75)
         assert conf == 75
         print("✅ Test 4 passed: Valid confidence")
-    except ValueError as e:
-        print(f"❌ Test 4 failed: {e}")
+    except ValueError:
+        print("❌ Test 4 failed")
 
     print("\n✅ All validation tests completed!")

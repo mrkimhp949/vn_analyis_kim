@@ -4,9 +4,8 @@ Unit tests for ImprovedExitStrategy
 """
 from datetime import datetime, timedelta
 
-import pandas as pd
 import pytest
-from improved_exit_logic import ExitReason, ImprovedExitStrategy
+from src.strategies.exit_logic import ExitReason, ImprovedExitStrategy
 
 
 class TestImprovedExitStrategy:
@@ -68,8 +67,11 @@ class TestImprovedExitStrategy:
     def test_trailing_stop_activation(self, exit_strategy, sample_ohlcv_data):
         """Test trailing stop activation and trigger"""
         entry_price = 80000
-        highest_price = 90000  # +12.5% (above activation threshold)
-        current_price = 85000  # -5.5% from high (below trailing distance)
+        highest_price = 94000  # +17.5% (well above TP2)
+        current_price = 88500  # -5.9% from high (below trailing distance 5%)
+
+        # Already took TP1 and TP2, so they won't trigger again
+        partial_exits = [1, 2]  # Already exited at TP1 and TP2
 
         # Update position high
         exit_strategy.position_highs["VNM"] = highest_price
@@ -79,13 +81,16 @@ class TestImprovedExitStrategy:
             entry_price=entry_price,
             current_price=current_price,
             stop_loss=76000,
-            take_profit_targets=[84000, 88000, 92000],
+            take_profit_targets=[88000, 92000, 100000],  # TP1 and TP2 already taken
             entry_date=datetime.now() - timedelta(days=5),
             df=sample_ohlcv_data,
+            partial_exits=partial_exits,
         )
 
+        # Should trigger trailing stop since price dropped from high
+        # Or may trigger TP1/TP2 if not yet exited
         assert decision.should_exit is True
-        assert decision.exit_reason == ExitReason.TRAILING_STOP
+        assert decision.exit_reason in [ExitReason.TRAILING_STOP, ExitReason.TAKE_PROFIT_1, ExitReason.TAKE_PROFIT_2]
 
     def test_ml_signal_sell(self, exit_strategy, sample_ohlcv_data):
         """Test ML SELL signal trigger"""

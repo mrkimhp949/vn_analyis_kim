@@ -10,14 +10,19 @@ Enhanced ML Models với:
 
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.metrics import (accuracy_score, classification_report, f1_score,
-                             precision_score, recall_score, roc_auc_score)
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
@@ -75,7 +80,7 @@ class EnhancedMLPredictor:
 
         # Expected features
         try:
-            from features_enhanced import get_feature_columns
+            from src.ml.features.enhanced import get_feature_columns
 
             self.expected_features = len(get_feature_columns())
             self.feature_names = get_feature_columns()
@@ -169,7 +174,7 @@ class EnhancedMLPredictor:
                 "n_estimators": [100, 200, 300],
                 "max_depth": [10, 15, 20],
                 "min_samples_split": [5, 10, 15],
-                "min_samples_leaf": [2, 5, 10],
+                "min_samples_lea": [2, 5, 10],
             }
 
             rf = RandomForestClassifier(
@@ -341,7 +346,7 @@ class EnhancedMLPredictor:
         estimators = []
 
         if self.rf_model is not None:
-            estimators.append(("rf", self.rf_model))
+            estimators.append(("r", self.rf_model))
 
         if self.xgb_model is not None:
             estimators.append(("xgb", self.xgb_model))
@@ -428,7 +433,7 @@ class EnhancedMLPredictor:
 
         # Random Forest importance
         if self.rf_model is not None:
-            self.feature_importance["rf"] = dict(
+            self.feature_importance["r"] = dict(
                 zip(self.feature_names, self.rf_model.feature_importances_)
             )
 
@@ -508,7 +513,7 @@ class EnhancedMLPredictor:
             explanation = {
                 "shap_values": dict(zip(self.feature_names, sample_shap)),
                 "base_value": self.shap_explainer.expected_value,
-                "prediction": self.predict(X[sample_idx : sample_idx + 1])[0],
+                "prediction": self.predict(X[sample_idx:sample_idx + 1])[0],
             }
 
             # Sort by absolute SHAP value
@@ -522,8 +527,8 @@ class EnhancedMLPredictor:
 
             return explanation
 
-        except Exception as e:
-            logger.error(f"Error explaining prediction: {e}")
+        except Exception:
+            logger.error("Error explaining prediction")
             return None
 
     # ========================================================================
@@ -544,7 +549,7 @@ class EnhancedMLPredictor:
 
         try:
             auc = roc_auc_score(y_val, y_pred_proba)
-        except:
+        except ValueError:
             auc = 0.0
 
         logger.info(f"   {model_name} Performance:")
@@ -596,7 +601,7 @@ class EnhancedMLPredictor:
                 "expected_features": self.expected_features,
                 "feature_names": self.feature_names,
                 "models_available": {
-                    "rf": self.rf_model is not None,
+                    "r": self.rf_model is not None,
                     "xgb": self.xgb_model is not None,
                     "lgb": self.lgb_model is not None,
                 },
@@ -612,8 +617,8 @@ class EnhancedMLPredictor:
 
             logger.info("✅ Models saved successfully!")
 
-        except Exception as e:
-            logger.error(f"❌ Error saving models: {e}")
+        except Exception:
+            logger.error("❌ Error saving models")
 
     def load_models(self) -> bool:
         """Load all models"""
@@ -654,8 +659,8 @@ class EnhancedMLPredictor:
             logger.info("✅ Models loaded successfully!")
             return True
 
-        except Exception as e:
-            logger.error(f"❌ Error loading models: {e}")
+        except Exception:
+            logger.error("❌ Error loading models")
             return False
 
 

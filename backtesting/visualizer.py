@@ -235,7 +235,7 @@ class BacktestVisualizer:
             for j in range(len(pivot_table.columns)):
                 value = pivot_table.values[i, j]
                 if not np.isnan(value):
-                    text = ax.text(
+                    _text = ax.text(  # noqa: F841
                         j,
                         i,
                         f"{value:.1f}%",

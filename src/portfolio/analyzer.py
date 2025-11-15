@@ -12,18 +12,17 @@ import os
 import sys
 from datetime import datetime
 
-import pandas as pd
-from data_loader import load_data
-from improved_entry_logic import ImprovedEntryLogic
-from improved_exit_logic import ImprovedExitStrategy
-from improved_position_sizing import ConservativePositionSizer
-from market_regime_proxy import ProxyMarketRegimeAnalyzer
-from ml_signals import MLSignalGenerator
-from portfolio_optimizer import PortfolioOptimizer
+from src.data.loader import load_data
+from src.strategies.entry_logic import ImprovedEntryLogic
+from src.strategies.exit_logic import ImprovedExitStrategy
+from src.strategies.position_sizing import ConservativePositionSizer
+from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
+from src.ml.signals.generator import MLSignalGenerator
+from src.portfolio.optimizer import PortfolioOptimizer
 from portfolio_regime_adjuster import PortfolioRegimeAdjuster
-from risk_metrics import calculate_sector_exposure, summarize_exposure
+from src.risk.metrics import calculate_sector_exposure, summarize_exposure
 
-from config import LOOKBACK
+from src.config.legacy_config import LOOKBACK
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ if sys.platform == "win32":
         # Force UTF-8 encoding for console
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
-    except:
+    except AttributeError:
         pass
 
     # Set environment variable for UTF-8
@@ -49,7 +48,7 @@ def safe_print(message):
         try:
             # Thử với UTF-8
             print(message.encode("utf-8", errors="replace").decode("utf-8"))
-        except:
+        except Exception:
             # Fallback: loại bỏ các ký tự không in được
             clean_message = "".join(char for char in message if ord(char) < 128)
             print(clean_message)
@@ -143,7 +142,7 @@ class PortfolioAnalyzer:
             error_msg = str(e)
             if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
                 return self._create_error_analysis(
-                    symbol, f"Mã có thể đã bị hủy niêm yết"
+                    symbol, "Mã có thể đã bị hủy niêm yết"
                 )
             return self._create_error_analysis(symbol, f"Lỗi tải dữ liệu: {error_msg}")
         except Exception as e:
@@ -219,8 +218,8 @@ class PortfolioAnalyzer:
                 ),
             }
 
-        except Exception as e:
-            return self._create_error_analysis(symbol, str(e))
+        except Exception:
+            return self._create_error_analysis(symbol, str(e))  # noqa: F821
 
     def _find_new_buy_opportunities(
         self, current_holdings, market_regime, max_recommendations=20
@@ -229,9 +228,9 @@ class PortfolioAnalyzer:
         safe_print("🎯 TÌM CƠ HỘI MUA MỚI - CHỈ DÙNG MÃ TỪ CONFIG")
 
         try:
-            from config import TICKERS
+            from src.config.legacy_config import TICKERS
 
-            safe_print(f"   📊 Tổng mã trong config: {len(TICKERS)}")
+            safe_print("   📊 Tổng mã trong config: {len(TICKERS)}")
             safe_print(
                 f"   📦 Mã đang nắm: {len(current_holdings)} - {list(current_holdings.keys())}"
             )
@@ -270,7 +269,7 @@ class PortfolioAnalyzer:
                         continue
 
                     if df.empty or len(df) < 50:
-                        safe_print(f"       ⚠️ {symbol}: Không đủ dữ liệu")
+                        safe_print("       ⚠️ {symbol}: Không đủ dữ liệu")
                         continue
 
                     # ML analysis với error handling
@@ -315,8 +314,8 @@ class PortfolioAnalyzer:
             )
             return buy_opportunities[:max_recommendations]
 
-        except Exception as e:
-            safe_print(f"💥 LỖI NGHIÊM TRỌNG trong _find_new_buy_opportunities: {e}")
+        except Exception:
+            safe_print("💥 LỖI NGHIÊM TRỌNG trong _find_new_buy_opportunities")
             import traceback
 
             traceback.print_exc()
@@ -398,8 +397,8 @@ class PortfolioAnalyzer:
                     "annualized_volatility": optimization.annualized_volatility,
                     "notes": optimization.notes,
                 }
-        except Exception as exc:
-            logging_msg = f"Failed to optimize portfolio: {exc}"
+        except Exception:
+            logging_msg = "Failed to optimize portfolio"
             logger.debug(logging_msg)
 
         return {
@@ -449,8 +448,8 @@ class PortfolioAnalyzer:
                 json.dump(safe_result, f, indent=2, ensure_ascii=False)
             safe_print("✅ Đã lưu phân tích vào portfolio file")
 
-        except Exception as e:
-            safe_print(f"❌ Lỗi lưu phân tích: {e}")
+        except Exception:
+            safe_print("❌ Lỗi lưu phân tích")
 
     def format_analysis_report(self, analysis_result):
         """Format báo cáo phân tích"""

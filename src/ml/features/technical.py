@@ -2,7 +2,6 @@
 # [file content begin]
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 import ta
 
@@ -44,7 +43,7 @@ def add_ml_features(
     macd = ta.trend.MACD(df["close"])
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
-    df["macd_diff"] = macd.macd_diff()
+    df["macd_dif"] = macd.macd_diff()
     df["macd_signal_line"] = (df["macd"] > df["macd_signal"]).astype(int)
 
     # 5. Bollinger Bands
@@ -99,7 +98,7 @@ def add_ml_features(
     # 13. LAG FEATURES (NEW)
     for lag in [1, 2, 3]:
         df[f"rsi_lag_{lag}"] = df["rsi"].shift(lag)
-        df[f"macd_diff_lag_{lag}"] = df["macd_diff"].shift(lag)
+        df[f"macd_diff_lag_{lag}"] = df["macd_dif"].shift(lag)
         df[f"volume_ratio_lag_{lag}"] = df["volume_ratio"].shift(lag)
 
     # Target: Price direction next day
@@ -125,7 +124,7 @@ def get_feature_columns():
         "atr",
         "macd",
         "macd_signal",
-        "macd_diff",
+        "macd_dif",
         "macd_signal_line",
         "bb_width",
         "bb_position",

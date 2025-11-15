@@ -7,9 +7,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
-from exceptions import PositionSizingError, RiskManagementError
+from src.config.exceptions import RiskManagementError
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +151,7 @@ class EnhancedPositionSizer:
         if risk_per_share <= 0:
             return self._zero_position("Invalid stop loss", warnings)
 
-        risk_reward_ratio = (
+        _risk_reward_ratio = (  # noqa: F841
             reward_per_share / risk_per_share if risk_per_share > 0 else 0
         )
 
@@ -318,7 +317,7 @@ class EnhancedPositionSizer:
         if avg_win_loss_ratio <= 0:
             logger.warning(
                 f"⚠️ Invalid avg_win_loss_ratio: {avg_win_loss_ratio:.3f}. "
-                f"Must be > 0. Using conservative sizing (Kelly = 0)."
+                "Must be > 0. Using conservative sizing (Kelly = 0)."
             )
             return 0.0
 
@@ -326,7 +325,7 @@ class EnhancedPositionSizer:
         if win_rate <= 0 or win_rate >= 1:
             logger.warning(
                 f"⚠️ Invalid win_rate: {win_rate:.3f}. "
-                f"Must be between 0 and 1. Using conservative sizing (Kelly = 0)."
+                "Must be between 0 and 1. Using conservative sizing (Kelly = 0)."
             )
             return 0.0
 
@@ -334,7 +333,7 @@ class EnhancedPositionSizer:
         if win_rate < 0.3:
             logger.warning(
                 f"⚠️ Low win rate detected: {win_rate:.1%}. "
-                f"Consider reviewing strategy before trading."
+                "Consider reviewing strategy before trading."
             )
 
         # Calculate Kelly
@@ -354,15 +353,15 @@ class EnhancedPositionSizer:
         if kelly < 0:
             logger.warning(
                 f"⚠️ Negative Kelly ({kelly:.1%}) suggests unfavorable odds. "
-                f"Win rate too low or win/loss ratio unfavorable. "
-                f"Using Kelly = 0."
+                "Win rate too low or win/loss ratio unfavorable. "
+                "Using Kelly = 0."
             )
             return 0.0
 
         if kelly > 0.5:
             logger.warning(
                 f"⚠️ Very high Kelly ({kelly:.1%}) detected. "
-                f"Clamping to max 25% for safety."
+                "Clamping to max 25% for safety."
             )
 
         # Clamp to reasonable range
@@ -464,8 +463,8 @@ class EnhancedPositionSizer:
 
             return corr
 
-        except Exception as e:
-            logger.warning(f"Error calculating correlation {symbol1}-{symbol2}: {e}")
+        except Exception:
+            logger.warning(f"Error calculating correlation {symbol1}-{symbol2}")
             return 0.0
 
     def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:
@@ -505,9 +504,9 @@ class EnhancedPositionSizer:
 
                 logger.debug(f"Correlation {symbol}-{pos_symbol}: {corr:.3f}")
 
-            except Exception as e:
+            except Exception:
                 logger.debug(
-                    f"Skipping correlation calc for {symbol}-{pos_symbol}: {e}"
+                    f"Skipping correlation calc for {symbol}-{pos_symbol}"
                 )
                 continue
 
@@ -531,7 +530,7 @@ class EnhancedPositionSizer:
                 adjustment = 0.75  # Medium correlation - reduce 25%
                 logger.info(
                     f"Medium correlation ({avg_correlation:.2f}) for {symbol}. "
-                    f"Reducing position size by 25%."
+                    "Reducing position size by 25%."
                 )
             else:
                 adjustment = 1.0  # Low correlation - no reduction
@@ -558,13 +557,13 @@ class EnhancedPositionSizer:
             if same_sector_count >= 3:
                 logger.warning(
                     f"⚠️ {same_sector_count} positions in {sector} sector. "
-                    f"Reducing position size by 30%."
+                    "Reducing position size by 30%."
                 )
                 return 0.7  # Reduce 30%
             elif same_sector_count >= 2:
                 logger.info(
                     f"{same_sector_count} positions in {sector} sector. "
-                    f"Reducing position size by 15%."
+                    "Reducing position size by 15%."
                 )
                 return 0.85  # Reduce 15%
 

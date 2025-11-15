@@ -37,9 +37,9 @@ class DataManager:
             try:
                 logger.info(f"Loading cached features for {symbol}")
                 return pd.read_parquet(feature_path)
-            except Exception as e:
+            except Exception:
                 logger.warning(
-                    f"Failed to load cached features for {symbol}: {e}, will reload"
+                    f"Failed to load cached features for {symbol}, will reload"
                 )
 
         try:
@@ -71,8 +71,8 @@ class DataManager:
             feat.to_parquet(feature_path, index=False)
             logger.info(f"✅ Successfully ingested {symbol} ({len(feat)} rows)")
             return feat
-        except Exception as e:
-            logger.error(f"❌ Failed to ingest {symbol}: {e}", exc_info=True)
+        except Exception:
+            logger.error(f"❌ Failed to ingest {symbol}", exc_info=True)
             return None
 
     def ingest_all(self) -> pd.DataFrame:

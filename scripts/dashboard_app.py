@@ -9,10 +9,10 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from database import get_db
-from ml_model_monitor import get_ml_model_monitor
-from monitoring_enhanced import get_enhanced_monitor
-from portfolio_manager import get_portfolio_manager
+from src.data.database import get_db
+from src.ml.monitor import get_ml_model_monitor
+from src.monitoring.enhanced import get_enhanced_monitor
+from src.portfolio.manager import get_portfolio_manager
 
 # Page config
 st.set_page_config(

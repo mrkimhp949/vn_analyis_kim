@@ -8,7 +8,7 @@ import json
 import os
 import pickle
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -86,7 +86,7 @@ class IncrementalCache:
         # Load và merge các cache files
         dfs = []
         for date in sorted(cached_dates)[
-            -lookback // 30 :
+            -lookback // 30:
         ]:  # Load khoảng 30 ngày gần nhất
             cache_file = self._get_cache_file(symbol, date)
             if os.path.exists(cache_file):
@@ -161,8 +161,8 @@ class IncrementalCache:
                 try:
                     with open(cache_file, "wb") as f:
                         pickle.dump(date_df, f, protocol=pickle.HIGHEST_PROTOCOL)
-                except Exception as e:
-                    print(f"⚠️ Lỗi lưu cache {symbol} {date}: {e}")
+                except Exception:
+                    print(f"⚠️ Lỗi lưu cache {symbol} {date}")
                     continue
 
         # Update metadata
