@@ -130,7 +130,7 @@ def run_bot_sync():
         logging.error("❌ Không thể chạy bot: Thiếu TELEGRAM_TOKEN hoặc CHAT_ID")
         logging.error("📝 Vui lòng set các biến môi trường: TELEGRAM_TOKEN, CHAT_ID")
         return
-    
+
     try:
         asyncio.run(run_bot_with_context(bot, CHAT_ID))
     except ConfigurationError as e:

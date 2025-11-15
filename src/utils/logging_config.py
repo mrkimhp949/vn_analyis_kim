@@ -7,7 +7,7 @@ import os
 import sys
 
 # Suppress warnings first (before any imports)
-import suppress_warnings  # noqa: F401
+from src.utils import suppress_warnings  # noqa: F401
 
 
 def setup_logging():
