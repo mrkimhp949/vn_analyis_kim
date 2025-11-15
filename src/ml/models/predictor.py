@@ -15,6 +15,8 @@ class MLPredictor:
         self.rf_model = None
         self.scaler = StandardScaler()
         self.models_dir = "models"
+        self.ml_enabled = True  # NEW: Flag to track if ML is usable
+        self.using_dummy_models = False  # NEW: Flag to track dummy models
         self.ensure_models_dir()
         # Đồng bộ số features mong đợi với features.get_feature_columns()
         try:
@@ -158,7 +160,18 @@ class MLPredictor:
             logger.error(f"❌ Error during model evaluation: {e}")
 
     def predict(self, X):
-        """Prediction với feature validation"""
+        """
+        Prediction với feature validation
+
+        NEW: Checks if ML is enabled before predicting
+        """
+        # NEW: Check if ML is enabled
+        if not self.ml_enabled:
+            raise ValueError(
+                "ML predictions disabled: Models not loaded. "
+                "Train models first: python scripts/train_models.py"
+            )
+
         if isinstance(X, (pd.DataFrame, pd.Series)):
             X_arr = X.values
         else:
@@ -192,9 +205,9 @@ class MLPredictor:
                 return rf_pred
             except Exception as e:
                 logger.error(f"⚠️ RF predict error: {e}")
-                return np.random.uniform(0.3, 0.7, n)
+                raise ValueError(f"Model prediction failed: {e}")
         else:
-            return np.random.uniform(0.3, 0.7, n)
+            raise ValueError("RF model not initialized")
 
     def load_models(self):
         """Load pre-trained models và scaler"""
@@ -242,16 +255,55 @@ class MLPredictor:
                     f"✅ Loaded trained models (expecting {self.expected_features} features)"
                 )
                 models_loaded = True
+                self.ml_enabled = True
+                self.using_dummy_models = False
             else:
-                logger.warning("ℹ️ Models not found, creating dummy models...")
-                self.create_dummy_models()
-                models_loaded = True
+                # CRITICAL: No models found
+                logger.critical(
+                    "\n" + "="*70 + "\n"
+                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
+                    + "="*70 + "\n"
+                    f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
+                    "\n"
+                    "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
+                    "\n"
+                    "🔧 ĐỂ SỬA LỖI NÀY:\n"
+                    "1. Chạy lệnh: python scripts/train_models.py\n"
+                    "2. Hoặc: python -m src.ml.training.pipeline\n"
+                    "3. Sau khi train xong, khởi động lại bot\n"
+                    "\n"
+                    "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n"
+                    + "="*70
+                )
+
+                # DISABLE ML instead of creating dummy models
+                self.ml_enabled = False
+                self.using_dummy_models = False
+                models_loaded = False
 
         except Exception as e:
-            logger.error(f"⚠️ Lỗi khi load models: {e}")
-            logger.info("🔄 Creating dummy models as fallback...")
-            self.create_dummy_models()
-            models_loaded = True
+            logger.critical(
+                "\n" + "="*70 + "\n"
+                "⚠️⚠️⚠️ LỖI KHI LOAD ML MODELS ⚠️⚠️⚠️\n"
+                + "="*70 + "\n"
+                f"Lỗi: {e}\n"
+                "\n"
+                "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
+                "\n"
+                "🔧 ĐỂ SỬA LỖI NÀY:\n"
+                "1. Kiểm tra log chi tiết ở trên\n"
+                "2. Xóa models cũ (nếu bị corrupt): rm -rf models/\n"
+                "3. Train lại: python scripts/train_models.py\n"
+                "4. Khởi động lại bot\n"
+                "\n"
+                "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n"
+                + "="*70
+            )
+
+            # DISABLE ML instead of creating dummy models
+            self.ml_enabled = False
+            self.using_dummy_models = False
+            models_loaded = False
 
         return models_loaded
 

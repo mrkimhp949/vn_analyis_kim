@@ -386,41 +386,145 @@ class ImprovedEntryLogic:
             "distance_to_resistance": distance_to_resistance,
         }
 
+    def _calculate_obv(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Calculate On-Balance Volume (OBV)
+
+        OBV measures buying/selling pressure by adding volume on up days
+        and subtracting on down days.
+
+        Returns:
+            Series with OBV values
+        """
+        obv = [0]
+        for i in range(1, len(df)):
+            if df['close'].iloc[i] > df['close'].iloc[i-1]:
+                obv.append(obv[-1] + df['volume'].iloc[i])
+            elif df['close'].iloc[i] < df['close'].iloc[i-1]:
+                obv.append(obv[-1] - df['volume'].iloc[i])
+            else:
+                obv.append(obv[-1])
+
+        return pd.Series(obv, index=df.index)
+
     def _check_volume_confirmation(self, df: pd.DataFrame) -> Dict:
         """
-        Check xem volume có confirm signal không
+        ENHANCED: Check volume confirmation với multiple indicators
 
-        Volume >= 1.2x average = confirmed
+        Checks:
+        1. Volume ratio (current vs average)
+        2. Volume trend (5-day vs 20-day MA)
+        3. OBV (On-Balance Volume) - accumulation/distribution
+
+        Returns:
+            Dict with detailed volume analysis
         """
         if len(df) < 20:
-            return {"confirmed": True, "reason": "Chưa đủ data", "surge": False}
+            return {
+                "confirmed": True,
+                "reason": "Chưa đủ data",
+                "surge": False,
+                "obv_bullish": True,
+                "volume_trending": True,
+                "confidence": 0.5,
+            }
 
         current_volume = df["volume"].iloc[-1]
-        avg_volume = df["volume"].rolling(20).mean().iloc[-1]
+        avg_volume_20 = df["volume"].rolling(20).mean().iloc[-1]
 
-        if avg_volume == 0:
-            return {"confirmed": True, "reason": "Volume data invalid", "surge": False}
-
-        volume_ratio = current_volume / avg_volume
-
-        if volume_ratio >= 1.5:
+        if avg_volume_20 == 0:
             return {
                 "confirmed": True,
-                "reason": f"Volume surge {volume_ratio:.1f}x",
-                "surge": True,
-            }
-        elif volume_ratio >= 1.2:
-            return {
-                "confirmed": True,
-                "reason": f"Volume tăng {volume_ratio:.1f}x",
+                "reason": "Volume data invalid",
                 "surge": False,
+                "obv_bullish": True,
+                "volume_trending": True,
+                "confidence": 0.5,
             }
+
+        # ============================================================
+        # 1. VOLUME RATIO (existing logic)
+        # ============================================================
+        volume_ratio = current_volume / avg_volume_20
+
+        # ============================================================
+        # 2. VOLUME TREND (NEW)
+        # ============================================================
+        avg_volume_5 = df["volume"].rolling(5).mean().iloc[-1]
+        volume_trending_up = avg_volume_5 > avg_volume_20
+
+        # ============================================================
+        # 3. OBV - ACCUMULATION/DISTRIBUTION (NEW)
+        # ============================================================
+        obv = self._calculate_obv(df)
+
+        # Calculate OBV slope over last 5 days
+        if len(obv) >= 5:
+            obv_recent = obv.iloc[-5:]
+            obv_slope = (obv_recent.iloc[-1] - obv_recent.iloc[0]) / 5
+
+            # Also check OBV moving average
+            obv_ma_5 = obv.rolling(5).mean().iloc[-1]
+            obv_ma_20 = obv.rolling(20).mean().iloc[-1]
+
+            obv_bullish = (obv_slope > 0) and (obv_ma_5 > obv_ma_20)
         else:
-            return {
-                "confirmed": False,
-                "reason": f"Volume thấp {volume_ratio:.1f}x",
-                "surge": False,
-            }
+            obv_bullish = True  # Default to True if not enough data
+
+        # ============================================================
+        # 4. COMBINE ALL SIGNALS
+        # ============================================================
+
+        # Calculate confidence score (0-1)
+        confidence_score = 0.0
+
+        # Volume ratio contributes 40%
+        if volume_ratio >= 1.5:
+            confidence_score += 0.4
+        elif volume_ratio >= 1.2:
+            confidence_score += 0.3
+        elif volume_ratio >= 1.0:
+            confidence_score += 0.2
+
+        # Volume trend contributes 30%
+        if volume_trending_up:
+            confidence_score += 0.3
+
+        # OBV contributes 30%
+        if obv_bullish:
+            confidence_score += 0.3
+
+        # Determine if confirmed (threshold: 0.6)
+        confirmed = confidence_score >= 0.6
+
+        # Generate detailed reason
+        reasons = []
+        if volume_ratio >= 1.5:
+            reasons.append(f"Volume surge {volume_ratio:.1f}x")
+        elif volume_ratio >= 1.2:
+            reasons.append(f"Volume tăng {volume_ratio:.1f}x")
+        else:
+            reasons.append(f"Volume {volume_ratio:.1f}x")
+
+        if volume_trending_up:
+            reasons.append("Volume trending up")
+        else:
+            reasons.append("Volume trending down")
+
+        if obv_bullish:
+            reasons.append("OBV bullish (accumulation)")
+        else:
+            reasons.append("OBV bearish (distribution)")
+
+        return {
+            "confirmed": confirmed,
+            "reason": " | ".join(reasons),
+            "surge": volume_ratio >= 1.5,
+            "volume_ratio": volume_ratio,
+            "volume_trending": volume_trending_up,
+            "obv_bullish": obv_bullish,
+            "confidence": confidence_score,
+        }
 
     def _check_volatility(self, df: pd.DataFrame) -> Dict:
         """

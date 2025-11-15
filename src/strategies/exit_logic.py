@@ -183,7 +183,22 @@ class ImprovedExitStrategy:
             return tp_check["decision"]
 
         # ====================================================================
-        # CHECK 4: TRAILING STOP
+        # CHECK 4: PROFIT PROTECTION (3-8% profit range)
+        # ====================================================================
+        # NEW: Protect profit before trailing stop activation
+        profit_protection_check = self._check_profit_protection(
+            entry_price,
+            current_price,
+            highest_price,
+            pnl_percent,
+            pnl_amount,
+        )
+
+        if profit_protection_check["should_exit"]:
+            return profit_protection_check["decision"]
+
+        # ====================================================================
+        # CHECK 5: TRAILING STOP (>= 8% profit)
         # ====================================================================
         trailing_check = self._check_trailing_stop(
             entry_price,
@@ -197,7 +212,7 @@ class ImprovedExitStrategy:
             return trailing_check["decision"]
 
         # ====================================================================
-        # CHECK 5: ML SIGNAL SELL
+        # CHECK 6: ML SIGNAL SELL
         # ====================================================================
         if ml_signal and ml_signal.get("signal") == "SELL":
             confidence = ml_signal.get("confidence", 0)
@@ -216,7 +231,7 @@ class ImprovedExitStrategy:
                 )
 
         # ====================================================================
-        # CHECK 6: BEARISH REVERSAL PATTERN
+        # CHECK 7: BEARISH REVERSAL PATTERN
         # ====================================================================
         if len(df) >= 3:
             pattern_check = self._check_reversal_pattern(df, pnl_percent, pnl_amount)
@@ -225,7 +240,7 @@ class ImprovedExitStrategy:
                 return pattern_check["decision"]
 
         # ====================================================================
-        # CHECK 7: SUPPORT BREAKDOWN
+        # CHECK 8: SUPPORT BREAKDOWN
         # ====================================================================
         breakdown_check = self._check_support_breakdown(
             df, current_price, entry_price, pnl_percent, pnl_amount
@@ -235,7 +250,7 @@ class ImprovedExitStrategy:
             return breakdown_check["decision"]
 
         # ====================================================================
-        # CHECK 8: TIME DECAY
+        # CHECK 9: TIME DECAY
         # ====================================================================
         if days_held >= self.max_holding_days:
             # Nếu giữ quá lâu mà lời < threshold → thoát
@@ -336,6 +351,69 @@ class ImprovedExitStrategy:
                         urgency=1,
                     ),
                 }
+
+        return {"should_exit": False}
+
+    def _check_profit_protection(
+        self,
+        entry_price: float,
+        current_price: float,
+        highest_price: float,
+        pnl_percent: float,
+        pnl_amount: float,
+    ) -> Dict:
+        """
+        NEW: Protect profit in the 3-8% profit range.
+
+        This prevents giving back all profits before trailing stop activates at 8%.
+
+        Logic:
+        - If profit is between 3-8%:
+          - Calculate a dynamic stop based on profit level
+          - 3-5% profit: Protect 50% of profit
+          - 5-8% profit: Protect 60% of profit
+        - Uses highest price to track maximum profit achieved
+
+        Returns:
+            Dict with should_exit flag and decision
+        """
+        # Only activate in 3-8% profit range (before trailing stop)
+        if pnl_percent < 3.0 or pnl_percent >= self.trailing_activation * 100:
+            return {"should_exit": False}
+
+        # Calculate maximum profit achieved
+        max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
+
+        # Dynamic protection based on profit level
+        if 3.0 <= pnl_percent < 5.0:
+            # Protect 50% of maximum profit
+            protection_pct = 0.50
+            stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_pct)
+        elif 5.0 <= pnl_percent < self.trailing_activation * 100:
+            # Protect 60% of maximum profit
+            protection_pct = 0.60
+            stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_pct)
+        else:
+            return {"should_exit": False}
+
+        # Check if current price dropped below protection level
+        if current_price <= stop_price:
+            profit_given_back = max_profit_pct - pnl_percent
+            return {
+                "should_exit": True,
+                "decision": ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.TRAILING_STOP,  # Use same reason for consistency
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=f"💰 PROFIT PROTECTION: Bảo vệ {protection_pct*100:.0f}% lợi nhuận | "
+                    f"Max profit: {max_profit_pct:.1f}% → Current: {pnl_percent:.1f}% "
+                    f"(Gave back {profit_given_back:.1f}%)",
+                    urgency=4,
+                ),
+            }
 
         return {"should_exit": False}
 
