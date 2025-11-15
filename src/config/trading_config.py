@@ -220,10 +220,26 @@ class TelegramConfig:
 
     def validate(self):
         """Validate telegram config"""
-        if not self.token:
-            raise ValueError("TELEGRAM_TOKEN not set")
-        if not self.chat_id:
-            raise ValueError("CHAT_ID not set")
+        if not self.token or self.token.strip() == "":
+            raise ConfigurationError(
+                "TELEGRAM_TOKEN not set or empty. Get your token from https://t.me/Botfather",
+                context={
+                    "config": "telegram",
+                    "field": "token",
+                    "value": self.token,
+                    "help": "Set TELEGRAM_TOKEN in .env file or environment variable",
+                },
+            )
+        if not self.chat_id or self.chat_id.strip() == "":
+            raise ConfigurationError(
+                "CHAT_ID not set or empty",
+                context={
+                    "config": "telegram",
+                    "field": "chat_id",
+                    "value": self.chat_id,
+                    "help": "Set CHAT_ID in .env file or environment variable",
+                },
+            )
 
 
 @dataclass
@@ -280,21 +296,21 @@ class Config:
         # Validate data config
         try:
             self.data.validate()
-        except ConfigurationError:
-            errors.append(str(e))  # noqa: F821
+        except ConfigurationError as e:
+            errors.append(str(e))
 
         # Validate trading config
         try:
             self.trading.validate()
-        except ConfigurationError:
-            errors.append(str(e))  # noqa: F821
+        except ConfigurationError as e:
+            errors.append(str(e))
 
         # Validate telegram if enabled
         if self.telegram.enabled:
             try:
                 self.telegram.validate()
-            except ValueError:
-                errors.append("Telegram")
+            except (ValueError, ConfigurationError) as e:
+                errors.append(f"Telegram: {str(e)}")
 
         # Validate API config
         if self.api.tcbs_rate_limit < 1:

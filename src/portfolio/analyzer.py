@@ -15,11 +15,12 @@ from datetime import datetime
 from src.data.loader import load_data
 from src.strategies.entry_logic import ImprovedEntryLogic
 from src.strategies.exit_logic import ImprovedExitStrategy
-from src.strategies.position_sizing import ConservativePositionSizer
+from src.strategies.position_sizing import EnhancedPositionSizer
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
 from src.ml.signals.generator import MLSignalGenerator
 from src.portfolio.optimizer import PortfolioOptimizer
-from portfolio_regime_adjuster import PortfolioRegimeAdjuster
+
+# from portfolio_regime_adjuster import PortfolioRegimeAdjuster  # Module not found
 from src.risk.metrics import calculate_sector_exposure, summarize_exposure
 
 from src.config.legacy_config import LOOKBACK
@@ -65,9 +66,10 @@ class PortfolioAnalyzer:
         self.ml_generator = MLSignalGenerator()
         self.entry_logic = ImprovedEntryLogic()
         self.exit_strategy = ImprovedExitStrategy()
-        self.position_sizer = ConservativePositionSizer()
+        self.position_sizer = EnhancedPositionSizer()
         self.market_analyzer = ProxyMarketRegimeAnalyzer()
-        self.regime_adjuster = PortfolioRegimeAdjuster()
+        # self.regime_adjuster = PortfolioRegimeAdjuster()  # Module not found
+        self.regime_adjuster = None
         self.optimizer = PortfolioOptimizer()
 
     def analyze_current_portfolio(self, current_holdings):

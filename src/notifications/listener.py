@@ -650,6 +650,14 @@ async def run_bot_async():
     """Hàm async chạy bot"""
     print("✅ Telegram Bot đang khởi động...")
 
+    # Validate token before starting
+    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN.strip() == "":
+        raise ValueError(
+            "TELEGRAM_TOKEN is not set or empty. "
+            "Please set TELEGRAM_TOKEN environment variable or in .env file. "
+            "Get your token from https://t.me/Botfather"
+        )
+
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Set bot instance cho notifications
@@ -704,12 +712,17 @@ def start_bot_listener():
         try:
             loop.run_until_complete(run_bot_async())
             break  # Thoát nếu shutdown bình thường
+        except ValueError as e:
+            # Configuration error - don't retry
+            print(f"❌ Lỗi cấu hình Telegram Bot: {str(e)}")
+            print("💡 Vui lòng kiểm tra TELEGRAM_TOKEN trong .env file")
+            break
         except TgNetworkError:
-            print("⚠️ Mất kết nối Telegram. Thử lại sau {backoff}s...")
+            print(f"⚠️ Mất kết nối Telegram. Thử lại sau {backoff}s...")
             time.sleep(backoff)
             backoff = min(backoff * 2, 300)
-        except Exception:
-            print("❌ Lỗi Telegram Bot")
+        except Exception as e:
+            print(f"❌ Lỗi Telegram Bot: {str(e)}")
             import traceback
 
             traceback.print_exc()

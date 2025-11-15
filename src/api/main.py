@@ -468,11 +468,21 @@ async def lifespan(app: FastAPI):
 
     # Khởi động Telegram bot trong thread riêng
     try:
-        telegram_thread = threading.Thread(target=start_bot_listener, daemon=True)
-        telegram_thread.start()
-        print("✅ Telegram bot started")
-    except Exception:
-        print("⚠️ Telegram bot error")
+        # Check if telegram is configured before starting
+        from src.config.trading_config import get_config
+
+        config = get_config(validate=False)
+
+        if config.telegram.token and config.telegram.token.strip():
+            telegram_thread = threading.Thread(target=start_bot_listener, daemon=True)
+            telegram_thread.start()
+            print("✅ Telegram bot started")
+        else:
+            print("⚠️ Telegram bot not configured (TELEGRAM_TOKEN not set)")
+            print("💡 Set TELEGRAM_TOKEN in .env file to enable Telegram notifications")
+    except Exception as e:
+        print(f"⚠️ Telegram bot error: {str(e)}")
+        print("💡 Bot will run without Telegram notifications")
 
     print("🎉 Tất cả services đã khởi động!")
 
