@@ -3,15 +3,15 @@ Script khởi tạo models tự động
 Chạy: python scripts/init_models.py
 """
 
-import sys
 import os
+import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from ml_models import MLPredictor
+import pandas as pd
 from data_loader import load_data
 from features import add_ml_features
-import pandas as pd
+from ml_models import MLPredictor
 
 
 def init_models():

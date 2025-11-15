@@ -3,18 +3,19 @@ Unit tests for services
 Tests for RiskManagementService, EntrySignalService, ExitManagementService, NotificationService
 """
 
-import pytest
 import asyncio
-from typing import Optional
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from datetime import datetime
-import pandas as pd
+from typing import Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-# Import services
-from services.risk_service import RiskManagementService
+import pandas as pd
+import pytest
+
 from services.entry_service import EntrySignalService
 from services.exit_service import ExitManagementService
 from services.notification_service import NotificationService
+# Import services
+from services.risk_service import RiskManagementService
 
 
 class TestRiskManagementService:

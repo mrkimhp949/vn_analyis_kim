@@ -23,11 +23,8 @@ class VietnameseSentimentAnalyzer:
             "PHOBERT_FINE_TUNED_PATH", "models/phobert_vi_financial"
         )
         try:
-            from transformers import (
-                AutoModelForSequenceClassification,
-                AutoTokenizer,
-                pipeline,
-            )
+            from transformers import (AutoModelForSequenceClassification,
+                                      AutoTokenizer, pipeline)
 
             if os.path.isdir(custom_model_path):
                 try:

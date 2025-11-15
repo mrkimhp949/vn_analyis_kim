@@ -3,8 +3,8 @@ Validate tickers in List.csv against TCBS API
 Check which tickers have data available
 """
 
-import sys
 import os
+import sys
 
 # Fix encoding
 if sys.platform == "win32":
@@ -15,9 +15,10 @@ if sys.platform == "win32":
         pass
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
-from ticker_loader import get_ticker_loader
-from data_loader import load_data
 import time
+
+from data_loader import load_data
+from ticker_loader import get_ticker_loader
 
 
 def validate_tickers(sample_size=None, skip_first=0):

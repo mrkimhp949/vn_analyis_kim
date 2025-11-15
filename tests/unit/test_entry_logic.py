@@ -2,9 +2,9 @@
 """
 Unit tests for ImprovedEntryLogic
 """
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 from improved_entry_logic import ImprovedEntryLogic, SignalStrength
 
 

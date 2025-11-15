@@ -2,10 +2,11 @@
 """
 Unit tests for ImprovedExitStrategy
 """
-import pytest
-import pandas as pd
 from datetime import datetime, timedelta
-from improved_exit_logic import ImprovedExitStrategy, ExitReason
+
+import pandas as pd
+import pytest
+from improved_exit_logic import ExitReason, ImprovedExitStrategy
 
 
 class TestImprovedExitStrategy:

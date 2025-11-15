@@ -1,8 +1,10 @@
-from strategies.base_strategy import BaseStrategy
-from typing import Dict, Any, List
+import logging
+from typing import Any, Dict, List
+
 import pandas as pd
 import ta
-import logging
+
+from strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
 

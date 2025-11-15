@@ -3,8 +3,9 @@ import json
 import logging
 import os
 
-from config import TICKERS
 from features import get_feature_columns
+
+from config import TICKERS
 from ml_pipeline.data_manager import DataIngestionConfig, DataManager
 from ml_pipeline.feature_selection import select_features_with_shap
 from ml_pipeline.model_trainer import EnsembleTrainer, TrainingConfig

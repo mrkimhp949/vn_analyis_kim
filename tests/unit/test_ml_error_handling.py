@@ -7,10 +7,11 @@ Note: Các test này verify rằng code có try-catch cho ML analysis.
 Không test integration vì có dependency issues.
 """
 
-import pytest
-from unittest.mock import Mock, patch
-import pandas as pd
 from datetime import datetime
+from unittest.mock import Mock, patch
+
+import pandas as pd
+import pytest
 
 
 @pytest.fixture

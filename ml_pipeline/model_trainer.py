@@ -2,18 +2,14 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    precision_score,
-    recall_score,
-)
+from sklearn.metrics import (accuracy_score, f1_score, precision_score,
+                             recall_score)
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
@@ -38,14 +34,14 @@ except ImportError:
 
 try:
     from tensorflow import keras
-    from tensorflow.keras.models import Sequential
     from tensorflow.keras.layers import LSTM, Dense, Dropout
+    from tensorflow.keras.models import Sequential
 
     LSTM_AVAILABLE = True
 except ImportError:
     try:
-        from keras.models import Sequential
         from keras.layers import LSTM, Dense, Dropout
+        from keras.models import Sequential
 
         LSTM_AVAILABLE = True
     except ImportError:

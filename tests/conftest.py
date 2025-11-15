@@ -2,12 +2,13 @@
 """
 Pytest configuration and fixtures
 """
-import pytest
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 import os
 import sys
+from datetime import datetime, timedelta
+
+import numpy as np
+import pandas as pd
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -65,7 +66,7 @@ def sample_market_regime():
 @pytest.fixture
 def mock_config():
     """Mock configuration for testing"""
-    from trading_config import TradingConfig, DataConfig
+    from trading_config import DataConfig, TradingConfig
 
     trading = TradingConfig(
         max_scan_universe=10,

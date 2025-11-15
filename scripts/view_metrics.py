@@ -3,8 +3,8 @@
 Performance Metrics Viewer
 Display trading bot performance metrics
 """
-import sys
 import os
+import sys
 from datetime import datetime, timedelta
 from typing import Dict, List
 

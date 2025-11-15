@@ -5,11 +5,13 @@ Gửi notifications cho subscribers khi có tin tức/signals mới
 
 import asyncio
 from typing import List, Optional
+
 from telegram import Bot
 from telegram.error import TelegramError
 
 try:
     from telegram_subscriptions import SubscriptionManager
+
     from config import TELEGRAM_TOKEN
 
     subscription_manager = SubscriptionManager()

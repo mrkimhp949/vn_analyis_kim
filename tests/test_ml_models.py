@@ -2,16 +2,17 @@
 Unit tests for ML Models
 """
 
-import pytest
-import sys
 import os
+import sys
+
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ml_models import MLPredictor
 from exceptions import ModelPredictionError
+from ml_models import MLPredictor
 
 
 class TestMLPredictor:
@@ -132,8 +133,8 @@ class TestMLPredictor:
 
     def test_save_and_load_models(self):
         """Test saving and loading models"""
-        import tempfile
         import shutil
+        import tempfile
 
         # Create temporary directory
         temp_dir = tempfile.mkdtemp()
@@ -166,9 +167,9 @@ class TestMLPredictor:
 
     def test_model_info_saved_with_metadata(self):
         """Test model info file contains correct metadata"""
-        import tempfile
-        import shutil
         import json
+        import shutil
+        import tempfile
 
         temp_dir = tempfile.mkdtemp()
 

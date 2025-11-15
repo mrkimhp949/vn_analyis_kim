@@ -3,12 +3,13 @@
 Backtesting Engine - Test Trading Strategies with Historical Data
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-import logging
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 

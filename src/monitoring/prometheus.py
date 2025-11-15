@@ -3,10 +3,11 @@ Prometheus Metrics Exporter
 Export trading bot metrics for Prometheus monitoring
 """
 
-from prometheus_client import Counter, Gauge, Histogram, Info, generate_latest, REGISTRY
-from typing import Dict, Optional
 import time
+from typing import Dict, Optional
 
+from prometheus_client import (REGISTRY, Counter, Gauge, Histogram, Info,
+                               generate_latest)
 
 # ============================================================================
 # TRADING METRICS

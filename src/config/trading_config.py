@@ -5,8 +5,9 @@ All trading parameters in one place
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 from datetime import datetime, timedelta
+from typing import Optional
+
 from exceptions import ConfigurationError
 
 

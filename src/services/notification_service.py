@@ -4,8 +4,9 @@ Handles all Telegram notifications
 """
 
 import logging
-from typing import Dict, List, Optional
 from datetime import datetime
+from typing import Dict, List, Optional
+
 from telegram import Bot
 
 logger = logging.getLogger(__name__)

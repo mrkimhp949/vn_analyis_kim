@@ -2,19 +2,21 @@
 Backtesting Engine - Kiểm tra hiệu suất chiến lược
 """
 
-import pandas as pd
-import numpy as np
 from datetime import datetime
+
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")  # Sử dụng backend không cần GUI
-import matplotlib.pyplot as plt
-from data_loader import load_data
-from ml_signals import MLSignalGenerator
 import concurrent.futures
 import os
+
+import matplotlib.pyplot as plt
+from data_loader import load_data
 from features import add_ml_features
 from improved_position_sizing import ConservativePositionSizer
+from ml_signals import MLSignalGenerator
 
 # Fallback progress bar nếu không có tqdm
 try:
@@ -828,7 +830,7 @@ class Backtester:
                     worksheet.column_dimensions[column_letter].width = adjusted_width
 
                 # Header style
-                from openpyxl.styles import Font, PatternFill, Alignment
+                from openpyxl.styles import Alignment, Font, PatternFill
 
                 header_fill = PatternFill(
                     start_color="366092", end_color="366092", fill_type="solid"

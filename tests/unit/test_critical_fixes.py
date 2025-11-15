@@ -3,16 +3,17 @@ Unit tests for critical fixes
 Tests for stop loss calculation, thread safety, and data validation
 """
 
-import pytest
-import pandas as pd
-import numpy as np
-from threading import Thread
 import time
+from threading import Thread
+
+import numpy as np
+import pandas as pd
+import pytest
+from portfolio_manager import PortfolioManager
 
 # Import modules to test
-from utils.indicators import StopLossCalculator, IndicatorUtils
+from utils.indicators import IndicatorUtils, StopLossCalculator
 from utils.validation import DataValidator, InputValidator
-from portfolio_manager import PortfolioManager
 
 
 class TestStopLossCalculator:

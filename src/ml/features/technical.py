@@ -1,9 +1,10 @@
 # [file name]: features.py
 # [file content begin]
-import pandas as pd
-import numpy as np
-import ta
 from typing import Optional
+
+import numpy as np
+import pandas as pd
+import ta
 
 
 def add_ml_features(

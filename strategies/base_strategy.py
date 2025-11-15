@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
-from typing import Dict, Any, List, Optional
 
 
 class BaseStrategy(ABC):

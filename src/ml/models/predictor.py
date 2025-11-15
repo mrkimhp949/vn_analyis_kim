@@ -1,11 +1,12 @@
+import logging
+import os
+from typing import Optional
+
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-import joblib
-import os
-import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,8 @@ class MLPredictor:
         self.ensure_models_dir()
         # Đồng bộ số features mong đợi với features.get_feature_columns()
         try:
-            from features import (
-                get_feature_columns,
-            )  # tránh import vòng bằng cách import khi cần
+            from features import \
+                get_feature_columns  # tránh import vòng bằng cách import khi cần
 
             self.expected_features = len(get_feature_columns())
         except Exception:
@@ -130,13 +130,9 @@ class MLPredictor:
 
         logger.info("📊 Evaluating model performance...")
         try:
-            from sklearn.metrics import (
-                classification_report,
-                accuracy_score,
-                precision_score,
-                recall_score,
-                f1_score,
-            )
+            from sklearn.metrics import (accuracy_score, classification_report,
+                                         f1_score, precision_score,
+                                         recall_score)
 
             y_pred = self.rf_model.predict(X_test)
 

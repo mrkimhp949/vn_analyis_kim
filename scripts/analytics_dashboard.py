@@ -4,9 +4,9 @@ Analytics Dashboard
 Tổng hợp tất cả analytics và monitoring
 """
 import asyncio
+import logging
 from datetime import datetime
 from typing import Dict, Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +204,7 @@ class AnalyticsDashboard:
         """Gửi dashboard qua Telegram"""
         try:
             from telegram import Bot
+
             from config import TELEGRAM_TOKEN
 
             bot = Bot(token=TELEGRAM_TOKEN)

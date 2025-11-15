@@ -5,7 +5,8 @@ Uses a dedicated DatabaseManager for safe concurrent access.
 
 import json
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from db_manager import db_manager  # Import the singleton instance
 
 

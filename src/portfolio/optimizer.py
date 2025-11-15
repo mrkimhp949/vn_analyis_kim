@@ -6,7 +6,6 @@ from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
-
 from risk_metrics import load_returns_dataframe
 
 logger = logging.getLogger(__name__)

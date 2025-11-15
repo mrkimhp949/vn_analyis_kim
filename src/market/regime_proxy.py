@@ -1,14 +1,14 @@
 # market_regime_proxy.py
-import sys
+import logging
 import os
+import sys
+from datetime import datetime
+from functools import lru_cache
+from typing import Any, Dict, Optional
+
 import pandas as pd
 from data_loader import load_data
 from ml_signals import MLSignalGenerator
-from functools import lru_cache
-from typing import Optional
-import logging
-from datetime import datetime
-from typing import Any, Dict, Optional
 
 # Fix encoding
 if sys.platform == "win32":

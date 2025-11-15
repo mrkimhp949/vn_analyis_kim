@@ -1,10 +1,11 @@
+import logging
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
-from typing import Dict, Any, List, Optional
+from features import add_ml_features, get_feature_columns
+from ml_models import MLPredictor
 
 from strategies.base_strategy import BaseStrategy
-from ml_models import MLPredictor
-from features import add_ml_features, get_feature_columns
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -3,11 +3,12 @@
 Health Check Script
 Monitor trading bot status and critical components
 """
-import sys
 import os
+import sys
 from datetime import datetime, timedelta
-import requests
 from typing import Dict, List, Tuple
+
+import requests
 
 
 class HealthChecker:
@@ -66,8 +67,8 @@ class HealthChecker:
     def check_configuration(self) -> Tuple[bool, str]:
         """Check configuration validity"""
         try:
-            from trading_config import get_config
             from exceptions import ConfigurationError
+            from trading_config import get_config
 
             config = get_config(validate=True)
             return True, "Configuration is valid"

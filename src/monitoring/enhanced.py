@@ -2,14 +2,15 @@
 """
 Enhanced Monitoring with Prometheus Metrics
 """
-import time
 import logging
-from typing import Dict, Optional
-from datetime import datetime
-from prometheus_client import Counter, Histogram, Gauge, Info, generate_latest
-from prometheus_client import CONTENT_TYPE_LATEST
-import psutil
 import os
+import time
+from datetime import datetime
+from typing import Dict, Optional
+
+import psutil
+from prometheus_client import (CONTENT_TYPE_LATEST, Counter, Gauge, Histogram,
+                               Info, generate_latest)
 
 logger = logging.getLogger(__name__)
 

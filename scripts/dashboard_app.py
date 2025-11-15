@@ -3,15 +3,16 @@
 Trading Bot Web Dashboard
 Streamlit-based interactive dashboard
 """
-import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime, timedelta
-from portfolio_manager import get_portfolio_manager
+
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
 from database import get_db
-from monitoring_enhanced import get_enhanced_monitor
 from ml_model_monitor import get_ml_model_monitor
+from monitoring_enhanced import get_enhanced_monitor
+from portfolio_manager import get_portfolio_manager
 
 # Page config
 st.set_page_config(

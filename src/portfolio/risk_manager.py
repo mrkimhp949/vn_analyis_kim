@@ -2,13 +2,15 @@
 Portfolio Risk Manager - Real-time risk calculation, circuit breakers, correlation limits
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 from exceptions import RiskManagementError
-from risk_metrics import calculate_portfolio_correlation_risk, get_sector_for_symbol
+from risk_metrics import (calculate_portfolio_correlation_risk,
+                          get_sector_for_symbol)
 
 
 @dataclass

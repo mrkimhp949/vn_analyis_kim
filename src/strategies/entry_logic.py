@@ -4,12 +4,13 @@ improved_entry_logic.py - Enhanced Entry Signal Logic
 Cải thiện logic vào lệnh với nhiều điều kiện hơn
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, Tuple, Optional
+import logging
 from dataclasses import dataclass
 from enum import Enum
-import logging
+from typing import Dict, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 # Import utilities
 from utils.indicators import IndicatorUtils, StopLossCalculator
@@ -789,8 +790,8 @@ class ImprovedEntryLogic:
 
 if __name__ == "__main__":
     from data_loader import load_data
-    from ml_signals import MLSignalGenerator
     from features import add_ml_features
+    from ml_signals import MLSignalGenerator
 
     print("\n" + "=" * 70)
     print("🧪 TESTING IMPROVED ENTRY LOGIC")

@@ -1,11 +1,14 @@
 import asyncio
-import time
 import logging
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import NetworkError as TgNetworkError
-from config import TELEGRAM_TOKEN, CHAT_ID
+import time
+
 from bot_runner_improved import run_bot_with_context
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import NetworkError as TgNetworkError
+from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
+                          ContextTypes)
+
+from config import CHAT_ID, TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +423,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_daily_summary_to_all():
     """Gửi daily summary cho tất cả users (called from scheduler)"""
     try:
-        from telegram_notifications import send_daily_summary_to_all as send_all
+        from telegram_notifications import \
+            send_daily_summary_to_all as send_all
 
         await send_all()
     except ImportError:
@@ -430,6 +434,7 @@ async def send_daily_summary_to_all():
 async def generate_daily_summary() -> str:
     """Tạo daily summary: hiệu suất, tin tức, watchlist"""
     from datetime import datetime
+
     import pytz
 
     msg_parts = []

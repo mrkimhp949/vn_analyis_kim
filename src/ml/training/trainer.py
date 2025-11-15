@@ -3,10 +3,11 @@ Script để train ML models
 Chạy lệnh: python train_models.py
 """
 
+import pandas as pd
 from data_loader import load_data
 from ml_signals import MLSignalGenerator
+
 from config import TICKERS
-import pandas as pd
 
 
 def train_models():

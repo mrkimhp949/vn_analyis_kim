@@ -1,7 +1,7 @@
-from features import add_ml_features, get_feature_columns
-from ml_models import MLPredictor
 import numpy as np
 from data_loader import load_data
+from features import add_ml_features, get_feature_columns
+from ml_models import MLPredictor
 
 # ML Model Monitor
 try:

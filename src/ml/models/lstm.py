@@ -3,11 +3,12 @@
 LSTM Model for Time-Series Prediction
 Advanced ML for better predictions
 """
+import logging
+import os
+from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
-import logging
-from typing import Optional, Tuple
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,10 @@ logger = logging.getLogger(__name__)
 try:
     import tensorflow as tf
     from tensorflow import keras
-    from tensorflow.keras.models import Sequential, load_model
-    from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
     from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+    from tensorflow.keras.layers import (LSTM, BatchNormalization, Dense,
+                                         Dropout)
+    from tensorflow.keras.models import Sequential, load_model
     from tensorflow.keras.optimizers import Adam
 
     TENSORFLOW_AVAILABLE = True

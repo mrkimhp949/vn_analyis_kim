@@ -3,11 +3,12 @@ Ticker Loader - Load và validate tickers từ List.csv
 Validates tickers trước khi scan để tránh mã đã hủy niêm yết
 """
 
-import pandas as pd
-import os
 import json
-from typing import List, Dict
+import os
 from datetime import datetime, timedelta
+from typing import Dict, List
+
+import pandas as pd
 
 
 class TickerLoader:

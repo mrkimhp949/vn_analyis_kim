@@ -2,14 +2,15 @@
 """
 Authentication and Security Module
 """
+import logging
 import os
 import secrets
 from typing import Optional
-from fastapi import Security, HTTPException, status
+
+from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -6,8 +6,9 @@ Kiểm tra validation cho API endpoints
 Note: Test verify code có validation, không test runtime vì có dependency issues
 """
 
-import pytest
 import re
+
+import pytest
 
 
 class TestAPIValidationCodeExists:

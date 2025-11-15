@@ -3,10 +3,11 @@
 Performance Benchmarking Script
 Measure and report performance of critical bot components
 """
-import sys
 import os
+import sys
 import time
-from typing import Dict, Callable
+from typing import Callable, Dict
+
 import numpy as np
 import pandas as pd
 

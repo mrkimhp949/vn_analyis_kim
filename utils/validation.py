@@ -3,11 +3,12 @@ Data Validation Utilities
 Comprehensive validation for trading data
 """
 
-import pandas as pd
-import numpy as np
-from typing import List, Optional
-from exceptions import DataQualityError
 import logging
+from typing import List, Optional
+
+import numpy as np
+import pandas as pd
+from exceptions import DataQualityError
 
 logger = logging.getLogger(__name__)
 

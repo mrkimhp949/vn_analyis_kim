@@ -1,11 +1,10 @@
-import os
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
 import pandas as pd
-
 from data_loader import load_data
 from features import add_ml_features
 

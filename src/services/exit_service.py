@@ -3,19 +3,20 @@ Exit Management Service
 Handles exit signal checking and execution
 """
 
-import logging
 import asyncio
-from typing import Dict, List, Optional
+import logging
 from datetime import datetime
-import pandas as pd
+from typing import Dict, List, Optional
 
+import pandas as pd
 from data_loader import load_data
-from ml_signals_enhanced import EnhancedMLSignalGenerator
-from improved_exit_logic import ImprovedExitStrategy
-from portfolio_manager import get_portfolio_manager
-from paper_trading import get_paper_account
-from utils.validation import DataValidator
 from exceptions import DataQualityError
+from improved_exit_logic import ImprovedExitStrategy
+from ml_signals_enhanced import EnhancedMLSignalGenerator
+from paper_trading import get_paper_account
+from portfolio_manager import get_portfolio_manager
+
+from utils.validation import DataValidator
 
 logger = logging.getLogger(__name__)
 

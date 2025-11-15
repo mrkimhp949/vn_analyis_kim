@@ -10,13 +10,14 @@ Supports:
 """
 
 import asyncio
-import websockets
 import json
 import logging
-from typing import Dict, List, Callable, Optional
-from datetime import datetime
-from dataclasses import dataclass, field
 import threading
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Callable, Dict, List, Optional
+
+import websockets
 
 logger = logging.getLogger(__name__)
 

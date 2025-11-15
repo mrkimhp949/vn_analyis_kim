@@ -9,15 +9,16 @@ Features:
 - Risk alerts
 """
 
-import logging
-from typing import Dict, Optional, Callable, List
-from datetime import datetime
-from dataclasses import dataclass
 import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable, Dict, List, Optional
+
+from improved_exit_logic import ExitDecision, ImprovedExitStrategy
+from portfolio_manager import PortfolioManager
 
 from websocket.price_feed import PriceFeedClient, PriceUpdate, WebSocketConfig
-from portfolio_manager import PortfolioManager
-from improved_exit_logic import ImprovedExitStrategy, ExitDecision
 
 logger = logging.getLogger(__name__)
 

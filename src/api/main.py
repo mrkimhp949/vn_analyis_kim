@@ -1,22 +1,22 @@
 # [file name]: main.py
 # [file content begin]
 
-# Suppress warnings first
-import suppress_warnings  # noqa: F401
-
-from fastapi import FastAPI, Security, Request, Depends, HTTPException
-from fastapi.responses import JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-import uvicorn
+import asyncio
 import os
 import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
+
 import pytz
-import asyncio
+# Suppress warnings first
+from src.utils import suppress_warnings  # noqa: F401
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 # Import for Prometheus metrics
 try:
@@ -25,15 +25,9 @@ except ImportError:
     CONTENT_TYPE_LATEST = "text/plain"  # Fallback if prometheus_client not installed
 
 # Import authentication
-from auth import (
-    verify_api_key,
-    verify_ip_whitelist,
-    limiter,
-    add_security_headers,
-    rate_limit_strict,
-    rate_limit_moderate,
-    rate_limit_relaxed,
-)
+from auth import (add_security_headers, limiter, rate_limit_moderate,
+                  rate_limit_relaxed, rate_limit_strict, verify_api_key,
+                  verify_ip_whitelist)
 
 # Import các module của bot - FIXED IMPORT
 try:
@@ -124,11 +118,8 @@ def schedule_job():
     """Scheduler với improved logic, error handling và VN trading schedule"""
     print("🤖 Bot khởi động với Portfolio Management!")
 
-    from vn_trading_schedule import (
-        should_run_scheduled_task,
-        is_trading_hour,
-        is_trading_day,
-    )
+    from vn_trading_schedule import (is_trading_day, is_trading_hour,
+                                     should_run_scheduled_task)
 
     last_sector_analysis = None
     last_signal_scan = None
@@ -214,7 +205,8 @@ def schedule_job():
             ):
                 print("\n💼 [THỨ 6] KIỂM TRA PORTFOLIO")
                 try:
-                    from portfolio_manager import send_portfolio_update_to_telegram
+                    from portfolio_manager import \
+                        send_portfolio_update_to_telegram
 
                     send_portfolio_update_to_telegram()
                     last_portfolio_check = current_date
@@ -250,7 +242,8 @@ def schedule_job():
             ):
                 print("\n📊 [17:00] GỬI DAILY SUMMARY")
                 try:
-                    from telegram_notifications import send_daily_summary_to_all
+                    from telegram_notifications import \
+                        send_daily_summary_to_all
 
                     # Run async function properly in thread-safe manner
                     asyncio.run(send_daily_summary_to_all())
@@ -310,8 +303,8 @@ async def lifespan(app: FastAPI):
 
     # Validate configuration on startup - MANDATORY
     try:
-        from trading_config import get_config
         from exceptions import ConfigurationError
+        from trading_config import get_config
 
         config = get_config(validate=True)
         print("✅ Configuration validated successfully")
@@ -403,8 +396,9 @@ async def read_root():
 @rate_limit_relaxed
 async def health_check():
     """Health check chi tiết với Prometheus metrics"""
-    from datetime import datetime
     import sys
+    from datetime import datetime
+
     from monitoring_enhanced import get_enhanced_monitor
 
     monitor = get_enhanced_monitor()
@@ -537,6 +531,7 @@ async def add_to_portfolio(symbol: str, shares: int, price: float):
     """Thêm cổ phiếu vào portfolio"""
     try:
         from portfolio_manager import PortfolioManager
+
         from src.utils.validation import InputValidator
 
         # VALIDATE INPUT
@@ -569,6 +564,7 @@ async def remove_from_portfolio(symbol: str, shares: int = None):
     """Bán cổ phiếu khỏi portfolio"""
     try:
         from portfolio_manager import PortfolioManager
+
         from src.utils.validation import InputValidator
 
         # VALIDATE INPUT

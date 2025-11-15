@@ -5,6 +5,7 @@ Centralized risk checks and circuit breaker logic
 
 import logging
 from typing import Dict, Tuple
+
 from circuit_breaker import get_circuit_breaker
 from emergency_stop import get_emergency_stop
 from portfolio_manager import get_portfolio_manager

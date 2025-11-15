@@ -4,8 +4,8 @@ Prevents hitting API rate limits
 """
 
 import time
-from threading import Lock
 from functools import wraps
+from threading import Lock
 
 
 class RateLimiter:

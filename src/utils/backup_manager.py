@@ -3,13 +3,13 @@
 Database Backup Manager
 Automatic backup with cloud storage support
 """
+import gzip
+import logging
 import os
 import shutil
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-import gzip
 
 logger = logging.getLogger(__name__)
 

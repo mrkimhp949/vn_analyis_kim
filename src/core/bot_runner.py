@@ -11,15 +11,16 @@ Version 2.0: Support for both old and new orchestrator with feature flag
 import asyncio
 import logging
 import os
-from telegram import Bot
-import pandas as pd
 
-# Import các thành phần cần thiết
-from src.config.legacy_config import CHAT_ID, TELEGRAM_TOKEN, LOOKBACK
+import pandas as pd
+from telegram import Bot
+
 from src.config.exceptions import ConfigurationError
+# Import các thành phần cần thiết
+from src.config.legacy_config import CHAT_ID, LOOKBACK, TELEGRAM_TOKEN
+from src.core.orchestrator import TradingOrchestrator
 from src.data.loader import load_data
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
-from src.core.orchestrator import TradingOrchestrator
 
 logging.info("✅ Using TradingOrchestrator")
 

@@ -3,10 +3,11 @@
 Analyze No Signals
 Phân tích tại sao không có tín hiệu mua
 """
-import pandas as pd
+import logging
 from collections import defaultdict
 from typing import Dict, List
-import logging
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class NoSignalAnalyzer:
         Phân tích kết quả scan để hiểu tại sao không có signals
         """
         from data_loader import load_data
+
         from config import LOOKBACK
 
         print(f"\n🔍 Analyzing {len(symbols)} symbols...")
@@ -296,10 +298,11 @@ def analyze_no_signals():
     print("🔍 Analyzing why no signals...")
 
     try:
-        from config import TICKERS
-        from ml_signals import MLSignalGenerator
         from improved_entry_logic import ImprovedEntryLogic
         from market_regime_proxy import ProxyMarketRegimeAnalyzer
+        from ml_signals import MLSignalGenerator
+
+        from config import TICKERS
 
         # Initialize
         ml_generator = MLSignalGenerator()

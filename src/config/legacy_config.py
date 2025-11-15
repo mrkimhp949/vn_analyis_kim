@@ -5,8 +5,8 @@ This file is kept for backward compatibility only
 
 import os
 import sys
-from typing import List
 import warnings
+from typing import List
 
 warnings.warn(
     "config.py is deprecated. Use 'from trading_config import get_config' instead",

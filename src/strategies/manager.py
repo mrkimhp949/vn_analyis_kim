@@ -4,13 +4,13 @@ Strategy Manager for the trading bot.
 Quản lý và cung cấp các đối tượng chiến lược (entry, exit, sizing).
 """
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
+from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
 # Import các lớp chiến lược
 from improved_entry_logic import ImprovedEntryLogic
-from position_sizing_enhanced import EnhancedPositionSizer
 from improved_position_sizing import ConservativePositionSizer
-from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
+from position_sizing_enhanced import EnhancedPositionSizer
 from trading_config import get_config
 
 

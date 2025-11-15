@@ -13,6 +13,7 @@ Usage:
 
 import logging
 from typing import Optional
+
 from src.config.trading_config import TradingConfig
 
 logger = logging.getLogger(__name__)

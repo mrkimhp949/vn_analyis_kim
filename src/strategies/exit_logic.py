@@ -4,13 +4,14 @@ improved_exit_logic.py - Smart Exit Strategy
 Chiến lược thoát lệnh chuyên nghiệp với trailing stop, take profit bậc thang
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, Tuple, Optional, List
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-import logging
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 

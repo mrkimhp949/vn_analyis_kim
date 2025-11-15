@@ -2,15 +2,16 @@
 Unit tests for Trading Configuration
 """
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from trading_config import TradingConfig, Config
 from exceptions import ConfigurationError
+from trading_config import Config, TradingConfig
 
 
 class TestTradingConfig:

@@ -3,9 +3,10 @@ Migration Script: JSON → SQLite
 Migrate all JSON data to database
 """
 
-import os
 import json
+import os
 from datetime import datetime
+
 from database import get_db
 from portfolio_manager import get_portfolio_manager
 

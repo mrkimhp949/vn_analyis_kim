@@ -6,27 +6,27 @@ Tách logic điều phối ra khỏi bot_runner_improved.py
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional
-import pandas as pd
+from typing import Any, Dict, List, Optional
 
+import pandas as pd
+from circuit_breaker import get_circuit_breaker
+from data_loader import load_data
+from exceptions import DataLoadError, DataQualityError
+from market_regime_proxy import ProxyMarketRegimeAnalyzer
+from ml_model_monitor import get_ml_model_monitor
+from ml_signals import MLSignalGenerator
+from news_analyzer import analyze_news_trend
+from paper_trading import get_paper_account
+from portfolio_lock import get_portfolio_lock
+from portfolio_manager import get_portfolio_manager
+from portfolio_risk_manager import get_portfolio_risk_manager
+from strategy_manager import get_strategy_manager
 from telegram import Bot
+from ticker_loader import get_ticker_loader
 
 # Import các thành phần cần thiết từ project
 # (Giả định các import này vẫn hoạt động sau khi tách file)
 from config import LOOKBACK, MAX_SCAN_UNIVERSE, WATCHLIST_SIZE
-from data_loader import load_data
-from ml_signals import MLSignalGenerator
-from strategy_manager import get_strategy_manager
-from circuit_breaker import get_circuit_breaker
-from news_analyzer import analyze_news_trend
-from portfolio_manager import get_portfolio_manager
-from portfolio_lock import get_portfolio_lock
-from portfolio_risk_manager import get_portfolio_risk_manager
-from market_regime_proxy import ProxyMarketRegimeAnalyzer
-from ticker_loader import get_ticker_loader
-from paper_trading import get_paper_account
-from ml_model_monitor import get_ml_model_monitor
-from exceptions import DataLoadError, DataQualityError
 
 
 class TradingOrchestrator:

@@ -5,7 +5,6 @@ Adjust Thresholds
 """
 import argparse
 
-
 RECOMMENDED_THRESHOLDS = {
     "conservative": {
         "description": "An toàn, ít signals nhưng chất lượng cao",
