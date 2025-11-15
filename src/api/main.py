@@ -523,9 +523,17 @@ async def add_to_portfolio(symbol: str, shares: int, price: float):
     """Thêm cổ phiếu vào portfolio"""
     try:
         from portfolio_manager import PortfolioManager
+        from src.utils.validation import InputValidator
+        
+        # VALIDATE INPUT
+        try:
+            symbol = InputValidator.validate_symbol(symbol)
+            shares = InputValidator.validate_shares(shares)
+            price = InputValidator.validate_price(price)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         manager = PortfolioManager()
-
         manager.add_stock(symbol, shares, price)
 
         return {
@@ -536,6 +544,8 @@ async def add_to_portfolio(symbol: str, shares: int, price: float):
             "price": price,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -545,9 +555,17 @@ async def remove_from_portfolio(symbol: str, shares: int = None):
     """Bán cổ phiếu khỏi portfolio"""
     try:
         from portfolio_manager import PortfolioManager
+        from src.utils.validation import InputValidator
+        
+        # VALIDATE INPUT
+        try:
+            symbol = InputValidator.validate_symbol(symbol)
+            if shares is not None:
+                shares = InputValidator.validate_shares(shares)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         manager = PortfolioManager()
-
         success, message = manager.remove_stock(symbol, shares)
 
         if success:
@@ -555,6 +573,8 @@ async def remove_from_portfolio(symbol: str, shares: int = None):
         else:
             return {"status": "error", "message": message}
 
+    except HTTPException:
+        raise
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

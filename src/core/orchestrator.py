@@ -301,7 +301,14 @@ class TradingOrchestrator:
                 return
 
             current_price = df.iloc[-1]["close"]
-            ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
+            
+            # ML analysis với error handling
+            ml_signal = None
+            try:
+                ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
+            except Exception as e:
+                logging.warning(f"⚠️ Lỗi ML analysis cho {symbol} (exit check): {e}")
+                # Tiếp tục với ml_signal = None
 
             exit_decision = self.exit_strategy.check_exit(
                 symbol=symbol,
@@ -345,6 +352,22 @@ class TradingOrchestrator:
                 logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
                 if exit_decision.exit_type == "FULL":
                     self.exit_strategy.clear_position_tracking(symbol)
+                
+                # GHI NHẬN PNL NGAY LẬP TỨC sau khi thoát lệnh
+                current_pnl = self.portfolio_manager.get_daily_pnl_pct()
+                self.circuit_breaker.record_pnl(current_pnl)
+                
+                # Kiểm tra xem circuit breaker có kích hoạt không
+                if self.circuit_breaker.is_active():
+                    logging.warning(f"⚠️ Circuit breaker đã kích hoạt sau khi thoát {symbol}. PnL: {current_pnl:.2%}")
+                    await self.bot.send_message(
+                        self.chat_id,
+                        f"🚨 *CIRCUIT BREAKER KÍCH HOẠT*\n\n"
+                        f"Sau khi thoát {symbol}\n"
+                        f"PnL hiện tại: {current_pnl:.2%}\n"
+                        f"Lý do: {self.circuit_breaker.tripped_reason}",
+                        parse_mode="Markdown"
+                    )
             else:
                 logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
                 await self.bot.send_message(
@@ -401,8 +424,13 @@ class TradingOrchestrator:
             if df.empty or len(df) < 50:  # Cần đủ dữ liệu để phân tích
                 return None
 
-            # Phân tích ML
-            ml_signal = self.ml_generator.analyze(symbol, df, self.vnindex_df)
+            # Phân tích ML với error handling
+            ml_signal = None
+            try:
+                ml_signal = self.ml_generator.analyze(symbol, df, self.vnindex_df)
+            except Exception as e:
+                logging.warning(f"⚠️ Lỗi ML analysis cho {symbol} (entry scan): {e}")
+                # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý
 
             # 1. Entry Logic
             entry_signal = self.entry_logic.analyze_entry(

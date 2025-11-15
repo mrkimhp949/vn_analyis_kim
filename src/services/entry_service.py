@@ -105,8 +105,13 @@ class EntrySignalService:
                 logger.debug(f"[{symbol}] Data validation failed: {e}")
                 return None
             
-            # ML analysis
-            ml_signal = self.ml_generator.analyze(df, vnindex_df)
+            # ML analysis với error handling
+            ml_signal = None
+            try:
+                ml_signal = self.ml_generator.analyze(df, vnindex_df)
+            except Exception as e:
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
+                # Tiếp tục với ml_signal = None
             
             # Entry logic
             entry_signal = self.entry_logic.analyze_entry(
