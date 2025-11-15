@@ -3,6 +3,13 @@
 Unit Tests for Enhanced Risk Management
 """
 
+import sys
+from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 import pytest
 from unittest.mock import Mock, patch
 
@@ -16,9 +23,7 @@ class TestEnhancedRiskManager:
     def risk_manager(self):
         """Create a risk manager instance for testing"""
         return EnhancedRiskManager(
-            total_capital=100_000_000,
-            max_position_pct=0.2,
-            risk_per_trade_pct=0.02
+            total_capital=100_000_000, max_position_pct=0.2, risk_per_trade_pct=0.02
         )
 
     def test_initialization(self, risk_manager):
@@ -78,55 +83,55 @@ class TestEnhancedRiskManager:
         factor = risk_manager._calculate_confidence_factor(30)
         assert factor == 0.3
 
-    @patch('src.strategies.risk_management.load_data')
+    @patch("src.data.loader.load_data")
     def test_market_regime_factor_bull(self, mock_load_data, risk_manager):
         """Test market regime factor in bull market"""
         # Mock VNINDEX data showing bull market (>2% gain)
         mock_df = Mock()
         mock_df.__len__ = Mock(return_value=50)
-        mock_df.__getitem__ = Mock(return_value=Mock(
-            iloc=Mock(
-                __getitem__=Mock(side_effect=[110, 100])  # 10% gain
+        mock_df.__getitem__ = Mock(
+            return_value=Mock(
+                iloc=Mock(__getitem__=Mock(side_effect=[110, 100]))  # 10% gain
             )
-        ))
+        )
         mock_load_data.return_value = mock_df
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 1.1
 
-    @patch('src.strategies.risk_management.load_data')
+    @patch("src.data.loader.load_data")
     def test_market_regime_factor_bear(self, mock_load_data, risk_manager):
         """Test market regime factor in bear market"""
         # Mock VNINDEX data showing bear market (<-2% loss)
         mock_df = Mock()
         mock_df.__len__ = Mock(return_value=50)
-        mock_df.__getitem__ = Mock(return_value=Mock(
-            iloc=Mock(
-                __getitem__=Mock(side_effect=[95, 100])  # -5% loss
+        mock_df.__getitem__ = Mock(
+            return_value=Mock(
+                iloc=Mock(__getitem__=Mock(side_effect=[95, 100]))  # -5% loss
             )
-        ))
+        )
         mock_load_data.return_value = mock_df
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 0.6
 
-    @patch('src.strategies.risk_management.load_data')
+    @patch("src.data.loader.load_data")
     def test_market_regime_factor_sideway(self, mock_load_data, risk_manager):
         """Test market regime factor in sideway market"""
         # Mock VNINDEX data showing sideway market (-2% to 2%)
         mock_df = Mock()
         mock_df.__len__ = Mock(return_value=50)
-        mock_df.__getitem__ = Mock(return_value=Mock(
-            iloc=Mock(
-                __getitem__=Mock(side_effect=[101, 100])  # 1% gain
+        mock_df.__getitem__ = Mock(
+            return_value=Mock(
+                iloc=Mock(__getitem__=Mock(side_effect=[101, 100]))  # 1% gain
             )
-        ))
+        )
         mock_load_data.return_value = mock_df
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 0.8
 
-    @patch('src.strategies.risk_management.load_data')
+    @patch("src.data.loader.load_data")
     def test_market_regime_factor_error_handling(self, mock_load_data, risk_manager):
         """Test market regime factor returns default on error"""
         # Mock load_data to raise exception
@@ -198,7 +203,7 @@ class TestEnhancedRiskManager:
         # Check ordering (aggressive < moderate < conservative)
         assert orders["aggressive"] < orders["moderate"] < orders["conservative"]
 
-    @patch('src.strategies.risk_management.RiskManager.calculate_position_size')
+    @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
     def test_calculate_enhanced_position_size_basic(
         self, mock_parent_calc, risk_manager
     ):
@@ -209,7 +214,7 @@ class TestEnhancedRiskManager:
             "value": 50_000_000,
             "risk_per_share": 500,
             "max_loss": 500_000,
-            "stop_loss": 49_500
+            "stop_loss": 49_500,
         }
 
         result = risk_manager.calculate_enhanced_position_size(
@@ -218,14 +223,14 @@ class TestEnhancedRiskManager:
             atr=1000,
             confidence=70,
             signal="BUY",
-            market_volatility=0.02
+            market_volatility=0.02,
         )
 
         assert "shares" in result
         assert "value" in result
         assert result["shares"] > 0
 
-    @patch('src.strategies.risk_management.RiskManager.calculate_position_size')
+    @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
     def test_calculate_enhanced_position_size_zero_shares(
         self, mock_parent_calc, risk_manager
     ):
@@ -236,7 +241,7 @@ class TestEnhancedRiskManager:
             "value": 0,
             "risk_per_share": 0,
             "max_loss": 0,
-            "stop_loss": 0
+            "stop_loss": 0,
         }
 
         result = risk_manager.calculate_enhanced_position_size(
@@ -245,12 +250,12 @@ class TestEnhancedRiskManager:
             atr=1000,
             confidence=70,
             signal="BUY",
-            market_volatility=0.02
+            market_volatility=0.02,
         )
 
         assert result["shares"] == 0
 
-    @patch('src.strategies.risk_management.RiskManager.calculate_position_size')
+    @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
     def test_calculate_enhanced_position_size_rounded_to_lot(
         self, mock_parent_calc, risk_manager
     ):
@@ -261,7 +266,7 @@ class TestEnhancedRiskManager:
             "value": 61_700_000,
             "risk_per_share": 500,
             "max_loss": 617_000,
-            "stop_loss": 49_500
+            "stop_loss": 49_500,
         }
 
         result = risk_manager.calculate_enhanced_position_size(
@@ -270,13 +275,13 @@ class TestEnhancedRiskManager:
             atr=1000,
             confidence=70,
             signal="BUY",
-            market_volatility=0.02
+            market_volatility=0.02,
         )
 
         # Should be rounded to nearest 100
         assert result["shares"] % 100 == 0
 
-    @patch('src.strategies.risk_management.RiskManager.calculate_position_size')
+    @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
     def test_calculate_enhanced_position_size_respects_max_capital(
         self, mock_parent_calc, risk_manager
     ):
@@ -287,7 +292,7 @@ class TestEnhancedRiskManager:
             "value": 5_000_000_000,
             "risk_per_share": 500,
             "max_loss": 50_000_000,
-            "stop_loss": 49_500
+            "stop_loss": 49_500,
         }
 
         result = risk_manager.calculate_enhanced_position_size(
@@ -296,7 +301,7 @@ class TestEnhancedRiskManager:
             atr=1000,
             confidence=70,
             signal="BUY",
-            market_volatility=0.02
+            market_volatility=0.02,
         )
 
         # Maximum allowed shares based on 20% of 100M capital at 50k price
@@ -333,9 +338,7 @@ class TestEnhancedRiskManagerEdgeCases:
     def test_initialization_with_custom_values(self):
         """Test initialization with custom parameter values"""
         rm = EnhancedRiskManager(
-            total_capital=500_000_000,
-            max_position_pct=0.15,
-            risk_per_trade_pct=0.01
+            total_capital=500_000_000, max_position_pct=0.15, risk_per_trade_pct=0.01
         )
 
         assert rm.total_capital == 500_000_000

@@ -3,7 +3,65 @@ Enhanced Risk Management
 Quản lý rủi ro nâng cao với volatility adjustment và correlation penalty
 """
 
-from risk_management import RiskManager
+
+class RiskManager:
+    """Base Risk Manager class"""
+
+    def __init__(
+        self, total_capital=100_000_000, max_position_pct=0.2, risk_per_trade_pct=0.02
+    ):
+        self.total_capital = total_capital
+        self.max_position_pct = max_position_pct
+        self.risk_per_trade_pct = risk_per_trade_pct
+
+    def calculate_position_size(self, price, atr, confidence, signal="BUY"):
+        """Base position sizing calculation"""
+        # Calculate max risk per trade
+        max_risk = self.total_capital * self.risk_per_trade_pct
+
+        # Calculate risk per share (using ATR as stop loss distance)
+        risk_per_share = atr * 2  # 2x ATR stop loss
+
+        # Calculate number of shares
+        shares = int(max_risk / risk_per_share) if risk_per_share > 0 else 0
+
+        # Check against max position size
+        max_shares_by_capital = int(
+            (self.total_capital * self.max_position_pct) / price
+        )
+        shares = min(shares, max_shares_by_capital)
+
+        # Round to lot of 100
+        if shares > 0:
+            shares = max((shares // 100) * 100, 100)
+
+        return {
+            "shares": shares,
+            "value": shares * price,
+            "risk_per_share": risk_per_share,
+            "max_loss": risk_per_share * shares,
+        }
+
+    def suggest_limit_orders(self, current_price, atr, signal="BUY"):
+        """Suggest limit order prices"""
+        if signal == "BUY":
+            return {
+                "aggressive": round(current_price - (atr * 0.3), -2),
+                "moderate": round(current_price - (atr * 0.5), -2),
+                "conservative": round(current_price - (atr * 0.7), -2),
+            }
+        else:
+            return {
+                "aggressive": round(current_price + (atr * 0.3), -2),
+                "moderate": round(current_price + (atr * 0.5), -2),
+                "conservative": round(current_price + (atr * 0.7), -2),
+            }
+
+    def format_recommendation(
+        self, symbol, result, position_info, limit_prices, df=None
+    ):
+        """Format recommendation message"""
+        return f"Position recommendation for {symbol}"
 
 
 class EnhancedRiskManager(RiskManager):
@@ -141,32 +199,31 @@ class EnhancedRiskManager(RiskManager):
         """Đề xuất limit orders nâng cao"""
         super().suggest_limit_orders(current_price, atr, signal)
 
-        # Điều chỉnh theo confidence
-        confidence_adjustment = confidence / 100
+        # Điều chỉnh theo confidence - Higher confidence = more aggressive (closer to price)
+        # Invert confidence: high confidence (80%) -> small discount, low confidence (30%) -> large discount
+        confidence_factor = (
+            1.0 - (confidence / 100) * 0.5
+        )  # Maps 0% -> 1.0, 100% -> 0.5
 
         if signal == "BUY":
             return {
                 "aggressive": round(
-                    current_price - (atr * 0.3 * confidence_adjustment), -2
+                    current_price - (atr * 0.3 * confidence_factor), -2
                 ),
-                "moderate": round(
-                    current_price - (atr * 0.5 * confidence_adjustment), -2
-                ),
+                "moderate": round(current_price - (atr * 0.5 * confidence_factor), -2),
                 "conservative": round(
-                    current_price - (atr * 0.7 * confidence_adjustment), -2
+                    current_price - (atr * 0.7 * confidence_factor), -2
                 ),
                 "note": f"Giá mua điều chỉnh theo confidence: {confidence}%",
             }
         else:
             return {
                 "aggressive": round(
-                    current_price + (atr * 0.3 * confidence_adjustment), -2
+                    current_price + (atr * 0.3 * confidence_factor), -2
                 ),
-                "moderate": round(
-                    current_price + (atr * 0.5 * confidence_adjustment), -2
-                ),
+                "moderate": round(current_price + (atr * 0.5 * confidence_factor), -2),
                 "conservative": round(
-                    current_price + (atr * 0.7 * confidence_adjustment), -2
+                    current_price + (atr * 0.7 * confidence_factor), -2
                 ),
                 "note": f"Giá bán điều chỉnh theo confidence: {confidence}%",
             }

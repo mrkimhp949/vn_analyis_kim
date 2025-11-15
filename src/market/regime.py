@@ -20,7 +20,7 @@ try:
     from hmmlearn.hmm import GaussianHMM  # type: ignore
 
     HMM_AVAILABLE = True
-    
+
     # Suppress hmmlearn convergence warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning, module="hmmlearn")
 except ImportError:  # pragma: no cover - optional dependency
@@ -244,7 +244,7 @@ class MarketRegimeAnalyzer:
                 return None
 
             returns_array = returns.values.reshape(-1, 1)
-            
+
             # Configure HMM with better convergence parameters
             hmm = GaussianHMM(
                 n_components=3,
@@ -254,7 +254,7 @@ class MarketRegimeAnalyzer:
                 random_state=42,
                 verbose=False,
             )
-            
+
             # Fit with convergence monitoring suppressed
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=RuntimeWarning)
