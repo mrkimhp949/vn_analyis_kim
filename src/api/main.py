@@ -40,9 +40,9 @@ from src.api.auth import (
 try:
     from src.core.bot_runner import run_bot_sync
 
-    print("✅ Import bot_runner_improved thành công")
+    print("✅ Import run_bot_sync từ src.core.bot_runner thành công")
 except ImportError:
-    print("❌ Lỗi import bot_runner_improved")
+    print("❌ Lỗi import run_bot_sync từ src.core.bot_runner")
 
     # Fallback function
     def run_bot_sync():

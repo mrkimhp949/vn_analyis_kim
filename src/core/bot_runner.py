@@ -16,7 +16,14 @@ from telegram import Bot
 from src.config.exceptions import ConfigurationError
 
 # Import các thành phần cần thiết
-from src.config.legacy_config import CHAT_ID, LOOKBACK, TELEGRAM_TOKEN
+try:
+    from src.config.legacy_config import CHAT_ID, LOOKBACK, TELEGRAM_TOKEN
+except (ImportError, ConfigurationError) as e:
+    logging.error(f"❌ Lỗi load config: {e}")
+    TELEGRAM_TOKEN = None
+    CHAT_ID = None
+    LOOKBACK = 252
+
 from src.core.orchestrator import TradingOrchestrator
 from src.data.loader import load_data
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
@@ -25,8 +32,12 @@ logging.info("✅ Using TradingOrchestrator")
 
 # Khởi tạo các đối tượng toàn cục
 try:
-    bot = Bot(token=TELEGRAM_TOKEN)
-    logging.info("✅ Telegram bot initialized")
+    if TELEGRAM_TOKEN:
+        bot = Bot(token=TELEGRAM_TOKEN)
+        logging.info("✅ Telegram bot initialized")
+    else:
+        logging.warning("⚠️ TELEGRAM_TOKEN không khả dụng")
+        bot = None
 except Exception:
     logging.critical("❌ Lỗi khởi tạo Telegram bot")
     bot = None
@@ -115,10 +126,15 @@ def run_bot_sync():
     """
     Hàm đồng bộ (sync wrapper) để `main.py` có thể gọi.
     """
+    if not bot or not CHAT_ID:
+        logging.error("❌ Không thể chạy bot: Thiếu TELEGRAM_TOKEN hoặc CHAT_ID")
+        logging.error("📝 Vui lòng set các biến môi trường: TELEGRAM_TOKEN, CHAT_ID")
+        return
+    
     try:
         asyncio.run(run_bot_with_context(bot, CHAT_ID))
-    except ConfigurationError:
-        logging.critical(f"CRITICAL CONFIG ERROR: {e.message}")  # noqa: F821
+    except ConfigurationError as e:
+        logging.critical(f"CRITICAL CONFIG ERROR: {e.message}")
         # Maybe send a notification through a different channel if Telegram bot failed
     except Exception:
         logging.critical("❌ Lỗi không xác định khi chạy bot", exc_info=True)

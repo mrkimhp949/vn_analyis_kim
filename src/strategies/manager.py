@@ -6,14 +6,11 @@ Quản lý và cung cấp các đối tượng chiến lược (entry, exit, siz
 import logging
 from typing import Any, Dict
 
-from exit_strategy_enhanced import EnhancedExitStrategy, ImprovedExitStrategy
+from src.strategies.exit_logic import ImprovedExitStrategy
 
 # Import các lớp chiến lược
 from src.strategies.entry_logic import ImprovedEntryLogic
-from src.strategies.position_sizing import (
-    ConservativePositionSizer,
-    EnhancedPositionSizer,
-)
+from src.strategies.position_sizing import EnhancedPositionSizer
 from src.config.trading_config import get_config
 
 
@@ -26,8 +23,8 @@ class StrategyManager:
     def __init__(self):
         self.trading_config = get_config(validate=False)
         self.entry_logic: ImprovedEntryLogic = None
-        self.position_sizer: EnhancedPositionSizer | ConservativePositionSizer = None
-        self.exit_strategy: EnhancedExitStrategy | ImprovedExitStrategy = None
+        self.position_sizer: EnhancedPositionSizer = None
+        self.exit_strategy: ImprovedExitStrategy = None
         self._initialize_strategies()
 
     def _initialize_strategies(self):
@@ -64,38 +61,14 @@ class StrategyManager:
                 kelly_fraction=0.5,
             )
             logging.info("✅ EnhancedPositionSizer initialized (with Kelly Criterion)")
-        except ImportError:
-            logging.warning(
-                "⚠️ EnhancedPositionSizer không khả dụng (), dùng fallback..."
-            )
-            self.position_sizer = ConservativePositionSizer(
-                total_capital=100_000_000,
-                max_risk_per_trade=0.02,
-                max_position_size=0.10,
-                max_total_exposure=0.60,
-                min_positions=8,
-            )
-            logging.info("✅ ConservativePositionSizer initialized (fallback)")
         except Exception:
             logging.critical("❌ Không thể khởi tạo PositionSizer", exc_info=True)
             raise
 
         # 3. Exit Strategy
         try:
-            self.exit_strategy = EnhancedExitStrategy(
-                use_dynamic_trailing=True,
-                use_breakeven_stop=True,
-                breakeven_activation=0.10,
-            )
-            logging.info(
-                "✅ EnhancedExitStrategy initialized (dynamic trailing & breakeven)"
-            )
-        except ImportError:
-            logging.warning(
-                "⚠️ EnhancedExitStrategy không khả dụng (), dùng fallback..."
-            )
             self.exit_strategy = ImprovedExitStrategy()
-            logging.info("✅ ImprovedExitStrategy initialized (fallback)")
+            logging.info("✅ ImprovedExitStrategy initialized")
         except Exception:
             logging.critical("❌ Không thể khởi tạo ExitStrategy", exc_info=True)
             raise
