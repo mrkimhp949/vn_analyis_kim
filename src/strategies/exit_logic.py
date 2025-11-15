@@ -478,7 +478,7 @@ class ImprovedExitStrategy:
         # Use safe access instead of df.iloc[-1]
         if len(df) < 2:
             return {"should_exit": False}
-        
+
         latest = df.iloc[-1]
         prev = df.iloc[-2]
 

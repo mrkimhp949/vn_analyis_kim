@@ -650,6 +650,7 @@ class ImprovedEntryLogic:
             }
 
         # Use safe access instead of df.iloc[-1]
+        latest = df.iloc[-1]
         prev = df.iloc[-2]
 
         # Bullish engulfing

@@ -240,6 +240,9 @@ class EnhancedMLSignalGenerator:
                 return self._default_signal()
 
             # Use safe access instead of df.iloc[-1]
+            from utils.dataframe_utils import safe_get_latest
+
+            latest = df.iloc[-1]  # Get latest row for technical analysis
 
             # Simple technical signals
             signal = "HOLD"

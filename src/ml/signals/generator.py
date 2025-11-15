@@ -42,6 +42,9 @@ class MLSignalGenerator:
 
             # Lấy data gần nhất
             # Use safe access instead of df.iloc[-1]
+            from utils.dataframe_utils import safe_get_latest
+
+            latest = df.iloc[-1]  # Get latest row for analysis
 
             # Chuẩn bị features cho ML
             feature_cols = get_feature_columns()
@@ -119,7 +122,9 @@ class MLSignalGenerator:
             # Cố gắng thêm các feature cơ bản mà không cần index_df
             if "rsi" not in df.columns:
                 df = add_ml_features(df.copy(), index_df=None)
-            # Use safe access instead of df.iloc[-1]
+
+            # Get latest row for analysis
+            latest = df.iloc[-1]
 
             # Simple technical signals
             signal = "HOLD"

@@ -80,12 +80,14 @@ def add_ml_features(
 
         if not merged_df.empty:
             # Tính performance của stock và index
+            from utils.dataframe_utils import safe_get_latest
+
             stock_perf = (
-                merged_safe_get_latest(df, "close_stock", 0)
+                safe_get_latest(merged_df, "close_stock", 0)
                 / merged_df["close_stock"].iloc[0]
             )
             index_perf = (
-                merged_safe_get_latest(df, "close_index", 0)
+                safe_get_latest(merged_df, "close_index", 0)
                 / merged_df["close_index"].iloc[0]
             )
 
