@@ -178,7 +178,7 @@ class HealthChecker:
                 passed, message = check_func()
                 results[name] = {"passed": passed, "message": message}
 
-                "✅" if passed else "❌"
+                emoji = "✅" if passed else "❌"
                 print(f"{emoji} {name:20s} {message}")
 
                 if passed:
@@ -187,7 +187,7 @@ class HealthChecker:
                     self.checks_failed += 1
             except Exception:
                 results[name] = {"passed": False, "message": "Error"}
-                print("❌ {name:20s} Error")
+                print(f"❌ {name:20s} Error")
                 self.checks_failed += 1
 
         # Print warnings

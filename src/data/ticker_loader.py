@@ -79,10 +79,10 @@ class TickerLoader:
             # Remove empty strings
             self.all_tickers = [t for t in self.all_tickers if t]
 
-            print(f"📊 Loaded {len(self.all_tickers)} tickers from {self.csv_file}")
+            print(f"Loaded {len(self.all_tickers)} tickers from {self.csv_file}")
 
         except Exception:
-            print(f"❌ Error loading {self.csv_file}")
+            print(f"Error loading {self.csv_file}")
             self.all_tickers = []
 
     def validate_ticker(self, symbol: str, min_volume: int = 100_000) -> bool:
@@ -102,8 +102,9 @@ class TickerLoader:
         try:
             from src.data.loader import load_data
 
-            # Try load data, requiring only 5 bars for a basic validity check
-            df = load_data(symbol, lookback=5, use_cache=False, required_bars=5)
+            # Try load data, requiring only 2 bars for a basic validity check
+            # (Some newly listed stocks may have very limited data)
+            df = load_data(symbol, lookback=30, use_cache=False, required_bars=2)
 
             if df.empty or len(df) < 2:
                 self.validation_cache["invalid"][symbol] = {
@@ -131,8 +132,8 @@ class TickerLoader:
             self._save_cache()
             return True
 
-        except ValueError:
-            error_msg = str(e)  # noqa: F821
+        except ValueError as e:
+            error_msg = str(e)
             if (
                 "hủy niêm yết" in error_msg
                 or "không tồn tại" in error_msg
