@@ -19,7 +19,9 @@ class TestAPIEndpoints:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup test client"""
-        self.client = TestClient(app)
+        with TestClient(app) as client:
+            self.client = client
+            yield
 
     def test_root_endpoint(self):
         """Test root endpoint returns correct response"""
@@ -178,7 +180,9 @@ class TestAPIErrorHandling:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Setup test client"""
-        self.client = TestClient(app)
+        with TestClient(app) as client:
+            self.client = client
+            yield
 
     def test_invalid_endpoint_returns_404(self):
         """Test invalid endpoint returns 404"""
