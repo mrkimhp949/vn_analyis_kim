@@ -80,9 +80,7 @@ class EntrySignalService:
             if result and result.get("signal"):
                 signals.append(result)
 
-        logger.info(
-            f"📊 Found {len(signals)} entry signals from {len(tickers)} tickers"
-        )
+        logger.info(f"📊 Found {len(signals)} entry signals from {len(tickers)} tickers")
 
         return signals
 

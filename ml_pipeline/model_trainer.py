@@ -275,9 +275,9 @@ class EnsembleTrainer:
                                     )
                                 elif len(lstm_pred) > len(y_val):
                                     lstm_pred = lstm_pred[: len(y_val)]
-                                fold_meta[:, base_models_order.index("lstm")] = (
-                                    lstm_pred
-                                )
+                                fold_meta[
+                                    :, base_models_order.index("lstm")
+                                ] = lstm_pred
                                 fold_predictions["lstm"] = lstm_pred
                 except Exception:
                     logger.warning(f"LSTM training failed in fold {fold_idx + 1}")

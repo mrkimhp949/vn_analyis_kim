@@ -49,7 +49,6 @@ class TestPortfolioAnalyzer:
         ), patch(
             "src.portfolio.analyzer.PortfolioOptimizer"
         ):
-
             analyzer = PortfolioAnalyzer(portfolio_file="test_portfolio.json")
             return analyzer
 
@@ -73,7 +72,6 @@ class TestPortfolioAnalyzer:
         ), patch(
             "src.portfolio.analyzer.PortfolioOptimizer"
         ):
-
             analyzer = PortfolioAnalyzer()
             assert analyzer.portfolio_file == "portfolio_status.json"
 

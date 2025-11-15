@@ -365,7 +365,7 @@ class MLSignalGenerator:
 
         # Limit history size
         if len(self._confidence_history) > self._max_history:
-            self._confidence_history = self._confidence_history[-self._max_history:]
+            self._confidence_history = self._confidence_history[-self._max_history :]
 
         # Log statistics periodically
         if len(self._confidence_history) % 20 == 0:

@@ -26,7 +26,22 @@ from src.data.ticker_loader import get_ticker_loader
 
 # Import các thành phần cần thiết từ project
 # (Giả định các import này vẫn hoạt động sau khi tách file)
-from src.config.legacy_config import LOOKBACK, MAX_SCAN_UNIVERSE
+from src.config.legacy_config import MAX_SCAN_UNIVERSE
+
+# Get LOOKBACK safely with fallback
+try:
+    from src.config.legacy_config import LOOKBACK
+
+    if LOOKBACK is None or not isinstance(LOOKBACK, int):
+        LOOKBACK = 200
+except Exception as e:
+    logging.warning(f"Failed to import LOOKBACK from config: {e}")
+    LOOKBACK = 200  # Fallback value
+
+# Ensure LOOKBACK is valid
+if not isinstance(LOOKBACK, int) or LOOKBACK < 50:
+    logging.warning(f"Invalid LOOKBACK value: {LOOKBACK}, using 200")
+    LOOKBACK = 200
 
 
 class TradingOrchestrator:
@@ -238,7 +253,11 @@ class TradingOrchestrator:
         # 0. KIỂM TRA NGẮT MẠCH (CIRCUIT BREAKER)
         vnindex_change = 0.0
         try:
-            if self.vnindex_df is not None and not self.vnindex_df.empty and len(self.vnindex_df) > 1:
+            if (
+                self.vnindex_df is not None
+                and not self.vnindex_df.empty
+                and len(self.vnindex_df) > 1
+            ):
                 vnindex_change = self.vnindex_df["close"].pct_change().iloc[-1]
                 if pd.isna(vnindex_change):
                     vnindex_change = 0.0
@@ -366,7 +385,7 @@ class TradingOrchestrator:
     ):
         """Logic kiểm tra cho một vị thế cụ thể."""
         try:
-            df = load_data(symbol, LOOKBACK)
+            df = load_data(symbol, lookback=LOOKBACK)
             if df.empty:
                 return
 

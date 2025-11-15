@@ -54,7 +54,6 @@ class LivePortfolioMonitor:
         websocket_config: WebSocketConfig = None,
         enable_alerts: bool = True,
     ):
-
         self.portfolio = portfolio_manager or PortfolioManager()
         self.price_feed = PriceFeedClient(websocket_config)
         self.exit_logic = ImprovedExitStrategy()

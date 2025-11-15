@@ -77,7 +77,9 @@ class ImprovedEntryLogic:
             portfolio_manager: Portfolio manager for context-aware decisions
         """
         self.min_confidence = min_confidence
-        self.base_min_confidence = min_confidence  # Store original for dynamic adjustment
+        self.base_min_confidence = (
+            min_confidence  # Store original for dynamic adjustment
+        )
         self.min_risk_reward = min_risk_reward
         self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
@@ -101,6 +103,10 @@ class ImprovedEntryLogic:
 
         # Use safe access instead of df.iloc[-1]
         from utils.dataframe_utils import safe_get_latest
+
+        # Check if ml_signal is None
+        if ml_signal is None:
+            return (False, "ML signal is None", 0, 0)
 
         signal_type = ml_signal.get("signal", "HOLD")
         base_confidence = ml_signal.get("confidence", 0)
@@ -294,9 +300,12 @@ class ImprovedEntryLogic:
         self._adjust_thresholds_for_market(market_regime)
 
         # Step 1: Validate initial signal
-        is_valid, signal_or_reason, base_confidence, current_price = (
-            self._validate_initial_signal(df, ml_signal)
-        )
+        (
+            is_valid,
+            signal_or_reason,
+            base_confidence,
+            current_price,
+        ) = self._validate_initial_signal(df, ml_signal)
         if not is_valid:
             return self._no_signal(signal_or_reason)
 
@@ -328,9 +337,14 @@ class ImprovedEntryLogic:
         entry_price = DataValidator.validate_price(close_price, "entry_price")
         sr_check = self._check_support_resistance(df, current_price)
 
-        success, error_msg, stop_loss, reward, take_profit_targets, risk_reward = (
-            self._calculate_prices_and_risk(df, entry_price, sr_check)
-        )
+        (
+            success,
+            error_msg,
+            stop_loss,
+            reward,
+            take_profit_targets,
+            risk_reward,
+        ) = self._calculate_prices_and_risk(df, entry_price, sr_check)
         if not success:
             return self._no_signal(error_msg)
 
@@ -850,10 +864,14 @@ class ImprovedEntryLogic:
                 # If portfolio is getting crowded, be more selective
                 if num_positions >= 8:
                     adjustment += 10
-                    logger.info(f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +10")
+                    logger.info(
+                        f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +10"
+                    )
                 elif num_positions >= 5:
                     adjustment += 5
-                    logger.info(f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +5")
+                    logger.info(
+                        f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +5"
+                    )
             except Exception as e:
                 logger.warning(f"⚠️ Could not check portfolio heat: {e}")
 

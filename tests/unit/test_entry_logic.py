@@ -8,7 +8,6 @@ from src.strategies.entry_logic import ImprovedEntryLogic, SignalStrength
 
 
 class TestImprovedEntryLogic:
-
     @pytest.fixture
     def entry_logic(self):
         return ImprovedEntryLogic(

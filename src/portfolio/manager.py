@@ -486,47 +486,55 @@ class PortfolioManager:
                 excess_value = position_value - target_value
                 shares_to_sell = int(excess_value / current_price)
 
-                suggestions.append({
-                    "symbol": symbol,
-                    "action": "REDUCE",
-                    "current_weight": position_weight,
-                    "target_weight": target_position_size,
-                    "shares_to_sell": shares_to_sell,
-                    "reason": f"Overweight: {position_weight:.1%} vs target {target_position_size:.1%}"
-                })
+                suggestions.append(
+                    {
+                        "symbol": symbol,
+                        "action": "REDUCE",
+                        "current_weight": position_weight,
+                        "target_weight": target_position_size,
+                        "shares_to_sell": shares_to_sell,
+                        "reason": f"Overweight: {position_weight:.1%} vs target {target_position_size:.1%}",
+                    }
+                )
                 needs_rebalancing = True
 
-            elif position_weight < target_position_size * 0.5 and position_weight > 0.02:
+            elif (
+                position_weight < target_position_size * 0.5 and position_weight > 0.02
+            ):
                 # Underweight (but not too small) - suggest increasing
                 target_value = total_value * target_position_size
                 deficit_value = target_value - position_value
                 shares_to_buy = int(deficit_value / current_price)
 
-                suggestions.append({
-                    "symbol": symbol,
-                    "action": "INCREASE",
-                    "current_weight": position_weight,
-                    "target_weight": target_position_size,
-                    "shares_to_buy": shares_to_buy,
-                    "reason": f"Underweight: {position_weight:.1%} vs target {target_position_size:.1%}"
-                })
+                suggestions.append(
+                    {
+                        "symbol": symbol,
+                        "action": "INCREASE",
+                        "current_weight": position_weight,
+                        "target_weight": target_position_size,
+                        "shares_to_buy": shares_to_buy,
+                        "reason": f"Underweight: {position_weight:.1%} vs target {target_position_size:.1%}",
+                    }
+                )
                 needs_rebalancing = True
 
             elif position_weight < 0.02:
                 # Too small - suggest closing
-                suggestions.append({
-                    "symbol": symbol,
-                    "action": "CLOSE",
-                    "current_weight": position_weight,
-                    "reason": f"Position too small: {position_weight:.1%}"
-                })
+                suggestions.append(
+                    {
+                        "symbol": symbol,
+                        "action": "CLOSE",
+                        "current_weight": position_weight,
+                        "reason": f"Position too small: {position_weight:.1%}",
+                    }
+                )
                 needs_rebalancing = True
 
         return {
             "needs_rebalancing": needs_rebalancing,
             "num_positions": len(positions),
             "total_value": total_value,
-            "suggestions": suggestions
+            "suggestions": suggestions,
         }
 
     def get_detailed_analysis(self) -> str:

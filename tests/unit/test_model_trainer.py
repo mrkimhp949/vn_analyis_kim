@@ -333,7 +333,6 @@ class TestEnsembleTrainer:
         ), patch("ml_pipeline.model_trainer.GradientBoostingClassifier"), patch(
             "ml_pipeline.model_trainer.StandardScaler"
         ):
-
             # Mock minimal setup
             mock_split_instance = Mock()
             mock_split_instance.split.return_value = [

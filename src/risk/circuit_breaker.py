@@ -241,7 +241,9 @@ class CircuitBreaker:
 
         # Apply adjustments
         self.max_loss_per_day_pct = self.base_max_loss_per_day_pct * volatility_factor
-        self.vnindex_drop_threshold = self.base_vnindex_drop_threshold * volatility_factor
+        self.vnindex_drop_threshold = (
+            self.base_vnindex_drop_threshold * volatility_factor
+        )
 
         print(
             f"🔧 Circuit breaker adjusted: "

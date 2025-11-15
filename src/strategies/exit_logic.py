@@ -68,7 +68,6 @@ class ImprovedExitStrategy:
         max_holding_days: int = 20,  # Tối đa 20 ngày
         time_decay_threshold: float = 0.02,
     ):  # Nếu <2% lời sau 20 ngày → thoát
-
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
         self.trailing_activation = trailing_stop_activation
@@ -502,7 +501,6 @@ class ImprovedExitStrategy:
             and latest["close"] < prev["open"]
             and latest["open"] > prev["close"]
         ):
-
             return {
                 "should_exit": True,
                 "decision": ExitDecision(

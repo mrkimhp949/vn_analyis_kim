@@ -64,4 +64,21 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="keras")
 warnings.filterwarnings("ignore", message=".*tf.losses.sparse_softmax_cross_entropy.*")
 warnings.filterwarnings("ignore", message=".*deprecated.*")
 
+# Suppress JAX deprecation warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="jax")
+warnings.filterwarnings("ignore", message=".*jax.xla_computation is deprecated.*")
+
+# Suppress TensorFlow Lite JAX warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="tensorflow.lite")
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="tensorflow.lite.python.util"
+)
+warnings.filterwarnings(
+    "ignore", message=".*jax.xla_computation is deprecated. Please use the AOT APIs.*"
+)
+
+# Suppress all JAX-related deprecation warnings from any module
+warnings.filterwarnings("ignore", message=".*jax.*deprecated.*")
+warnings.filterwarnings("ignore", message=".*xla_computation.*deprecated.*")
+
 # Có thể thêm các warnings khác cần suppress ở đây

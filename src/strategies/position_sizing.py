@@ -453,7 +453,9 @@ class EnhancedPositionSizer:
                 return corr
             else:
                 # Cache expired
-                logger.debug(f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)")
+                logger.debug(
+                    f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)"
+                )
 
         # Cache miss - calculate correlation
         self._cache_misses += 1
@@ -524,7 +526,7 @@ class EnhancedPositionSizer:
         sorted_items = sorted(
             self._correlation_cache.items(),
             key=lambda x: x[1][1],  # Sort by timestamp
-            reverse=True
+            reverse=True,
         )
 
         keep_count = int(len(sorted_items) * 0.8)

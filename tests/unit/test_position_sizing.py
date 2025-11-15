@@ -9,7 +9,6 @@ from src.strategies.position_sizing import (
 
 
 class TestConservativePositionSizer:
-
     @pytest.fixture
     def sizer(self):
         return ConservativePositionSizer(

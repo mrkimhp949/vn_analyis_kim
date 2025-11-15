@@ -167,7 +167,6 @@ class TestEntrySignalService:
         with patch("src.services.entry_service.load_data") as mock_load, patch(
             "src.services.entry_service.DataValidator"
         ):
-
             # Mock data
             mock_df = pd.DataFrame(
                 {
@@ -271,7 +270,6 @@ class TestExitManagementService:
         with patch("src.services.exit_service.load_data") as mock_load, patch(
             "src.services.exit_service.DataValidator"
         ):
-
             # Mock data
             mock_df = pd.DataFrame(
                 {

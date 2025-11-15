@@ -117,9 +117,9 @@ class PortfolioAnalyzer:
                     }
 
             # Tìm cổ phiếu mới nên mua
-            analysis_result["new_buy_recommendations"] = (
-                self._find_new_buy_opportunities(current_holdings, market_regime)
-            )
+            analysis_result[
+                "new_buy_recommendations"
+            ] = self._find_new_buy_opportunities(current_holdings, market_regime)
 
             # Tổng kết portfolio
             analysis_result["portfolio_summary"] = self._calculate_portfolio_summary(
@@ -152,7 +152,6 @@ class PortfolioAnalyzer:
             return self._create_error_analysis(symbol, f"Lỗi: {str(e)}")
 
         try:
-
             current_price = safe_get_latest(df, "close", 0)
             entry_price = holding["avg_price"]
             shares = holding["shares"]
