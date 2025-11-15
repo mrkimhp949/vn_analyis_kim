@@ -17,6 +17,7 @@ from src.portfolio.paper_trading import get_paper_account
 from src.portfolio.manager import get_portfolio_manager
 
 from src.utils.validation import DataValidator
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 logger = logging.getLogger(__name__)
 

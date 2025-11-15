@@ -332,6 +332,7 @@ def get_all_feature_columns() -> list:
 
 if __name__ == "__main__":
     from src.data.loader import load_data
+    from utils.dataframe_utils import safe_get_latest
 
     print("\n" + "=" * 70)
     print("🧪 TESTING ENHANCED FEATURES")

@@ -128,6 +128,8 @@ class TestEnsembleTrainer:
 
     def test_build_lstm_success(self, trainer):
         """Test successful LSTM model building"""
+        import ml_pipeline.model_trainer as mt
+
         # Create mock layers
         mock_lstm_layer_1 = Mock()
         mock_dropout_layer_1 = Mock()
@@ -144,14 +146,21 @@ class TestEnsembleTrainer:
         mock_lstm = Mock(side_effect=[mock_lstm_layer_1, mock_lstm_layer_2])
         mock_dropout = Mock(side_effect=[mock_dropout_layer_1, mock_dropout_layer_2])
         mock_dense = Mock(side_effect=[mock_dense_layer_1, mock_dense_layer_2])
+        mock_sequential = Mock(return_value=mock_model)
 
-        with patch("ml_pipeline.model_trainer.LSTM_AVAILABLE", True), patch(
-            "ml_pipeline.model_trainer.Sequential", return_value=mock_model
-        ) as mock_sequential, patch("ml_pipeline.model_trainer.LSTM", mock_lstm), patch(
-            "ml_pipeline.model_trainer.Dropout", mock_dropout
-        ), patch(
-            "ml_pipeline.model_trainer.Dense", mock_dense
-        ):
+        # Temporarily set the mocked classes on the module
+        old_lstm_available = getattr(mt, "LSTM_AVAILABLE", False)
+        old_sequential = getattr(mt, "Sequential", None)
+        old_lstm = getattr(mt, "LSTM", None)
+        old_dropout = getattr(mt, "Dropout", None)
+        old_dense = getattr(mt, "Dense", None)
+
+        try:
+            mt.LSTM_AVAILABLE = True
+            mt.Sequential = mock_sequential
+            mt.LSTM = mock_lstm
+            mt.Dropout = mock_dropout
+            mt.Dense = mock_dense
 
             result = trainer._build_lstm((10, 3))
 
@@ -168,6 +177,25 @@ class TestEnsembleTrainer:
             mock_model.compile.assert_called_once_with(
                 optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"]
             )
+        finally:
+            # Restore original values
+            mt.LSTM_AVAILABLE = old_lstm_available
+            if old_sequential is not None:
+                mt.Sequential = old_sequential
+            elif hasattr(mt, "Sequential"):
+                delattr(mt, "Sequential")
+            if old_lstm is not None:
+                mt.LSTM = old_lstm
+            elif hasattr(mt, "LSTM"):
+                delattr(mt, "LSTM")
+            if old_dropout is not None:
+                mt.Dropout = old_dropout
+            elif hasattr(mt, "Dropout"):
+                delattr(mt, "Dropout")
+            if old_dense is not None:
+                mt.Dense = old_dense
+            elif hasattr(mt, "Dense"):
+                delattr(mt, "Dense")
 
     @patch("ml_pipeline.model_trainer.LSTM_AVAILABLE", False)
     def test_build_lstm_not_available(self, trainer):

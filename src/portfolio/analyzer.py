@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 
 from src.data.loader import load_data
+from utils.dataframe_utils import safe_get_latest
 from src.strategies.entry_logic import ImprovedEntryLogic
 from src.strategies.exit_logic import ImprovedExitStrategy
 from src.strategies.position_sizing import EnhancedPositionSizer
@@ -152,7 +153,7 @@ class PortfolioAnalyzer:
 
         try:
 
-            current_price = df["close"].iloc[-1]
+            current_price = safe_get_latest(df, "close", 0)
             entry_price = holding["avg_price"]
             shares = holding["shares"]
 
@@ -282,7 +283,7 @@ class PortfolioAnalyzer:
                         logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {e}")
                         # Tiếp tục với ml_signal = None
 
-                    current_price = df["close"].iloc[-1]
+                    current_price = safe_get_latest(df, "close", 0)
 
                     # Kiểm tra entry signal
                     entry_signal = self.entry_logic.analyze_entry(

@@ -94,7 +94,9 @@ class ImprovedEntryLogic:
         except Exception as e:
             return (False, f"Data validation failed: {str(e)}", 0, 0)
 
-        latest = df.iloc[-1]
+        # Use safe access instead of df.iloc[-1]
+        from utils.dataframe_utils import safe_get_latest
+
         signal_type = ml_signal.get("signal", "HOLD")
         base_confidence = ml_signal.get("confidence", 0)
 
@@ -106,7 +108,8 @@ class ImprovedEntryLogic:
         if base_confidence < self.min_confidence:
             return (False, f"Confidence thấp ({base_confidence}%)", 0, 0)
 
-        return (True, signal_type, base_confidence, latest["close"])
+        close_price = safe_get_latest(df, "close", 0)
+        return (True, signal_type, base_confidence, close_price)
 
     def _run_all_filters(
         self,
@@ -312,7 +315,7 @@ class ImprovedEntryLogic:
             )
 
         # Step 4: Calculate prices and risk/reward
-        latest = df.iloc[-1]
+        # Use safe access instead of df.iloc[-1]
         entry_price = DataValidator.validate_price(latest["close"], "entry_price")
         sr_check = self._check_support_resistance(df, current_price)
 
@@ -367,7 +370,7 @@ class ImprovedEntryLogic:
         ema50 = df["close"].ewm(span=50).mean()
         ema200 = df["close"].ewm(span=200).mean()
 
-        latest_price = df["close"].iloc[-1]
+        latest_price = safe_get_latest(df, "close", 0)
         latest_ema20 = ema20.iloc[-1]
         latest_ema50 = ema50.iloc[-1]
         latest_ema200 = ema200.iloc[-1]
@@ -425,8 +428,8 @@ class ImprovedEntryLogic:
                 "distance_to_resistance": 0,
             }
 
-        support = df["low"].rolling(20).min().iloc[-1]
-        resistance = df["high"].rolling(20).max().iloc[-1]
+        support = safe_rolling_operation(df, "low", 20, "min", 0)
+        resistance = safe_rolling_operation(df, "high", 20, "max", 0)
 
         distance_to_support = ((current_price - support) / support) * 100
         distance_to_resistance = ((resistance - current_price) / current_price) * 100
@@ -489,8 +492,8 @@ class ImprovedEntryLogic:
                 "confidence": 0.5,
             }
 
-        current_volume = df["volume"].iloc[-1]
-        avg_volume_20 = df["volume"].rolling(20).mean().iloc[-1]
+        current_volume = safe_get_latest(df, "volume", 0)
+        avg_volume_20 = safe_rolling_operation(df, "volume", 20, "mean", 0)
 
         if avg_volume_20 == 0:
             return {
@@ -510,7 +513,7 @@ class ImprovedEntryLogic:
         # ============================================================
         # 2. VOLUME TREND (NEW)
         # ============================================================
-        avg_volume_5 = df["volume"].rolling(5).mean().iloc[-1]
+        avg_volume_5 = safe_rolling_operation(df, "volume", 5, "mean", 0)
         volume_trending_up = avg_volume_5 > avg_volume_20
 
         # ============================================================
@@ -594,7 +597,7 @@ class ImprovedEntryLogic:
         2-3%: Optimal
         > 4%: Too high (risky)
         """
-        latest = df.iloc[-1]
+        # Use safe access instead of df.iloc[-1]
         atr = latest.get("atr", 0)
         price = latest["close"]
 
@@ -621,7 +624,7 @@ class ImprovedEntryLogic:
         if "rsi" not in df.columns:
             return {"overbought": False, "optimal": True, "value": 50}
 
-        rsi = df["rsi"].iloc[-1]
+        rsi = safe_get_latest(df, "rsi", 0)
 
         if pd.isna(rsi):
             return {"overbought": False, "optimal": True, "value": 50}
@@ -644,7 +647,7 @@ class ImprovedEntryLogic:
                 "pattern": "None",
             }
 
-        latest = df.iloc[-1]
+        # Use safe access instead of df.iloc[-1]
         prev = df.iloc[-2]
 
         # Bullish engulfing
@@ -702,10 +705,10 @@ class ImprovedEntryLogic:
 
         # RS > 1: Cổ phiếu/ngành mạnh hơn thị trường
         # RS dốc lên: Sức mạnh đang tăng
-        latest_rs = df["rs"].iloc[-1]
-        rs_trend = (
-            df["rs"].rolling(10).mean().iloc[-1] > df["rs"].rolling(30).mean().iloc[-1]
-        )
+        latest_rs = safe_get_latest(df, "rs", 0)
+        rs_trend = safe_rolling_operation(
+            df, "rs", 10, "mean", 0
+        ) > safe_rolling_operation(df, "rs", 30, "mean", 0)
 
         is_leading = latest_rs > 1.0 and rs_trend
         is_lagging = latest_rs < 0.95
@@ -714,7 +717,11 @@ class ImprovedEntryLogic:
         sector_perf = 0
         if market_regime and "sector_performance" in market_regime:
             # Giả sử df có cột 'sector'
-            sector = df["sector"].iloc[-1] if "sector" in df.columns else "UNKNOWN"
+            sector = (
+                safe_get_latest(df, "sector", 0)
+                if "sector" in df.columns
+                else "UNKNOWN"
+            )
             sector_perf = market_regime["sector_performance"].get(sector, 0)
 
         return {
@@ -853,6 +860,7 @@ if __name__ == "__main__":
     from src.data.loader import load_data
     from src.ml.features.technical import add_ml_features
     from src.ml.signals.generator import MLSignalGenerator
+    from utils.dataframe_utils import safe_get_latest
 
     print("\n" + "=" * 70)
     print("🧪 TESTING IMPROVED ENTRY LOGIC")

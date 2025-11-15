@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 import pandas as pd
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +475,7 @@ class ImprovedExitStrategy:
         if len(df) < 3:
             return {"should_exit": False}
 
-        latest = df.iloc[-1]
+        # Use safe access instead of df.iloc[-1]
         prev = df.iloc[-2]
 
         # Chỉ check pattern nếu đang lời
@@ -546,7 +547,8 @@ class ImprovedExitStrategy:
         # Nếu giá break support với volume cao
         if current_price < support:
             volume_surge = (
-                df["volume"].iloc[-1] > df["volume"].rolling(20).mean().iloc[-1] * 1.5
+                safe_get_latest(df, "volume", 0)
+                > safe_rolling_operation(df, "volume", 20, "mean", 0) * 1.5
             )
 
             if volume_surge:
@@ -623,6 +625,7 @@ if __name__ == "__main__":
     from src.data.loader import load_data
     from src.ml.features.technical import add_ml_features
     from src.ml.signals.generator import MLSignalGenerator
+    from utils.dataframe_utils import safe_get_latest
 
     print("\n" + "=" * 70)
     print("🧪 TESTING IMPROVED EXIT STRATEGY")

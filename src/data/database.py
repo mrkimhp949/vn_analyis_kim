@@ -49,9 +49,9 @@ class TradingDB:
             else:
                 cursor.execute(query)
             conn.commit()
-        except Exception:
+        except Exception as e:
             conn.rollback()
-            raise e  # noqa: F821
+            raise
         finally:
             cursor.close()
 

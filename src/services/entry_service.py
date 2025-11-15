@@ -16,6 +16,7 @@ from src.portfolio.lock import get_portfolio_lock
 from src.strategies.position_sizing import EnhancedPositionSizer
 
 from src.utils.validation import DataValidator
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 logger = logging.getLogger(__name__)
 

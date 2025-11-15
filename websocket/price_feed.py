@@ -251,14 +251,23 @@ class PriceFeedClient:
 
     def start(self):
         """Start the WebSocket client in a background thread"""
+        if hasattr(self, "_thread") and self._thread and self._thread.is_alive():
+            logger.warning("WebSocket client already running")
+            return
 
         def run_async_loop():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self.run())
+            try:
+                loop.run_until_complete(self.run())
+            except Exception as e:
+                logger.error(f"Error in WebSocket loop: {e}")
+            finally:
+                loop.close()
 
-        thread = threading.Thread(target=run_async_loop, daemon=True)
-        thread.start()
+        self._thread = threading.Thread(target=run_async_loop)
+        self._thread.daemon = False  # Allow proper shutdown
+        self._thread.start()
         logger.info("WebSocket client started in background")
 
     async def stop(self):
@@ -271,6 +280,16 @@ class PriceFeedClient:
 
         self.connected = False
         logger.info("WebSocket client stopped")
+
+    def stop_sync(self):
+        """Synchronous stop method for proper shutdown"""
+        self.running = False
+        if hasattr(self, "_thread") and self._thread and self._thread.is_alive():
+            logger.info("Waiting for WebSocket thread to finish...")
+            self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                logger.warning("WebSocket thread did not stop gracefully")
+        logger.info("WebSocket client stopped synchronously")
 
     def get_price(self, symbol: str) -> Optional[PriceUpdate]:
         """Get latest price for a symbol"""

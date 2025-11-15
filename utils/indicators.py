@@ -36,9 +36,15 @@ class IndicatorUtils:
             price = df["close"].iloc[-1]
             return float(price * default_pct)
 
-        except Exception:
-            logger.warning("Error getting ATR")
-            return float(df["close"].iloc[-1] * default_pct)
+        except Exception as e:
+            logger.warning(f"Error getting ATR: {e}")
+            try:
+                if len(df) > 0 and "close" in df.columns:
+                    return float(df["close"].iloc[-1] * default_pct)
+                else:
+                    return float(100_000 * default_pct)  # Safe fallback
+            except Exception:
+                return float(100_000 * default_pct)  # Ultimate fallback
 
     @staticmethod
     def get_rsi(df: pd.DataFrame, default: float = 50.0) -> float:

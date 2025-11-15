@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from src.data.loader import load_data
 from src.config.trading_config import get_config
+from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 config = get_config()
 logger = logging.getLogger(__name__)
@@ -143,7 +144,7 @@ class MarketRegimeAnalyzer:
         if len(df) < 6:
             return 0.0
 
-        current_close = df["close"].iloc[-1]
+        current_close = safe_get_latest(df, "close", 0)
         week_ago_close = df["close"].iloc[-6]
 
         change = (current_close / week_ago_close - 1) * 100
@@ -159,7 +160,7 @@ class MarketRegimeAnalyzer:
         """
         sma20 = df["close"].rolling(20).mean()
         sma50 = df["close"].rolling(50).mean()
-        current_close = df["close"].iloc[-1]
+        current_close = safe_get_latest(df, "close", 0)
 
         sma20_val = sma20.iloc[-1]
         sma50_val = sma50.iloc[-1]
@@ -199,8 +200,8 @@ class MarketRegimeAnalyzer:
             atr = true_range.rolling(14).mean()
             df["atr"] = atr
 
-        current_atr = df["atr"].iloc[-1]
-        current_price = df["close"].iloc[-1]
+        current_atr = safe_get_latest(df, "atr", 0)
+        current_price = safe_get_latest(df, "close", 0)
 
         volatility = current_atr / current_price
         return volatility

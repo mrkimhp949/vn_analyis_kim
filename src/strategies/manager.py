@@ -14,6 +14,11 @@ from src.strategies.position_sizing import EnhancedPositionSizer
 from src.config.trading_config import get_config
 
 
+# Risk calculation constants
+RISK_MULTIPLIER = 0.02  # 2% risk multiplier
+RISK_DIVISOR = 0.15  # 15% risk divisor
+
+
 class StrategyManager:
     """
     Lớp chịu trách nhiệm khởi tạo và điều chỉnh các chiến lược
@@ -50,8 +55,8 @@ class StrategyManager:
             self.position_sizer = EnhancedPositionSizer(
                 total_capital=100_000_000,
                 max_risk_per_trade=self.trading_config.trading.max_position_size
-                * 0.02
-                / 0.15,
+                * RISK_MULTIPLIER
+                / RISK_DIVISOR,
                 max_position_size=self.trading_config.trading.max_position_size,
                 min_position_size=self.trading_config.trading.min_position_size,
                 max_total_exposure=0.60,

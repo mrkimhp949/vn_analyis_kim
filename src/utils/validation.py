@@ -57,8 +57,13 @@ class DataValidator:
             )
 
         # Check 4: NaN in latest row
-        latest = df.iloc[-1]
-        nan_cols = [col for col in check_columns if pd.isna(latest[col])]
+        from utils.dataframe_utils import safe_get_latest
+
+        nan_cols = []
+        for col in check_columns:
+            value = safe_get_latest(df, col)
+            if pd.isna(value):
+                nan_cols.append(col)
         if nan_cols:
             raise DataQualityError(
                 f"NaN values in latest row: {nan_cols}",
@@ -73,36 +78,43 @@ class DataValidator:
     @staticmethod
     def _validate_values(df: pd.DataFrame, columns: List[str]) -> None:
         """Validate value ranges"""
-        latest = df.iloc[-1]
+        from utils.dataframe_utils import safe_get_latest
 
         # Price columns must be positive
         price_cols = ["open", "high", "low", "close"]
         for col in price_cols:
-            if col in columns and latest[col] <= 0:
-                raise DataQualityError(
-                    f"Invalid {col}: {latest[col]} <= 0", context={col: latest[col]}
-                )
+            if col in columns:
+                value = safe_get_latest(df, col, 0)
+                if value <= 0:
+                    raise DataQualityError(
+                        f"Invalid {col}: {value} <= 0", context={col: value}
+                    )
 
         # Volume must be positive
-        if "volume" in columns and latest["volume"] <= 0:
-            raise DataQualityError(
-                f"Invalid volume: {latest['volume']} <= 0",
-                context={"volume": latest["volume"]},
-            )
+        if "volume" in columns:
+            volume = safe_get_latest(df, "volume", 0)
+            if volume <= 0:
+                raise DataQualityError(
+                    f"Invalid volume: {volume} <= 0",
+                    context={"volume": volume},
+                )
 
         # High >= Low
         if "high" in columns and "low" in columns:
-            if latest["high"] < latest["low"]:
+            high = safe_get_latest(df, "high", 0)
+            low = safe_get_latest(df, "low", 0)
+            if high < low:
                 raise DataQualityError(
-                    f"High {latest['high']} < Low {latest['low']}",
-                    context={"high": latest["high"], "low": latest["low"]},
+                    f"High {high} < Low {low}",
+                    context={"high": high, "low": low},
                 )
 
         # RSI range
-        if "rsi" in df.columns and pd.notna(latest.get("rsi")):
-            rsi = latest["rsi"]
-            if not (0 <= rsi <= 100):
-                logger.warning(f"RSI out of range: {rsi}")
+        if "rsi" in df.columns:
+            rsi = safe_get_latest(df, "rsi")
+            if rsi is not None and pd.notna(rsi):
+                if not (0 <= rsi <= 100):
+                    logger.warning(f"RSI out of range: {rsi}")
 
     @staticmethod
     def validate_price(price: float, name: str = "price") -> float:

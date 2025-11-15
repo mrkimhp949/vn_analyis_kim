@@ -193,11 +193,12 @@ class PaperTradingAccount:
         if price is None:
             try:
                 from src.data.loader import load_data
+                from utils.dataframe_utils import safe_get_latest
 
                 df = load_data(symbol, lookback=5, use_cache=True)
                 if df.empty:
                     return False, f"Không thể lấy giá {symbol}", None
-                price = df["close"].iloc[-1]
+                price = safe_get_latest(df, "close", 0)
             except Exception:
                 return False, f"Lỗi lấy giá {symbol}", None
 

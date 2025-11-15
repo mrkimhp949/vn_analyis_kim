@@ -175,12 +175,17 @@ class EnhancedRiskManager(RiskManager):
         # Tạm thời giả lập:
         try:
             from src.data.loader import load_data
+            from utils.dataframe_utils import safe_get_latest
 
             vnindex_data = load_data("VNINDEX", lookback=50)
             if len(vnindex_data) > 20:
-                market_trend = (
-                    vnindex_data["close"].iloc[-1] / vnindex_data["close"].iloc[-20] - 1
+                current_close = safe_get_latest(vnindex_data, "close", 0)
+                past_close = (
+                    vnindex_data["close"].iloc[-20]
+                    if len(vnindex_data) > 20
+                    else current_close
                 )
+                market_trend = (current_close / past_close - 1) if past_close > 0 else 0
 
                 if market_trend > 0.02:
                     return 1.1  # Bull market -> tăng nhẹ

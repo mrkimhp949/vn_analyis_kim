@@ -239,7 +239,7 @@ class EnhancedMLSignalGenerator:
             if df.empty or len(df) < 20:
                 return self._default_signal()
 
-            latest = df.iloc[-1]
+            # Use safe access instead of df.iloc[-1]
 
             # Simple technical signals
             signal = "HOLD"
@@ -323,6 +323,7 @@ class EnhancedMLSignalGenerator:
 
 if __name__ == "__main__":
     from src.data.loader import load_data
+    from utils.dataframe_utils import safe_get_latest
 
     print("\n" + "=" * 70)
     print("🧪 TESTING ENHANCED ML SIGNAL GENERATOR")

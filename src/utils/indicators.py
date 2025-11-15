@@ -28,29 +28,42 @@ class IndicatorUtils:
         """
         try:
             if "atr" in df.columns and not df["atr"].isnull().all():
-                atr = df["atr"].iloc[-1]
+                from utils.dataframe_utils import safe_get_latest
+
+                atr = safe_get_latest(df, "atr", 0)
                 if pd.notna(atr) and atr > 0:
                     return float(atr)
 
             # Fallback: calculate from price
-            price = df["close"].iloc[-1]
+            from utils.dataframe_utils import safe_get_latest
+
+            price = safe_get_latest(df, "close", 100000)
             return float(price * default_pct)
 
-        except Exception:
-            logger.warning("Error getting ATR")
-            return float(df["close"].iloc[-1] * default_pct)
+        except Exception as e:
+            logger.warning(f"Error getting ATR: {e}")
+            try:
+                if len(df) > 0 and "close" in df.columns:
+                    price = safe_get_latest(df, "close", 100000)
+                    return float(price * default_pct)
+                else:
+                    return float(100_000 * default_pct)  # Safe fallback
+            except Exception:
+                return float(100_000 * default_pct)  # Ultimate fallback
 
     @staticmethod
     def get_rsi(df: pd.DataFrame, default: float = 50.0) -> float:
         """Get RSI with fallback"""
         try:
             if "rsi" in df.columns and not df["rsi"].isnull().all():
-                rsi = df["rsi"].iloc[-1]
+                from utils.dataframe_utils import safe_get_latest
+
+                rsi = safe_get_latest(df, "rsi", 50)
                 if pd.notna(rsi) and 0 <= rsi <= 100:
                     return float(rsi)
             return default
-        except Exception:
-            logger.warning("Error getting RSI")
+        except Exception as e:
+            logger.warning(f"Error getting RSI: {e}")
             return default
 
     @staticmethod
@@ -67,8 +80,10 @@ class IndicatorUtils:
             if len(df) < lookback:
                 return None, None
 
-            support = df["low"].rolling(lookback).min().iloc[-1]
-            resistance = df["high"].rolling(lookback).max().iloc[-1]
+            from utils.dataframe_utils import safe_rolling_operation
+
+            support = safe_rolling_operation(df, "low", lookback, "min")
+            resistance = safe_rolling_operation(df, "high", lookback, "max")
 
             # Validate
             if pd.notna(support) and support > 0:
@@ -83,8 +98,8 @@ class IndicatorUtils:
 
             return support, resistance
 
-        except Exception:
-            logger.warning("Error calculating S/R")
+        except Exception as e:
+            logger.warning(f"Error calculating S/R: {e}")
             return None, None
 
 
