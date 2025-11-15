@@ -85,7 +85,7 @@ class TestAPIValidationCodeExists:
             api_code = f.read()
 
         # Pattern: try-except ValueError -> return error
-        assert "except ValueError:" in api_code
+        assert "except ValueError" in api_code
         assert 'return {"status": "error"' in api_code
 
 
