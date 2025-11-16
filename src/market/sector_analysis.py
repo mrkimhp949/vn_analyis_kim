@@ -16,9 +16,7 @@ class EnhancedSectorAnalyzer:
     """
 
     def __init__(self, min_volume=1_000_000, min_price=10_000):
-        logger.warning(
-            "EnhancedSectorAnalyzer is deprecated - no longer using sector analysis"
-        )
+        logger.warning("EnhancedSectorAnalyzer is deprecated - no longer using sector analysis")
         self.min_volume = min_volume
         self.min_price = min_price
 

@@ -82,9 +82,7 @@ class TestFeatureSelection:
         from ml_pipeline.feature_selection import select_features_with_shap
 
         np.random.seed(42)
-        df = pd.DataFrame(
-            {"feat1": np.random.randn(100), "target": np.random.randint(0, 2, 100)}
-        )
+        df = pd.DataFrame({"feat1": np.random.randn(100), "target": np.random.randint(0, 2, 100)})
         # Create highly correlated feature
         df["feat2"] = df["feat1"] * 0.99 + np.random.randn(100) * 0.01
         df["feat3"] = np.random.randn(100)

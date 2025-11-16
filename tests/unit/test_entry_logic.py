@@ -8,7 +8,6 @@ from src.strategies.entry_logic import ImprovedEntryLogic, SignalStrength
 
 
 class TestImprovedEntryLogic:
-
     @pytest.fixture
     def entry_logic(self):
         return ImprovedEntryLogic(
@@ -100,9 +99,7 @@ class TestImprovedEntryLogic:
         assert strength in [SignalStrength.VERY_STRONG, SignalStrength.STRONG]
 
         # Low confidence, low R:R, warnings
-        strength = entry_logic._calculate_signal_strength(
-            60, 2.0, ["warning1", "warning2"]
-        )
+        strength = entry_logic._calculate_signal_strength(60, 2.0, ["warning1", "warning2"])
         assert strength in [SignalStrength.WEAK, SignalStrength.MODERATE]
 
     def test_calculate_position_multiplier(self, entry_logic):

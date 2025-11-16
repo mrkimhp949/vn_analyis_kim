@@ -182,10 +182,7 @@ def _download_from_tcbs(
             response = requests.get(url, params=params, timeout=10)
 
             if response.status_code != 200:
-                if (
-                    response.status_code in [429, 500, 502, 503, 504]
-                    and attempt < max_retries - 1
-                ):
+                if response.status_code in [429, 500, 502, 503, 504] and attempt < max_retries - 1:
                     logger.warning(
                         f"⚠️ TCBS API error {response.status_code} for {symbol}, retrying in {retry_delays[attempt]}s..."
                     )
@@ -203,9 +200,7 @@ def _download_from_tcbs(
                     "TCBS API returned invalid format",
                     context={
                         "symbol": symbol,
-                        "response_keys": (
-                            list(data.keys()) if isinstance(data, dict) else None
-                        ),
+                        "response_keys": (list(data.keys()) if isinstance(data, dict) else None),
                     },
                 )
 
@@ -265,9 +260,7 @@ if __name__ == "__main__":
             )
             if not df.empty:
                 print(f"✅ {symbol}: {len(df)} rows")
-                print(
-                    f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}"
-                )
+                print(f"   Date range: {df['time'].min().date()} to {df['time'].max().date()}")
                 print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
             else:
                 print(f"⚠️ {symbol}: No data returned.")

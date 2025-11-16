@@ -71,9 +71,7 @@ class EnhancedMLSignalGenerator:
             feature_cols = get_feature_columns()
 
             # Check if all features exist
-            missing_features = [
-                col for col in feature_cols if col not in df_enhanced.columns
-            ]
+            missing_features = [col for col in feature_cols if col not in df_enhanced.columns]
             if missing_features:
                 logger.warning(f"Missing features: {missing_features}")
                 return self._fallback_technical_analysis(df_enhanced)
@@ -101,9 +99,7 @@ class EnhancedMLSignalGenerator:
             tech_score = self._calculate_technical_score(latest)
 
             # Ensemble Decision
-            signal, confidence, reason = self._make_decision(
-                ml_score, tech_score, latest
-            )
+            signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
 
             # Build result
             result = {
@@ -115,9 +111,7 @@ class EnhancedMLSignalGenerator:
                 "reason": reason,
                 "price": float(latest["close"]),
                 "rsi": float(latest.get("rsi", 50)),
-                "ema_trend": (
-                    "UP" if latest.get("ema20", 0) > latest.get("ema50", 0) else "DOWN"
-                ),
+                "ema_trend": ("UP" if latest.get("ema20", 0) > latest.get("ema50", 0) else "DOWN"),
             }
 
             # Add explanation if requested
@@ -168,9 +162,7 @@ class EnhancedMLSignalGenerator:
 
         return score
 
-    def _make_decision(
-        self, ml_score: float, tech_score: Dict, latest: pd.Series
-    ) -> tuple:
+    def _make_decision(self, ml_score: float, tech_score: Dict, latest: pd.Series) -> tuple:
         """
         Decision engine: Kết hợp ML + Technical
 

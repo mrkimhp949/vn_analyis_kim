@@ -118,15 +118,9 @@ class PerformanceMonitor:
         win_rate = (len(winning_trades) / total_trades) * 100 if total_trades > 0 else 0
 
         avg_profit = (
-            sum(t.pnl for t in winning_trades) / len(winning_trades)
-            if winning_trades
-            else 0
+            sum(t.pnl for t in winning_trades) / len(winning_trades) if winning_trades else 0
         )
-        avg_loss = (
-            sum(t.pnl for t in losing_trades) / len(losing_trades)
-            if losing_trades
-            else 0
-        )
+        avg_loss = sum(t.pnl for t in losing_trades) / len(losing_trades) if losing_trades else 0
 
         total_pnl = sum(t.pnl for t in self.trades)
 
@@ -165,9 +159,7 @@ class PerformanceMonitor:
             "sharpe_ratio": sharpe_ratio,
             "max_drawdown": max_drawdown,
             "avg_hold_days": (
-                sum(t.hold_days for t in self.trades) / total_trades
-                if total_trades > 0
-                else 0
+                sum(t.hold_days for t in self.trades) / total_trades if total_trades > 0 else 0
             ),
         }
 

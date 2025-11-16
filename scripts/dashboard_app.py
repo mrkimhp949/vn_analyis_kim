@@ -160,9 +160,7 @@ if page == "Overview":
         )
 
         if signals:
-            df_signals = pd.DataFrame(
-                signals, columns=["Symbol", "Signal", "Confidence", "Date"]
-            )
+            df_signals = pd.DataFrame(signals, columns=["Symbol", "Signal", "Confidence", "Date"])
             st.dataframe(df_signals, use_container_width=True)
         else:
             st.info("No recent signals")
@@ -305,9 +303,7 @@ elif page == "Signals":
         col1, col2 = st.columns(2)
 
         with col1:
-            fig = px.histogram(
-                df_signals, x="Signal", title="Signal Distribution", color="Signal"
-            )
+            fig = px.histogram(df_signals, x="Signal", title="Signal Distribution", color="Signal")
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
@@ -351,18 +347,12 @@ elif page == "Performance":
         import json
 
         total_trades = len(trades)
-        winning_trades = sum(
-            1 for t in trades if json.loads(t[6] or "{}").get("pnl", 0) > 0
-        )
+        winning_trades = sum(1 for t in trades if json.loads(t[6] or "{}").get("pnl", 0) > 0)
         win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
 
         profits = [json.loads(t[6] or "{}").get("pnl", 0) for t in trades]
-        avg_profit = sum(p for p in profits if p > 0) / max(
-            1, sum(1 for p in profits if p > 0)
-        )
-        avg_loss = sum(p for p in profits if p < 0) / max(
-            1, sum(1 for p in profits if p < 0)
-        )
+        avg_profit = sum(p for p in profits if p > 0) / max(1, sum(1 for p in profits if p > 0))
+        avg_loss = sum(p for p in profits if p < 0) / max(1, sum(1 for p in profits if p < 0))
 
         # Metrics
         col1, col2, col3, col4 = st.columns(4)

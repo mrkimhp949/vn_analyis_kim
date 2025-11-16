@@ -70,9 +70,7 @@ class RiskManagementService:
         )
 
         if tripped:
-            logger.critical(
-                f"🚨 Circuit breaker tripped: {self.circuit_breaker.tripped_reason}"
-            )
+            logger.critical(f"🚨 Circuit breaker tripped: {self.circuit_breaker.tripped_reason}")
 
         return tripped
 

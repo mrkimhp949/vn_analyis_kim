@@ -59,18 +59,12 @@ class VolatilityForecaster:
         # ATR-based features
         if "atr" in df.columns:
             features_df["atr_pct"] = df["atr"] / (df["close"] + 1e-6)
-            features_df["atr_ma_ratio"] = df["atr"] / (
-                df["atr"].rolling(20).mean() + 1e-6
-            )
+            features_df["atr_ma_ratio"] = df["atr"] / (df["atr"].rolling(20).mean() + 1e-6)
 
         # Volume features
         if "volume" in df.columns:
-            features_df["volume_ratio"] = df["volume"] / (
-                df["volume"].rolling(20).mean() + 1e-6
-            )
-            features_df["volume_volatility"] = (
-                df["volume"].pct_change().rolling(10).std()
-            )
+            features_df["volume_ratio"] = df["volume"] / (df["volume"].rolling(20).mean() + 1e-6)
+            features_df["volume_volatility"] = df["volume"].pct_change().rolling(10).std()
 
         # Price range features
         if all(col in df.columns for col in ["high", "low", "close"]):
@@ -140,9 +134,7 @@ class VolatilityForecaster:
             return {"error": "Insufficient features"}
 
         # Prepare data
-        valid_idx = ~(
-            features_df[available_features].isna().any(axis=1) | target.isna()
-        )
+        valid_idx = ~(features_df[available_features].isna().any(axis=1) | target.isna())
         X = features_df.loc[valid_idx, available_features].values
         y = target.loc[valid_idx].values
 
@@ -269,12 +261,8 @@ class VolatilityForecaster:
     def save(self):
         """Save model and scaler"""
         if self.model is not None:
-            joblib.dump(
-                self.model, os.path.join(self.models_dir, "volatility_model.pkl")
-            )
-            joblib.dump(
-                self.scaler, os.path.join(self.models_dir, "volatility_scaler.pkl")
-            )
+            joblib.dump(self.model, os.path.join(self.models_dir, "volatility_model.pkl"))
+            joblib.dump(self.scaler, os.path.join(self.models_dir, "volatility_scaler.pkl"))
             logger.info("Volatility model saved")
 
     def load(self) -> bool:

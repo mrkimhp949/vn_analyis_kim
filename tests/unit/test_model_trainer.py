@@ -98,9 +98,7 @@ class TestEnsembleTrainer:
             splits = trainer._split(sample_data)
 
             assert len(splits) == 2
-            assert all(
-                len(split) == 4 for split in splits
-            )  # X_train, X_test, y_train, y_test
+            assert all(len(split) == 4 for split in splits)  # X_train, X_test, y_train, y_test
 
     def test_prepare_lstm_data_sufficient_data(self, trainer):
         """Test _prepare_lstm_data with sufficient data"""
@@ -219,9 +217,7 @@ class TestEnsembleTrainer:
 
     def test_train_missing_target(self, trainer, config):
         """Test training with missing target column"""
-        df = pd.DataFrame(
-            {"feature1": [1, 2, 3], "feature2": [4, 5, 6], "feature3": [7, 8, 9]}
-        )
+        df = pd.DataFrame({"feature1": [1, 2, 3], "feature2": [4, 5, 6], "feature3": [7, 8, 9]})
 
         with pytest.raises(ValueError, match="Target column 'target' is missing"):
             trainer.train(df)
@@ -328,17 +324,15 @@ class TestEnsembleTrainer:
 
     def test_train_logs_info_messages(self, trainer, sample_data, caplog):
         """Test that training logs appropriate info messages"""
-        with patch("ml_pipeline.model_trainer.TimeSeriesSplit") as mock_tscv, patch(
-            "ml_pipeline.model_trainer.RandomForestClassifier"
-        ), patch("ml_pipeline.model_trainer.GradientBoostingClassifier"), patch(
-            "ml_pipeline.model_trainer.StandardScaler"
+        with (
+            patch("ml_pipeline.model_trainer.TimeSeriesSplit") as mock_tscv,
+            patch("ml_pipeline.model_trainer.RandomForestClassifier"),
+            patch("ml_pipeline.model_trainer.GradientBoostingClassifier"),
+            patch("ml_pipeline.model_trainer.StandardScaler"),
         ):
-
             # Mock minimal setup
             mock_split_instance = Mock()
-            mock_split_instance.split.return_value = [
-                (np.array([0, 1, 2]), np.array([3, 4]))
-            ]
+            mock_split_instance.split.return_value = [(np.array([0, 1, 2]), np.array([3, 4]))]
             mock_tscv.return_value = mock_split_instance
 
             with caplog.at_level("INFO"):
@@ -348,9 +342,7 @@ class TestEnsembleTrainer:
                     pass  # We're just testing logging, not full execution
 
             # Check that info messages were logged
-            assert any(
-                "Training ensemble" in record.message for record in caplog.records
-            )
+            assert any("Training ensemble" in record.message for record in caplog.records)
 
 
 if __name__ == "__main__":

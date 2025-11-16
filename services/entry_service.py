@@ -61,9 +61,7 @@ class EntrySignalService:
 
         # Scan in parallel
         tasks = [
-            self._scan_single_ticker(
-                symbol, existing_symbols, market_regime, vnindex_df
-            )
+            self._scan_single_ticker(symbol, existing_symbols, market_regime, vnindex_df)
             for symbol in tickers
         ]
 
@@ -78,9 +76,7 @@ class EntrySignalService:
             if result and result.get("signal"):
                 signals.append(result)
 
-        logger.info(
-            f"📊 Found {len(signals)} entry signals from {len(tickers)} tickers"
-        )
+        logger.info(f"📊 Found {len(signals)} entry signals from {len(tickers)} tickers")
 
         return signals
 
@@ -149,9 +145,7 @@ class EntrySignalService:
             logger.error(f"[{symbol}] Error scanning", exc_info=True)
             return None
 
-    def filter_and_rank_signals(
-        self, signals: List[Dict], max_signals: int = 5
-    ) -> List[Dict]:
+    def filter_and_rank_signals(self, signals: List[Dict], max_signals: int = 5) -> List[Dict]:
         """
         Filter and rank signals by quality
 

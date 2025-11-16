@@ -120,8 +120,7 @@ class EnhancedMLPredictor:
         # Validate features
         if X_train.shape[1] != self.expected_features:
             raise ValueError(
-                f"Feature mismatch: got {X_train.shape[1]}, "
-                f"expected {self.expected_features}"
+                f"Feature mismatch: got {X_train.shape[1]}, " f"expected {self.expected_features}"
             )
 
         # Scale features
@@ -132,19 +131,13 @@ class EnhancedMLPredictor:
             X_val_scaled = None
 
         # Train individual models
-        self.train_random_forest(
-            X_train_scaled, y_train, X_val_scaled, y_val, tune_hyperparameters
-        )
+        self.train_random_forest(X_train_scaled, y_train, X_val_scaled, y_val, tune_hyperparameters)
 
         if XGBOOST_AVAILABLE:
-            self.train_xgboost(
-                X_train_scaled, y_train, X_val_scaled, y_val, tune_hyperparameters
-            )
+            self.train_xgboost(X_train_scaled, y_train, X_val_scaled, y_val, tune_hyperparameters)
 
         if LIGHTGBM_AVAILABLE:
-            self.train_lightgbm(
-                X_train_scaled, y_train, X_val_scaled, y_val, tune_hyperparameters
-            )
+            self.train_lightgbm(X_train_scaled, y_train, X_val_scaled, y_val, tune_hyperparameters)
 
         # Create ensemble
         self.create_ensemble()
@@ -177,14 +170,10 @@ class EnhancedMLPredictor:
                 "min_samples_lea": [2, 5, 10],
             }
 
-            rf = RandomForestClassifier(
-                class_weight="balanced", random_state=42, n_jobs=-1
-            )
+            rf = RandomForestClassifier(class_weight="balanced", random_state=42, n_jobs=-1)
 
             tscv = TimeSeriesSplit(n_splits=3)
-            grid_search = GridSearchCV(
-                rf, param_grid, cv=tscv, scoring="f1", n_jobs=-1, verbose=1
-            )
+            grid_search = GridSearchCV(rf, param_grid, cv=tscv, scoring="f1", n_jobs=-1, verbose=1)
             grid_search.fit(X_train, y_train)
 
             self.rf_model = grid_search.best_estimator_
@@ -389,8 +378,7 @@ class EnhancedMLPredictor:
         # Validate features
         if X.shape[1] != self.expected_features:
             raise ValueError(
-                f"Feature mismatch: got {X.shape[1]}, "
-                f"expected {self.expected_features}"
+                f"Feature mismatch: got {X.shape[1]}, " f"expected {self.expected_features}"
             )
 
         # Scale
@@ -463,9 +451,7 @@ class EnhancedMLPredictor:
             self.feature_importance["average"] = avg_importance
 
             # Sort by importance
-            sorted_features = sorted(
-                avg_importance.items(), key=lambda x: x[1], reverse=True
-            )
+            sorted_features = sorted(avg_importance.items(), key=lambda x: x[1], reverse=True)
 
             logger.info("   Top 10 features:")
             for feature, importance in sorted_features[:10]:
@@ -535,9 +521,7 @@ class EnhancedMLPredictor:
     # EVALUATION
     # ========================================================================
 
-    def _evaluate_model(
-        self, model, X_val: np.ndarray, y_val: np.ndarray, model_name: str
-    ):
+    def _evaluate_model(self, model, X_val: np.ndarray, y_val: np.ndarray, model_name: str):
         """Evaluate model performance"""
         y_pred = model.predict(X_val)
         y_pred_proba = model.predict_proba(X_val)[:, 1]
@@ -569,25 +553,17 @@ class EnhancedMLPredictor:
 
         try:
             # Save scaler
-            joblib.dump(
-                self.scaler, os.path.join(self.models_dir, "scaler_enhanced.pkl")
-            )
+            joblib.dump(self.scaler, os.path.join(self.models_dir, "scaler_enhanced.pkl"))
 
             # Save individual models
             if self.rf_model is not None:
-                joblib.dump(
-                    self.rf_model, os.path.join(self.models_dir, "rf_enhanced.pkl")
-                )
+                joblib.dump(self.rf_model, os.path.join(self.models_dir, "rf_enhanced.pkl"))
 
             if self.xgb_model is not None:
-                joblib.dump(
-                    self.xgb_model, os.path.join(self.models_dir, "xgb_enhanced.pkl")
-                )
+                joblib.dump(self.xgb_model, os.path.join(self.models_dir, "xgb_enhanced.pkl"))
 
             if self.lgb_model is not None:
-                joblib.dump(
-                    self.lgb_model, os.path.join(self.models_dir, "lgb_enhanced.pkl")
-                )
+                joblib.dump(self.lgb_model, os.path.join(self.models_dir, "lgb_enhanced.pkl"))
 
             # Save feature importance
             if self.feature_importance:
@@ -610,9 +586,7 @@ class EnhancedMLPredictor:
 
             import json
 
-            with open(
-                os.path.join(self.models_dir, "model_info_enhanced.json"), "w"
-            ) as f:
+            with open(os.path.join(self.models_dir, "model_info_enhanced.json"), "w") as f:
                 json.dump(metadata, f, indent=2)
 
             logger.info("✅ Models saved successfully!")
@@ -687,9 +661,7 @@ if __name__ == "__main__":
 
     # Train
     predictor = EnhancedMLPredictor()
-    predictor.train_all_models(
-        X_train, y_train, X_val, y_val, tune_hyperparameters=False
-    )
+    predictor.train_all_models(X_train, y_train, X_val, y_val, tune_hyperparameters=False)
 
     # Predict
     predictions = predictor.predict(X_val)
@@ -698,9 +670,7 @@ if __name__ == "__main__":
     # Feature importance
     if predictor.feature_importance:
         print("\n📊 Top 5 features:")
-        for feature, importance in list(
-            predictor.feature_importance["average"].items()
-        )[:5]:
+        for feature, importance in list(predictor.feature_importance["average"].items())[:5]:
             print(f"   {feature}: {importance:.4f}")
 
     print("\n✅ Testing complete!")

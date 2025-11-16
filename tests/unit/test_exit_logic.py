@@ -9,7 +9,6 @@ from src.strategies.exit_logic import ExitReason, ImprovedExitStrategy
 
 
 class TestImprovedExitStrategy:
-
     @pytest.fixture
     def exit_strategy(self):
         return ImprovedExitStrategy(

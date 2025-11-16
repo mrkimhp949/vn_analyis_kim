@@ -175,9 +175,7 @@ class TradeRepository:
             logger.error(f"Error getting trades for {symbol}")
             return []
 
-    def get_by_date_range(
-        self, start_date: datetime, end_date: datetime
-    ) -> List[Trade]:
+    def get_by_date_range(self, start_date: datetime, end_date: datetime) -> List[Trade]:
         """
         Get trades within date range
 

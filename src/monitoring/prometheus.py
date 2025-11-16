@@ -50,9 +50,7 @@ ml_prediction_time = Histogram("ml_prediction_seconds", "ML prediction latency")
 ml_model_accuracy = Gauge("ml_model_accuracy", "ML model accuracy", ["model"])
 
 # API
-api_requests = Counter(
-    "api_requests_total", "Total API requests", ["endpoint", "status"]
-)
+api_requests = Counter("api_requests_total", "Total API requests", ["endpoint", "status"])
 api_latency = Histogram("api_latency_seconds", "API request latency", ["endpoint"])
 
 # Database
@@ -73,9 +71,7 @@ errors_total = Counter("errors_total", "Total errors", ["component", "error_type
 max_drawdown = Gauge("risk_max_drawdown", "Maximum drawdown percentage")
 sharpe_ratio = Gauge("risk_sharpe_ratio", "Sharpe ratio")
 sortino_ratio = Gauge("risk_sortino_ratio", "Sortino ratio")
-sector_exposure = Gauge(
-    "risk_sector_exposure", "Sector exposure percentage", ["sector"]
-)
+sector_exposure = Gauge("risk_sector_exposure", "Sector exposure percentage", ["sector"])
 correlation_risk = Gauge("risk_correlation", "Portfolio correlation risk")
 
 # ============================================================================
@@ -83,9 +79,7 @@ correlation_risk = Gauge("risk_correlation", "Portfolio correlation risk")
 # ============================================================================
 
 system_info = Info("trading_bot", "Trading bot information")
-system_info.info(
-    {"version": "1.0.0", "python_version": "3.11", "environment": "production"}
-)
+system_info.info({"version": "1.0.0", "python_version": "3.11", "environment": "production"})
 
 # ============================================================================
 # HELPER FUNCTIONS

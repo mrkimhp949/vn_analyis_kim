@@ -48,8 +48,7 @@ class PortfolioLock:
 
             # Check 3: Max exposure
             current_exposure = sum(
-                pos.get("shares", 0) * pos.get("avg_price", 0)
-                for pos in current_positions.values()
+                pos.get("shares", 0) * pos.get("avg_price", 0) for pos in current_positions.values()
             )
             pending_exposure = sum(self._pending_positions.values())
             total_exposure = current_exposure + pending_exposure + position_value
@@ -83,6 +82,17 @@ class PortfolioLock:
         """Check if symbol has a pending position"""
         with self._lock:
             return symbol in self._pending_positions
+
+    def add_pending(self, symbol: str, position_value: float = 0.0):
+        """
+        Add symbol to pending positions (thread-safe)
+
+        Args:
+            symbol: Stock symbol
+            position_value: Position value (optional, for exposure tracking)
+        """
+        with self._lock:
+            self._pending_positions[symbol] = position_value
 
     def get_pending_exposure(self) -> float:
         """Lấy tổng exposure đang pending"""

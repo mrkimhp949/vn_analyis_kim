@@ -59,15 +59,11 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
 
     if not api_key:
         logger.warning("❌ Missing API key in request")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Missing API key"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing API key")
 
     if api_key not in VALID_API_KEYS:
         logger.warning(f"❌ Invalid API key: {api_key[:10]}...")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
 
     return api_key
 
@@ -90,9 +86,7 @@ async def verify_ip_whitelist(request):
 
     if client_ip not in IP_WHITELIST:
         logger.warning(f"❌ Blocked request from IP: {client_ip}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="IP not whitelisted"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="IP not whitelisted")
 
 
 # Rate limit decorators
@@ -117,9 +111,7 @@ def add_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosnif"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains"
-    )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 

@@ -184,16 +184,12 @@ class BacktestVisualizer:
         monthly_returns = []
         for year in equity_df["year"].unique():
             for month in range(1, 13):
-                month_data = equity_df[
-                    (equity_df["year"] == year) & (equity_df["month"] == month)
-                ]
+                month_data = equity_df[(equity_df["year"] == year) & (equity_df["month"] == month)]
                 if len(month_data) > 0:
                     start_val = month_data["equity"].iloc[0]
                     end_val = month_data["equity"].iloc[-1]
                     monthly_return = ((end_val - start_val) / start_val) * 100
-                    monthly_returns.append(
-                        {"year": year, "month": month, "return": monthly_return}
-                    )
+                    monthly_returns.append({"year": year, "month": month, "return": monthly_return})
 
         if not monthly_returns:
             print("Not enough data for monthly returns")
@@ -205,9 +201,7 @@ class BacktestVisualizer:
         # Plot heatmap
         fig, ax = plt.subplots(figsize=(12, 8))
 
-        im = ax.imshow(
-            pivot_table.values, cmap="RdYlGn", aspect="auto", vmin=-10, vmax=10
-        )
+        im = ax.imshow(pivot_table.values, cmap="RdYlGn", aspect="auto", vmin=-10, vmax=10)
 
         # Set ticks
         ax.set_xticks(np.arange(len(pivot_table.columns)))
@@ -262,9 +256,7 @@ class BacktestVisualizer:
         plt.show()
 
     @staticmethod
-    def create_full_report(
-        result: BacktestResult, output_dir: str = "backtest_results"
-    ):
+    def create_full_report(result: BacktestResult, output_dir: str = "backtest_results"):
         """Create complete visualization report"""
         import os
 
@@ -272,13 +264,9 @@ class BacktestVisualizer:
 
         print(f"\n📊 Creating backtest visualization report in {output_dir}/")
 
-        BacktestVisualizer.plot_equity_curve(
-            result, save_path=f"{output_dir}/equity_curve.png"
-        )
+        BacktestVisualizer.plot_equity_curve(result, save_path=f"{output_dir}/equity_curve.png")
 
-        BacktestVisualizer.plot_trade_analysis(
-            result, save_path=f"{output_dir}/trade_analysis.png"
-        )
+        BacktestVisualizer.plot_trade_analysis(result, save_path=f"{output_dir}/trade_analysis.png")
 
         BacktestVisualizer.plot_monthly_returns(
             result, save_path=f"{output_dir}/monthly_returns.png"

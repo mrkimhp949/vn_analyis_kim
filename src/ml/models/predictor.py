@@ -62,9 +62,7 @@ class MLPredictor:
         self.ensure_models_dir()
         try:
             if self.rf_model:
-                joblib.dump(
-                    self.rf_model, os.path.join(self.models_dir, "random_forest.pkl")
-                )
+                joblib.dump(self.rf_model, os.path.join(self.models_dir, "random_forest.pkl"))
             joblib.dump(self.scaler, os.path.join(self.models_dir, "scaler.pkl"))
 
             # Lưu model metadata với feature list
@@ -86,9 +84,7 @@ class MLPredictor:
 
                 json.dump(metadata, f, indent=2)
 
-            logger.info(
-                f"✅ Models saved successfully with {self.expected_features} features"
-            )
+            logger.info(f"✅ Models saved successfully with {self.expected_features} features")
         except Exception:
             logger.error("❌ Lỗi khi lưu models")
 
@@ -141,9 +137,7 @@ class MLPredictor:
             y_pred = self.rf_model.predict(X_test)
 
             _accuracy = accuracy_score(y_test, y_pred)  # noqa: F841
-            _precision = precision_score(
-                y_test, y_pred, average="weighted"
-            )  # noqa: F841
+            _precision = precision_score(y_test, y_pred, average="weighted")  # noqa: F841
             _recall = recall_score(y_test, y_pred, average="weighted")  # noqa: F841
             _f1 = f1_score(y_test, y_pred, average="weighted")  # noqa: F841
 
@@ -154,9 +148,7 @@ class MLPredictor:
 
             logger.info("   - Classification Report:")
             # Dùng print để format đẹp hơn trong log
-            print(
-                classification_report(y_test, y_pred, target_names=["Down/Hold", "Up"])
-            )
+            print(classification_report(y_test, y_pred, target_names=["Down/Hold", "Up"]))
 
         except Exception:
             logger.error("❌ Error during model evaluation")
@@ -241,9 +233,7 @@ class MLPredictor:
                                 logger.warning(
                                     f"⚠️ Model feature mismatch: saved={saved_features}, current={current_features}"
                                 )
-                                logger.warning(
-                                    "🔄 Recreating models with current feature set..."
-                                )
+                                logger.warning("🔄 Recreating models with current feature set...")
                                 self.create_dummy_models()
                                 return True
                         except Exception:
@@ -263,9 +253,7 @@ class MLPredictor:
                 # CRITICAL: No models found
                 logger.critical(
                     "\n" + "=" * 70 + "\n"
-                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
-                    + "=" * 70
-                    + "\n"
+                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
                     f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
                     "\n"
                     "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"

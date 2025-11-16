@@ -9,6 +9,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_db_for_tests(tmp_path_factory):
+    """Ensure tests use an isolated SQLite DB and not the production DB."""
+    base = tmp_path_factory.mktemp("db")
+    db_path = base / "trading_test.db"
+    os.environ["TRADING_DB_PATH"] = str(db_path)
+    yield
+
+
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -87,7 +97,7 @@ def temp_database(tmp_path):
     db_path = tmp_path / "test_trading.db"
 
     # Set environment variable
-    os.environ["DATABASE_PATH"] = str(db_path)
+    os.environ["TRADING_DB_PATH"] = str(db_path)
 
     yield str(db_path)
 

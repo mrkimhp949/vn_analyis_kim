@@ -74,9 +74,7 @@ def main():
         threshold = input("Confidence threshold % (mặc định: 50): ").strip()
         threshold = int(threshold) if threshold else 50
 
-        print(
-            f"\n🚀 Bắt đầu backtest {symbol} | {lookback} ngày | threshold {threshold}%\n"
-        )
+        print(f"\n🚀 Bắt đầu backtest {symbol} | {lookback} ngày | threshold {threshold}%\n")
 
         try:
             result = backtester.run_backtest(
@@ -101,8 +99,7 @@ def main():
 
                 # Giao dịch chi tiết
                 if (
-                    input("\nHiển thị chi tiết giao dịch? (y/n): ").strip().lower()
-                    == "y"
+                    input("\nHiển thị chi tiết giao dịch? (y/n): ").strip().lower() == "y"
                     and len(result["trades"]) > 0
                 ):
                     print("\n📋 CHI TIẾT GIAO DỊCH:")
@@ -128,9 +125,7 @@ def main():
         threshold = input("Confidence threshold % (mặc định: 50): ").strip()
         threshold = int(threshold) if threshold else 50
 
-        print(
-            f"\n🚀 Bắt đầu backtest {len(TICKERS)} cổ phiếu với threshold {threshold}%...\n"
-        )
+        print(f"\n🚀 Bắt đầu backtest {len(TICKERS)} cổ phiếu với threshold {threshold}%...\n")
 
         try:
             # run_multiple_backtest đã được cập nhật để nhận confidence_threshold

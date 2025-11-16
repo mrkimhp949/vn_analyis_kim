@@ -175,9 +175,7 @@ class StopLossCalculator:
             raise ValueError(f"Calculated stop loss <= 0: {stop_loss}")
 
         if stop_loss >= entry_price:
-            raise ValueError(
-                f"Stop loss {stop_loss:.0f} >= entry_price {entry_price:.0f}"
-            )
+            raise ValueError(f"Stop loss {stop_loss:.0f} >= entry_price {entry_price:.0f}")
 
         return float(stop_loss), reason
 

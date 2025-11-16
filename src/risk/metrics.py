@@ -203,9 +203,7 @@ def calculate_sector_exposure(current_holdings: Dict[str, Dict]) -> Dict[str, fl
     total_value = 0.0
 
     for symbol, data in current_holdings.items():
-        value = data.get("current_value") or (
-            data.get("shares", 0) * data.get("current_price", 0)
-        )
+        value = data.get("current_value") or (data.get("shares", 0) * data.get("current_price", 0))
         total_value += value
         sector = SECTOR_MAP.get(symbol.upper(), "UNCLASSIFIED")
         exposure[sector] += value
@@ -255,9 +253,7 @@ def load_returns_dataframe(symbols: List[str], lookback: int = 60) -> pd.DataFra
     return pd.DataFrame(returns_data)
 
 
-def calculate_correlation_matrix(
-    symbols: List[str], lookback: int = 60
-) -> pd.DataFrame:
+def calculate_correlation_matrix(symbols: List[str], lookback: int = 60) -> pd.DataFrame:
     """
     Tính correlation matrix giữa các symbols
 
@@ -313,9 +309,7 @@ def calculate_distance_correlation_matrix(returns_df: pd.DataFrame) -> pd.DataFr
     for i, sym_i in enumerate(symbols):
         for j in range(i + 1, len(symbols)):
             sym_j = symbols[j]
-            dcor = _distance_correlation(
-                returns_df[sym_i].values, returns_df[sym_j].values
-            )
+            dcor = _distance_correlation(returns_df[sym_i].values, returns_df[sym_j].values)
             matrix.loc[sym_i, sym_j] = dcor
             matrix.loc[sym_j, sym_i] = dcor
 
@@ -354,18 +348,13 @@ def check_high_correlation(
 
     # Nếu có current_holdings, chỉ check các cặp trong holdings
     if current_holdings:
-        symbols_to_check = [
-            s for s in current_holdings if s in correlation_matrix.columns
-        ]
+        symbols_to_check = [s for s in current_holdings if s in correlation_matrix.columns]
     else:
         symbols_to_check = correlation_matrix.columns.tolist()
 
     for i, symbol1 in enumerate(symbols_to_check):
         for symbol2 in symbols_to_check[i + 1 :]:
-            if (
-                symbol1 in correlation_matrix.index
-                and symbol2 in correlation_matrix.columns
-            ):
+            if symbol1 in correlation_matrix.index and symbol2 in correlation_matrix.columns:
                 corr = correlation_matrix.loc[symbol1, symbol2]
                 if not np.isnan(corr) and abs(corr) >= threshold:
                     high_corr_pairs.append((symbol1, symbol2, corr))
@@ -493,13 +482,9 @@ def calculate_portfolio_correlation_risk(
 
     # Recommendation
     if avg_correlation > max_avg_correlation:
-        recommendation = (
-            f"⚠️ Portfolio có correlation cao ({avg_correlation:.2f}). Nên đa dạng hóa."
-        )
+        recommendation = f"⚠️ Portfolio có correlation cao ({avg_correlation:.2f}). Nên đa dạng hóa."
     elif len(high_corr_pairs) > 0:
-        recommendation = (
-            f"⚠️ Có {len(high_corr_pairs)} cặp mã có correlation cao. Nên xem xét."
-        )
+        recommendation = f"⚠️ Có {len(high_corr_pairs)} cặp mã có correlation cao. Nên xem xét."
     else:
         recommendation = "✅ Portfolio đa dạng hóa tốt."
 
@@ -543,12 +528,8 @@ def get_diversification_recommendation(
     # Sector exposure warnings
     if overweight:
         for sector, pct in overweight:
-            warnings.append(
-                f"⚠️ {sector} chiếm {pct:.1f}% portfolio (vượt {max_sector_pct}%)"
-            )
-            recommendations.append(
-                f"Nên giảm exposure {sector} hoặc thêm mã từ ngành khác"
-            )
+            warnings.append(f"⚠️ {sector} chiếm {pct:.1f}% portfolio (vượt {max_sector_pct}%)")
+            recommendations.append(f"Nên giảm exposure {sector} hoặc thêm mã từ ngành khác")
 
     # Correlation warnings
     if correlation_risk["risk_score"] > 50:

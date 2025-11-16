@@ -68,7 +68,6 @@ class ImprovedExitStrategy:
         max_holding_days: int = 20,  # Tối đa 20 ngày
         time_decay_threshold: float = 0.02,
     ):  # Nếu <2% lời sau 20 ngày → thoát
-
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
         self.trailing_activation = trailing_stop_activation
@@ -124,9 +123,7 @@ class ImprovedExitStrategy:
         if symbol not in self.position_highs:
             self.position_highs[symbol] = current_price
         else:
-            self.position_highs[symbol] = max(
-                self.position_highs[symbol], current_price
-            )
+            self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
 
         highest_price = self.position_highs[symbol]
 
@@ -213,13 +210,22 @@ class ImprovedExitStrategy:
             return trailing_check["decision"]
 
         # ====================================================================
-        # CHECK 6: ML SIGNAL SELL
+        # CHECK 6: ML SIGNAL SELL (with volume confirmation)
         # ====================================================================
         if ml_signal and ml_signal.get("signal") == "SELL":
             confidence = ml_signal.get("confidence", 0)
 
+            # ENHANCEMENT: Add volume confirmation for ML sell signal
+            volume_confirmation = self._check_volume_for_exit(df)
+
             # Chỉ thoát nếu confidence >= 60 và đang lời (hoặc lỗ ít)
             if confidence >= 60 and pnl_percent > -3:
+                # If volume confirms (high volume on sell), increase urgency
+                urgency = 4 if volume_confirmation else 3
+                message = f"📉 ML SIGNAL SELL (Conf: {confidence}%): {pnl_percent:+.2f}%"
+                if volume_confirmation:
+                    message += " | Volume confirmed ⚠️"
+
                 return ExitDecision(
                     should_exit=True,
                     exit_reason=ExitReason.ML_SIGNAL_SELL,
@@ -227,8 +233,8 @@ class ImprovedExitStrategy:
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
-                    message=f"📉 ML SIGNAL SELL (Conf: {confidence}%): {pnl_percent:+.2f}%",
-                    urgency=3,
+                    message=message,
+                    urgency=urgency,
                 )
 
         # ====================================================================
@@ -493,7 +499,6 @@ class ImprovedExitStrategy:
             and latest["close"] < prev["open"]
             and latest["open"] > prev["close"]
         ):
-
             return {
                 "should_exit": True,
                 "decision": ExitDecision(
@@ -530,6 +535,37 @@ class ImprovedExitStrategy:
 
         return {"should_exit": False}
 
+    def _check_volume_for_exit(self, df: pd.DataFrame) -> bool:
+        """
+        ENHANCEMENT: Check if volume confirms exit signal
+
+        Returns:
+            True if high volume confirms selling pressure
+        """
+        if len(df) < 20:
+            return False
+
+        try:
+            current_volume = safe_get_latest(df, "volume", 0)
+            avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
+
+            if avg_volume == 0:
+                return False
+
+            # Check if volume is significantly higher (selling pressure)
+            volume_ratio = current_volume / avg_volume
+
+            # High volume on down day suggests strong selling
+            latest_close = safe_get_latest(df, "close", 0)
+            prev_close = df["close"].iloc[-2] if len(df) >= 2 else latest_close
+            is_down_day = latest_close < prev_close
+
+            return volume_ratio >= 1.5 and is_down_day
+
+        except Exception:
+            logger.warning("⚠️ Error checking volume for exit")
+            return False
+
     def _check_support_breakdown(
         self,
         df: pd.DataFrame,
@@ -565,7 +601,7 @@ class ImprovedExitStrategy:
                         exit_price=current_price,
                         expected_pnl=pnl_amount,
                         expected_pnl_percent=pnl_percent,
-                        message=f"📉 SUPPORT BREAKDOWN: {pnl_percent:+.2f}%",
+                        message=f"📉 SUPPORT BREAKDOWN (Volume confirmed): {pnl_percent:+.2f}%",
                         urgency=4,
                     ),
                 }

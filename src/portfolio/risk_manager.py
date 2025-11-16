@@ -161,10 +161,7 @@ class PortfolioRiskManager:
 
         # Convert to percentages
         if total_value > 0:
-            return {
-                sector: (value / total_value) * 100
-                for sector, value in sector_values.items()
-            }
+            return {sector: (value / total_value) * 100 for sector, value in sector_values.items()}
 
         return {}
 
@@ -238,10 +235,7 @@ class PortfolioRiskManager:
             return "CRITICAL"
         elif high_count >= 2:
             return "HIGH"
-        elif (
-            high_count > 0
-            or portfolio_risk_percent > self.max_portfolio_risk * 100 * 0.8
-        ):
+        elif high_count > 0 or portfolio_risk_percent > self.max_portfolio_risk * 100 * 0.8:
             return "MEDIUM"
         else:
             return "LOW"
@@ -261,9 +255,7 @@ class PortfolioRiskManager:
             self.peak_portfolio_value = current_portfolio_value
 
         # Calculate drawdown from peak
-        drawdown = (
-            self.peak_portfolio_value - current_portfolio_value
-        ) / self.peak_portfolio_value
+        drawdown = (self.peak_portfolio_value - current_portfolio_value) / self.peak_portfolio_value
         drawdown_percent = drawdown * 100
 
         if drawdown_percent >= self.max_drawdown * 100:
@@ -311,9 +303,7 @@ class PortfolioRiskManager:
             / 100
             * current_metrics.total_portfolio_value
         ) + position_value
-        new_sector_exp = (
-            (new_sector_value / new_total_value * 100) if new_total_value > 0 else 0
-        )
+        new_sector_exp = (new_sector_value / new_total_value * 100) if new_total_value > 0 else 0
 
         if new_sector_exp > self.max_sector_exposure * 100:
             return (

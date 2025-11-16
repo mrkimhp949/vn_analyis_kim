@@ -163,9 +163,7 @@ class AnalyticsDashboard:
             data = cache["data"]
             lines.append("💾 **CACHE PERFORMANCE**")
             lines.append(f"• Hit rate: {data.get('hit_rate', 0):.1f}%")
-            lines.append(
-                f"• Hits: {data.get('hits', 0)} | Misses: {data.get('misses', 0)}"
-            )
+            lines.append(f"• Hits: {data.get('hits', 0)} | Misses: {data.get('misses', 0)}")
             lines.append(f"• Memory entries: {data.get('memory_entries', 0)}")
             lines.append("")
 
@@ -178,9 +176,7 @@ class AnalyticsDashboard:
             api_stats = data.get("api_stats", {})
             if api_stats:
                 for api_name, stats in list(api_stats.items())[:3]:
-                    lines.append(
-                        f"• {api_name}: {stats.get('success_rate', 0):.1f}% success"
-                    )
+                    lines.append(f"• {api_name}: {stats.get('success_rate', 0):.1f}% success")
 
             error_count = data.get("error_count", 0)
             lines.append(f"• Recent errors: {error_count}")
@@ -191,9 +187,7 @@ class AnalyticsDashboard:
         if monitoring.get("status") == "success" and monitoring.get("data"):
             data = monitoring["data"]
             lines.append("🔍 **REAL-TIME MONITORING**")
-            lines.append(
-                f"• Status: {'🟢 Running' if data.get('is_running') else '🔴 Stopped'}"
-            )
+            lines.append(f"• Status: {'🟢 Running' if data.get('is_running') else '🔴 Stopped'}")
             lines.append(f"• Monitored symbols: {data.get('monitored_symbols', 0)}")
             lines.append(f"• Check interval: {data.get('check_interval', 0)}s")
             lines.append("")

@@ -78,10 +78,7 @@ class ProxyMarketRegimeAnalyzer:
         try:
             if self.analyzer:
                 # Nếu analyzer cần vnindex_df, truyền nó vào
-                if (
-                    "vnindex_df"
-                    in self.analyzer.analyze_market_regime.__code__.co_varnames
-                ):
+                if "vnindex_df" in self.analyzer.analyze_market_regime.__code__.co_varnames:
                     regime = self.analyzer.analyze_market_regime(vnindex_df=vnindex_df)
                 else:
                     # Giữ tương thích với analyzer cũ không cần df

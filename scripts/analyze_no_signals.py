@@ -71,6 +71,12 @@ class NoSignalAnalyzer:
             "recommendations": [],
         }
 
+        # Preload VNINDEX for ML features
+        try:
+            index_df = load_data("VNINDEX", lookback=LOOKBACK, is_index=True)
+        except Exception:
+            index_df = None
+
         for symbol in symbols[:100]:  # Analyze first 100 for speed
             try:
                 # Load data
@@ -82,7 +88,7 @@ class NoSignalAnalyzer:
                 results["total_scanned"] += 1
 
                 # ML analysis
-                ml_signal = ml_generator.analyze(df)
+                ml_signal = ml_generator.analyze(df, index_df=index_df)
                 results["ml_analysis"]["total"] += 1
 
                 if ml_signal["signal"] == "BUY":
@@ -121,10 +127,7 @@ class NoSignalAnalyzer:
                     warnings_str = " ".join(entry_signal.warnings)
                     if "trend" in warnings_str.lower():
                         results["entry_filters"]["failed_trend"] += 1
-                    if (
-                        "support" in warnings_str.lower()
-                        or "resistance" in warnings_str.lower()
-                    ):
+                    if "support" in warnings_str.lower() or "resistance" in warnings_str.lower():
                         results["entry_filters"]["failed_support"] += 1
                     if "volume" in warnings_str.lower():
                         results["entry_filters"]["failed_volume"] += 1
@@ -142,15 +145,11 @@ class NoSignalAnalyzer:
         # Calculate averages
         if results["ml_analysis"]["total"] > 0:
             results["ml_analysis"]["buy_rate"] = (
-                results["ml_analysis"]["buy_signals"]
-                / results["ml_analysis"]["total"]
-                * 100
+                results["ml_analysis"]["buy_signals"] / results["ml_analysis"]["total"] * 100
             )
 
         # Generate recommendations
-        results["recommendations"] = self._generate_recommendations(
-            results, entry_logic
-        )
+        results["recommendations"] = self._generate_recommendations(results, entry_logic)
 
         return results
 
@@ -171,9 +170,7 @@ class NoSignalAnalyzer:
             )
 
         # Check confidence distribution
-        low_conf = (
-            results["confidence_ranges"]["0-20"] + results["confidence_ranges"]["20-40"]
-        )
+        low_conf = results["confidence_ranges"]["0-20"] + results["confidence_ranges"]["20-40"]
         if low_conf / total > 0.5:
             recommendations.append(
                 f"⚠️ {low_conf/total*100:.1f}% mã có confidence <40%. "
@@ -235,15 +232,13 @@ class NoSignalAnalyzer:
         # ML Analysis
         ml = results["ml_analysis"]
         lines.append("🤖 **ML SIGNALS**")
-        lines.append(
-            f"• BUY signals: {ml['buy_signals']} ({ml['buy_signals']/ml['total']*100:.1f}%)"
-        )
-        lines.append(
-            f"• SELL signals: {ml['sell_signals']} ({ml['sell_signals']/ml['total']*100:.1f}%)"
-        )
-        lines.append(
-            f"• HOLD signals: {ml['hold_signals']} ({ml['hold_signals']/ml['total']*100:.1f}%)"
-        )
+        total_ml = ml.get("total", 0) or 0
+        buy_pct = (ml["buy_signals"] / total_ml * 100) if total_ml > 0 else 0
+        sell_pct = (ml["sell_signals"] / total_ml * 100) if total_ml > 0 else 0
+        hold_pct = (ml["hold_signals"] / total_ml * 100) if total_ml > 0 else 0
+        lines.append(f"• BUY signals: {ml['buy_signals']} ({buy_pct:.1f}%)")
+        lines.append(f"• SELL signals: {ml['sell_signals']} ({sell_pct:.1f}%)")
+        lines.append(f"• HOLD signals: {ml['hold_signals']} ({hold_pct:.1f}%)")
         lines.append("")
 
         # Confidence Distribution
@@ -258,27 +253,26 @@ class NoSignalAnalyzer:
         # Entry Filters
         lines.append("🚪 **ENTRY FILTERS**")
         filters = results["entry_filters"]
+        passed_pct = (filters["passed_all"] / total * 100) if total > 0 else 0
+        fail_conf_pct = (filters["failed_confidence"] / total * 100) if total > 0 else 0
+        fail_trend_pct = (filters["failed_trend"] / total * 100) if total > 0 else 0
+        fail_sr_pct = (filters["failed_support"] / total * 100) if total > 0 else 0
+        fail_vol_pct = (filters["failed_volume"] / total * 100) if total > 0 else 0
+        fail_vola_pct = (filters["failed_volatility"] / total * 100) if total > 0 else 0
+        fail_rsi_pct = (filters["failed_rsi"] / total * 100) if total > 0 else 0
+        lines.append(f"• ✅ Passed all: {filters['passed_all']} ({passed_pct:.1f}%)")
         lines.append(
-            f"• ✅ Passed all: {filters['passed_all']} ({filters['passed_all']/total*100:.1f}%)"
+            f"• ❌ Failed confidence: {filters['failed_confidence']} ({fail_conf_pct:.1f}%)"
         )
+        lines.append(f"• ❌ Failed trend: {filters['failed_trend']} ({fail_trend_pct:.1f}%)")
         lines.append(
-            f"• ❌ Failed confidence: {filters['failed_confidence']} ({filters['failed_confidence']/total*100:.1f}%)"
+            f"• ❌ Failed support/resistance: {filters['failed_support']} ({fail_sr_pct:.1f}%)"
         )
+        lines.append(f"• ❌ Failed volume: {filters['failed_volume']} ({fail_vol_pct:.1f}%)")
         lines.append(
-            f"• ❌ Failed trend: {filters['failed_trend']} ({filters['failed_trend']/total*100:.1f}%)"
+            f"• ❌ Failed volatility: {filters['failed_volatility']} ({fail_vola_pct:.1f}%)"
         )
-        lines.append(
-            f"• ❌ Failed support/resistance: {filters['failed_support']} ({filters['failed_support']/total*100:.1f}%)"
-        )
-        lines.append(
-            f"• ❌ Failed volume: {filters['failed_volume']} ({filters['failed_volume']/total*100:.1f}%)"
-        )
-        lines.append(
-            f"• ❌ Failed volatility: {filters['failed_volatility']} ({filters['failed_volatility']/total*100:.1f}%)"
-        )
-        lines.append(
-            f"• ❌ Failed RSI: {filters['failed_rsi']} ({filters['failed_rsi']/total*100:.1f}%)"
-        )
+        lines.append(f"• ❌ Failed RSI: {filters['failed_rsi']} ({fail_rsi_pct:.1f}%)")
         lines.append("")
 
         # Recommendations
@@ -297,15 +291,16 @@ def analyze_no_signals():
     print("🔍 Analyzing why no signals...")
 
     try:
+        # Lazy imports to avoid heavy startup
         from src.strategies.entry_logic import ImprovedEntryLogic
         from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
         from src.ml.signals.generator import MLSignalGenerator
-
-        from src.config.legacy_config import TICKERS
+        from src.config.trading_config import get_config
 
         # Initialize
+        config = get_config(validate=False)
         ml_generator = MLSignalGenerator()
-        entry_logic = ImprovedEntryLogic(min_confidence=65)
+        entry_logic = ImprovedEntryLogic(min_confidence=config.trading.min_confidence)
         market_analyzer = ProxyMarketRegimeAnalyzer()
 
         # Get market regime
@@ -314,8 +309,15 @@ def analyze_no_signals():
 
         # Analyze
         analyzer = NoSignalAnalyzer()
+
+        # Load tickers using legacy helper (parses CSV correctly)
+        from src.config.legacy_config import get_tickers
+
+        tickers = get_tickers()
+        print(f"📊 Loaded {len(tickers)} mã từ List.csv")
+
         results = analyzer.analyze_scan_results(
-            TICKERS[:100], ml_generator, entry_logic, market_regime  # First 100 symbols
+            tickers[:100], ml_generator, entry_logic, market_regime  # First 100 symbols
         )
 
         # Print report
@@ -324,10 +326,9 @@ def analyze_no_signals():
 
         # Save to file
         import os
-
-        os.makedirs("reports", exist_ok=True)
         from datetime import datetime
 
+        os.makedirs("reports", exist_ok=True)
         filename = f"reports/no_signals_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         with open(filename, "w", encoding="utf-8") as f:
             f.write(report)

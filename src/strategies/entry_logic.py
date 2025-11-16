@@ -65,6 +65,7 @@ class ImprovedEntryLogic:
         support_distance_percent: float = 3.0,
         require_trend_alignment: bool = True,
         require_volume_confirmation: bool = True,
+        portfolio_manager=None,
     ):
         """
         Args:
@@ -73,18 +74,22 @@ class ImprovedEntryLogic:
             support_distance_percent: Khoảng cách tối đa đến support (%)
             require_trend_alignment: Yêu cầu phải theo trend
             require_volume_confirmation: Yêu cầu volume confirm
+            portfolio_manager: Portfolio manager for context-aware decisions
         """
         self.min_confidence = min_confidence
+        self.base_min_confidence = min_confidence  # Store original for dynamic adjustment
         self.min_risk_reward = min_risk_reward
         self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
         self.require_volume_confirmation = require_volume_confirmation
+        self.portfolio_manager = portfolio_manager
 
     def _validate_initial_signal(
-        self, df: pd.DataFrame, ml_signal: Dict
+        self, df: pd.DataFrame, ml_signal: Optional[Dict]
     ) -> tuple[bool, str, float, float]:
         """
         Validate initial data and ML signal
+        ENHANCED: Allow fallback to technical analysis when ML signal is None
 
         Returns:
             (is_valid, signal_type, base_confidence, current_price) or
@@ -98,6 +103,25 @@ class ImprovedEntryLogic:
         # Use safe access instead of df.iloc[-1]
         from utils.dataframe_utils import safe_get_latest
 
+        close_price = safe_get_latest(df, "close", 0)
+
+        # ENHANCEMENT: Fallback to technical analysis if ML signal is None
+        if ml_signal is None:
+            logger.debug("ML signal is None - using technical analysis fallback")
+            # Use technical indicators to generate a fallback signal
+            base_confidence = self._calculate_technical_confidence(df)
+
+            # Only proceed if technical confidence is reasonable
+            if base_confidence < 40:  # Lower threshold for technical-only signals
+                return (False, f"Technical confidence thấp ({base_confidence}%)", 0, 0)
+
+            # Determine signal type from technical analysis
+            signal_type = self._get_technical_signal(df)
+            if signal_type != "BUY":
+                return (False, f"Technical signal = {signal_type}", 0, 0)
+
+            return (True, signal_type, base_confidence, close_price)
+
         signal_type = ml_signal.get("signal", "HOLD")
         base_confidence = ml_signal.get("confidence", 0)
 
@@ -109,7 +133,6 @@ class ImprovedEntryLogic:
         if base_confidence < self.min_confidence:
             return (False, f"Confidence thấp ({base_confidence}%)", 0, 0)
 
-        close_price = safe_get_latest(df, "close", 0)
         return (True, signal_type, base_confidence, close_price)
 
     def _run_all_filters(
@@ -154,9 +177,7 @@ class ImprovedEntryLogic:
         # FILTER 3: SUPPORT/RESISTANCE
         sr_check = self._check_support_resistance(df, current_price)
         if sr_check["too_close_to_resistance"]:
-            warnings.append(
-                f"⚠️ Gần resistance: {sr_check['distance_to_resistance']:.1f}%"
-            )
+            warnings.append(f"⚠️ Gần resistance: {sr_check['distance_to_resistance']:.1f}%")
             adjustments.append(-15)
         elif sr_check["near_support"]:
             reasons.append(f"✅ Gần support (+{sr_check['distance_to_support']:.1f}%)")
@@ -205,14 +226,10 @@ class ImprovedEntryLogic:
         # FILTER 8: SECTOR STRENGTH
         sector_strength_check = self._check_sector_strength(df, market_regime)
         if sector_strength_check["is_leading"]:
-            reasons.append(
-                f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)"
-            )
+            reasons.append(f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)")
             adjustments.append(+10)
         elif sector_strength_check["is_lagging"]:
-            warnings.append(
-                f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)"
-            )
+            warnings.append(f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)")
             adjustments.append(-15)
 
         return (True, reasons, warnings, adjustments)
@@ -265,9 +282,7 @@ class ImprovedEntryLogic:
 
         risk_reward = reward / risk
         if risk_reward < self.min_risk_reward:
-            error_msg = (
-                f"R:R ratio thấp: {risk_reward:.2f} < " f"{self.min_risk_reward:.2f}"
-            )
+            error_msg = f"R:R ratio thấp: {risk_reward:.2f} < " f"{self.min_risk_reward:.2f}"
             return (False, error_msg, 0, 0, [], 0)
 
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
@@ -286,10 +301,16 @@ class ImprovedEntryLogic:
         Returns:
             EntrySignal object với đầy đủ thông tin
         """
+        # ENHANCEMENT: Adjust thresholds dynamically based on market regime
+        self._adjust_thresholds_for_market(market_regime)
+
         # Step 1: Validate initial signal
-        is_valid, signal_or_reason, base_confidence, current_price = (
-            self._validate_initial_signal(df, ml_signal)
-        )
+        (
+            is_valid,
+            signal_or_reason,
+            base_confidence,
+            current_price,
+        ) = self._validate_initial_signal(df, ml_signal)
         if not is_valid:
             return self._no_signal(signal_or_reason)
 
@@ -300,9 +321,7 @@ class ImprovedEntryLogic:
             df, signal_type, current_price, market_regime
         )
         if not passed:
-            regime_name = (
-                market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
-            )
+            regime_name = market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
             return self._no_signal(f"Thị trường: {regime_name}")
 
         # Step 3: Calculate adjusted confidence
@@ -311,8 +330,7 @@ class ImprovedEntryLogic:
 
         if adjusted_confidence < self.min_confidence:
             return self._no_signal(
-                f"Confidence sau adjustment: {adjusted_confidence}% < "
-                f"{self.min_confidence}%"
+                f"Confidence sau adjustment: {adjusted_confidence}% < " f"{self.min_confidence}%"
             )
 
         # Step 4: Calculate prices and risk/reward
@@ -321,18 +339,21 @@ class ImprovedEntryLogic:
         entry_price = DataValidator.validate_price(close_price, "entry_price")
         sr_check = self._check_support_resistance(df, current_price)
 
-        success, error_msg, stop_loss, reward, take_profit_targets, risk_reward = (
-            self._calculate_prices_and_risk(df, entry_price, sr_check)
-        )
+        (
+            success,
+            error_msg,
+            stop_loss,
+            reward,
+            take_profit_targets,
+            risk_reward,
+        ) = self._calculate_prices_and_risk(df, entry_price, sr_check)
         if not success:
             return self._no_signal(error_msg)
 
         reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
 
         # Step 5: Determine signal strength and position multiplier
-        strength = self._calculate_signal_strength(
-            adjusted_confidence, risk_reward, warnings
-        )
+        strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
         position_multiplier = self._calculate_position_multiplier(
             strength, adjusted_confidence, warnings, market_regime
         )
@@ -696,9 +717,7 @@ class ImprovedEntryLogic:
 
         return {"bullish_pattern": False, "bearish_pattern": False, "pattern": "None"}
 
-    def _check_sector_strength(
-        self, df: pd.DataFrame, market_regime: Optional[Dict]
-    ) -> Dict:
+    def _check_sector_strength(self, df: pd.DataFrame, market_regime: Optional[Dict]) -> Dict:
         """
         Kiểm tra sức mạnh của ngành so với thị trường chung (VNINDEX).
         Sử dụng RS (Relative Strength)
@@ -709,9 +728,9 @@ class ImprovedEntryLogic:
         # RS > 1: Cổ phiếu/ngành mạnh hơn thị trường
         # RS dốc lên: Sức mạnh đang tăng
         latest_rs = safe_get_latest(df, "rs", 0)
-        rs_trend = safe_rolling_operation(
-            df, "rs", 10, "mean", 0
-        ) > safe_rolling_operation(df, "rs", 30, "mean", 0)
+        rs_trend = safe_rolling_operation(df, "rs", 10, "mean", 0) > safe_rolling_operation(
+            df, "rs", 30, "mean", 0
+        )
 
         is_leading = latest_rs > 1.0 and rs_trend
         is_lagging = latest_rs < 0.95
@@ -720,17 +739,13 @@ class ImprovedEntryLogic:
         sector_perf = 0
         if market_regime and "sector_performance" in market_regime:
             # Giả sử df có cột 'sector'
-            sector = (
-                safe_get_latest(df, "sector", 0)
-                if "sector" in df.columns
-                else "UNKNOWN"
-            )
+            sector = safe_get_latest(df, "sector", 0) if "sector" in df.columns else "UNKNOWN"
             sector_perf = market_regime["sector_performance"].get(sector, 0)
 
         return {
             "is_leading": is_leading,
             "is_lagging": is_lagging,
-            "sector_per": sector_perf,
+            "sector_perf": sector_perf,
         }
 
     # ========================================================================
@@ -804,6 +819,135 @@ class ImprovedEntryLogic:
         # Clamp
         return max(0.3, min(multiplier, 1.5))
 
+    def _adjust_thresholds_for_market(self, market_regime: Optional[Dict]):
+        """
+        ENHANCEMENT: Dynamically adjust confidence thresholds based on market conditions
+
+        Logic:
+        - BULL market: Lower threshold (more opportunities)
+        - BEAR/HIGH_VOLATILITY: Higher threshold (more selective)
+        - Consider portfolio heat
+        """
+        if not market_regime:
+            self.min_confidence = self.base_min_confidence
+            return
+
+        regime = market_regime.get("regime", "SIDEWAYS")
+        regime_confidence = market_regime.get("confidence", 50)
+
+        # Base adjustment by regime type
+        if regime == "BULL" and regime_confidence >= 70:
+            # Strong bull market - can be less strict
+            adjustment = -5
+        elif regime == "BEAR":
+            # Bear market - be more selective
+            adjustment = +10
+        elif regime == "HIGH_VOLATILITY":
+            # High volatility - require higher confidence
+            adjustment = +15
+        else:
+            # SIDEWAYS or unknown
+            adjustment = 0
+
+        # Portfolio heat adjustment
+        if self.portfolio_manager:
+            try:
+                positions = self.portfolio_manager.get_positions()
+                num_positions = len(positions)
+
+                # If portfolio is getting crowded, be more selective
+                if num_positions >= 8:
+                    adjustment += 10
+                    logger.info(
+                        f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +10"
+                    )
+                elif num_positions >= 5:
+                    adjustment += 5
+                    logger.info(
+                        f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +5"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check portfolio heat: {e}")
+
+        # Apply adjustment (with limits)
+        # Allow lower bound 40 in favorable regimes to increase opportunities
+        self.min_confidence = max(40, min(80, self.base_min_confidence + adjustment))
+
+        if adjustment != 0:
+            logger.info(
+                f"📊 Dynamic threshold adjustment: {self.base_min_confidence} → {self.min_confidence} "
+                f"(regime: {regime}, adj: {adjustment:+d})"
+            )
+
+    def _calculate_technical_confidence(self, df: pd.DataFrame) -> float:
+        """
+        Calculate confidence from technical indicators when ML signal is unavailable
+
+        Uses multiple technical factors:
+        - RSI position
+        - MACD signal
+        - Moving average alignment
+        - Price action strength
+        """
+        if len(df) < 50:
+            return 0.0
+
+        from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
+
+        confidence = 50.0  # Base confidence
+
+        # RSI check
+        if "rsi" in df.columns:
+            rsi = safe_get_latest(df, "rsi", 50)
+            if not pd.isna(rsi):
+                if 30 <= rsi <= 60:  # Good range for entry
+                    confidence += 10
+                elif 60 < rsi <= 70:
+                    confidence += 5
+
+        # Moving average alignment
+        if len(df) >= 50:
+            ema20 = df["close"].ewm(span=20).mean()
+            ema50 = df["close"].ewm(span=50).mean()
+            current_price = safe_get_latest(df, "close", 0)
+            latest_ema20 = ema20.iloc[-1]
+            latest_ema50 = ema50.iloc[-1]
+
+            if current_price > latest_ema20:
+                confidence += 10
+            if latest_ema20 > latest_ema50:
+                confidence += 10
+
+        # Volume confirmation
+        if len(df) >= 20:
+            current_volume = safe_get_latest(df, "volume", 0)
+            avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
+            if avg_volume > 0 and current_volume > avg_volume * 1.2:
+                confidence += 10
+
+        return min(confidence, 100.0)
+
+    def _get_technical_signal(self, df: pd.DataFrame) -> str:
+        """
+        Determine signal type from technical analysis
+        Returns: "BUY", "SELL", or "HOLD"
+        """
+        if len(df) < 50:
+            return "HOLD"
+
+        from utils.dataframe_utils import safe_get_latest
+
+        current_price = safe_get_latest(df, "close", 0)
+        prev_price = df["close"].iloc[-2] if len(df) >= 2 else current_price
+
+        # Simple trend following
+        if current_price > prev_price:
+            return "BUY"
+        elif current_price < prev_price:
+            return "SELL"
+        else:
+            return "HOLD"
+
     def _no_signal(self, reason: str) -> EntrySignal:
         """Return no signal"""
         return EntrySignal(
@@ -823,10 +967,7 @@ class ImprovedEntryLogic:
         """Format signal thành message đẹp"""
 
         if not signal.should_enter:
-            return (
-                f"⏭️ **{symbol}** - Không vào lệnh\n"
-                f"Lý do: {', '.join(signal.warnings)}"
-            )
+            return f"⏭️ **{symbol}** - Không vào lệnh\n" f"Lý do: {', '.join(signal.warnings)}"
 
         msg = f"🎯 **{symbol}** - {signal.signal_type}\n"
         msg += f"💪 Strength: {signal.strength.name}\n"

@@ -386,9 +386,7 @@ class TestCheckHighCorrelation:
         )
 
         # Only check VCB and FPT (low correlation)
-        result = check_high_correlation(
-            corr_matrix, threshold=0.7, current_holdings=["VCB", "FPT"]
-        )
+        result = check_high_correlation(corr_matrix, threshold=0.7, current_holdings=["VCB", "FPT"])
 
         assert len(result) == 0
 
@@ -588,9 +586,7 @@ class TestGetDiversificationRecommendation:
             "FPT": {"current_value": 40000},
         }
 
-        result = get_diversification_recommendation(
-            holdings, max_sector_pct=40.0, min_sectors=3
-        )
+        result = get_diversification_recommendation(holdings, max_sector_pct=40.0, min_sectors=3)
 
         assert len(result["warnings"]) > 0
         assert len(result["overweight_sectors"]) > 0
@@ -642,9 +638,7 @@ class TestGetDiversificationRecommendation:
             "FPT": {"current_value": 50000},
         }
 
-        result = get_diversification_recommendation(
-            holdings, max_sector_pct=40.0, min_sectors=3
-        )
+        result = get_diversification_recommendation(holdings, max_sector_pct=40.0, min_sectors=3)
 
         assert any("ngành" in w.lower() for w in result["warnings"])
         assert result["diversification_score"] < 100
@@ -671,9 +665,7 @@ class TestGetDiversificationRecommendation:
             "MWG": {"current_value": 25000},  # RETAIL
         }
 
-        result = get_diversification_recommendation(
-            holdings, max_sector_pct=40.0, min_sectors=3
-        )
+        result = get_diversification_recommendation(holdings, max_sector_pct=40.0, min_sectors=3)
 
         assert len(result["warnings"]) == 0
         assert result["diversification_score"] == 100

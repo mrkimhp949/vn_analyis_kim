@@ -112,9 +112,7 @@ def display_dashboard():
         print("Positions:     {portfolio['num_positions']}")
         print("Total Value:   {portfolio['total_value']:,.0f} VNĐ")
         print("Total Cost:    {portfolio['total_cost']:,.0f} VNĐ")
-        print(
-            f"P&L:           {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.2f}%)"
-        )
+        print(f"P&L:           {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.2f}%)")
 
         if portfolio["positions"]:
             print("\nCurrent Positions:")

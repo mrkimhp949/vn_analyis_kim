@@ -102,9 +102,7 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
         "feature_columns": feature_cols,
     }
     if shap_importance is not None:
-        all_metrics["shap_feature_importance"] = shap_importance.to_dict(
-            orient="records"
-        )
+        all_metrics["shap_feature_importance"] = shap_importance.to_dict(orient="records")
 
     # Record model version & drift monitoring
     if get_model_monitor:
@@ -119,9 +117,7 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
                     "market_regime": market_regime,
                 },
             )
-            drift_info = monitor.check_drift(
-                "ensemble_classifier", metric_key="accuracy"
-            )
+            drift_info = monitor.check_drift("ensemble_classifier", metric_key="accuracy")
             all_metrics["model_monitor"] = {
                 "version": record.get("version"),
                 "drift": drift_info,
@@ -137,9 +133,7 @@ def run_pipeline(tickers, lookback, refresh, market_regime=None):
 
     if shap_importance is not None:
         shap_report = "reports/shap_feature_importance.json"
-        shap_importance.to_json(
-            shap_report, orient="records", force_ascii=False, indent=2
-        )
+        shap_importance.to_json(shap_report, orient="records", force_ascii=False, indent=2)
         logger.info(f"Saved SHAP feature importance to {shap_report}")
 
     with open(report_file, "w", encoding="utf-8") as f:
@@ -164,9 +158,7 @@ def main():
     )
     args = parser.parse_args()
     tickers = [sym.strip().upper() for sym in args.tickers.split(",") if sym.strip()]
-    metrics = run_pipeline(
-        tickers, args.lookback, args.refresh, market_regime=args.regime
-    )
+    metrics = run_pipeline(tickers, args.lookback, args.refresh, market_regime=args.regime)
     print(json.dumps(metrics, indent=2, ensure_ascii=False))
 
 

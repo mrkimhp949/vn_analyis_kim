@@ -7,9 +7,7 @@ import ta
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 
-def add_ml_features(
-    df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None
-) -> pd.DataFrame:
+def add_ml_features(df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     Thêm features cho ML models.
 
@@ -83,12 +81,10 @@ def add_ml_features(
             from utils.dataframe_utils import safe_get_latest
 
             stock_perf = (
-                safe_get_latest(merged_df, "close_stock", 0)
-                / merged_df["close_stock"].iloc[0]
+                safe_get_latest(merged_df, "close_stock", 0) / merged_df["close_stock"].iloc[0]
             )
             index_perf = (
-                safe_get_latest(merged_df, "close_index", 0)
-                / merged_df["close_index"].iloc[0]
+                safe_get_latest(merged_df, "close_index", 0) / merged_df["close_index"].iloc[0]
             )
 
             # RS = perf_stock / perf_index

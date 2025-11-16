@@ -50,6 +50,7 @@ class EnhancedPositionSizer:
         max_sector_exposure: float = 0.40,  # 40% max per sector
         use_kelly: bool = True,
         kelly_fraction: float = 0.5,
+        correlation_cache_ttl: int = 3600,  # Cache correlations for 1 hour
     ):  # Half-Kelly
         self.total_capital = total_capital
         self.max_risk_per_trade = max_risk_per_trade
@@ -60,11 +61,17 @@ class EnhancedPositionSizer:
         self.max_sector_exposure = max_sector_exposure
         self.use_kelly = use_kelly
         self.kelly_fraction = kelly_fraction
+        self.correlation_cache_ttl = correlation_cache_ttl
 
         # Tracking
         self.current_positions = {}  # {symbol: position_data}
         self.trade_history = []  # Track trades for win rate calculation
         self.sector_exposure = {}  # Track sector exposure
+
+        # ENHANCEMENT: Correlation cache for performance
+        self._correlation_cache = {}  # {(symbol1, symbol2): (correlation, timestamp)}
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def calculate_position_size(
         self,
@@ -133,9 +140,7 @@ class EnhancedPositionSizer:
         # CHECK 3: Available Capital
         # =================================================================
         current_exposure = self._calculate_current_exposure()
-        available_capital = (
-            self.total_capital * self.max_total_exposure - current_exposure
-        )
+        available_capital = self.total_capital * self.max_total_exposure - current_exposure
 
         if available_capital <= 0:
             return self._zero_position(
@@ -233,9 +238,7 @@ class EnhancedPositionSizer:
         # =================================================================
 
         # Max by capital
-        max_shares_by_capital = int(
-            (self.total_capital * self.max_position_size) / entry_price
-        )
+        max_shares_by_capital = int((self.total_capital * self.max_position_size) / entry_price)
 
         # Max by available
         max_shares_by_available = int(available_capital / entry_price)
@@ -263,9 +266,7 @@ class EnhancedPositionSizer:
 
         # Check risk limit
         if risk_percent > self.max_risk_per_trade * 100:
-            max_safe_shares = int(
-                (self.total_capital * self.max_risk_per_trade) / risk_per_share
-            )
+            max_safe_shares = int((self.total_capital * self.max_risk_per_trade) / risk_per_share)
             shares = min(shares, max_safe_shares)
             shares = max((shares // 100) * 100, 100)
 
@@ -274,9 +275,7 @@ class EnhancedPositionSizer:
             max_loss = shares * risk_per_share
             risk_percent = (max_loss / self.total_capital) * 100
 
-            warnings.append(
-                f"Reduced shares to keep risk <= {self.max_risk_per_trade*100}%"
-            )
+            warnings.append(f"Reduced shares to keep risk <= {self.max_risk_per_trade*100}%")
 
         # DCA entries
         recommended_entries = self._calculate_dca_entries(entry_price, shares)
@@ -360,8 +359,7 @@ class EnhancedPositionSizer:
 
         if kelly > 0.5:
             logger.warning(
-                f"⚠️ Very high Kelly ({kelly:.1%}) detected. "
-                "Clamping to max 25% for safety."
+                f"⚠️ Very high Kelly ({kelly:.1%}) detected. " "Clamping to max 25% for safety."
             )
 
         # Clamp to reasonable range
@@ -412,11 +410,9 @@ class EnhancedPositionSizer:
 
         return max(0.5, min(base * strength_mult * regime_mult, 1.2))
 
-    def _calculate_correlation(
-        self, symbol1: str, symbol2: str, days: int = 60
-    ) -> float:
+    def _calculate_correlation(self, symbol1: str, symbol2: str, days: int = 60) -> float:
         """
-        Calculate correlation coefficient between two stocks
+        ENHANCED: Calculate correlation coefficient with caching
 
         Args:
             symbol1: First stock symbol
@@ -426,6 +422,35 @@ class EnhancedPositionSizer:
         Returns:
             Correlation coefficient (-1 to 1), or 0 if calculation fails
         """
+        import time
+
+        # Create cache key (order-independent)
+        cache_key = tuple(sorted([symbol1, symbol2]))
+
+        # Check cache first
+        if cache_key in self._correlation_cache:
+            corr, timestamp = self._correlation_cache[cache_key]
+            age = time.time() - timestamp
+
+            # Use cached value if still valid
+            if age < self.correlation_cache_ttl:
+                self._cache_hits += 1
+                logger.debug(
+                    f"📦 Cache HIT for {symbol1}-{symbol2} correlation "
+                    f"(age: {age:.0f}s, hits: {self._cache_hits})"
+                )
+                return corr
+            else:
+                # Cache expired
+                logger.debug(f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)")
+
+        # Cache miss - calculate correlation
+        self._cache_misses += 1
+        logger.debug(
+            f"📊 Cache MISS for {symbol1}-{symbol2} "
+            f"(misses: {self._cache_misses}, hit rate: {self._get_cache_hit_rate():.1%})"
+        )
+
         try:
             from src.data.loader import TCBSDataLoader
 
@@ -436,9 +461,7 @@ class EnhancedPositionSizer:
             df2 = loader.load_data(symbol2, days=days)
 
             if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
-                logger.warning(
-                    f"Insufficient data for correlation: {symbol1}-{symbol2}"
-                )
+                logger.warning(f"Insufficient data for correlation: {symbol1}-{symbol2}")
                 return 0.0
 
             # Merge on date to align time series
@@ -459,13 +482,75 @@ class EnhancedPositionSizer:
             corr = merged["close_1"].corr(merged["close_2"])
 
             if pd.isna(corr):
-                return 0.0
+                corr = 0.0
+
+            # Store in cache
+            self._correlation_cache[cache_key] = (corr, time.time())
+
+            # Limit cache size (keep last 100 entries)
+            if len(self._correlation_cache) > 100:
+                self._prune_cache()
 
             return corr
 
-        except Exception:
-            logger.warning(f"Error calculating correlation {symbol1}-{symbol2}")
+        except Exception as e:
+            logger.warning(
+                f"Error calculating correlation {symbol1}-{symbol2}: "
+                f"{type(e).__name__}: {str(e)}"
+            )
             return 0.0
+
+    def _get_cache_hit_rate(self) -> float:
+        """Calculate cache hit rate for monitoring"""
+        total = self._cache_hits + self._cache_misses
+        return self._cache_hits / total if total > 0 else 0.0
+
+    def _prune_cache(self):
+        """
+        Remove oldest 20% of cache entries to prevent unbounded growth
+
+        Cache management strategy:
+        - Remove entries older than TTL first
+        - Then remove oldest 20% if still over limit
+        """
+        if not self._correlation_cache:
+            return
+
+        import time
+
+        current_time = time.time()
+        initial_size = len(self._correlation_cache)
+
+        # First pass: Remove expired entries
+        expired_keys = [
+            key
+            for key, (_, timestamp) in self._correlation_cache.items()
+            if current_time - timestamp > self.correlation_cache_ttl
+        ]
+        for key in expired_keys:
+            del self._correlation_cache[key]
+
+        if expired_keys:
+            logger.debug(
+                f"🗑️ Removed {len(expired_keys)} expired cache entries "
+                f"({initial_size} → {len(self._correlation_cache)})"
+            )
+
+        # Second pass: If still over limit, remove oldest 20%
+        if len(self._correlation_cache) > 100:
+            sorted_items = sorted(
+                self._correlation_cache.items(),
+                key=lambda x: x[1][1],  # Sort by timestamp
+                reverse=True,
+            )
+
+            keep_count = int(len(sorted_items) * 0.8)
+            self._correlation_cache = dict(sorted_items[:keep_count])
+
+            logger.info(
+                f"🧹 Pruned correlation cache: {initial_size} → {len(self._correlation_cache)} entries "
+                f"(hit rate: {self._get_cache_hit_rate():.1%})"
+            )
 
     def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:
         """
@@ -546,9 +631,7 @@ class EnhancedPositionSizer:
 
             # Count positions in same sector
             same_sector_count = sum(
-                1
-                for pos in self.current_positions.values()
-                if pos.get("sector") == sector
+                1 for pos in self.current_positions.values() if pos.get("sector") == sector
             )
 
             # Reduce size if too many in same sector
@@ -582,14 +665,9 @@ class EnhancedPositionSizer:
 
     def _calculate_current_exposure(self) -> float:
         """Calculate current total exposure"""
-        return sum(
-            pos["shares"] * pos["current_price"]
-            for pos in self.current_positions.values()
-        )
+        return sum(pos["shares"] * pos["current_price"] for pos in self.current_positions.values())
 
-    def _calculate_dca_entries(
-        self, base_price: float, total_shares: int
-    ) -> List[Dict]:
+    def _calculate_dca_entries(self, base_price: float, total_shares: int) -> List[Dict]:
         """Calculate DCA entry levels"""
         return [
             {

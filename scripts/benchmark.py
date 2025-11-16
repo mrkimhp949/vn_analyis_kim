@@ -206,9 +206,7 @@ def main():
     bench = Benchmark()
 
     # ML benchmarks
-    bench.measure(
-        "ML Model Prediction (10 samples)", benchmark_ml_prediction(), iterations=100
-    )
+    bench.measure("ML Model Prediction (10 samples)", benchmark_ml_prediction(), iterations=100)
 
     # Data benchmarks
     bench.measure("Data Loading (with cache)", benchmark_data_loading(), iterations=20)
@@ -222,14 +220,10 @@ def main():
     bench.measure("Entry Logic Analysis", benchmark_entry_logic(), iterations=50)
 
     # Database benchmarks
-    bench.measure(
-        "Database Query Operations", benchmark_database_operations(), iterations=100
-    )
+    bench.measure("Database Query Operations", benchmark_database_operations(), iterations=100)
 
     # Portfolio benchmarks
-    bench.measure(
-        "Portfolio Value Calculation", benchmark_portfolio_calculation(), iterations=100
-    )
+    bench.measure("Portfolio Value Calculation", benchmark_portfolio_calculation(), iterations=100)
 
     # Generate report
     bench.report()
@@ -250,9 +244,7 @@ def main():
 
     for component, target in targets.items():
         # Find matching benchmark
-        matching = [
-            r for r in bench.results.values() if component.lower() in r["name"].lower()
-        ]
+        matching = [r for r in bench.results.values() if component.lower() in r["name"].lower()]
         if matching:
             actual = matching[0]["mean"] * 1000
             status = "✅ PASS" if actual < target else "❌ FAIL"

@@ -135,18 +135,14 @@ class TestSafeRollingOperation:
         """Test with unsupported operation"""
         df = pd.DataFrame({"close": [100, 101, 102, 103, 104]})
 
-        result = safe_rolling_operation(
-            df, "close", window=3, operation="invalid", default=-1
-        )
+        result = safe_rolling_operation(df, "close", window=3, operation="invalid", default=-1)
         assert result == -1
 
     def test_nan_result(self):
         """Test when rolling operation returns NaN"""
         df = pd.DataFrame({"close": [100, np.nan, np.nan, np.nan, 104]})
 
-        result = safe_rolling_operation(
-            df, "close", window=3, operation="mean", default=0.0
-        )
+        result = safe_rolling_operation(df, "close", window=3, operation="mean", default=0.0)
         assert result == 0.0  # Should return default when result is NaN
 
 
@@ -157,9 +153,7 @@ class TestValidateDataframeBasic:
         """Test with valid DataFrame"""
         df = pd.DataFrame({"close": [100, 101, 102], "volume": [1000, 1100, 1200]})
 
-        result = validate_dataframe_basic(
-            df, min_rows=2, required_columns=["close", "volume"]
-        )
+        result = validate_dataframe_basic(df, min_rows=2, required_columns=["close", "volume"])
         assert result is True
 
     def test_none_dataframe(self):
@@ -254,9 +248,7 @@ class TestErrorHandling:
 
         safe_get_latest(df, "close", default=0.0)
 
-        mock_logger.debug.assert_called_with(
-            "DataFrame is empty, returning default for close"
-        )
+        mock_logger.debug.assert_called_with("DataFrame is empty, returning default for close")
 
     def test_exception_in_safe_get_latest(self):
         """Test exception handling in safe_get_latest"""
@@ -284,12 +276,8 @@ class TestErrorHandling:
         df = pd.DataFrame({"close": [100, 101, 102]})
 
         # Mock rolling to raise exception
-        with patch.object(
-            df["close"], "rolling", side_effect=Exception("Rolling failed")
-        ):
-            result = safe_rolling_operation(
-                df, "close", window=2, operation="mean", default=-1
-            )
+        with patch.object(df["close"], "rolling", side_effect=Exception("Rolling failed")):
+            result = safe_rolling_operation(df, "close", window=2, operation="mean", default=-1)
             assert result == -1
 
 
@@ -335,9 +323,7 @@ class TestIntegration:
         assert safe_get_close_price(empty_df, default=0.0) == 0.0
 
         # DataFrame with NaN values
-        nan_df = pd.DataFrame(
-            {"close": [100, np.nan, 102], "volume": [1000, 1100, np.nan]}
-        )
+        nan_df = pd.DataFrame({"close": [100, np.nan, 102], "volume": [1000, 1100, np.nan]})
 
         assert validate_dataframe_basic(nan_df, min_rows=2)
         assert safe_get_volume(nan_df, default=0.0) == 0.0  # Latest is NaN
@@ -345,7 +331,5 @@ class TestIntegration:
         # DataFrame with missing columns
         partial_df = pd.DataFrame({"close": [100, 101, 102]})
 
-        assert not validate_dataframe_basic(
-            partial_df, required_columns=["close", "volume"]
-        )
+        assert not validate_dataframe_basic(partial_df, required_columns=["close", "volume"])
         assert safe_get_volume(partial_df, default=500.0) == 500.0

@@ -103,15 +103,23 @@ class ExitManagementService:
                 logger.warning(f"[{symbol}] Data validation failed")
                 return None
 
-            # Get current price
-            current_price = df.iloc[-1]["close"]
+            # Get current price safely
+            from utils.dataframe_utils import safe_get_latest
+
+            current_price = safe_get_latest(df, "close", 0)
+
+            if current_price <= 0:
+                logger.warning(f"[{symbol}] Invalid current price: {current_price}")
+                return None
 
             # ML signal với error handling
             ml_signal = None
             try:
                 ml_signal = self.ml_generator.analyze(df, vnindex_df)
-            except Exception:
-                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}")
+                if ml_signal is None:
+                    logger.debug(f"[{symbol}] ML analysis returned None")
+            except Exception as e:
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
                 # Tiếp tục với ml_signal = None
 
             # Check exit
@@ -142,9 +150,7 @@ class ExitManagementService:
             logger.error(f"[{symbol}] Error checking exit", exc_info=True)
             return None
 
-    async def execute_exit(
-        self, symbol: str, exit_decision: Dict, current_price: float
-    ) -> bool:
+    async def execute_exit(self, symbol: str, exit_decision: Dict, current_price: float) -> bool:
         """
         Execute an exit (full or partial)
 
@@ -160,8 +166,16 @@ class ExitManagementService:
             decision = exit_decision["decision"]
             pos_data = exit_decision["position"]
 
-            # Calculate P&L for circuit breaker
-            (current_price - pos_data["avg_price"]) * pos_data["shares"]
+            # Calculate P&L for circuit breaker recording
+            if pos_data["avg_price"] <= 0:
+                logger.error(
+                    f"[{symbol}] Invalid entry price: {pos_data['avg_price']}. "
+                    "Cannot calculate P&L."
+                )
+                return False
+
+            pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
+            pnl_pct = ((current_price - pos_data["avg_price"]) / pos_data["avg_price"]) * 100
 
             # Execute paper trade
             success, message, _ = self.paper_account.execute_sell(
@@ -173,6 +187,13 @@ class ExitManagementService:
 
             if success:
                 logger.info(f"✅ Exit executed: {symbol} - {message}")
+
+                # Record P&L for circuit breaker tracking
+                from src.services.risk_service import get_risk_service
+
+                risk_service = get_risk_service()
+                risk_service.record_trade(pnl_pct)
+                logger.debug(f"📊 Recorded exit P&L for {symbol}: {pnl_pct:.2f}%")
 
                 # Clear position tracking if full exit
                 if decision.exit_type == "FULL":

@@ -40,16 +40,14 @@ class TestPortfolioAnalyzer:
     @pytest.fixture
     def analyzer(self):
         """Create analyzer instance with mocked dependencies"""
-        with patch("src.portfolio.analyzer.MLSignalGenerator"), patch(
-            "src.portfolio.analyzer.ImprovedEntryLogic"
-        ), patch("src.portfolio.analyzer.ImprovedExitStrategy"), patch(
-            "src.portfolio.analyzer.EnhancedPositionSizer"
-        ), patch(
-            "src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"
-        ), patch(
-            "src.portfolio.analyzer.PortfolioOptimizer"
+        with (
+            patch("src.portfolio.analyzer.MLSignalGenerator"),
+            patch("src.portfolio.analyzer.ImprovedEntryLogic"),
+            patch("src.portfolio.analyzer.ImprovedExitStrategy"),
+            patch("src.portfolio.analyzer.EnhancedPositionSizer"),
+            patch("src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"),
+            patch("src.portfolio.analyzer.PortfolioOptimizer"),
         ):
-
             analyzer = PortfolioAnalyzer(portfolio_file="test_portfolio.json")
             return analyzer
 
@@ -64,16 +62,14 @@ class TestPortfolioAnalyzer:
 
     def test_initialization_default_file(self):
         """Test initialization with default portfolio file"""
-        with patch("src.portfolio.analyzer.MLSignalGenerator"), patch(
-            "src.portfolio.analyzer.ImprovedEntryLogic"
-        ), patch("src.portfolio.analyzer.ImprovedExitStrategy"), patch(
-            "src.portfolio.analyzer.EnhancedPositionSizer"
-        ), patch(
-            "src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"
-        ), patch(
-            "src.portfolio.analyzer.PortfolioOptimizer"
+        with (
+            patch("src.portfolio.analyzer.MLSignalGenerator"),
+            patch("src.portfolio.analyzer.ImprovedEntryLogic"),
+            patch("src.portfolio.analyzer.ImprovedExitStrategy"),
+            patch("src.portfolio.analyzer.EnhancedPositionSizer"),
+            patch("src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"),
+            patch("src.portfolio.analyzer.PortfolioOptimizer"),
         ):
-
             analyzer = PortfolioAnalyzer()
             assert analyzer.portfolio_file == "portfolio_status.json"
 
@@ -122,9 +118,7 @@ class TestPortfolioAnalyzer:
         mock_load_data.return_value = mock_df
 
         # Mock ML signal
-        analyzer.ml_generator.analyze = Mock(
-            return_value={"signal": "BUY", "confidence": 0.8}
-        )
+        analyzer.ml_generator.analyze = Mock(return_value={"signal": "BUY", "confidence": 0.8})
 
         # Mock exit decision
         mock_exit_decision = Mock()
@@ -173,9 +167,7 @@ class TestPortfolioAnalyzer:
     @patch("src.portfolio.analyzer.load_data")
     def test_analyze_current_portfolio_empty(self, mock_load_data, analyzer):
         """Test analyzing empty portfolio"""
-        analyzer.market_analyzer.analyze_market_regime = Mock(
-            return_value={"regime": "NEUTRAL"}
-        )
+        analyzer.market_analyzer.analyze_market_regime = Mock(return_value={"regime": "NEUTRAL"})
 
         result = analyzer.analyze_current_portfolio({})
 
@@ -205,13 +197,9 @@ class TestPortfolioAnalyzer:
         mock_load_data.return_value = mock_df
 
         # Mock dependencies
-        analyzer.market_analyzer.analyze_market_regime = Mock(
-            return_value={"regime": "BULLISH"}
-        )
+        analyzer.market_analyzer.analyze_market_regime = Mock(return_value={"regime": "BULLISH"})
 
-        analyzer.ml_generator.analyze = Mock(
-            return_value={"signal": "BUY", "confidence": 0.7}
-        )
+        analyzer.ml_generator.analyze = Mock(return_value={"signal": "BUY", "confidence": 0.7})
 
         mock_exit_decision = Mock()
         mock_exit_decision.should_exit = False

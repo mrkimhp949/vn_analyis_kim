@@ -89,9 +89,7 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
         logging.info("✅ Trading Orchestrator initialized.")
     except Exception:
         logging.critical("❌ Lỗi khởi tạo TradingOrchestrator", exc_info=True)
-        await bot_instance.send_message(
-            chat_id, "FATAL: Không thể khởi tạo Orchestrator"
-        )
+        await bot_instance.send_message(chat_id, "FATAL: Không thể khởi tạo Orchestrator")
         return
 
     # 3. Lấy trạng thái thị trường
@@ -153,9 +151,7 @@ if __name__ == "__main__":
     print("=" * 70 + "\n")
 
     # Thiết lập logging cơ bản để xem output
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     if not all([CHAT_ID, TELEGRAM_TOKEN]):
         print(

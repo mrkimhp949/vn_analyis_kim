@@ -98,18 +98,14 @@ def add_enhanced_features(
     # 9. PRICE MOMENTUM INDICATORS
     df["roc_5"] = ta.momentum.ROCIndicator(df["close"], window=5).roc()
     df["roc_10"] = ta.momentum.ROCIndicator(df["close"], window=10).roc()
-    df["stoch_k"] = ta.momentum.StochasticOscillator(
-        df["high"], df["low"], df["close"]
-    ).stoch()
+    df["stoch_k"] = ta.momentum.StochasticOscillator(df["high"], df["low"], df["close"]).stoch()
     df["stoch_d"] = ta.momentum.StochasticOscillator(
         df["high"], df["low"], df["close"]
     ).stoch_signal()
 
     # 10. VOLUME-PRICE RELATIONSHIP
     # OBV (On-Balance Volume)
-    df["obv"] = ta.volume.OnBalanceVolumeIndicator(
-        df["close"], df["volume"]
-    ).on_balance_volume()
+    df["obv"] = ta.volume.OnBalanceVolumeIndicator(df["close"], df["volume"]).on_balance_volume()
     df["obv_ema"] = df["obv"].ewm(span=20).mean()
     df["obv_signal"] = (df["obv"] > df["obv_ema"]).astype(int)
 
@@ -168,9 +164,7 @@ def add_enhanced_features(
                 merged["rs_momentum"] = merged["rs"].pct_change(10)
 
                 # Merge back
-                df = df.merge(
-                    merged[["time", "rs", "rs_momentum"]], on="time", how="left"
-                )
+                df = df.merge(merged[["time", "rs", "rs_momentum"]], on="time", how="left")
 
                 df["rs"].fillna(1.0, inplace=True)
                 df["rs_momentum"].fillna(0.0, inplace=True)
@@ -210,9 +204,7 @@ def add_enhanced_features(
     # Hammer/Hanging Man
     lower_shadow = df[["open", "close"]].min(axis=1) - df["low"]
     upper_shadow = df["high"] - df[["open", "close"]].max(axis=1)
-    df["is_hammer"] = ((lower_shadow > body * 2) & (upper_shadow < body * 0.5)).astype(
-        int
-    )
+    df["is_hammer"] = ((lower_shadow > body * 2) & (upper_shadow < body * 0.5)).astype(int)
 
     # Engulfing
     prev_body = abs(df["close"].shift(1) - df["open"].shift(1))
@@ -351,9 +343,7 @@ if __name__ == "__main__":
     # Check features
     feature_cols = get_feature_columns()
     print(f"📊 Total features: {len(feature_cols)}")
-    print(
-        f"📊 Features available: {sum(col in df_enhanced.columns for col in feature_cols)}"
-    )
+    print(f"📊 Features available: {sum(col in df_enhanced.columns for col in feature_cols)}")
 
     # Check for NaN
     nan_count = df_enhanced[feature_cols].isna().sum().sum()

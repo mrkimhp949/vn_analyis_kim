@@ -298,9 +298,7 @@ class BacktestEngine:
         days = (end_date - start_date).days
         years = days / 365.25
         annualized_return = (
-            ((final_capital / self.initial_capital) ** (1 / years) - 1) * 100
-            if years > 0
-            else 0
+            ((final_capital / self.initial_capital) ** (1 / years) - 1) * 100 if years > 0 else 0
         )
 
         # Sharpe ratio (assuming risk-free rate = 0)
@@ -321,9 +319,7 @@ class BacktestEngine:
         drawdown = equity_series - rolling_max
         max_drawdown = drawdown.min()
         max_drawdown_pct = (
-            (max_drawdown / rolling_max[drawdown.idxmin()]) * 100
-            if len(rolling_max) > 0
-            else 0
+            (max_drawdown / rolling_max[drawdown.idxmin()]) * 100 if len(rolling_max) > 0 else 0
         )
 
         # Trade statistics
@@ -390,14 +386,10 @@ class BacktestEngine:
         print("💰 Final Capital: {result.final_capital:,.0f} VND")
 
         print("\n📊 Performance:")
-        print(
-            f"  Total Return: {result.total_return:+,.0f} VND ({result.total_return_pct:+.2f}%)"
-        )
+        print(f"  Total Return: {result.total_return:+,.0f} VND ({result.total_return_pct:+.2f}%)")
         print("  Annualized Return: {result.annualized_return:.2f}%")
         print(f"  Sharpe Ratio: {result.sharpe_ratio:.2f}")
-        print(
-            f"  Max Drawdown: {result.max_drawdown:,.0f} VND ({result.max_drawdown_pct:.2f}%)"
-        )
+        print(f"  Max Drawdown: {result.max_drawdown:,.0f} VND ({result.max_drawdown_pct:.2f}%)")
 
         print("\n📈 Trade Statistics:")
         print(f"  Total Trades: {result.total_trades}")

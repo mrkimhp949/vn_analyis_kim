@@ -15,9 +15,7 @@ from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
 from src.ml.models.ensemble import EnhancedMLPredictor
 from sklearn.model_selection import train_test_split
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -51,9 +49,7 @@ def load_training_data(
     # Load symbols
     for i, symbol in enumerate(symbols[:max_symbols], 1):
         try:
-            logger.info(
-                f"   [{i}/{min(len(symbols), max_symbols)}] Loading {symbol}..."
-            )
+            logger.info(f"   [{i}/{min(len(symbols), max_symbols)}] Loading {symbol}...")
             df = load_data(symbol, lookback=lookback)
 
             if df.empty or len(df) < 100:
@@ -85,9 +81,7 @@ def load_training_data(
     return combined_df
 
 
-def prepare_training_data(
-    df: pd.DataFrame, test_size: float = 0.2, val_size: float = 0.1
-):
+def prepare_training_data(df: pd.DataFrame, test_size: float = 0.2, val_size: float = 0.1):
     """
     Prepare data for training
 
@@ -198,9 +192,7 @@ def train_advanced_models(
         print("=" * 70)
 
         avg_importance = predictor.feature_importance.get("average", {})
-        sorted_features = sorted(
-            avg_importance.items(), key=lambda x: x[1], reverse=True
-        )
+        sorted_features = sorted(avg_importance.items(), key=lambda x: x[1], reverse=True)
 
         for i, (feature, importance) in enumerate(sorted_features[:15], 1):
             print(f"{i:2d}. {feature:25s}: {importance:.4f}")

@@ -55,9 +55,7 @@ class IncrementalCache:
         """Lấy key trong metadata"""
         return symbol.upper()
 
-    def get_cached_data(
-        self, symbol: str, lookback: int = 200
-    ) -> Optional[pd.DataFrame]:
+    def get_cached_data(self, symbol: str, lookback: int = 200) -> Optional[pd.DataFrame]:
         """
         Lấy dữ liệu từ cache
 
@@ -70,9 +68,7 @@ class IncrementalCache:
             return None
 
         cache_info = self.metadata[symbol_key]
-        last_update = datetime.fromisoformat(
-            cache_info.get("last_update", "2000-01-01")
-        )
+        last_update = datetime.fromisoformat(cache_info.get("last_update", "2000-01-01"))
 
         # Kiểm tra cache có còn fresh không (trong vòng 1 ngày)
         if (datetime.now() - last_update).days > 1:
@@ -85,9 +81,7 @@ class IncrementalCache:
 
         # Load và merge các cache files
         dfs = []
-        for date in sorted(cached_dates)[
-            -lookback // 30 :
-        ]:  # Load khoảng 30 ngày gần nhất
+        for date in sorted(cached_dates)[-lookback // 30 :]:  # Load khoảng 30 ngày gần nhất
             cache_file = self._get_cache_file(symbol, date)
             if os.path.exists(cache_file):
                 try:
@@ -112,9 +106,7 @@ class IncrementalCache:
 
         return result
 
-    def update_cache(
-        self, symbol: str, new_data: pd.DataFrame, incremental: bool = True
-    ) -> bool:
+    def update_cache(self, symbol: str, new_data: pd.DataFrame, incremental: bool = True) -> bool:
         """
         Cập nhật cache với dữ liệu mới
 

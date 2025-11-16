@@ -10,9 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 # Add project root to Python path for direct execution
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -129,9 +127,7 @@ def _run_weekly_model_retraining():
 # ═══════════════════════════════════════════════════════════
 
 
-def _check_weekly_retrain(
-    now, current_weekday, current_hour, current_minute, last_model_retrain
-):
+def _check_weekly_retrain(now, current_weekday, current_hour, current_minute, last_model_retrain):
     """Check and run weekly model retraining on Sunday at 20:00"""
     if (
         current_weekday == 6
@@ -191,9 +187,7 @@ def _check_signal_scan(now, current_hour, current_minute, last_signal_scan):
     return False, None, last_signal_scan
 
 
-def _check_portfolio(
-    now, current_weekday, current_hour, current_minute, last_portfolio_check
-):
+def _check_portfolio(now, current_weekday, current_hour, current_minute, last_portfolio_check):
     """Check and send portfolio update on Friday at 14:45"""
     from src.market.schedule import is_trading_day
 
@@ -600,6 +594,40 @@ async def metrics():
     return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
 
 
+@app.get("/health/portfolio")
+@rate_limit_relaxed
+async def health_portfolio(request: Request):
+    """Portfolio health: DB path, positions count, and quick totals."""
+    from datetime import datetime
+
+    try:
+        from src.portfolio.manager import get_portfolio_manager
+        from src.data.database import get_db
+
+        pm = get_portfolio_manager()
+        db = get_db()
+
+        positions = pm.get_positions()
+        portfolio = pm.get_portfolio_value()
+
+        resp = {
+            "status": "ok",
+            "timestamp": datetime.now(tz).isoformat(),
+            "db_path": str(db.db_path),
+            "num_positions": len(positions),
+            "symbols": sorted(list(positions.keys()))[:20],
+            "totals": {
+                "total_value": portfolio.get("total_value", 0),
+                "total_cost": portfolio.get("total_cost", 0),
+                "pnl": portfolio.get("pnl", 0),
+                "pnl_percent": portfolio.get("pnl_percent", 0),
+            },
+        }
+        return JSONResponse(resp)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/run-bot")
 @rate_limit_strict
 async def run_bot(request: Request, api_key: str = Security(verify_api_key)):
@@ -689,11 +717,35 @@ async def add_to_portfolio(symbol: str, shares: int, price: float):
             return {"status": "error", "message": str(e)}
 
         manager = PortfolioManager()
-        manager.add_stock(symbol, shares, price)
+
+        # Check if symbol already has position (for averaging up)
+        existing_positions = manager.get_positions()
+        symbol_has_position = symbol in existing_positions
+
+        manager.add_position(
+            symbol=symbol,
+            shares=shares,
+            entry_price=price,
+            metadata={"source": "api_add_to_portfolio"},
+        )
+
+        # Get updated position info
+        updated_positions = manager.get_positions()
+        if symbol in updated_positions:
+            pos = updated_positions[symbol]
+            message = (
+                f"Đã {'mua thêm' if symbol_has_position else 'thêm'} {shares} CP {symbol} "
+                f"@ {price:,.0f} VNĐ. "
+                f"Tổng: {pos['shares']} CP @ {pos['avg_price']:,.0f} VNĐ TB"
+                if symbol_has_position
+                else f"Đã thêm {shares} CP {symbol} vào portfolio"
+            )
+        else:
+            message = f"Đã thêm {shares} CP {symbol} vào portfolio"
 
         return {
             "status": "success",
-            "message": f"Đã thêm {shares} CP {symbol} vào portfolio",
+            "message": message,
             "symbol": symbol,
             "shares": shares,
             "price": price,

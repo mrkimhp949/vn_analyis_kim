@@ -193,50 +193,72 @@ class PaperTradingAccount:
         if price is None:
             try:
                 from src.data.loader import load_data
-                from utils.dataframe_utils import safe_get_latest
+                from src.utils.dataframe_utils import safe_get_latest
 
                 df = load_data(symbol, lookback=5, use_cache=True)
-                if df.empty:
-                    return False, f"Không thể lấy giá {symbol}", None
-                price = safe_get_latest(df, "close", 0)
+                if df is None or df.empty:
+                    # Fallback: use average entry price if market data unavailable
+                    price = position.get("avg_price", 0)
+                else:
+                    price = safe_get_latest(df, "close", 0)
             except Exception:
-                return False, f"Lỗi lấy giá {symbol}", None
+                # Fallback: use average entry price if fetch fails
+                price = position.get("avg_price", 0)
+
+            if price is None or price <= 0:
+                return False, f"Không thể lấy giá {symbol} (hãy cung cấp PRICE)", None
 
         # Apply slippage
         execution_price = price * (1 - self.slippage_pct)
 
         try:
-            # Determine shares to sell for logging
-            if exit_type == "FULL":
-                shares_to_sell = available_shares
-            else:
-                try:
-                    percentage = (
-                        float(exit_type.replace("PARTIAL_", "").replace("%", ""))
-                        / 100.0
-                    )
-                    shares_to_sell = int(available_shares * percentage)
-                except (ValueError, TypeError):
-                    shares_to_sell = available_shares  # Fallback to full sell on error
-
-            # Calculate proceeds for cash update
-            gross_proceeds = execution_price * shares_to_sell
-            commission = gross_proceeds * self.commission_rate
-            net_proceeds = gross_proceeds - commission
-            self.account["cash"] += net_proceeds
-
-            # Use PortfolioManager to handle the database logic
-            self.portfolio_manager.handle_exit(
-                symbol=symbol,
-                exit_price=execution_price,
-                exit_type=exit_type,
-                reason=reason,
+            # Determine shares to sell and perform DB update
+            direct_partial = (
+                shares is not None and isinstance(shares, int) and 0 < shares < available_shares
             )
+
+            if direct_partial:
+                shares_to_sell = shares
+                # Update cash based on exact shares
+                gross_proceeds = execution_price * shares_to_sell
+                commission = gross_proceeds * self.commission_rate
+                net_proceeds = gross_proceeds - commission
+                self.account["cash"] += net_proceeds
+
+                # Use PortfolioManager to reduce exact shares
+                self.portfolio_manager.reduce_position(
+                    symbol=symbol,
+                    shares_to_sell=shares_to_sell,
+                    exit_price=execution_price,
+                    reason=reason or "Manual partial sell",
+                )
+            else:
+                # Derive shares_to_sell via exit_type
+                if exit_type == "FULL" or shares is None or shares >= available_shares:
+                    shares_to_sell = available_shares
+                    exit_type = "FULL"
+                else:
+                    # If user passed shares >= available, treat as FULL
+                    shares_to_sell = available_shares
+                    exit_type = "FULL"
+
+                gross_proceeds = execution_price * shares_to_sell
+                commission = gross_proceeds * self.commission_rate
+                net_proceeds = gross_proceeds - commission
+                self.account["cash"] += net_proceeds
+
+                # Delegate to PortfolioManager to handle exit
+                self.portfolio_manager.handle_exit(
+                    symbol=symbol,
+                    exit_price=execution_price,
+                    exit_type=exit_type,
+                    reason=reason,
+                )
 
             # Create a representative trade object for logging
             trade = PaperTrade(
                 symbol=symbol,
-                action=f"SELL_{exit_type}",
+                action=(f"SELL_PARTIAL" if direct_partial else f"SELL_{exit_type}"),
                 shares=shares_to_sell,
                 price=execution_price,
                 timestamp=datetime.now().isoformat(),
@@ -247,7 +269,7 @@ class PaperTradingAccount:
 
             return (
                 True,
-                f"✅ Xử lý lệnh bán {exit_type} cho {symbol} @ {execution_price:,.0f} VNĐ",
+                f"✅ Xử lý lệnh bán {'PARTIAL' if direct_partial else exit_type} cho {symbol} @ {execution_price:,.0f} VNĐ",
                 trade,
             )
 
@@ -317,8 +339,7 @@ class PaperTradingAccount:
         sell_trades = [t for t in trades if "SELL" in t.get("action", "")]
 
         total_commission = sum(
-            (t.get("price", 0) * t.get("shares", 0) * self.commission_rate)
-            for t in trades
+            (t.get("price", 0) * t.get("shares", 0) * self.commission_rate) for t in trades
         )
 
         portfolio_value = self.get_portfolio_value()

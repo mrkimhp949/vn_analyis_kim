@@ -229,9 +229,7 @@ class TestLivePortfolioMonitor:
 
     def test_monitor_initialization(self):
         """Test monitor initializes correctly"""
-        monitor = LivePortfolioMonitor(
-            portfolio_manager=self.mock_portfolio, enable_alerts=True
-        )
+        monitor = LivePortfolioMonitor(portfolio_manager=self.mock_portfolio, enable_alerts=True)
 
         assert monitor.portfolio is not None
         assert monitor.price_feed is not None
@@ -280,9 +278,7 @@ class TestLivePortfolioMonitor:
 
     def test_alerts_disabled(self):
         """Test alerts can be disabled"""
-        monitor = LivePortfolioMonitor(
-            portfolio_manager=self.mock_portfolio, enable_alerts=False
-        )
+        monitor = LivePortfolioMonitor(portfolio_manager=self.mock_portfolio, enable_alerts=False)
 
         callback_called = [False]
 

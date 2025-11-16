@@ -43,9 +43,7 @@ class NotificationService:
                 f"Thời gian: {datetime.now().strftime('%H:%M %d/%m/%Y')}"
             )
 
-            await self.bot.send_message(
-                chat_id=self.chat_id, text=message, parse_mode="Markdown"
-            )
+            await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")
         except Exception:
             logger.error("Error sending scan start")
 
@@ -78,9 +76,7 @@ class NotificationService:
                 f"**Lý do:** {', '.join(signal.reasons[:2])}"
             )
 
-            await self.bot.send_message(
-                chat_id=self.chat_id, text=message, parse_mode="Markdown"
-            )
+            await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")
         except Exception:
             logger.error("Error sending entry signal")
 
@@ -105,9 +101,7 @@ class NotificationService:
                 f"{decision.message}"
             )
 
-            await self.bot.send_message(
-                chat_id=self.chat_id, text=message, parse_mode="Markdown"
-            )
+            await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")
         except Exception:
             logger.error("Error sending exit signal")
 
@@ -134,9 +128,7 @@ class NotificationService:
             if portfolio_summary:
                 message += f"\n{portfolio_summary}"
 
-            await self.bot.send_message(
-                chat_id=self.chat_id, text=message, parse_mode="Markdown"
-            )
+            await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")
         except Exception:
             logger.error("Error sending summary")
 

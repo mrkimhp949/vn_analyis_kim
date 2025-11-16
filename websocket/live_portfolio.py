@@ -54,7 +54,6 @@ class LivePortfolioMonitor:
         websocket_config: WebSocketConfig = None,
         enable_alerts: bool = True,
     ):
-
         self.portfolio = portfolio_manager or PortfolioManager()
         self.price_feed = PriceFeedClient(websocket_config)
         self.exit_logic = ImprovedExitStrategy()
@@ -259,9 +258,7 @@ class LivePortfolioMonitor:
                 shares = position["shares"]
                 current_value = live_price.price * shares
                 position_pnl = (live_price.price - entry_price) * shares
-                position_pnl_pct = (
-                    (live_price.price - entry_price) / entry_price
-                ) * 100
+                position_pnl_pct = ((live_price.price - entry_price) / entry_price) * 100
 
                 summary["positions"][symbol] = {
                     "shares": shares,
@@ -280,9 +277,7 @@ class LivePortfolioMonitor:
         summary = self.get_live_summary()
 
         print("\n" + "=" * 80)
-        print(
-            f"LIVE PORTFOLIO SUMMARY - {summary['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}"
-        )
+        print(f"LIVE PORTFOLIO SUMMARY - {summary['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 80)
 
         print(f"\n📊 Portfolio Value: {summary['portfolio_value']:,.0f} VND")
@@ -324,9 +319,7 @@ def console_alert(alert: PositionAlert):
 
 if __name__ == "__main__":
     # Example usage
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     # Create monitor
     monitor = LivePortfolioMonitor()
