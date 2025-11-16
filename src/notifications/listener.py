@@ -609,7 +609,9 @@ async def generate_daily_summary() -> str:
         if num_positions > 0:
             msg_parts.append(f"💰 Giá trị: {total_value:,.0f} VNĐ\n")
             msg_parts.append(f"💵 Vốn: {total_cost:,.0f} VNĐ\n")
-            msg_parts.append(f"{'📈' if pnl >= 0 else '📉'} P&L: {pnl:+,.0f} VNĐ ({pnl_pct:+.2f}%)\n")
+            msg_parts.append(
+                f"{'📈' if pnl >= 0 else '📉'} P&L: {pnl:+,.0f} VNĐ ({pnl_pct:+.2f}%)\n"
+            )
             msg_parts.append(f"📊 Số mã: {num_positions}\n")
 
             # Chi tiết theo từng mã (dựa trên giá hiện có trong metadata nếu có)

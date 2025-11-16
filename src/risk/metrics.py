@@ -482,9 +482,7 @@ def calculate_portfolio_correlation_risk(
 
     # Recommendation
     if avg_correlation > max_avg_correlation:
-        recommendation = (
-            f"⚠️ Portfolio có correlation cao ({avg_correlation:.2f}). Nên đa dạng hóa."
-        )
+        recommendation = f"⚠️ Portfolio có correlation cao ({avg_correlation:.2f}). Nên đa dạng hóa."
     elif len(high_corr_pairs) > 0:
         recommendation = f"⚠️ Có {len(high_corr_pairs)} cặp mã có correlation cao. Nên xem xét."
     else:

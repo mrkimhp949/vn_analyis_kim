@@ -40,14 +40,13 @@ class TestPortfolioAnalyzer:
     @pytest.fixture
     def analyzer(self):
         """Create analyzer instance with mocked dependencies"""
-        with patch("src.portfolio.analyzer.MLSignalGenerator"), patch(
-            "src.portfolio.analyzer.ImprovedEntryLogic"
-        ), patch("src.portfolio.analyzer.ImprovedExitStrategy"), patch(
-            "src.portfolio.analyzer.EnhancedPositionSizer"
-        ), patch(
-            "src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"
-        ), patch(
-            "src.portfolio.analyzer.PortfolioOptimizer"
+        with (
+            patch("src.portfolio.analyzer.MLSignalGenerator"),
+            patch("src.portfolio.analyzer.ImprovedEntryLogic"),
+            patch("src.portfolio.analyzer.ImprovedExitStrategy"),
+            patch("src.portfolio.analyzer.EnhancedPositionSizer"),
+            patch("src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"),
+            patch("src.portfolio.analyzer.PortfolioOptimizer"),
         ):
             analyzer = PortfolioAnalyzer(portfolio_file="test_portfolio.json")
             return analyzer
@@ -63,14 +62,13 @@ class TestPortfolioAnalyzer:
 
     def test_initialization_default_file(self):
         """Test initialization with default portfolio file"""
-        with patch("src.portfolio.analyzer.MLSignalGenerator"), patch(
-            "src.portfolio.analyzer.ImprovedEntryLogic"
-        ), patch("src.portfolio.analyzer.ImprovedExitStrategy"), patch(
-            "src.portfolio.analyzer.EnhancedPositionSizer"
-        ), patch(
-            "src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"
-        ), patch(
-            "src.portfolio.analyzer.PortfolioOptimizer"
+        with (
+            patch("src.portfolio.analyzer.MLSignalGenerator"),
+            patch("src.portfolio.analyzer.ImprovedEntryLogic"),
+            patch("src.portfolio.analyzer.ImprovedExitStrategy"),
+            patch("src.portfolio.analyzer.EnhancedPositionSizer"),
+            patch("src.portfolio.analyzer.ProxyMarketRegimeAnalyzer"),
+            patch("src.portfolio.analyzer.PortfolioOptimizer"),
         ):
             analyzer = PortfolioAnalyzer()
             assert analyzer.portfolio_file == "portfolio_status.json"

@@ -183,9 +183,7 @@ class TradingOrchestrator:
         msg = f"🎯 *TÍN HIỆU VÀO LỆNH - {symbol}*\n\n"
 
         if market_regime:
-            msg += (
-                f"📊 *Market:* {market_regime['regime']} ({market_regime.get('confidence', 0)}%)\n\n"
-            )
+            msg += f"📊 *Market:* {market_regime['regime']} ({market_regime.get('confidence', 0)}%)\n\n"
 
         msg += f"💪 *Signal:* {entry_signal.strength.name}\n"
         msg += f"🎲 *Confidence:* {entry_signal.confidence}%\n"
@@ -398,7 +396,7 @@ class TradingOrchestrator:
                 try:
                     ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
                 except Exception as e:
-                    logging.debug(f"ML analysis failed for {symbol}: {str(e)}")
+                    logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
                     # Tiếp tục với ml_signal = None
 
             exit_decision = self.exit_strategy.check_exit(
@@ -519,7 +517,7 @@ class TradingOrchestrator:
                 try:
                     ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
                 except Exception as e:
-                    logging.debug(f"ML analysis failed for {symbol}: {str(e)}")
+                    logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
                     # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý
 
             # 1. Entry Logic with validation
@@ -703,7 +701,9 @@ class TradingOrchestrator:
 
         # Format confidence với emoji dựa trên mức độ
         confidence_emoji = (
-            "🟢" if entry_signal.confidence >= 70 else "🟡" if entry_signal.confidence >= 50 else "🔴"
+            "🟢"
+            if entry_signal.confidence >= 70
+            else "🟡" if entry_signal.confidence >= 50 else "🔴"
         )
 
         message = (

@@ -48,9 +48,11 @@ class TestVietnameseSentimentAnalyzerInitialization:
         mock_model.config = mock_config
         mock_pipeline = Mock()
 
-        with patch("transformers.AutoTokenizer") as mock_auto_tokenizer, patch(
-            "transformers.AutoModelForSequenceClassification"
-        ) as mock_auto_model, patch("transformers.pipeline") as mock_pipeline_func:
+        with (
+            patch("transformers.AutoTokenizer") as mock_auto_tokenizer,
+            patch("transformers.AutoModelForSequenceClassification") as mock_auto_model,
+            patch("transformers.pipeline") as mock_pipeline_func,
+        ):
             mock_auto_tokenizer.from_pretrained.return_value = mock_tokenizer
             mock_auto_model.from_pretrained.return_value = mock_model
             mock_pipeline_func.return_value = mock_pipeline
@@ -84,9 +86,11 @@ class TestVietnameseSentimentAnalyzerInitialization:
         mock_model.config = mock_config
         mock_pipeline = Mock()
 
-        with patch("transformers.AutoTokenizer") as mock_auto_tokenizer, patch(
-            "transformers.AutoModelForSequenceClassification"
-        ) as mock_auto_model, patch("transformers.pipeline") as mock_pipeline_func:
+        with (
+            patch("transformers.AutoTokenizer") as mock_auto_tokenizer,
+            patch("transformers.AutoModelForSequenceClassification") as mock_auto_model,
+            patch("transformers.pipeline") as mock_pipeline_func,
+        ):
             # First call (custom model) fails
             mock_auto_tokenizer.from_pretrained.side_effect = [
                 Exception("Custom model not found"),

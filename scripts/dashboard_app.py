@@ -497,7 +497,9 @@ elif page == "Settings":
 
     status_color = {"healthy": "🟢", "degraded": "🟡", "unhealthy": "🔴"}
 
-    st.markdown(f"### {status_color.get(health['status'], '⚪')} Status: {health['status'].upper()}")
+    st.markdown(
+        f"### {status_color.get(health['status'], '⚪')} Status: {health['status'].upper()}"
+    )
 
     col1, col2 = st.columns(2)
 

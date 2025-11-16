@@ -324,10 +324,11 @@ class TestEnsembleTrainer:
 
     def test_train_logs_info_messages(self, trainer, sample_data, caplog):
         """Test that training logs appropriate info messages"""
-        with patch("ml_pipeline.model_trainer.TimeSeriesSplit") as mock_tscv, patch(
-            "ml_pipeline.model_trainer.RandomForestClassifier"
-        ), patch("ml_pipeline.model_trainer.GradientBoostingClassifier"), patch(
-            "ml_pipeline.model_trainer.StandardScaler"
+        with (
+            patch("ml_pipeline.model_trainer.TimeSeriesSplit") as mock_tscv,
+            patch("ml_pipeline.model_trainer.RandomForestClassifier"),
+            patch("ml_pipeline.model_trainer.GradientBoostingClassifier"),
+            patch("ml_pipeline.model_trainer.StandardScaler"),
         ):
             # Mock minimal setup
             mock_split_instance = Mock()

@@ -8,6 +8,7 @@ Usage (programmatic):
 Usage (CLI):
     python -m src.utils.db_maintenance purge-tests
 """
+
 import os
 import sqlite3
 from pathlib import Path

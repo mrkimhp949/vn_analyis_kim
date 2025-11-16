@@ -105,9 +105,11 @@ class EntrySignalService:
     ) -> Optional[Dict]:
         """Scan a single ticker for entry signal"""
         try:
+            # Skip if already in portfolio or pending (align with tests)
+            if symbol in existing_symbols:
+                return None
+
             # Skip only if pending (being processed)
-            # ENHANCED: Don't skip if already in portfolio - we still want to generate signals
-            # The actual buy execution will check if symbol already has a position
             if self.portfolio_lock.is_pending(symbol):
                 logger.debug(f"[{symbol}] Đang pending, skip")
                 return None
@@ -210,27 +212,35 @@ class EntrySignalService:
             position_size = sig.get("position_size", None)
 
             # Base score: confidence * strength (weighted 50%)
-            base_score = (
-                (entry_signal.confidence / 100.0) * (entry_signal.strength.value / 5.0) * 0.5
-            )
+            try:
+                confidence = float(getattr(entry_signal, "confidence", 0) or 0)
+            except Exception:
+                confidence = 0.0
+            try:
+                strength_value = float(
+                    getattr(getattr(entry_signal, "strength", None), "value", 0) or 0
+                )
+            except Exception:
+                strength_value = 0.0
+            base_score = (confidence / 100.0) * (strength_value / 5.0) * 0.5
 
             # Risk/reward bonus (weighted 25%)
             # Calculate R:R from entry signal (entry price, stop loss, take profit)
             rr_score = 0.0
+            entry_price = float(getattr(entry_signal, "entry_price", 0) or 0)
+            stop_loss = float(getattr(entry_signal, "stop_loss", 0) or 0)
+            take_profits = getattr(entry_signal, "take_profit_targets", None)
             if (
-                entry_signal.entry_price > 0
-                and entry_signal.stop_loss > 0
-                and len(entry_signal.take_profit_targets) > 0
+                take_profits
+                and isinstance(take_profits, (list, tuple))
+                and entry_price > 0
+                and stop_loss > 0
             ):
-                risk = abs(entry_signal.entry_price - entry_signal.stop_loss)
+                risk = abs(entry_price - stop_loss)
                 if risk > 0:
                     # Use TP2 (index 1) as target, or TP1 if TP2 not available
-                    tp_target = (
-                        entry_signal.take_profit_targets[1]
-                        if len(entry_signal.take_profit_targets) > 1
-                        else entry_signal.take_profit_targets[0]
-                    )
-                    reward = abs(tp_target - entry_signal.entry_price)
+                    tp_target = take_profits[1] if len(take_profits) > 1 else take_profits[0]
+                    reward = abs(float(tp_target) - entry_price)
                     rr_ratio = reward / risk if risk > 0 else 0
                     # Normalize R:R to 0-0.25 score (2:1 = 0.1, 5:1 = 0.25)
                     rr_score = min(rr_ratio / 5.0, 1.0) * 0.25
@@ -238,18 +248,32 @@ class EntrySignalService:
             # Position size quality bonus (weighted 10%)
             # Larger positions with valid risk indicate stronger conviction
             position_bonus = 0.0
-            if position_size and position_size.shares > 0 and position_size.risk_percent > 0:
-                # Score based on position size being meaningful but not excessive
-                if 0.05 <= position_size.position_percent <= 0.15:  # 5-15% range
-                    position_bonus = 0.10
-                elif position_size.position_percent > 0.15:
-                    position_bonus = 0.05  # Slightly penalize oversized positions
+            try:
+                if (
+                    position_size
+                    and int(getattr(position_size, "shares", 0) or 0) > 0
+                    and float(getattr(position_size, "risk_percent", 0) or 0) > 0
+                ):
+                    position_percent = float(getattr(position_size, "position_percent", 0) or 0)
+                    # Score based on position size being meaningful but not excessive
+                    if 0.05 <= position_percent <= 0.15:  # 5-15% range
+                        position_bonus = 0.10
+                    elif position_percent > 0.15:
+                        position_bonus = 0.05  # Slightly penalize oversized positions
+            except Exception:
+                position_bonus = 0.0
 
             # Reasons bonus (weighted 10%)
-            reasons_bonus = min(len(entry_signal.reasons) / 8.0, 1.0) * 0.10
+            reasons = getattr(entry_signal, "reasons", []) or []
+            if not isinstance(reasons, (list, tuple)):
+                reasons = []
+            reasons_bonus = min(len(reasons) / 8.0, 1.0) * 0.10
 
             # Warnings penalty (weighted 5%)
-            warnings_penalty = max(0, 1.0 - (len(entry_signal.warnings) / 5.0)) * 0.05
+            warnings = getattr(entry_signal, "warnings", []) or []
+            if not isinstance(warnings, (list, tuple)):
+                warnings = []
+            warnings_penalty = max(0, 1.0 - (len(warnings) / 5.0)) * 0.05
 
             # Combine scores
             total_score = base_score + rr_score + position_bonus + reasons_bonus + warnings_penalty

@@ -253,9 +253,7 @@ class MLPredictor:
                 # CRITICAL: No models found
                 logger.critical(
                     "\n" + "=" * 70 + "\n"
-                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
-                    + "=" * 70
-                    + "\n"
+                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
                     f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
                     "\n"
                     "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"

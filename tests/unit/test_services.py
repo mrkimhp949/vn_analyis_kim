@@ -23,9 +23,11 @@ class TestRiskManagementService:
     @pytest.fixture
     def risk_service(self):
         """Create risk service with mocked dependencies"""
-        with patch("src.services.risk_service.get_circuit_breaker"), patch(
-            "src.services.risk_service.get_emergency_stop"
-        ), patch("src.services.risk_service.get_portfolio_manager"):
+        with (
+            patch("src.services.risk_service.get_circuit_breaker"),
+            patch("src.services.risk_service.get_emergency_stop"),
+            patch("src.services.risk_service.get_portfolio_manager"),
+        ):
             service = RiskManagementService()
 
             # Mock circuit breaker
@@ -124,10 +126,11 @@ class TestEntrySignalService:
     @pytest.fixture
     def entry_service(self):
         """Create entry service with mocked dependencies"""
-        with patch("src.services.entry_service.EnhancedMLSignalGenerator"), patch(
-            "src.services.entry_service.ImprovedEntryLogic"
-        ), patch("src.services.entry_service.EnhancedPositionSizer"), patch(
-            "src.services.entry_service.get_portfolio_lock"
+        with (
+            patch("src.services.entry_service.EnhancedMLSignalGenerator"),
+            patch("src.services.entry_service.ImprovedEntryLogic"),
+            patch("src.services.entry_service.EnhancedPositionSizer"),
+            patch("src.services.entry_service.get_portfolio_lock"),
         ):
             service = EntrySignalService()
 
@@ -164,8 +167,9 @@ class TestEntrySignalService:
     @pytest.mark.asyncio
     async def test_scan_single_ticker_success(self, entry_service):
         """Test scanning a single ticker successfully"""
-        with patch("src.services.entry_service.load_data") as mock_load, patch(
-            "src.services.entry_service.DataValidator"
+        with (
+            patch("src.services.entry_service.load_data") as mock_load,
+            patch("src.services.entry_service.DataValidator"),
         ):
             # Mock data
             mock_df = pd.DataFrame(
@@ -227,10 +231,11 @@ class TestExitManagementService:
     @pytest.fixture
     def exit_service(self):
         """Create exit service with mocked dependencies"""
-        with patch("src.services.exit_service.ImprovedExitStrategy"), patch(
-            "src.services.exit_service.EnhancedMLSignalGenerator"
-        ), patch("src.services.exit_service.get_portfolio_manager"), patch(
-            "src.services.exit_service.get_paper_account"
+        with (
+            patch("src.services.exit_service.ImprovedExitStrategy"),
+            patch("src.services.exit_service.EnhancedMLSignalGenerator"),
+            patch("src.services.exit_service.get_portfolio_manager"),
+            patch("src.services.exit_service.get_paper_account"),
         ):
             service = ExitManagementService()
 
@@ -265,8 +270,9 @@ class TestExitManagementService:
     @pytest.mark.asyncio
     async def test_check_single_position_exit(self, exit_service):
         """Test checking a single position for exit"""
-        with patch("src.services.exit_service.load_data") as mock_load, patch(
-            "src.services.exit_service.DataValidator"
+        with (
+            patch("src.services.exit_service.load_data") as mock_load,
+            patch("src.services.exit_service.DataValidator"),
         ):
             # Mock data
             mock_df = pd.DataFrame(
