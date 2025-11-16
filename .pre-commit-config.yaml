@@ -20,11 +20,11 @@ repos:
 
   # Python code formatting
   - repo: https://github.com/psf/black
-    rev: 23.12.1
+    rev: 24.8.0
     hooks:
       - id: black
         language_version: python3.11
-        args: ['--line-length=100']
+        args: ['--config', 'pyproject.toml']
 
   # Import sorting
   - repo: https://github.com/pycqa/isort

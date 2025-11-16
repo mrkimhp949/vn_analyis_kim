@@ -211,24 +211,34 @@ class EntrySignalService:
             entry_signal = sig["signal"]
             position_size = sig.get("position_size", None)
 
+            def to_float(val, default=0.0):
+                try:
+                    if isinstance(val, (int, float)):
+                        return float(val)
+                    # Avoid coercing unittest.mock objects
+                    import numbers
+
+                    if isinstance(val, numbers.Number):
+                        return float(val)
+                    return default
+                except Exception:
+                    return default
+
             # Base score: confidence * strength (weighted 50%)
-            try:
-                confidence = float(getattr(entry_signal, "confidence", 0) or 0)
-            except Exception:
-                confidence = 0.0
-            try:
-                strength_value = float(
-                    getattr(getattr(entry_signal, "strength", None), "value", 0) or 0
-                )
-            except Exception:
-                strength_value = 0.0
+            confidence = to_float(getattr(entry_signal, "confidence", 0), 0.0)
+            strength = getattr(entry_signal, "strength", None)
+            strength_value = to_float(
+                getattr(strength, "value", 0) if strength is not None else 0, 0.0
+            )
             base_score = (confidence / 100.0) * (strength_value / 5.0) * 0.5
 
             # Risk/reward bonus (weighted 25%)
             # Calculate R:R from entry signal (entry price, stop loss, take profit)
             rr_score = 0.0
-            entry_price = float(getattr(entry_signal, "entry_price", 0) or 0)
-            stop_loss = float(getattr(entry_signal, "stop_loss", 0) or 0)
+            raw_entry = getattr(entry_signal, "entry_price", 0)
+            entry_price = to_float(raw_entry, 0.0)
+            raw_sl = getattr(entry_signal, "stop_loss", 0)
+            stop_loss = to_float(raw_sl, 0.0)
             take_profits = getattr(entry_signal, "take_profit_targets", None)
             if (
                 take_profits
@@ -239,8 +249,9 @@ class EntrySignalService:
                 risk = abs(entry_price - stop_loss)
                 if risk > 0:
                     # Use TP2 (index 1) as target, or TP1 if TP2 not available
-                    tp_target = take_profits[1] if len(take_profits) > 1 else take_profits[0]
-                    reward = abs(float(tp_target) - entry_price)
+                    tp_raw = take_profits[1] if len(take_profits) > 1 else take_profits[0]
+                    tp_target = to_float(tp_raw, 0.0)
+                    reward = abs(tp_target - entry_price)
                     rr_ratio = reward / risk if risk > 0 else 0
                     # Normalize R:R to 0-0.25 score (2:1 = 0.1, 5:1 = 0.25)
                     rr_score = min(rr_ratio / 5.0, 1.0) * 0.25
@@ -248,20 +259,21 @@ class EntrySignalService:
             # Position size quality bonus (weighted 10%)
             # Larger positions with valid risk indicate stronger conviction
             position_bonus = 0.0
-            try:
-                if (
-                    position_size
-                    and int(getattr(position_size, "shares", 0) or 0) > 0
-                    and float(getattr(position_size, "risk_percent", 0) or 0) > 0
-                ):
-                    position_percent = float(getattr(position_size, "position_percent", 0) or 0)
+            if position_size:
+                shares_ps = getattr(position_size, "shares", 0)
+                risk_pct_ps = getattr(position_size, "risk_percent", 0)
+                position_percent = to_float(getattr(position_size, "position_percent", 0), 0.0)
+                try:
+                    shares_val = int(shares_ps) if isinstance(shares_ps, (int,)) else 0
+                except Exception:
+                    shares_val = 0
+                risk_pct_val = to_float(risk_pct_ps, 0.0)
+                if shares_val > 0 and risk_pct_val > 0:
                     # Score based on position size being meaningful but not excessive
                     if 0.05 <= position_percent <= 0.15:  # 5-15% range
                         position_bonus = 0.10
                     elif position_percent > 0.15:
                         position_bonus = 0.05  # Slightly penalize oversized positions
-            except Exception:
-                position_bonus = 0.0
 
             # Reasons bonus (weighted 10%)
             reasons = getattr(entry_signal, "reasons", []) or []
