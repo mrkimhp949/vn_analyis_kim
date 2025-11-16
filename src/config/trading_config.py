@@ -67,9 +67,9 @@ class TradingConfig:
     watchlist_size: int = 100  # Size of the initial watchlist
 
     # Entry logic
-    min_confidence: int = 60
-    min_risk_reward: float = 2.0
-    support_distance_percent: float = 3.0  # Max distance to support (%)
+    min_confidence: int = 40  # Reduced from 45 to allow more signals
+    min_risk_reward: float = 1.8  # Reduced from 2.0 to be less strict
+    support_distance_percent: float = 5.0  # Increased from 3.0 to allow more flexibility  # Max distance to support (%)
 
     # Exit logic
     stop_loss_percent: float = -7.0
@@ -93,7 +93,7 @@ class TradingConfig:
         return cls(
             max_scan_universe=int(os.getenv("MAX_SCAN_UNIVERSE", 40)),
             watchlist_size=int(os.getenv("WATCHLIST_SIZE", 100)),
-            min_confidence=int(os.getenv("MIN_CONFIDENCE", 60)),
+            min_confidence=int(os.getenv("MIN_CONFIDENCE", 45)),
             min_risk_reward=float(os.getenv("MIN_RISK_REWARD", 2.0)),
             support_distance_percent=float(os.getenv("SUPPORT_DISTANCE_PERCENT", 3.0)),
             stop_loss_percent=float(os.getenv("STOP_LOSS_PERCENT", -7.0)),

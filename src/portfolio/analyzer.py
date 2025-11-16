@@ -15,6 +15,7 @@ from datetime import datetime
 from src.data.loader import load_data
 from utils.dataframe_utils import safe_get_latest
 from src.strategies.entry_logic import ImprovedEntryLogic
+from src.config.trading_config import get_config
 from src.strategies.exit_logic import ImprovedExitStrategy
 from src.strategies.position_sizing import EnhancedPositionSizer
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
@@ -65,7 +66,8 @@ class PortfolioAnalyzer:
     def __init__(self, portfolio_file="portfolio_status.json"):
         self.portfolio_file = portfolio_file
         self.ml_generator = MLSignalGenerator()
-        self.entry_logic = ImprovedEntryLogic()
+        cfg = get_config(validate=False)
+        self.entry_logic = ImprovedEntryLogic(min_confidence=cfg.trading.min_confidence)
         self.exit_strategy = ImprovedExitStrategy()
         self.position_sizer = EnhancedPositionSizer()
         self.market_analyzer = ProxyMarketRegimeAnalyzer()

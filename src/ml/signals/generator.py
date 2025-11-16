@@ -1,4 +1,6 @@
 from src.data.loader import load_data
+import logging
+import traceback
 from src.ml.features.technical import add_ml_features, get_feature_columns
 from src.ml.models.predictor import MLPredictor
 from utils.dataframe_utils import safe_get_latest
@@ -34,10 +36,30 @@ class MLSignalGenerator:
     def analyze(self, df, index_df=None):
         """Phân tích và tạo tín hiệu từ ML + Technical Analysis"""
         try:
-            # Thêm ML features, yêu cầu có index_df
-            if index_df is None:
-                print("⚠️ Missing index_df for ML analysis, falling back to technical.")
+            # Validate input data
+            if df is None or df.empty:
+                raise ValueError("Empty or None dataframe")
+
+            if len(df) < 50:
+                raise ValueError(f"Insufficient data: {len(df)} rows, need at least 50")
+
+            # Thêm ML features, cố gắng tự nạp VNINDEX nếu thiếu index_df
+            if index_df is None or getattr(index_df, "empty", True):
+                try:
+                    index_df = load_data("VNINDEX", lookback=200, is_index=True)
+                except Exception:
+                    index_df = None
+
+            # Require OHLCV basics before attempting ML features
+            required_cols = {"open", "high", "low", "close", "volume"}
+            if not required_cols.issubset(set(df.columns)):
+                # Data incomplete -> fallback to technical
                 return self._fallback_technical_analysis(df)
+
+            if index_df is None or getattr(index_df, "empty", True):
+                # Không đủ điều kiện cho ML features, fallback sang technical
+                return self._fallback_technical_analysis(df)
+
             df = add_ml_features(df, index_df=index_df)
 
             # Kiểm tra xem có đủ data không
@@ -119,8 +141,13 @@ class MLSignalGenerator:
                 )
                 return self._fallback_technical_analysis(df)
 
-        except Exception:
-            print("⚠️ Lỗi ML analysis")
+        except Exception as e:
+            # Surface the real error to help diagnose recurring "Lỗi ML analysis" in logs
+            logging.getLogger(__name__).warning(f"⚠️ Lỗi ML analysis: {str(e)}")
+            try:
+                traceback.print_exc()
+            except Exception:
+                pass
             return self._fallback_technical_analysis(df)
 
     def _fallback_technical_analysis(self, df):

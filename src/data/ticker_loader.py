@@ -166,12 +166,23 @@ class TickerLoader:
         Returns:
             List validated tickers
         """
-        if not force_validate and self.validated_tickers:
+        # Check if we need to re-validate due to changed parameters
+        cache_key = f"min_volume_{min_volume}_max_tickers_{max_tickers}"
+        last_cache_key = getattr(self, "_last_cache_key", None)
+
+        if (
+            not force_validate
+            and self.validated_tickers
+            and cache_key == last_cache_key
+        ):
             return (
                 self.validated_tickers[:max_tickers]
                 if max_tickers
                 else self.validated_tickers
             )
+
+        # Store current cache key for next time
+        self._last_cache_key = cache_key
 
         print(f"🔍 Validating {len(self.all_tickers)} tickers...")
 
@@ -206,6 +217,15 @@ class TickerLoader:
         print(f"❌ Invalid: {len(invalid)} tickers")
 
         return validated
+
+    def clear_validation_cache(self):
+        """Clear validation cache để force validate lại"""
+        self.validated_tickers = []
+        self.invalid_tickers = []
+        self._last_cache_key = None
+        if os.path.exists(self.cache_file):
+            os.remove(self.cache_file)
+        print("🗑️ Cleared validation cache")
 
 
 # Singleton instance

@@ -27,12 +27,14 @@ class MLModelMonitor:
     def __init__(
         self,
         baseline_accuracy: float = 0.60,
+        baseline_precision: float = 0.65,  # Baseline for BUY signal precision
         drift_threshold: float = 0.10,  # 10% drop triggers alert
         window_days: int = 30,
     ):
         self.db = get_db()
         self.monitor = get_enhanced_monitor()
         self.baseline_accuracy = baseline_accuracy
+        self.baseline_precision = baseline_precision
         self.drift_threshold = drift_threshold
         self.window_days = window_days
 
@@ -363,6 +365,54 @@ class MLModelMonitor:
             lines.append("  ✅ Model performing well")
 
         return "\n".join(lines)
+
+    def calibrate_confidence(self, confidence: float, model_version: str) -> float:
+        """
+        Calibrate confidence based on recent model precision.
+
+        Args:
+            confidence: Original confidence score.
+            model_version: The model version being used.
+
+        Returns:
+            Calibrated confidence score.
+        """
+        try:
+            # Use a shorter window for more responsive calibration
+            metrics = self.calculate_accuracy(window_days=15)
+            recent_precision = metrics.get("precision")
+
+            if recent_precision is None or metrics.get("total_predictions", 0) < 10:
+                # Not enough data, return original confidence
+                return confidence
+
+            # Simple linear calibration
+            # If precision is at baseline, no change.
+            # If precision is higher, increase confidence.
+            # If precision is lower, decrease confidence.
+            precision_diff = recent_precision - self.baseline_precision
+
+            # Max adjustment is +/- 15 points
+            adjustment = precision_diff * 50
+            adjustment = max(-15, min(15, adjustment))
+
+            calibrated = confidence + adjustment
+
+            # Clip to 0-100 range
+            calibrated = max(0, min(100, calibrated))
+
+            if abs(calibrated - confidence) > 2:  # Log only significant changes
+                logger.info(
+                    f"Confidence calibrated: {confidence:.0f}% -> {calibrated:.0f}% "
+                    f"(Precision: {recent_precision:.2%}, "
+                    f"Baseline: {self.baseline_precision:.2%})"
+                )
+
+            return calibrated
+
+        except Exception as e:
+            logger.error(f"Error during confidence calibration: {e}", exc_info=True)
+            return confidence
 
 
 # Singleton

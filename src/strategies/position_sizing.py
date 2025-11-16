@@ -508,8 +508,11 @@ class EnhancedPositionSizer:
 
             return corr
 
-        except Exception:
-            logger.warning(f"Error calculating correlation {symbol1}-{symbol2}")
+        except Exception as e:
+            logger.warning(
+                f"Error calculating correlation {symbol1}-{symbol2}: "
+                f"{type(e).__name__}: {str(e)}"
+            )
             return 0.0
 
     def _get_cache_hit_rate(self) -> float:
@@ -518,21 +521,51 @@ class EnhancedPositionSizer:
         return self._cache_hits / total if total > 0 else 0.0
 
     def _prune_cache(self):
-        """Remove oldest 20% of cache entries"""
+        """
+        Remove oldest 20% of cache entries to prevent unbounded growth
+
+        Cache management strategy:
+        - Remove entries older than TTL first
+        - Then remove oldest 20% if still over limit
+        """
         if not self._correlation_cache:
             return
 
-        # Sort by timestamp and keep newest 80%
-        sorted_items = sorted(
-            self._correlation_cache.items(),
-            key=lambda x: x[1][1],  # Sort by timestamp
-            reverse=True,
-        )
+        import time
 
-        keep_count = int(len(sorted_items) * 0.8)
-        self._correlation_cache = dict(sorted_items[:keep_count])
+        current_time = time.time()
+        initial_size = len(self._correlation_cache)
 
-        logger.info(f"🧹 Pruned correlation cache to {keep_count} entries")
+        # First pass: Remove expired entries
+        expired_keys = [
+            key
+            for key, (_, timestamp) in self._correlation_cache.items()
+            if current_time - timestamp > self.correlation_cache_ttl
+        ]
+        for key in expired_keys:
+            del self._correlation_cache[key]
+
+        if expired_keys:
+            logger.debug(
+                f"🗑️ Removed {len(expired_keys)} expired cache entries "
+                f"({initial_size} → {len(self._correlation_cache)})"
+            )
+
+        # Second pass: If still over limit, remove oldest 20%
+        if len(self._correlation_cache) > 100:
+            sorted_items = sorted(
+                self._correlation_cache.items(),
+                key=lambda x: x[1][1],  # Sort by timestamp
+                reverse=True,
+            )
+
+            keep_count = int(len(sorted_items) * 0.8)
+            self._correlation_cache = dict(sorted_items[:keep_count])
+
+            logger.info(
+                f"🧹 Pruned correlation cache: {initial_size} → {len(self._correlation_cache)} entries "
+                f"(hit rate: {self._get_cache_hit_rate():.1%})"
+            )
 
     def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:
         """

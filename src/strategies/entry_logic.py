@@ -87,10 +87,11 @@ class ImprovedEntryLogic:
         self.portfolio_manager = portfolio_manager
 
     def _validate_initial_signal(
-        self, df: pd.DataFrame, ml_signal: Dict
+        self, df: pd.DataFrame, ml_signal: Optional[Dict]
     ) -> tuple[bool, str, float, float]:
         """
         Validate initial data and ML signal
+        ENHANCED: Allow fallback to technical analysis when ML signal is None
 
         Returns:
             (is_valid, signal_type, base_confidence, current_price) or
@@ -104,9 +105,24 @@ class ImprovedEntryLogic:
         # Use safe access instead of df.iloc[-1]
         from utils.dataframe_utils import safe_get_latest
 
-        # Check if ml_signal is None
+        close_price = safe_get_latest(df, "close", 0)
+
+        # ENHANCEMENT: Fallback to technical analysis if ML signal is None
         if ml_signal is None:
-            return (False, "ML signal is None", 0, 0)
+            logger.debug("ML signal is None - using technical analysis fallback")
+            # Use technical indicators to generate a fallback signal
+            base_confidence = self._calculate_technical_confidence(df)
+
+            # Only proceed if technical confidence is reasonable
+            if base_confidence < 40:  # Lower threshold for technical-only signals
+                return (False, f"Technical confidence thấp ({base_confidence}%)", 0, 0)
+
+            # Determine signal type from technical analysis
+            signal_type = self._get_technical_signal(df)
+            if signal_type != "BUY":
+                return (False, f"Technical signal = {signal_type}", 0, 0)
+
+            return (True, signal_type, base_confidence, close_price)
 
         signal_type = ml_signal.get("signal", "HOLD")
         base_confidence = ml_signal.get("confidence", 0)
@@ -119,7 +135,6 @@ class ImprovedEntryLogic:
         if base_confidence < self.min_confidence:
             return (False, f"Confidence thấp ({base_confidence}%)", 0, 0)
 
-        close_price = safe_get_latest(df, "close", 0)
         return (True, signal_type, base_confidence, close_price)
 
     def _run_all_filters(
@@ -751,7 +766,7 @@ class ImprovedEntryLogic:
         return {
             "is_leading": is_leading,
             "is_lagging": is_lagging,
-            "sector_per": sector_perf,
+            "sector_perf": sector_perf,
         }
 
     # ========================================================================
@@ -876,13 +891,83 @@ class ImprovedEntryLogic:
                 logger.warning(f"⚠️ Could not check portfolio heat: {e}")
 
         # Apply adjustment (with limits)
-        self.min_confidence = max(50, min(80, self.base_min_confidence + adjustment))
+        # Allow lower bound 40 in favorable regimes to increase opportunities
+        self.min_confidence = max(40, min(80, self.base_min_confidence + adjustment))
 
         if adjustment != 0:
             logger.info(
                 f"📊 Dynamic threshold adjustment: {self.base_min_confidence} → {self.min_confidence} "
                 f"(regime: {regime}, adj: {adjustment:+d})"
             )
+
+    def _calculate_technical_confidence(self, df: pd.DataFrame) -> float:
+        """
+        Calculate confidence from technical indicators when ML signal is unavailable
+
+        Uses multiple technical factors:
+        - RSI position
+        - MACD signal
+        - Moving average alignment
+        - Price action strength
+        """
+        if len(df) < 50:
+            return 0.0
+
+        from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
+
+        confidence = 50.0  # Base confidence
+
+        # RSI check
+        if "rsi" in df.columns:
+            rsi = safe_get_latest(df, "rsi", 50)
+            if not pd.isna(rsi):
+                if 30 <= rsi <= 60:  # Good range for entry
+                    confidence += 10
+                elif 60 < rsi <= 70:
+                    confidence += 5
+
+        # Moving average alignment
+        if len(df) >= 50:
+            ema20 = df["close"].ewm(span=20).mean()
+            ema50 = df["close"].ewm(span=50).mean()
+            current_price = safe_get_latest(df, "close", 0)
+            latest_ema20 = ema20.iloc[-1]
+            latest_ema50 = ema50.iloc[-1]
+
+            if current_price > latest_ema20:
+                confidence += 10
+            if latest_ema20 > latest_ema50:
+                confidence += 10
+
+        # Volume confirmation
+        if len(df) >= 20:
+            current_volume = safe_get_latest(df, "volume", 0)
+            avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
+            if avg_volume > 0 and current_volume > avg_volume * 1.2:
+                confidence += 10
+
+        return min(confidence, 100.0)
+
+    def _get_technical_signal(self, df: pd.DataFrame) -> str:
+        """
+        Determine signal type from technical analysis
+        Returns: "BUY", "SELL", or "HOLD"
+        """
+        if len(df) < 50:
+            return "HOLD"
+
+        from utils.dataframe_utils import safe_get_latest
+
+        current_price = safe_get_latest(df, "close", 0)
+        prev_price = df["close"].iloc[-2] if len(df) >= 2 else current_price
+
+        # Simple trend following
+        if current_price > prev_price:
+            return "BUY"
+        elif current_price < prev_price:
+            return "SELL"
+        else:
+            return "HOLD"
 
     def _no_signal(self, reason: str) -> EntrySignal:
         """Return no signal"""

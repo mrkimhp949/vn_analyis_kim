@@ -84,6 +84,17 @@ class PortfolioLock:
         with self._lock:
             return symbol in self._pending_positions
 
+    def add_pending(self, symbol: str, position_value: float = 0.0):
+        """
+        Add symbol to pending positions (thread-safe)
+
+        Args:
+            symbol: Stock symbol
+            position_value: Position value (optional, for exposure tracking)
+        """
+        with self._lock:
+            self._pending_positions[symbol] = position_value
+
     def get_pending_exposure(self) -> float:
         """Lấy tổng exposure đang pending"""
         with self._lock:

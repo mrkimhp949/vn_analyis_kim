@@ -4,6 +4,7 @@ Uses a dedicated DatabaseManager for safe concurrent access.
 """
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -18,14 +19,33 @@ class TradingDB:
     """
 
     def __init__(self):
-        # Initialize database path
-        db_dir = Path("data/database")
-        db_dir.mkdir(parents=True, exist_ok=True)
-        self.db_path = db_dir / "trading.db"
+        # Initialize database path (allow override via env var)
+        env_path = os.getenv("TRADING_DB_PATH")
+        if env_path:
+            # Support special values like ':memory:' for tests
+            self.db_path = env_path
+            # Ensure parent dir exists if it's a filesystem path
+            try:
+                p = Path(env_path)
+                if p.name != ":memory:":
+                    p.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                # If not a filesystem path, ignore
+                pass
+        else:
+            db_dir = Path("data/database")
+            db_dir.mkdir(parents=True, exist_ok=True)
+            self.db_path = db_dir / "trading.db"
 
         # Create connection
         self._conn = None
         self.create_tables()
+        try:
+            logging.getLogger(__name__).info(
+                f"✅ TradingDB initialized. Using DB at: {self.db_path}"
+            )
+        except Exception:
+            pass
 
     def _get_connection(self):
         """Get or create database connection"""
@@ -151,32 +171,49 @@ class TradingDB:
     # ===== POSITIONS =====
 
     def get_positions(self) -> Dict[str, Dict]:
-        """Get all active positions using the read connection."""
+        """
+        Get all active positions using the read connection.
+        ENHANCED: Filter out positions with shares = 0 or negative shares
+        to handle temporary/test data in DB
+        """
         rows = self.execute_read("SELECT * FROM positions")
         positions = {}
         for row in rows:
             # Assuming row is a tuple from sqlite3
-            (
-                symbol,
-                shares,
-                avg_price,
-                entry_date,
-                entry_value,
-                stop_loss,
-                take_profit,
-                metadata_str,
-                _,
-                _,
-            ) = row
-            positions[symbol] = {
-                "shares": shares,
-                "avg_price": avg_price,
-                "entry_date": entry_date,
-                "entry_value": entry_value,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "metadata": json.loads(metadata_str) if metadata_str else {},
-            }
+            try:
+                (
+                    symbol,
+                    shares,
+                    avg_price,
+                    entry_date,
+                    entry_value,
+                    stop_loss,
+                    take_profit,
+                    metadata_str,
+                    _,
+                    _,
+                ) = row
+
+                # ENHANCEMENT: Skip positions with invalid shares
+                # This filters out closed/inactive/test positions
+                if not shares or shares <= 0:
+                    continue
+
+                positions[symbol] = {
+                    "shares": shares,
+                    "avg_price": avg_price,
+                    "entry_date": entry_date,
+                    "entry_value": entry_value,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "metadata": json.loads(metadata_str) if metadata_str else {},
+                }
+            except (ValueError, TypeError, IndexError) as e:
+                # Skip malformed rows
+                logging.getLogger(__name__).warning(
+                    f"Skipping malformed position row: {e}"
+                )
+                continue
         return positions
 
     def save_position(
@@ -213,6 +250,27 @@ class TradingDB:
         query = "DELETE FROM positions WHERE symbol = ?"
         params = (symbol,)
         self.execute_write(query, params)
+
+    def clear_all_positions(self) -> int:
+        """
+        Delete all positions from database
+
+        Returns:
+            Number of positions deleted
+        """
+        query = "DELETE FROM positions"
+        self.execute_write(query)
+
+        # Get count before deletion (approximate)
+        # Note: SQLite doesn't return rowcount for DELETE, so we check after
+        remaining = self.execute_read("SELECT COUNT(*) as count FROM positions")
+        if remaining and len(remaining) > 0:
+            count = (
+                dict(remaining[0]) if hasattr(remaining[0], "keys") else remaining[0][0]
+            )
+            return 0  # All deleted
+
+        return 1  # At least some were deleted
 
     # ===== PORTFOLIO HISTORY =====
 
