@@ -100,9 +100,7 @@ class PortfolioAnalyzer:
             # Phân tích từng cổ phiếu đang nắm giữ
             for symbol, holding in current_holdings.items():
                 try:
-                    stock_analysis = self._analyze_single_stock(
-                        symbol, holding, market_regime
-                    )
+                    stock_analysis = self._analyze_single_stock(symbol, holding, market_regime)
                     analysis_result["current_holdings"][symbol] = stock_analysis
 
                     # Phân loại recommendation
@@ -119,9 +117,9 @@ class PortfolioAnalyzer:
                     }
 
             # Tìm cổ phiếu mới nên mua
-            analysis_result[
-                "new_buy_recommendations"
-            ] = self._find_new_buy_opportunities(current_holdings, market_regime)
+            analysis_result["new_buy_recommendations"] = self._find_new_buy_opportunities(
+                current_holdings, market_regime
+            )
 
             # Tổng kết portfolio
             analysis_result["portfolio_summary"] = self._calculate_portfolio_summary(
@@ -146,9 +144,7 @@ class PortfolioAnalyzer:
         except ValueError as e:
             error_msg = str(e)
             if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
-                return self._create_error_analysis(
-                    symbol, "Mã có thể đã bị hủy niêm yết"
-                )
+                return self._create_error_analysis(symbol, "Mã có thể đã bị hủy niêm yết")
             return self._create_error_analysis(symbol, f"Lỗi tải dữ liệu: {error_msg}")
         except Exception as e:
             return self._create_error_analysis(symbol, f"Lỗi: {str(e)}")
@@ -190,9 +186,7 @@ class PortfolioAnalyzer:
             )
 
             # Đề xuất
-            recommendation = self._generate_recommendation(
-                exit_decision, pnl_percent, ml_signal
-            )
+            recommendation = self._generate_recommendation(exit_decision, pnl_percent, ml_signal)
 
             # CHỈ trả về primitive types, không có objects
             return {
@@ -209,9 +203,7 @@ class PortfolioAnalyzer:
                 # Chỉ lấy thông tin từ exit_decision, không lưu object
                 "should_exit": exit_decision.should_exit,
                 "exit_reason": (
-                    exit_decision.exit_reason.value
-                    if exit_decision.exit_reason
-                    else None
+                    exit_decision.exit_reason.value if exit_decision.exit_reason else None
                 ),
                 "exit_type": exit_decision.exit_type,
                 "exit_urgency": exit_decision.urgency,
@@ -225,9 +217,7 @@ class PortfolioAnalyzer:
         except Exception:
             return self._create_error_analysis(symbol, str(e))  # noqa: F821
 
-    def _find_new_buy_opportunities(
-        self, current_holdings, market_regime, max_recommendations=20
-    ):
+    def _find_new_buy_opportunities(self, current_holdings, market_regime, max_recommendations=20):
         """Tìm cổ phiếu mới nên mua - CHỈ dùng mã từ config"""
         safe_print("🎯 TÌM CƠ HỘI MUA MỚI - CHỈ DÙNG MÃ TỪ CONFIG")
 
@@ -242,32 +232,24 @@ class PortfolioAnalyzer:
             # ⭐⭐⭐ QUAN TRỌNG: Chỉ dùng mã từ config, loại trừ mã đã có ⭐⭐⭐
             symbols_to_scan = [s for s in TICKERS if s not in current_holdings]
 
-            safe_print(
-                f"   🔍 Sẽ quét {len(symbols_to_scan)} mã từ config (loại trừ mã đang nắm)"
-            )
+            safe_print(f"   🔍 Sẽ quét {len(symbols_to_scan)} mã từ config (loại trừ mã đang nắm)")
 
             if not symbols_to_scan:
-                safe_print(
-                    "   ⚠️ Không có mã nào để quét - có thể đã nắm hết các mã trong config"
-                )
+                safe_print("   ⚠️ Không có mã nào để quét - có thể đã nắm hết các mã trong config")
                 return []
 
             buy_opportunities = []
 
             for i, symbol in enumerate(symbols_to_scan):
                 try:
-                    safe_print(
-                        f"     📈 ({i+1}/{len(symbols_to_scan)}) Phân tích {symbol}..."
-                    )
+                    safe_print(f"     📈 ({i+1}/{len(symbols_to_scan)}) Phân tích {symbol}...")
 
                     try:
                         df = load_data(symbol, lookback=LOOKBACK)
                     except ValueError as e:
                         error_msg = str(e)
                         if "hủy niêm yết" in error_msg or "không tồn tại" in error_msg:
-                            safe_print(
-                                f"       ⚠️ {symbol}: Mã có thể đã bị hủy niêm yết"
-                            )
+                            safe_print(f"       ⚠️ {symbol}: Mã có thể đã bị hủy niêm yết")
                             continue
                         safe_print(f"       ❌ {symbol}: Lỗi tải dữ liệu - {error_msg}")
                         continue
@@ -352,18 +334,12 @@ class PortfolioAnalyzer:
         else:
             return "Vẫn tiềm năng - Nên tiếp tục nắm giữ"
 
-    def _calculate_portfolio_summary(
-        self, current_holdings, market_regime, current_cash=0.0
-    ):
+    def _calculate_portfolio_summary(self, current_holdings, market_regime, current_cash=0.0):
         """Tính tổng kết portfolio"""
         total_value = sum(
-            h["current_value"]
-            for h in current_holdings.values()
-            if "current_value" in h
+            h["current_value"] for h in current_holdings.values() if "current_value" in h
         )
-        total_pnl = sum(
-            h["pnl_amount"] for h in current_holdings.values() if "pnl_amount" in h
-        )
+        total_pnl = sum(h["pnl_amount"] for h in current_holdings.values() if "pnl_amount" in h)
         total_invested = sum(
             h["entry_value"] for h in current_holdings.values() if "entry_value" in h
         )
@@ -375,9 +351,7 @@ class PortfolioAnalyzer:
             1 for h in current_holdings.values() if h.get("recommendation") == "HOLD"
         )
 
-        sector_exposure = (
-            calculate_sector_exposure(current_holdings) if current_holdings else {}
-        )
+        sector_exposure = calculate_sector_exposure(current_holdings) if current_holdings else {}
 
         regime_adjustment = self.regime_adjuster.evaluate_adjustment(
             current_holdings,
@@ -388,11 +362,7 @@ class PortfolioAnalyzer:
         optimal_allocation = None
         try:
             optimization = self.optimizer.optimize_weights(
-                [
-                    symbol
-                    for symbol, data in current_holdings.items()
-                    if data.get("shares", 0) > 0
-                ]
+                [symbol for symbol, data in current_holdings.items() if data.get("shares", 0) > 0]
             )
             if optimization:
                 optimal_allocation = {
@@ -472,9 +442,7 @@ class PortfolioAnalyzer:
         # Market Regime
         regime = analysis_result["market_regime"]
         if regime:
-            report.append(
-                f"📈 **Market Regime**: {regime['regime']} ({regime['confidence']}%)"
-            )
+            report.append(f"📈 **Market Regime**: {regime['regime']} ({regime['confidence']}%)")
             report.append(f"💡 {regime['message']}")
         report.append("")
 
@@ -498,9 +466,7 @@ class PortfolioAnalyzer:
             report.append("")
             report.append("⚠️ **ĐIỀU CHỈNH THEO REGIME**")
             report.append(f"• Regime: {adjustment.get('regime')}")
-            report.append(
-                f"• Mục tiêu tiền mặt: {adjustment.get('target_cash_ratio', 0)*100:.0f}%"
-            )
+            report.append(f"• Mục tiêu tiền mặt: {adjustment.get('target_cash_ratio', 0)*100:.0f}%")
             report.append(
                 f"• Cần tăng tiền mặt thêm: {adjustment.get('required_cash_increase', 0):,.0f} VNĐ"
             )

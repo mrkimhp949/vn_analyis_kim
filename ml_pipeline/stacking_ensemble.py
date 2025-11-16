@@ -19,9 +19,7 @@ try:
     LIGHTGBM_AVAILABLE = True
 except ImportError:  # pragma: no cover - optional dependency
     LIGHTGBM_AVAILABLE = False
-    logger.info(
-        "LightGBM not installed. Stacking meta-model sẽ dùng LogisticRegression."
-    )
+    logger.info("LightGBM not installed. Stacking meta-model sẽ dùng LogisticRegression.")
 
 
 class StackingMetaModel:
@@ -70,9 +68,7 @@ class StackingMetaModel:
 
         self._build_model()
         self.model.fit(meta_features, y)
-        self.feature_names = feature_names or [
-            f"model_{i}" for i in range(meta_features.shape[1])
-        ]
+        self.feature_names = feature_names or [f"model_{i}" for i in range(meta_features.shape[1])]
         logger.info(
             "Đã huấn luyện stacking meta-model với %d mẫu và %d base models.",
             meta_features.shape[0],
@@ -91,9 +87,7 @@ class StackingMetaModel:
     def save(self, save_dir: str):
         os.makedirs(save_dir, exist_ok=True)
         joblib.dump(self.model, os.path.join(save_dir, "stacking_meta_model.pkl"))
-        with open(
-            os.path.join(save_dir, "stacking_meta_info.json"), "w", encoding="utf-8"
-        ) as f:
+        with open(os.path.join(save_dir, "stacking_meta_info.json"), "w", encoding="utf-8") as f:
             json.dump(
                 {"model_type": self.model_type, "feature_names": self.feature_names},
                 f,

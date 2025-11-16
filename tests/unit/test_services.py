@@ -218,9 +218,7 @@ class TestEntrySignalService:
 
         assert len(top_signals) == 5
         # Should be sorted by score (confidence * strength)
-        assert (
-            top_signals[0]["signal"].confidence >= top_signals[-1]["signal"].confidence
-        )
+        assert top_signals[0]["signal"].confidence >= top_signals[-1]["signal"].confidence
 
 
 class TestExitManagementService:

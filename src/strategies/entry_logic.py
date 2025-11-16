@@ -77,9 +77,7 @@ class ImprovedEntryLogic:
             portfolio_manager: Portfolio manager for context-aware decisions
         """
         self.min_confidence = min_confidence
-        self.base_min_confidence = (
-            min_confidence  # Store original for dynamic adjustment
-        )
+        self.base_min_confidence = min_confidence  # Store original for dynamic adjustment
         self.min_risk_reward = min_risk_reward
         self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
@@ -179,9 +177,7 @@ class ImprovedEntryLogic:
         # FILTER 3: SUPPORT/RESISTANCE
         sr_check = self._check_support_resistance(df, current_price)
         if sr_check["too_close_to_resistance"]:
-            warnings.append(
-                f"⚠️ Gần resistance: {sr_check['distance_to_resistance']:.1f}%"
-            )
+            warnings.append(f"⚠️ Gần resistance: {sr_check['distance_to_resistance']:.1f}%")
             adjustments.append(-15)
         elif sr_check["near_support"]:
             reasons.append(f"✅ Gần support (+{sr_check['distance_to_support']:.1f}%)")
@@ -230,14 +226,10 @@ class ImprovedEntryLogic:
         # FILTER 8: SECTOR STRENGTH
         sector_strength_check = self._check_sector_strength(df, market_regime)
         if sector_strength_check["is_leading"]:
-            reasons.append(
-                f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)"
-            )
+            reasons.append(f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)")
             adjustments.append(+10)
         elif sector_strength_check["is_lagging"]:
-            warnings.append(
-                f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)"
-            )
+            warnings.append(f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)")
             adjustments.append(-15)
 
         return (True, reasons, warnings, adjustments)
@@ -290,9 +282,7 @@ class ImprovedEntryLogic:
 
         risk_reward = reward / risk
         if risk_reward < self.min_risk_reward:
-            error_msg = (
-                f"R:R ratio thấp: {risk_reward:.2f} < " f"{self.min_risk_reward:.2f}"
-            )
+            error_msg = f"R:R ratio thấp: {risk_reward:.2f} < " f"{self.min_risk_reward:.2f}"
             return (False, error_msg, 0, 0, [], 0)
 
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
@@ -331,9 +321,7 @@ class ImprovedEntryLogic:
             df, signal_type, current_price, market_regime
         )
         if not passed:
-            regime_name = (
-                market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
-            )
+            regime_name = market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
             return self._no_signal(f"Thị trường: {regime_name}")
 
         # Step 3: Calculate adjusted confidence
@@ -342,8 +330,7 @@ class ImprovedEntryLogic:
 
         if adjusted_confidence < self.min_confidence:
             return self._no_signal(
-                f"Confidence sau adjustment: {adjusted_confidence}% < "
-                f"{self.min_confidence}%"
+                f"Confidence sau adjustment: {adjusted_confidence}% < " f"{self.min_confidence}%"
             )
 
         # Step 4: Calculate prices and risk/reward
@@ -366,9 +353,7 @@ class ImprovedEntryLogic:
         reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
 
         # Step 5: Determine signal strength and position multiplier
-        strength = self._calculate_signal_strength(
-            adjusted_confidence, risk_reward, warnings
-        )
+        strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
         position_multiplier = self._calculate_position_multiplier(
             strength, adjusted_confidence, warnings, market_regime
         )
@@ -732,9 +717,7 @@ class ImprovedEntryLogic:
 
         return {"bullish_pattern": False, "bearish_pattern": False, "pattern": "None"}
 
-    def _check_sector_strength(
-        self, df: pd.DataFrame, market_regime: Optional[Dict]
-    ) -> Dict:
+    def _check_sector_strength(self, df: pd.DataFrame, market_regime: Optional[Dict]) -> Dict:
         """
         Kiểm tra sức mạnh của ngành so với thị trường chung (VNINDEX).
         Sử dụng RS (Relative Strength)
@@ -745,9 +728,9 @@ class ImprovedEntryLogic:
         # RS > 1: Cổ phiếu/ngành mạnh hơn thị trường
         # RS dốc lên: Sức mạnh đang tăng
         latest_rs = safe_get_latest(df, "rs", 0)
-        rs_trend = safe_rolling_operation(
-            df, "rs", 10, "mean", 0
-        ) > safe_rolling_operation(df, "rs", 30, "mean", 0)
+        rs_trend = safe_rolling_operation(df, "rs", 10, "mean", 0) > safe_rolling_operation(
+            df, "rs", 30, "mean", 0
+        )
 
         is_leading = latest_rs > 1.0 and rs_trend
         is_lagging = latest_rs < 0.95
@@ -756,11 +739,7 @@ class ImprovedEntryLogic:
         sector_perf = 0
         if market_regime and "sector_performance" in market_regime:
             # Giả sử df có cột 'sector'
-            sector = (
-                safe_get_latest(df, "sector", 0)
-                if "sector" in df.columns
-                else "UNKNOWN"
-            )
+            sector = safe_get_latest(df, "sector", 0) if "sector" in df.columns else "UNKNOWN"
             sector_perf = market_regime["sector_performance"].get(sector, 0)
 
         return {
@@ -988,10 +967,7 @@ class ImprovedEntryLogic:
         """Format signal thành message đẹp"""
 
         if not signal.should_enter:
-            return (
-                f"⏭️ **{symbol}** - Không vào lệnh\n"
-                f"Lý do: {', '.join(signal.warnings)}"
-            )
+            return f"⏭️ **{symbol}** - Không vào lệnh\n" f"Lý do: {', '.join(signal.warnings)}"
 
         msg = f"🎯 **{symbol}** - {signal.signal_type}\n"
         msg += f"💪 Strength: {signal.strength.name}\n"

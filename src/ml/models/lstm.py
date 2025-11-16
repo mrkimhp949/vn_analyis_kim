@@ -110,9 +110,7 @@ class LSTMPredictor:
         n_sequences = n_samples - self.sequence_length + 1
 
         if n_sequences <= 0:
-            raise ValueError(
-                f"Not enough samples for sequence_length={self.sequence_length}"
-            )
+            raise ValueError(f"Not enough samples for sequence_length={self.sequence_length}")
 
         # Create sequences
         X_seq = np.array([X[i : i + self.sequence_length] for i in range(n_sequences)])

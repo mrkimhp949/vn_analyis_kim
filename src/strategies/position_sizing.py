@@ -140,9 +140,7 @@ class EnhancedPositionSizer:
         # CHECK 3: Available Capital
         # =================================================================
         current_exposure = self._calculate_current_exposure()
-        available_capital = (
-            self.total_capital * self.max_total_exposure - current_exposure
-        )
+        available_capital = self.total_capital * self.max_total_exposure - current_exposure
 
         if available_capital <= 0:
             return self._zero_position(
@@ -240,9 +238,7 @@ class EnhancedPositionSizer:
         # =================================================================
 
         # Max by capital
-        max_shares_by_capital = int(
-            (self.total_capital * self.max_position_size) / entry_price
-        )
+        max_shares_by_capital = int((self.total_capital * self.max_position_size) / entry_price)
 
         # Max by available
         max_shares_by_available = int(available_capital / entry_price)
@@ -270,9 +266,7 @@ class EnhancedPositionSizer:
 
         # Check risk limit
         if risk_percent > self.max_risk_per_trade * 100:
-            max_safe_shares = int(
-                (self.total_capital * self.max_risk_per_trade) / risk_per_share
-            )
+            max_safe_shares = int((self.total_capital * self.max_risk_per_trade) / risk_per_share)
             shares = min(shares, max_safe_shares)
             shares = max((shares // 100) * 100, 100)
 
@@ -281,9 +275,7 @@ class EnhancedPositionSizer:
             max_loss = shares * risk_per_share
             risk_percent = (max_loss / self.total_capital) * 100
 
-            warnings.append(
-                f"Reduced shares to keep risk <= {self.max_risk_per_trade*100}%"
-            )
+            warnings.append(f"Reduced shares to keep risk <= {self.max_risk_per_trade*100}%")
 
         # DCA entries
         recommended_entries = self._calculate_dca_entries(entry_price, shares)
@@ -367,8 +359,7 @@ class EnhancedPositionSizer:
 
         if kelly > 0.5:
             logger.warning(
-                f"⚠️ Very high Kelly ({kelly:.1%}) detected. "
-                "Clamping to max 25% for safety."
+                f"⚠️ Very high Kelly ({kelly:.1%}) detected. " "Clamping to max 25% for safety."
             )
 
         # Clamp to reasonable range
@@ -419,9 +410,7 @@ class EnhancedPositionSizer:
 
         return max(0.5, min(base * strength_mult * regime_mult, 1.2))
 
-    def _calculate_correlation(
-        self, symbol1: str, symbol2: str, days: int = 60
-    ) -> float:
+    def _calculate_correlation(self, symbol1: str, symbol2: str, days: int = 60) -> float:
         """
         ENHANCED: Calculate correlation coefficient with caching
 
@@ -453,9 +442,7 @@ class EnhancedPositionSizer:
                 return corr
             else:
                 # Cache expired
-                logger.debug(
-                    f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)"
-                )
+                logger.debug(f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)")
 
         # Cache miss - calculate correlation
         self._cache_misses += 1
@@ -474,9 +461,7 @@ class EnhancedPositionSizer:
             df2 = loader.load_data(symbol2, days=days)
 
             if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
-                logger.warning(
-                    f"Insufficient data for correlation: {symbol1}-{symbol2}"
-                )
+                logger.warning(f"Insufficient data for correlation: {symbol1}-{symbol2}")
                 return 0.0
 
             # Merge on date to align time series
@@ -646,9 +631,7 @@ class EnhancedPositionSizer:
 
             # Count positions in same sector
             same_sector_count = sum(
-                1
-                for pos in self.current_positions.values()
-                if pos.get("sector") == sector
+                1 for pos in self.current_positions.values() if pos.get("sector") == sector
             )
 
             # Reduce size if too many in same sector
@@ -682,14 +665,9 @@ class EnhancedPositionSizer:
 
     def _calculate_current_exposure(self) -> float:
         """Calculate current total exposure"""
-        return sum(
-            pos["shares"] * pos["current_price"]
-            for pos in self.current_positions.values()
-        )
+        return sum(pos["shares"] * pos["current_price"] for pos in self.current_positions.values())
 
-    def _calculate_dca_entries(
-        self, base_price: float, total_shares: int
-    ) -> List[Dict]:
+    def _calculate_dca_entries(self, base_price: float, total_shares: int) -> List[Dict]:
         """Calculate DCA entry levels"""
         return [
             {

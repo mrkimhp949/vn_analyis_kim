@@ -69,13 +69,9 @@ class PortfolioManager:
 
         # Validate inputs
         if not symbol or not isinstance(symbol, str):
-            raise PortfolioError(
-                "Symbol must be a non-empty string", context={"symbol": symbol}
-            )
+            raise PortfolioError("Symbol must be a non-empty string", context={"symbol": symbol})
         if not isinstance(shares, int) or shares <= 0:
-            raise PortfolioError(
-                "Shares must be a positive integer", context={"shares": shares}
-            )
+            raise PortfolioError("Shares must be a positive integer", context={"shares": shares})
         if not isinstance(entry_price, (int, float)) or entry_price <= 0:
             raise PortfolioError(
                 "Entry price must be a positive number",
@@ -157,9 +153,7 @@ class PortfolioManager:
 
         # Calculate new average price
         total_shares = current_shares + shares_to_add
-        total_value = (current_shares * current_avg_price) + (
-            shares_to_add * price_to_add
-        )
+        total_value = (current_shares * current_avg_price) + (shares_to_add * price_to_add)
         new_avg_price = total_value / total_shares
 
         # Log the additional buy
@@ -234,11 +228,7 @@ class PortfolioManager:
         exit_value = shares_to_sell * exit_price
         entry_value_of_sold_part = shares_to_sell * entry_price
         pnl = exit_value - entry_value_of_sold_part
-        pnl_percent = (
-            (pnl / entry_value_of_sold_part) * 100
-            if entry_value_of_sold_part > 0
-            else 0
-        )
+        pnl_percent = (pnl / entry_value_of_sold_part) * 100 if entry_value_of_sold_part > 0 else 0
 
         # Log the partial sell trade
         self.db.save_trade(
@@ -301,16 +291,12 @@ class PortfolioManager:
                     )
                     self.reduce_position(symbol, shares_to_sell, exit_price, reason)
                 else:
-                    print(
-                        f"⚠️ Calculated 0 shares to sell for {symbol} with type {exit_type}"
-                    )
+                    print(f"⚠️ Calculated 0 shares to sell for {symbol} with type {exit_type}")
 
             except (ValueError, TypeError):
                 print("❌ Invalid exit_type format: {exit_type}.")
 
-    def close_position(
-        self, symbol: str, exit_price: float, reason: str = "Exit signal"
-    ):
+    def close_position(self, symbol: str, exit_price: float, reason: str = "Exit signal"):
         """Close a position entirely."""
         positions = self.db.get_positions()
 
@@ -498,9 +484,7 @@ class PortfolioManager:
                 )
                 needs_rebalancing = True
 
-            elif (
-                position_weight < target_position_size * 0.5 and position_weight > 0.02
-            ):
+            elif position_weight < target_position_size * 0.5 and position_weight > 0.02:
                 # Underweight (but not too small) - suggest increasing
                 target_value = total_value * target_position_size
                 deficit_value = target_value - position_value
@@ -550,9 +534,7 @@ class PortfolioManager:
         # Portfolio summary
         lines.append(f"\n💰 *Portfolio Value:* {portfolio['total_value']:,.0f} VNĐ")
         lines.append(f"💵 *Total Cost:* {portfolio['total_cost']:,.0f} VNĐ")
-        lines.append(
-            f"📈 *P&L:* {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.1f}%)"
-        )
+        lines.append(f"📈 *P&L:* {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.1f}%)")
         lines.append(f"📦 *Positions:* {portfolio['num_positions']}")
 
         # Individual positions

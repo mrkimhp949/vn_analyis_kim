@@ -123,9 +123,7 @@ class ImprovedExitStrategy:
         if symbol not in self.position_highs:
             self.position_highs[symbol] = current_price
         else:
-            self.position_highs[symbol] = max(
-                self.position_highs[symbol], current_price
-            )
+            self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
 
         highest_price = self.position_highs[symbol]
 

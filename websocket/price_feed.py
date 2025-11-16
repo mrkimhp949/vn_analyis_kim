@@ -138,9 +138,7 @@ class PriceFeedClient:
 
         try:
             await self.websocket.send(json.dumps(subscription_msg))
-            logger.info(
-                f"Sent subscription for {len(self.config.subscribe_channels)} symbols"
-            )
+            logger.info(f"Sent subscription for {len(self.config.subscribe_channels)} symbols")
         except Exception:
             logger.error("Failed to send subscription")
 
@@ -172,9 +170,7 @@ class PriceFeedClient:
                 price=float(data.get("lastPrice", data.get("price", 0))),
                 volume=int(data.get("totalVol", data.get("volume", 0))),
                 change=float(data.get("change", 0)),
-                change_percent=float(
-                    data.get("changePc", data.get("changePercent", 0))
-                ),
+                change_percent=float(data.get("changePc", data.get("changePercent", 0))),
                 timestamp=datetime.now(),
                 bid=float(data.get("bid1", 0)) if "bid1" in data else None,
                 ask=float(data.get("ask1", 0)) if "ask1" in data else None,
@@ -315,9 +311,7 @@ def print_price_update(update: PriceUpdate):
 
 if __name__ == "__main__":
     # Example usage
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     # Create client
     client = PriceFeedClient()

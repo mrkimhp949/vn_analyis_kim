@@ -186,11 +186,7 @@ class SmartCache:
     def get_stats(self) -> dict:
         """Get cache statistics"""
         total_requests = self.cache_stats["hits"] + self.cache_stats["misses"]
-        hit_rate = (
-            (self.cache_stats["hits"] / total_requests * 100)
-            if total_requests > 0
-            else 0
-        )
+        hit_rate = (self.cache_stats["hits"] / total_requests * 100) if total_requests > 0 else 0
 
         return {
             "hits": self.cache_stats["hits"],

@@ -58,9 +58,7 @@ class MlStrategy(BaseStrategy):
 
         for symbol, df in market_data.items():
             if df.empty or len(df) < 50:
-                logger.warning(
-                    f"[{self.name}] Không đủ dữ liệu cho mã {symbol}, bỏ qua."
-                )
+                logger.warning(f"[{self.name}] Không đủ dữ liệu cho mã {symbol}, bỏ qua.")
                 continue
 
             try:
@@ -110,9 +108,7 @@ class MlStrategy(BaseStrategy):
         logger.info(f"[{self.name}] Đã tạo ra {len(signals)} tín hiệu MUA.")
         return signals
 
-    def determine_exit_levels(
-        self, signal: Dict[str, Any]
-    ) -> Dict[str, Optional[float]]:
+    def determine_exit_levels(self, signal: Dict[str, Any]) -> Dict[str, Optional[float]]:
         """
         Override logic mặc định để sử dụng SL/TP từ config của chiến lược này.
         """

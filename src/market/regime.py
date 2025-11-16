@@ -70,9 +70,7 @@ class MarketRegimeAnalyzer:
             )
 
             if vnindex.empty or len(vnindex) < 50:
-                logger.warning(
-                    f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}"
-                )
+                logger.warning(f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}")
                 return self._default_regime()
 
             # Tính các chỉ số
@@ -194,9 +192,7 @@ class MarketRegimeAnalyzer:
             high_close = abs(df["high"] - df["close"].shift())
             low_close = abs(df["low"] - df["close"].shift())
 
-            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(
-                axis=1
-            )
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
             atr = true_range.rolling(14).mean()
             df["atr"] = atr
 
@@ -294,9 +290,7 @@ class MarketRegimeAnalyzer:
             logger.debug("HMM regime detection failed")
             return None
 
-    def _is_tradeable(
-        self, regime: str, volatility: float, weekly_change: float
-    ) -> bool:
+    def _is_tradeable(self, regime: str, volatility: float, weekly_change: float) -> bool:
         """
         Quyết định có nên trade hay không
 
@@ -324,9 +318,7 @@ class MarketRegimeAnalyzer:
 
         return False
 
-    def _calculate_confidence(
-        self, regime: str, trend_strength: float, volatility: float
-    ) -> int:
+    def _calculate_confidence(self, regime: str, trend_strength: float, volatility: float) -> int:
         """Tính confidence score cho quyết định"""
 
         base_confidence = {

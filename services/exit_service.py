@@ -136,9 +136,7 @@ class ExitManagementService:
             logger.error(f"[{symbol}] Error checking exit", exc_info=True)
             return None
 
-    async def execute_exit(
-        self, symbol: str, exit_decision: Dict, current_price: float
-    ) -> bool:
+    async def execute_exit(self, symbol: str, exit_decision: Dict, current_price: float) -> bool:
         """
         Execute an exit (full or partial)
 

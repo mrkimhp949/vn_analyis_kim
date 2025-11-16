@@ -77,9 +77,7 @@ class EntrySignalService:
 
         # Scan in parallel
         tasks = [
-            self._scan_single_ticker(
-                symbol, existing_symbols, market_regime, vnindex_df
-            )
+            self._scan_single_ticker(symbol, existing_symbols, market_regime, vnindex_df)
             for symbol in tickers
         ]
 
@@ -131,9 +129,7 @@ class EntrySignalService:
                 if ml_signal is None:
                     logger.debug(f"[{symbol}] ML analysis returned None")
             except Exception as e:
-                logger.warning(
-                    f"⚠️ Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}"
-                )
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
                 # Tiếp tục với ml_signal = None
 
             # Entry logic
@@ -187,9 +183,7 @@ class EntrySignalService:
             logger.error(f"[{symbol}] Error scanning", exc_info=True)
             return None
 
-    def filter_and_rank_signals(
-        self, signals: List[Dict], max_signals: int = 5
-    ) -> List[Dict]:
+    def filter_and_rank_signals(self, signals: List[Dict], max_signals: int = 5) -> List[Dict]:
         """
         Filter and rank signals by quality using multiple factors
 
@@ -217,9 +211,7 @@ class EntrySignalService:
 
             # Base score: confidence * strength (weighted 50%)
             base_score = (
-                (entry_signal.confidence / 100.0)
-                * (entry_signal.strength.value / 5.0)
-                * 0.5
+                (entry_signal.confidence / 100.0) * (entry_signal.strength.value / 5.0) * 0.5
             )
 
             # Risk/reward bonus (weighted 25%)
@@ -246,11 +238,7 @@ class EntrySignalService:
             # Position size quality bonus (weighted 10%)
             # Larger positions with valid risk indicate stronger conviction
             position_bonus = 0.0
-            if (
-                position_size
-                and position_size.shares > 0
-                and position_size.risk_percent > 0
-            ):
+            if position_size and position_size.shares > 0 and position_size.risk_percent > 0:
                 # Score based on position size being meaningful but not excessive
                 if 0.05 <= position_size.position_percent <= 0.15:  # 5-15% range
                     position_bonus = 0.10
@@ -264,13 +252,7 @@ class EntrySignalService:
             warnings_penalty = max(0, 1.0 - (len(entry_signal.warnings) / 5.0)) * 0.05
 
             # Combine scores
-            total_score = (
-                base_score
-                + rr_score
-                + position_bonus
-                + reasons_bonus
-                + warnings_penalty
-            )
+            total_score = base_score + rr_score + position_bonus + reasons_bonus + warnings_penalty
 
             return total_score
 

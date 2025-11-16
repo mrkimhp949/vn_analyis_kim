@@ -66,9 +66,7 @@ class TestVietnameseSentimentAnalyzerInitialization:
     @pytest.mark.skip(reason="Transformers import conflicts with environment variables")
     @patch("ml_pipeline.sentiment_model.os.path.isdir")
     @patch("ml_pipeline.sentiment_model.os.environ.get")
-    def test_init_custom_model_fails_fallback_to_phobert(
-        self, mock_env_get, mock_isdir
-    ):
+    def test_init_custom_model_fails_fallback_to_phobert(self, mock_env_get, mock_isdir):
         """Test fallback to PhoBERT base when custom model fails"""
         mock_env_get.return_value = "models/phobert_vi_financial"
         mock_isdir.return_value = True
@@ -114,9 +112,7 @@ class TestVietnameseSentimentAnalyzerInitialization:
         mock_isdir.return_value = False
 
         with patch("transformers.AutoTokenizer") as mock_auto_tokenizer:
-            mock_auto_tokenizer.from_pretrained.side_effect = Exception(
-                "All models failed"
-            )
+            mock_auto_tokenizer.from_pretrained.side_effect = Exception("All models failed")
 
             analyzer = VietnameseSentimentAnalyzer()
 
@@ -389,9 +385,7 @@ class TestScoreMethod:
         analyzer = VietnameseSentimentAnalyzer()
 
         # Many positive keywords to test upper bound
-        texts = [
-            "tăng trưởng tích cực lợi nhuận vượt mục tiêu mở rộng bứt phá kỷ lục"
-        ] * 10
+        texts = ["tăng trưởng tích cực lợi nhuận vượt mục tiêu mở rộng bứt phá kỷ lục"] * 10
 
         score = analyzer.score(texts)
         assert score <= 1.0

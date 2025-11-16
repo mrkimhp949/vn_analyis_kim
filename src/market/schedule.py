@@ -118,9 +118,7 @@ def get_next_trading_time(dt: Optional[datetime] = None) -> Optional[datetime]:
             days_ahead = 2
 
         next_date = dt.date() + timedelta(days=days_ahead)
-        next_dt = VN_TZ.localize(
-            datetime.combine(next_date, TRADING_HOURS["morning"][0])
-        )
+        next_dt = VN_TZ.localize(datetime.combine(next_date, TRADING_HOURS["morning"][0]))
         return next_dt
 
     # Nếu trước 9:00, return 9:00 hôm nay
@@ -129,9 +127,7 @@ def get_next_trading_time(dt: Optional[datetime] = None) -> Optional[datetime]:
 
     # Nếu giữa 11:30 và 13:00, return 13:00 hôm nay
     if TRADING_HOURS["morning"][1] < current_time < TRADING_HOURS["afternoon"][0]:
-        return VN_TZ.localize(
-            datetime.combine(dt.date(), TRADING_HOURS["afternoon"][0])
-        )
+        return VN_TZ.localize(datetime.combine(dt.date(), TRADING_HOURS["afternoon"][0]))
 
     # Nếu sau 15:00, return 9:00 ngày mai
     if current_time > TRADING_HOURS["afternoon"][1]:
@@ -178,12 +174,8 @@ def get_trading_sessions_today(
     sessions.append((morning_start, morning_end))
 
     # Afternoon session
-    afternoon_start = VN_TZ.localize(
-        datetime.combine(today, TRADING_HOURS["afternoon"][0])
-    )
-    afternoon_end = VN_TZ.localize(
-        datetime.combine(today, TRADING_HOURS["afternoon"][1])
-    )
+    afternoon_start = VN_TZ.localize(datetime.combine(today, TRADING_HOURS["afternoon"][0]))
+    afternoon_end = VN_TZ.localize(datetime.combine(today, TRADING_HOURS["afternoon"][1]))
     sessions.append((afternoon_start, afternoon_end))
 
     return sessions

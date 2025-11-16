@@ -48,8 +48,7 @@ class PortfolioLock:
 
             # Check 3: Max exposure
             current_exposure = sum(
-                pos.get("shares", 0) * pos.get("avg_price", 0)
-                for pos in current_positions.values()
+                pos.get("shares", 0) * pos.get("avg_price", 0) for pos in current_positions.values()
             )
             pending_exposure = sum(self._pending_positions.values())
             total_exposure = current_exposure + pending_exposure + position_value

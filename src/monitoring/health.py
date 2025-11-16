@@ -106,9 +106,7 @@ class HealthChecker:
 
             # Check newest file in cache
             cache_files = [
-                os.path.join(cache_dir, f)
-                for f in os.listdir(cache_dir)
-                if f.endswith(".pkl")
+                os.path.join(cache_dir, f) for f in os.listdir(cache_dir) if f.endswith(".pkl")
             ]
 
             if not cache_files:

@@ -270,9 +270,7 @@ class TestPortfolioManagerThreadSafety:
         # All reads should return consistent count (even if 0)
         if results:
             first_count = results[0]
-            assert all(
-                r == first_count for r in results
-            ), f"Inconsistent reads: {set(results)}"
+            assert all(r == first_count for r in results), f"Inconsistent reads: {set(results)}"
 
 
 class TestIndicatorUtils:

@@ -33,17 +33,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("📰 Tin nóng", callback_data="action:hotnews"),
-            InlineKeyboardButton(
-                "📈 Summary hôm nay", callback_data="action:dailysummary"
-            ),
+            InlineKeyboardButton("📈 Summary hôm nay", callback_data="action:dailysummary"),
         ],
         [
-            InlineKeyboardButton(
-                "⚙️ Quản lý đăng ký", callback_data="action:subscriptions"
-            ),
-            InlineKeyboardButton(
-                "📝 Paper Trading", callback_data="action:paperaccount"
-            ),
+            InlineKeyboardButton("⚙️ Quản lý đăng ký", callback_data="action:subscriptions"),
+            InlineKeyboardButton("📝 Paper Trading", callback_data="action:paperaccount"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -91,10 +85,7 @@ async def portfolio_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Chia nhỏ message nếu cần
         if len(analysis_report) > 4000:
-            parts = [
-                analysis_report[i : i + 4000]
-                for i in range(0, len(analysis_report), 4000)
-            ]
+            parts = [analysis_report[i : i + 4000] for i in range(0, len(analysis_report), 4000)]
             for part in parts:
                 await update.message.reply_text(part, parse_mode="Markdown")
         else:
@@ -220,8 +211,7 @@ async def sell_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         if not context.args or len(context.args) < 1:
             await update.message.reply_text(
-                "⚠️ Usage: /sellstock SYMBOL [SHARES] [PRICE]\n"
-                "Ví dụ: /sellstock VNM 500 82000"
+                "⚠️ Usage: /sellstock SYMBOL [SHARES] [PRICE]\n" "Ví dụ: /sellstock VNM 500 82000"
             )
             return
 
@@ -312,9 +302,7 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("🔔 Đăng ký", callback_data=f"subscribe:{symbol}"),
             ],
             [
-                InlineKeyboardButton(
-                    "💼 Thêm vào portfolio", callback_data=f"add:{symbol}"
-                ),
+                InlineKeyboardButton("💼 Thêm vào portfolio", callback_data=f"add:{symbol}"),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -332,9 +320,7 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "⚠️ Usage: /subscribe SYMBOL\nVí dụ: /subscribe VNM"
-        )
+        await update.message.reply_text("⚠️ Usage: /subscribe SYMBOL\nVí dụ: /subscribe VNM")
         return
 
     symbol = context.args[0].upper()
@@ -354,9 +340,7 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "⚠️ Usage: /unsubscribe SYMBOL\nVí dụ: /unsubscribe VNM"
-        )
+        await update.message.reply_text("⚠️ Usage: /unsubscribe SYMBOL\nVí dụ: /unsubscribe VNM")
         return
 
     symbol = context.args[0].upper()
@@ -521,17 +505,13 @@ async def _handle_paperaccount_action(query):
 
         keyboard = [
             [
-                InlineKeyboardButton(
-                    "📊 Trade History", callback_data="action:papertrades"
-                ),
+                InlineKeyboardButton("📊 Trade History", callback_data="action:papertrades"),
                 InlineKeyboardButton("📈 Performance", callback_data="action:paperper"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(
-            summary, parse_mode="Markdown", reply_markup=reply_markup
-        )
+        await query.edit_message_text(summary, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception:
         await query.edit_message_text("❌ Lỗi")
 
@@ -548,8 +528,7 @@ async def _handle_subscribe_callback(query, user_id, symbol):
 async def _handle_add_callback(query, symbol):
     """Handle add to portfolio button callback"""
     await query.edit_message_text(
-        f"💼 Thêm {symbol} vào portfolio:\n\n"
-        f"Dùng lệnh: /addstock {symbol} SHARES PRICE"
+        f"💼 Thêm {symbol} vào portfolio:\n\n" f"Dùng lệnh: /addstock {symbol} SHARES PRICE"
     )
 
 
@@ -623,18 +602,14 @@ async def generate_daily_summary() -> str:
         total_value = pv.get("total_value", 0)
         total_cost = pv.get("total_cost", 0)
         pnl = pv.get("pnl", total_value - total_cost)
-        pnl_pct = pv.get(
-            "pnl_percent", (pnl / total_cost * 100) if total_cost > 0 else 0
-        )
+        pnl_pct = pv.get("pnl_percent", (pnl / total_cost * 100) if total_cost > 0 else 0)
         num_positions = pv.get("num_positions", 0)
 
         msg_parts.append("💼 *PORTFOLIO*\n")
         if num_positions > 0:
             msg_parts.append(f"💰 Giá trị: {total_value:,.0f} VNĐ\n")
             msg_parts.append(f"💵 Vốn: {total_cost:,.0f} VNĐ\n")
-            msg_parts.append(
-                f"{'📈' if pnl >= 0 else '📉'} P&L: {pnl:+,.0f} VNĐ ({pnl_pct:+.2f}%)\n"
-            )
+            msg_parts.append(f"{'📈' if pnl >= 0 else '📉'} P&L: {pnl:+,.0f} VNĐ ({pnl_pct:+.2f}%)\n")
             msg_parts.append(f"📊 Số mã: {num_positions}\n")
 
             # Chi tiết theo từng mã (dựa trên giá hiện có trong metadata nếu có)
@@ -649,8 +624,7 @@ async def generate_daily_summary() -> str:
                         shares = pos.get("shares", 0) or 0
                         avg_price = pos.get("avg_price", 0) or 0
                         last_price = (
-                            pos.get("metadata", {}).get("last_price", avg_price)
-                            or avg_price
+                            pos.get("metadata", {}).get("last_price", avg_price) or avg_price
                         )
                         cost = shares * avg_price
                         value = shares * last_price
@@ -658,17 +632,14 @@ async def generate_daily_summary() -> str:
                         pnl_percent = (pnl_abs / cost * 100) if cost > 0 else 0
                         return (pnl_percent, pnl_abs)
 
-                    sorted_items = sorted(
-                        positions.items(), key=calc_pnl_tuple, reverse=True
-                    )
+                    sorted_items = sorted(positions.items(), key=calc_pnl_tuple, reverse=True)
                     limit = min(len(sorted_items), 10)
                     for i in range(limit):
                         sym, pos = sorted_items[i]
                         shares = pos.get("shares", 0) or 0
                         avg_price = pos.get("avg_price", 0) or 0
                         last_price = (
-                            pos.get("metadata", {}).get("last_price", avg_price)
-                            or avg_price
+                            pos.get("metadata", {}).get("last_price", avg_price) or avg_price
                         )
                         cost = shares * avg_price
                         value = shares * last_price
@@ -680,9 +651,7 @@ async def generate_daily_summary() -> str:
                             f"{shares} CP @ {avg_price:,.0f} → {last_price:,.0f}\n"
                         )
                     if len(sorted_items) > limit:
-                        msg_parts.append(
-                            f"... và {len(sorted_items) - limit} mã khác\n"
-                        )
+                        msg_parts.append(f"... và {len(sorted_items) - limit} mã khác\n")
             except Exception:
                 # Bỏ qua chi tiết nếu có lỗi nhỏ, vẫn giữ phần tổng
                 pass
@@ -702,9 +671,7 @@ async def generate_daily_summary() -> str:
         msg_parts.append("\n📈 *THỊ TRƯỜNG*\n")
         msg_parts.append(f"Trạng thái: {regime.get('regime', 'UNKNOWN')}\n")
         msg_parts.append(f"Confidence: {regime.get('confidence', 0):.0f}%\n")
-        msg_parts.append(
-            f"Tradeable: {'✅' if regime.get('tradeable', False) else '❌'}\n"
-        )
+        msg_parts.append(f"Tradeable: {'✅' if regime.get('tradeable', False) else '❌'}\n")
     except Exception:
         logger.warning("Could not fetch market regime for summary")
 
@@ -775,9 +742,7 @@ async def paper_account_command(update: Update, context: ContextTypes.DEFAULT_TY
 
         # Defensive: ensure essential fields exist
         if not hasattr(account, "format_account_summary"):
-            await update.message.reply_text(
-                "❌ PaperTradingAccount thiếu format_account_summary()"
-            )
+            await update.message.reply_text("❌ PaperTradingAccount thiếu format_account_summary()")
             return
 
         try:
@@ -790,9 +755,7 @@ async def paper_account_command(update: Update, context: ContextTypes.DEFAULT_TY
 
         keyboard = [
             [
-                InlineKeyboardButton(
-                    "📊 Trade History", callback_data="action:papertrades"
-                ),
+                InlineKeyboardButton("📊 Trade History", callback_data="action:papertrades"),
                 InlineKeyboardButton("📈 Performance", callback_data="action:paperper"),
             ]
         ]
@@ -819,9 +782,7 @@ async def paper_trades_command(update: Update, context: ContextTypes.DEFAULT_TYP
         trades = account.get_trade_history()
 
         if not trades:
-            await update.message.reply_text(
-                "📭 Chưa có giao dịch nào trong paper trading account."
-            )
+            await update.message.reply_text("📭 Chưa có giao dịch nào trong paper trading account.")
             return
 
         # Normalize trades to dicts (DB rows may be tuples or sqlite rows)

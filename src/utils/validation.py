@@ -86,9 +86,7 @@ class DataValidator:
             if col in columns:
                 value = safe_get_latest(df, col, 0)
                 if value <= 0:
-                    raise DataQualityError(
-                        f"Invalid {col}: {value} <= 0", context={col: value}
-                    )
+                    raise DataQualityError(f"Invalid {col}: {value} <= 0", context={col: value})
 
         # Volume must be positive
         if "volume" in columns:
@@ -197,9 +195,7 @@ class DataValidator:
         # Ensure positive values
         for col in available_critical:
             df[col] = df[col].abs()
-            df.loc[df[col] == 0, col] = (
-                df[col].replace(0, np.nan).fillna(method="ffill")
-            )
+            df.loc[df[col] == 0, col] = df[col].replace(0, np.nan).fillna(method="ffill")
 
         return df
 
@@ -296,9 +292,7 @@ class InputValidator:
             raise ValueError(f"Price must be positive, got {price}")
 
         if price > max_price:
-            raise ValueError(
-                f"Price exceeds maximum ({max_price:,.0f} VNĐ), got {price:,.0f}"
-            )
+            raise ValueError(f"Price exceeds maximum ({max_price:,.0f} VNĐ), got {price:,.0f}")
 
         return price
 

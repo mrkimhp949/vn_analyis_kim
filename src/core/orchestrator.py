@@ -89,9 +89,7 @@ class TradingOrchestrator:
         self.config = config
         self.data_loader = data_loader
         self.portfolio_manager = portfolio_manager or get_portfolio_manager()
-        self.portfolio_risk_manager = get_portfolio_risk_manager(
-            total_capital=100_000_000
-        )
+        self.portfolio_risk_manager = get_portfolio_risk_manager(total_capital=100_000_000)
         self.portfolio_lock = get_portfolio_lock()
         self.market_analyzer = ProxyMarketRegimeAnalyzer()
         self.ticker_loader = get_ticker_loader()
@@ -140,16 +138,13 @@ class TradingOrchestrator:
             for article in news_context.get("articles", [])
         )
         has_dividend = any(
-            "dividend" in article.get("topics", [])
-            for article in news_context.get("articles", [])
+            "dividend" in article.get("topics", []) for article in news_context.get("articles", [])
         )
 
         # ENHANCED IMPACT
         if news_sentiment >= 0.8:
             entry_signal.confidence = min(100, entry_signal.confidence + 15)
-            entry_signal.reasons.append(
-                f"📰 Tin tức RẤT tích cực ({news_sentiment:+.2f})"
-            )
+            entry_signal.reasons.append(f"📰 Tin tức RẤT tích cực ({news_sentiment:+.2f})")
         elif news_sentiment >= 0.5:
             entry_signal.confidence = min(100, entry_signal.confidence + 10)
             entry_signal.reasons.append(f"📰 Tin tức tích cực ({news_sentiment:+.2f})")
@@ -188,7 +183,9 @@ class TradingOrchestrator:
         msg = f"🎯 *TÍN HIỆU VÀO LỆNH - {symbol}*\n\n"
 
         if market_regime:
-            msg += f"📊 *Market:* {market_regime['regime']} ({market_regime.get('confidence', 0)}%)\n\n"
+            msg += (
+                f"📊 *Market:* {market_regime['regime']} ({market_regime.get('confidence', 0)}%)\n\n"
+            )
 
         msg += f"💪 *Signal:* {entry_signal.strength.name}\n"
         msg += f"🎲 *Confidence:* {entry_signal.confidence}%\n"
@@ -204,9 +201,7 @@ class TradingOrchestrator:
 
         msg += f"🛑 *Stop Loss:* {entry_signal.stop_loss:,.0f} VNĐ "
         sl_pct = (
-            (entry_signal.stop_loss - entry_signal.entry_price)
-            / entry_signal.entry_price
-            * 100
+            (entry_signal.stop_loss - entry_signal.entry_price) / entry_signal.entry_price * 100
         )
         msg += f"({sl_pct:+.1f}%)\n\n"
 
@@ -223,9 +218,7 @@ class TradingOrchestrator:
         if entry_signal.warnings:
             msg += f"\n⚠️ *Cảnh báo:* {entry_signal.warnings[0]}\n"
 
-        msg += (
-            f"\n💸 *Risk:* {position.max_loss:,.0f} VNĐ ({position.risk_percent:.2f}%)"
-        )
+        msg += f"\n💸 *Risk:* {position.max_loss:,.0f} VNĐ ({position.risk_percent:.2f}%)"
 
         if news_context and news_context.get("articles"):
             msg += f"\n\n📰 *News Sentiment:* {news_context['sentiment_label']} ({news_context['sentiment_score']:+.2f})\n"
@@ -280,9 +273,7 @@ class TradingOrchestrator:
             portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change
         ):
             reason = self.circuit_breaker.tripped_reason
-            logging.critical(
-                f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới."
-            )
+            logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
             await self.bot.send_message(
                 self.chat_id,
                 f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
@@ -318,9 +309,7 @@ class TradingOrchestrator:
         )
 
         # 6. GỬI BÁO CÁO TÓM TẮT
-        await self.send_summary_report(
-            signal_count, watchlist_candidates, market_regime
-        )
+        await self.send_summary_report(signal_count, watchlist_candidates, market_regime)
 
     def get_scan_universe(self) -> List[str]:
         """Lấy danh sách các mã cổ phiếu cần quét."""
@@ -350,9 +339,7 @@ class TradingOrchestrator:
                     "shares": pos.get("shares", 0),
                     "entry_price": entry_price,
                     # Prefer last known price from metadata if available
-                    "current_price": pos.get("metadata", {}).get(
-                        "last_price", entry_price
-                    ),
+                    "current_price": pos.get("metadata", {}).get("last_price", entry_price),
                     "unrealized_pnl": 0,
                 }
 
@@ -400,9 +387,7 @@ class TradingOrchestrator:
 
             # Cập nhật giá hiện tại vào metadata để portfolio phản ánh P&L theo thời gian thực
             try:
-                self.portfolio_manager.update_position_price(
-                    symbol, float(current_price)
-                )
+                self.portfolio_manager.update_position_price(symbol, float(current_price))
             except Exception:
                 logging.debug(f"Không thể cập nhật last_price cho {symbol}")
 
@@ -478,16 +463,12 @@ class TradingOrchestrator:
                     )
             else:
                 logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
-                await self.bot.send_message(
-                    self.chat_id, f"❌ Lỗi bán {symbol}: {sell_msg}"
-                )
+                await self.bot.send_message(self.chat_id, f"❌ Lỗi bán {symbol}: {sell_msg}")
 
         except Exception:
             logging.error(f"Lỗi khi thực hiện thoát lệnh {symbol}", exc_info=True)
 
-    async def scan_for_new_entries(
-        self, current_tickers, existing_symbols, market_regime
-    ):
+    async def scan_for_new_entries(self, current_tickers, existing_symbols, market_regime):
         """Quét song song để tìm các tín hiệu vào lệnh mới."""
         signal_count = 0
         watchlist_candidates = []
@@ -503,9 +484,7 @@ class TradingOrchestrator:
                     return
 
                 # Logic xử lý được chuyển hết vào process_single_ticker_for_entry
-                entry_result = await self.process_single_ticker_for_entry(
-                    symbol, market_regime
-                )
+                entry_result = await self.process_single_ticker_for_entry(symbol, market_regime)
 
                 if entry_result and entry_result.get("signal"):
                     async with results_lock:
@@ -572,9 +551,7 @@ class TradingOrchestrator:
 
                 # Double-check: Filter out any positions with invalid shares
                 active_positions = {
-                    sym: pos
-                    for sym, pos in current_positions.items()
-                    if pos.get("shares", 0) > 0
+                    sym: pos for sym, pos in current_positions.items() if pos.get("shares", 0) > 0
                 }
 
                 # ENHANCED: Check if symbol already has position
@@ -602,9 +579,7 @@ class TradingOrchestrator:
                     )
                     if active_count > 0:
                         symbols_list = list(active_positions.keys())[:10]
-                        logging.debug(
-                            f"   Các vị thế hiện tại: {', '.join(symbols_list)}"
-                        )
+                        logging.debug(f"   Các vị thế hiện tại: {', '.join(symbols_list)}")
                     return None
 
                 # Log if close to limit
@@ -699,9 +674,7 @@ class TradingOrchestrator:
             # logging.warning(f"[{symbol}] Lỗi tải dữ liệu") # Giảm log nhiễu
             return None
         except Exception:
-            logging.error(
-                f"[{symbol}] Lỗi không xác định trong process_single_ticker_for_entry"
-            )
+            logging.error(f"[{symbol}] Lỗi không xác định trong process_single_ticker_for_entry")
             import traceback
 
             logging.error(traceback.format_exc())
@@ -726,19 +699,11 @@ class TradingOrchestrator:
         except (ZeroDivisionError, IndexError):
             risk_reward_ratio = 0
 
-        tp1_target = (
-            entry_signal.take_profit_targets[0]
-            if entry_signal.take_profit_targets
-            else 0
-        )
+        tp1_target = entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else 0
 
         # Format confidence với emoji dựa trên mức độ
         confidence_emoji = (
-            "🟢"
-            if entry_signal.confidence >= 70
-            else "🟡"
-            if entry_signal.confidence >= 50
-            else "🔴"
+            "🟢" if entry_signal.confidence >= 70 else "🟡" if entry_signal.confidence >= 50 else "🔴"
         )
 
         message = (
@@ -775,13 +740,9 @@ class TradingOrchestrator:
                 }
                 for sym, pos in active_positions.items()
             }
-            risk_metrics = self.portfolio_risk_manager.calculate_portfolio_risk(
-                risk_positions
-            )
+            risk_metrics = self.portfolio_risk_manager.calculate_portfolio_risk(risk_positions)
             if risk_metrics.risk_status in ["HIGH", "CRITICAL"]:
-                risk_summary = self.portfolio_risk_manager.get_risk_summary(
-                    risk_positions
-                )
+                risk_summary = self.portfolio_risk_manager.get_risk_summary(risk_positions)
                 await self.bot.send_message(
                     self.chat_id,
                     f"⚠️ *PORTFOLIO RISK ALERT*\n\n{risk_summary}",
@@ -790,9 +751,7 @@ class TradingOrchestrator:
         except Exception:
             logging.error("Lỗi portfolio risk analysis", exc_info=True)
 
-    async def send_summary_report(
-        self, signal_count, watchlist_candidates, market_regime: Dict
-    ):
+    async def send_summary_report(self, signal_count, watchlist_candidates, market_regime: Dict):
         """Gửi báo cáo tóm tắt cuối phiên quét."""
         try:
             portfolio_summary = self.portfolio_manager.get_detailed_analysis()
@@ -810,9 +769,7 @@ class TradingOrchestrator:
 
             summary_msg += "\n" + portfolio_summary
 
-            await self.bot.send_message(
-                self.chat_id, summary_msg, parse_mode="Markdown"
-            )
+            await self.bot.send_message(self.chat_id, summary_msg, parse_mode="Markdown")
         except Exception:
             logging.error("Lỗi gửi báo cáo tóm tắt", exc_info=True)
             await self.bot.send_message(self.chat_id, "Lỗi khi tạo báo cáo")

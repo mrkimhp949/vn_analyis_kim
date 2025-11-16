@@ -72,9 +72,7 @@ class TickerLoader:
             self.all_tickers = df.iloc[:, 0].tolist()
 
             # Clean tickers
-            self.all_tickers = [
-                str(t).strip().upper() for t in self.all_tickers if pd.notna(t)
-            ]
+            self.all_tickers = [str(t).strip().upper() for t in self.all_tickers if pd.notna(t)]
 
             # Remove empty strings
             self.all_tickers = [t for t in self.all_tickers if t]
@@ -170,16 +168,8 @@ class TickerLoader:
         cache_key = f"min_volume_{min_volume}_max_tickers_{max_tickers}"
         last_cache_key = getattr(self, "_last_cache_key", None)
 
-        if (
-            not force_validate
-            and self.validated_tickers
-            and cache_key == last_cache_key
-        ):
-            return (
-                self.validated_tickers[:max_tickers]
-                if max_tickers
-                else self.validated_tickers
-            )
+        if not force_validate and self.validated_tickers and cache_key == last_cache_key:
+            return self.validated_tickers[:max_tickers] if max_tickers else self.validated_tickers
 
         # Store current cache key for next time
         self._last_cache_key = cache_key
@@ -254,9 +244,7 @@ def run_sector_analysis():
             min_volume=100_000,
             max_tickers=500,  # Lấy nhiều hơn một chút để có lựa chọn
         )
-        print(
-            f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning."
-        )
+        print(f"✅ [Compatibility] Loaded {len(tickers)} validated tickers for scanning.")
         return tickers
     except Exception:
         print("❌ [Compatibility] Error in fake run_sector_analysis")

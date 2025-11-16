@@ -133,9 +133,7 @@ class CircuitBreaker:
 
         # Validate input parameters
         if not isinstance(portfolio_pnl_pct, (int, float)):
-            raise ValueError(
-                f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}"
-            )
+            raise ValueError(f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}")
         if not isinstance(vnindex_change_pct, (int, float)):
             raise ValueError(
                 f"vnindex_change_pct phải là số, nhận được: {type(vnindex_change_pct)}"
@@ -145,10 +143,7 @@ class CircuitBreaker:
         self._adjust_thresholds_for_volatility(market_volatility)
 
         # Check 1: Max loss per day
-        if (
-            portfolio_pnl_pct < 0
-            and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct
-        ):
+        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
             self.tripped = True
             self.tripped_reason = (
                 f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
@@ -170,14 +165,18 @@ class CircuitBreaker:
         # Check 3: Max trades per day
         if self.stats["today"]["trades_count"] >= self.max_trades_per_day:
             self.tripped = True
-            self.tripped_reason = f"Số lệnh trong ngày ({self.stats['today']['trades_count']}) đạt giới hạn."
+            self.tripped_reason = (
+                f"Số lệnh trong ngày ({self.stats['today']['trades_count']}) đạt giới hạn."
+            )
             self._save_stats()
             return True
 
         # Check 4: Consecutive losses
         if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
             self.tripped = True
-            self.tripped_reason = f"Số lệnh thua liên tiếp ({self.stats['consecutive_losses']}) đạt giới hạn."
+            self.tripped_reason = (
+                f"Số lệnh thua liên tiếp ({self.stats['consecutive_losses']}) đạt giới hạn."
+            )
             self._save_stats()
             return True
 
@@ -232,8 +231,7 @@ class CircuitBreaker:
             # Low volatility - can relax slightly
             volatility_factor = 1.10  # 10% looser
             print(
-                f"📉 Low volatility ({vol_pct:.1f}%). "
-                "Relaxing circuit breaker thresholds by 10%"
+                f"📉 Low volatility ({vol_pct:.1f}%). " "Relaxing circuit breaker thresholds by 10%"
             )
         else:
             # Normal volatility - use base
@@ -241,9 +239,7 @@ class CircuitBreaker:
 
         # Apply adjustments
         self.max_loss_per_day_pct = self.base_max_loss_per_day_pct * volatility_factor
-        self.vnindex_drop_threshold = (
-            self.base_vnindex_drop_threshold * volatility_factor
-        )
+        self.vnindex_drop_threshold = self.base_vnindex_drop_threshold * volatility_factor
 
         print(
             f"🔧 Circuit breaker adjusted: "
@@ -324,10 +320,7 @@ class CircuitBreaker:
         self.stats["today"]["last_updated"] = datetime.now().isoformat()
 
         # Kiểm tra ngay xem có cần kích hoạt circuit breaker không
-        if (
-            portfolio_pnl_pct < 0
-            and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct
-        ):
+        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
             self.tripped = True
             self.tripped_reason = (
                 f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
@@ -359,9 +352,7 @@ class CircuitBreaker:
             f"⚠️ Consecutive losses: {self.stats.get('consecutive_losses', 0)}/{self.max_consecutive_losses}"
         )
         msg.append("")
-        msg.append(
-            f"Status: {'TRIPPED - ' + self.tripped_reason if self.tripped else 'OK'}"
-        )
+        msg.append(f"Status: {'TRIPPED - ' + self.tripped_reason if self.tripped else 'OK'}")
 
         return "\n".join(msg)
 

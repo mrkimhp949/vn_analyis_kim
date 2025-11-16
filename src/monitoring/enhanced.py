@@ -60,9 +60,7 @@ portfolio_value = Gauge("trading_portfolio_value", "Current portfolio value in V
 
 portfolio_pnl = Gauge("trading_portfolio_pnl", "Current portfolio P&L in VND")
 
-portfolio_pnl_percent = Gauge(
-    "trading_portfolio_pnl_percent", "Current portfolio P&L percentage"
-)
+portfolio_pnl_percent = Gauge("trading_portfolio_pnl_percent", "Current portfolio P&L percentage")
 
 active_positions = Gauge("trading_active_positions", "Number of active positions")
 
@@ -70,9 +68,7 @@ cash_available = Gauge("trading_cash_available", "Available cash in VND")
 
 system_cpu_percent = Gauge("trading_system_cpu_percent", "System CPU usage percentage")
 
-system_memory_percent = Gauge(
-    "trading_system_memory_percent", "System memory usage percentage"
-)
+system_memory_percent = Gauge("trading_system_memory_percent", "System memory usage percentage")
 
 # Info
 bot_info = Info("trading_bot", "Trading bot information")
@@ -200,12 +196,8 @@ class EnhancedMonitor:
         return {
             "status": self.health_status,
             "uptime_seconds": uptime,
-            "last_scan": (
-                self.last_scan_time.isoformat() if self.last_scan_time else None
-            ),
-            "last_error": (
-                self.last_error_time.isoformat() if self.last_error_time else None
-            ),
+            "last_scan": (self.last_scan_time.isoformat() if self.last_scan_time else None),
+            "last_error": (self.last_error_time.isoformat() if self.last_error_time else None),
             "checks": {"scan_recent": scan_healthy, "no_recent_errors": error_healthy},
         }
 

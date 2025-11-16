@@ -210,9 +210,7 @@ class TradingDB:
                 }
             except (ValueError, TypeError, IndexError) as e:
                 # Skip malformed rows
-                logging.getLogger(__name__).warning(
-                    f"Skipping malformed position row: {e}"
-                )
+                logging.getLogger(__name__).warning(f"Skipping malformed position row: {e}")
                 continue
         return positions
 
@@ -265,9 +263,7 @@ class TradingDB:
         # Note: SQLite doesn't return rowcount for DELETE, so we check after
         remaining = self.execute_read("SELECT COUNT(*) as count FROM positions")
         if remaining and len(remaining) > 0:
-            count = (
-                dict(remaining[0]) if hasattr(remaining[0], "keys") else remaining[0][0]
-            )
+            count = dict(remaining[0]) if hasattr(remaining[0], "keys") else remaining[0][0]
             return 0  # All deleted
 
         return 1  # At least some were deleted
@@ -374,9 +370,7 @@ class TradingDB:
     def get_trades(self, symbol: Optional[str] = None, limit: int = 100) -> List[Dict]:
         """Get trade history using the read connection."""
         if symbol:
-            query = (
-                "SELECT * FROM trades WHERE symbol = ? ORDER BY trade_date DESC LIMIT ?"
-            )
+            query = "SELECT * FROM trades WHERE symbol = ? ORDER BY trade_date DESC LIMIT ?"
             params = (symbol, limit)
         else:
             query = "SELECT * FROM trades ORDER BY trade_date DESC LIMIT ?"
@@ -485,17 +479,13 @@ class TradingDB:
                             symbol=symbol,
                             shares=pos.get("shares", 0),
                             avg_price=pos.get("avg_price", 0),
-                            entry_date=pos.get(
-                                "entry_date", datetime.now().isoformat()
-                            ),
+                            entry_date=pos.get("entry_date", datetime.now().isoformat()),
                             entry_value=pos.get("entry_value", 0),
                             stop_loss=pos.get("stop_loss"),
                             take_profit=pos.get("take_profit"),
                             metadata=pos,
                         )
-                    print(
-                        f"✅ Queued migration for {len(data)} positions from {filepath}"
-                    )
+                    print(f"✅ Queued migration for {len(data)} positions from {filepath}")
 
                 elif table == "portfolio_history" and isinstance(data, list):
                     for snapshot in data:
@@ -508,9 +498,7 @@ class TradingDB:
                             num_positions=snapshot.get("num_positions", 0),
                             metadata=snapshot,
                         )
-                    print(
-                        f"✅ Queued migration for {len(data)} snapshots from {filepath}"
-                    )
+                    print(f"✅ Queued migration for {len(data)} snapshots from {filepath}")
 
             except Exception:
                 print(f"❌ Error queuing migration for {filepath}")

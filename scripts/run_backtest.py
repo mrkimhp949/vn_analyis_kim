@@ -36,17 +36,13 @@ except ImportError:
                 for i, item in enumerate(self.iterable):
                     self.n = i + 1
                     if i % max(1, self.total // 10) == 0:  # Update every 10%
-                        print(
-                            f"{self.desc}: {self.n}/{self.total} ({self.n/self.total*100:.1f}%)"
-                        )
+                        print(f"{self.desc}: {self.n}/{self.total} ({self.n/self.total*100:.1f}%)")
                     yield item
             else:
                 for i in range(self.total):
                     self.n = i + 1
                     if i % max(1, self.total // 10) == 0:
-                        print(
-                            f"{self.desc}: {self.n}/{self.total} ({self.n/self.total*100:.1f}%)"
-                        )
+                        print(f"{self.desc}: {self.n}/{self.total} ({self.n/self.total*100:.1f}%)")
                     yield i
 
         def update(self, n=1):
@@ -216,9 +212,7 @@ class Backtester:
                 price = current_row["close"]
                 day_high = current_row.get("high", price)
                 day_low = current_row.get("low", price)
-                atr_value = current_row.get(
-                    "atr", current_data["close"].rolling(14).std().iloc[-1]
-                )
+                atr_value = current_row.get("atr", current_data["close"].rolling(14).std().iloc[-1])
 
                 # Kiểm tra stop-loss / take-profit khi đang giữ vị thế
                 if position > 0 and position_data:
@@ -256,18 +250,10 @@ class Backtester:
                 execution_price = self._apply_slippage(price, signal)
 
                 # CHỈ VÀO LỆNH KHI CONFIDENCE >= THRESHOLD
-                if (
-                    signal == "BUY"
-                    and confidence >= confidence_threshold
-                    and position == 0
-                ):
+                if signal == "BUY" and confidence >= confidence_threshold and position == 0:
                     # Tính ATR và stop loss dựa trên features
                     enriched = add_ml_features(current_data)
-                    latest_atr = (
-                        float(enriched.iloc[-1].get("atr", 0))
-                        if len(enriched) > 0
-                        else 0
-                    )
+                    latest_atr = float(enriched.iloc[-1].get("atr", 0)) if len(enriched) > 0 else 0
                     atr_for_stop = (
                         latest_atr
                         if latest_atr > 0
@@ -320,11 +306,7 @@ class Backtester:
                             "take_profit": take_profit_price,
                         }
 
-                elif (
-                    signal == "SELL"
-                    and confidence >= confidence_threshold
-                    and position > 0
-                ):
+                elif signal == "SELL" and confidence >= confidence_threshold and position > 0:
                     # Bán
                     revenue = position * execution_price * (1 - self.commission)
                     capital += revenue
@@ -380,9 +362,7 @@ class Backtester:
 
         # Calculate metrics
         final_capital = capital
-        total_return = (
-            (final_capital - self.initial_capital) / self.initial_capital * 100
-        )
+        total_return = (final_capital - self.initial_capital) / self.initial_capital * 100
 
         # Buy & Hold comparison
         buy_hold_return = (
@@ -422,9 +402,7 @@ class Backtester:
                     losing_trades += 1
                     gross_loss += abs(pnl)
                     consecutive_losses += 1
-                    max_consecutive_losses = max(
-                        max_consecutive_losses, consecutive_losses
-                    )
+                    max_consecutive_losses = max(max_consecutive_losses, consecutive_losses)
 
         win_rate = (
             (winning_trades / (winning_trades + losing_trades) * 100)
@@ -455,11 +433,7 @@ class Backtester:
             else 0
         )
         annual_return = (
-            (
-                (final_capital / self.initial_capital)
-                ** (252 / max(len(portfolio_df), 1))
-                - 1
-            )
+            ((final_capital / self.initial_capital) ** (252 / max(len(portfolio_df), 1)) - 1)
             if len(portfolio_df) > 0
             else 0
         )
@@ -850,9 +824,7 @@ class Backtester:
                 green_fill = PatternFill(
                     start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"
                 )
-                red_fill = PatternFill(
-                    start_color="FFC7CE", end_color="FFC7CE", fill_type="solid"
-                )
+                red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
                 worksheet.conditional_formatting.add(
                     f"D2:D{len(detailed_summary)+1}",

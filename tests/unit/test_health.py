@@ -232,9 +232,7 @@ class TestHealthChecker:
 
     @patch("os.listdir")
     @patch("os.path.exists")
-    def test_check_data_freshness_empty_cache(
-        self, mock_exists, mock_listdir, health_checker
-    ):
+    def test_check_data_freshness_empty_cache(self, mock_exists, mock_listdir, health_checker):
         """Test data freshness check with empty cache"""
         mock_exists.return_value = True
         mock_listdir.return_value = []
@@ -297,9 +295,7 @@ class TestHealthChecker:
         assert message == "No positions (no risk)"
 
     @patch("src.portfolio.manager.get_portfolio_manager")
-    def test_check_portfolio_risk_with_positions(
-        self, mock_get_manager, health_checker
-    ):
+    def test_check_portfolio_risk_with_positions(self, mock_get_manager, health_checker):
         """Test portfolio risk check with positions"""
         mock_manager = Mock()
         mock_manager.get_positions.return_value = [{"symbol": "VCB"}, {"symbol": "VIC"}]
@@ -315,9 +311,7 @@ class TestHealthChecker:
         assert "2 positions, P&L: +5.5%" in message
 
     @patch("src.portfolio.manager.get_portfolio_manager")
-    def test_check_portfolio_risk_large_drawdown(
-        self, mock_get_manager, health_checker
-    ):
+    def test_check_portfolio_risk_large_drawdown(self, mock_get_manager, health_checker):
         """Test portfolio risk check with large drawdown"""
         mock_manager = Mock()
         mock_manager.get_positions.return_value = [{"symbol": "VCB"}]
@@ -410,9 +404,7 @@ class TestHealthChecker:
     def test_run_all_checks_with_exception(self, mock_print, health_checker):
         """Test running all checks when one throws exception"""
         # Mock one check to throw exception
-        health_checker.check_api_server = Mock(
-            side_effect=Exception("Unexpected error")
-        )
+        health_checker.check_api_server = Mock(side_effect=Exception("Unexpected error"))
         health_checker.check_database = Mock(return_value=(True, "DB OK"))
         health_checker.check_models = Mock(return_value=(True, "Models OK"))
         health_checker.check_configuration = Mock(return_value=(True, "Config OK"))

@@ -119,9 +119,7 @@ class ExitManagementService:
                 if ml_signal is None:
                     logger.debug(f"[{symbol}] ML analysis returned None")
             except Exception as e:
-                logger.warning(
-                    f"⚠️ Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}"
-                )
+                logger.warning(f"⚠️ Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
                 # Tiếp tục với ml_signal = None
 
             # Check exit
@@ -152,9 +150,7 @@ class ExitManagementService:
             logger.error(f"[{symbol}] Error checking exit", exc_info=True)
             return None
 
-    async def execute_exit(
-        self, symbol: str, exit_decision: Dict, current_price: float
-    ) -> bool:
+    async def execute_exit(self, symbol: str, exit_decision: Dict, current_price: float) -> bool:
         """
         Execute an exit (full or partial)
 
@@ -179,9 +175,7 @@ class ExitManagementService:
                 return False
 
             pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
-            pnl_pct = (
-                (current_price - pos_data["avg_price"]) / pos_data["avg_price"]
-            ) * 100
+            pnl_pct = ((current_price - pos_data["avg_price"]) / pos_data["avg_price"]) * 100
 
             # Execute paper trade
             success, message, _ = self.paper_account.execute_sell(

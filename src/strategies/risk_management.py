@@ -7,9 +7,7 @@ Quản lý rủi ro nâng cao với volatility adjustment và correlation penalt
 class RiskManager:
     """Base Risk Manager class"""
 
-    def __init__(
-        self, total_capital=100_000_000, max_position_pct=0.2, risk_per_trade_pct=0.02
-    ):
+    def __init__(self, total_capital=100_000_000, max_position_pct=0.2, risk_per_trade_pct=0.02):
         self.total_capital = total_capital
         self.max_position_pct = max_position_pct
         self.risk_per_trade_pct = risk_per_trade_pct
@@ -26,9 +24,7 @@ class RiskManager:
         shares = int(max_risk / risk_per_share) if risk_per_share > 0 else 0
 
         # Check against max position size
-        max_shares_by_capital = int(
-            (self.total_capital * self.max_position_pct) / price
-        )
+        max_shares_by_capital = int((self.total_capital * self.max_position_pct) / price)
         shares = min(shares, max_shares_by_capital)
 
         # Round to lot of 100
@@ -57,9 +53,7 @@ class RiskManager:
                 "conservative": round(current_price + (atr * 0.7), -2),
             }
 
-    def format_recommendation(
-        self, symbol, result, position_info, limit_prices, df=None
-    ):
+    def format_recommendation(self, symbol, result, position_info, limit_prices, df=None):
         """Format recommendation message"""
         return f"Position recommendation for {symbol}"
 
@@ -69,17 +63,11 @@ class EnhancedRiskManager(RiskManager):
         """Override method từ class cha để tránh lỗi"""
         return super().suggest_limit_orders(current_price, atr, signal)
 
-    def format_recommendation(
-        self, symbol, result, position_info, limit_prices, df=None
-    ):
+    def format_recommendation(self, symbol, result, position_info, limit_prices, df=None):
         """Override method từ class cha"""
-        return super().format_recommendation(
-            symbol, result, position_info, limit_prices, df
-        )
+        return super().format_recommendation(symbol, result, position_info, limit_prices, df)
 
-    def __init__(
-        self, total_capital=100_000_000, max_position_pct=0.2, risk_per_trade_pct=0.02
-    ):
+    def __init__(self, total_capital=100_000_000, max_position_pct=0.2, risk_per_trade_pct=0.02):
         super().__init__(total_capital, max_position_pct, risk_per_trade_pct)
         self.volatility_adjustment = True
         self.correlation_penalty = True
@@ -105,18 +93,14 @@ class EnhancedRiskManager(RiskManager):
             volatility_factor = self._calculate_volatility_factor(market_volatility)
             base_position["shares"] = int(base_position["shares"] * volatility_factor)
             base_position["value"] = base_position["shares"] * price
-            base_position["max_loss"] = (
-                base_position["risk_per_share"] * base_position["shares"]
-            )
+            base_position["max_loss"] = base_position["risk_per_share"] * base_position["shares"]
             print(f"  📉 Volatility adjustment: {volatility_factor:.2f}x")
 
         # ĐIỀU CHỈNH 2: Confidence-based Sizing
         confidence_factor = self._calculate_confidence_factor(confidence)
         base_position["shares"] = int(base_position["shares"] * confidence_factor)
         base_position["value"] = base_position["shares"] * price
-        base_position["max_loss"] = (
-            base_position["risk_per_share"] * base_position["shares"]
-        )
+        base_position["max_loss"] = base_position["risk_per_share"] * base_position["shares"]
         print(f"  🎯 Confidence adjustment: {confidence_factor:.2f}x")
 
         # ĐIỀU CHỈNH 3: Market Regime
@@ -124,15 +108,11 @@ class EnhancedRiskManager(RiskManager):
             regime_factor = self._calculate_market_regime_factor()
             base_position["shares"] = int(base_position["shares"] * regime_factor)
             base_position["value"] = base_position["shares"] * price
-            base_position["max_loss"] = (
-                base_position["risk_per_share"] * base_position["shares"]
-            )
+            base_position["max_loss"] = base_position["risk_per_share"] * base_position["shares"]
             print(f"  🌡️ Market regime adjustment: {regime_factor:.2f}x")
 
         # Đảm bảo không vượt quá giới hạn
-        max_shares_by_capital = int(
-            (self.total_capital * self.max_position_pct) / price
-        )
+        max_shares_by_capital = int((self.total_capital * self.max_position_pct) / price)
         base_position["shares"] = min(base_position["shares"], max_shares_by_capital)
 
         # Làm tròn đến lot 100
@@ -181,9 +161,7 @@ class EnhancedRiskManager(RiskManager):
             if len(vnindex_data) > 20:
                 current_close = safe_get_latest(vnindex_data, "close", 0)
                 past_close = (
-                    vnindex_data["close"].iloc[-20]
-                    if len(vnindex_data) > 20
-                    else current_close
+                    vnindex_data["close"].iloc[-20] if len(vnindex_data) > 20 else current_close
                 )
                 market_trend = (current_close / past_close - 1) if past_close > 0 else 0
 
@@ -198,37 +176,25 @@ class EnhancedRiskManager(RiskManager):
 
         return 1.0  # Default
 
-    def suggest_enhanced_limit_orders(
-        self, current_price, atr, signal="BUY", confidence=50
-    ):
+    def suggest_enhanced_limit_orders(self, current_price, atr, signal="BUY", confidence=50):
         """Đề xuất limit orders nâng cao"""
         super().suggest_limit_orders(current_price, atr, signal)
 
         # Điều chỉnh theo confidence - Higher confidence = more aggressive (closer to price)
         # Invert confidence: high confidence (80%) -> small discount, low confidence (30%) -> large discount
-        confidence_factor = (
-            1.0 - (confidence / 100) * 0.5
-        )  # Maps 0% -> 1.0, 100% -> 0.5
+        confidence_factor = 1.0 - (confidence / 100) * 0.5  # Maps 0% -> 1.0, 100% -> 0.5
 
         if signal == "BUY":
             return {
-                "aggressive": round(
-                    current_price - (atr * 0.3 * confidence_factor), -2
-                ),
+                "aggressive": round(current_price - (atr * 0.3 * confidence_factor), -2),
                 "moderate": round(current_price - (atr * 0.5 * confidence_factor), -2),
-                "conservative": round(
-                    current_price - (atr * 0.7 * confidence_factor), -2
-                ),
+                "conservative": round(current_price - (atr * 0.7 * confidence_factor), -2),
                 "note": f"Giá mua điều chỉnh theo confidence: {confidence}%",
             }
         else:
             return {
-                "aggressive": round(
-                    current_price + (atr * 0.3 * confidence_factor), -2
-                ),
+                "aggressive": round(current_price + (atr * 0.3 * confidence_factor), -2),
                 "moderate": round(current_price + (atr * 0.5 * confidence_factor), -2),
-                "conservative": round(
-                    current_price + (atr * 0.7 * confidence_factor), -2
-                ),
+                "conservative": round(current_price + (atr * 0.7 * confidence_factor), -2),
                 "note": f"Giá bán điều chỉnh theo confidence: {confidence}%",
             }

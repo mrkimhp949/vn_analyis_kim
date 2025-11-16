@@ -85,9 +85,7 @@ class TestEnhancedRiskManager:
 
     @patch("utils.dataframe_utils.safe_get_latest")
     @patch("src.data.loader.load_data")
-    def test_market_regime_factor_bull(
-        self, mock_load_data, mock_safe_get_latest, risk_manager
-    ):
+    def test_market_regime_factor_bull(self, mock_load_data, mock_safe_get_latest, risk_manager):
         """Test market regime factor in bull market"""
         # Mock VNINDEX data showing bull market (>2% gain)
         mock_df = Mock()
@@ -95,9 +93,7 @@ class TestEnhancedRiskManager:
         # Mock the "close" column access for iloc[-20]
         close_column_mock = Mock()
         close_column_mock.iloc = Mock()
-        close_column_mock.iloc.__getitem__ = Mock(
-            return_value=100
-        )  # Past close (20 days ago)
+        close_column_mock.iloc.__getitem__ = Mock(return_value=100)  # Past close (20 days ago)
         mock_df.__getitem__ = Mock(return_value=close_column_mock)
         mock_load_data.return_value = mock_df
         mock_safe_get_latest.return_value = 110  # Current close price
@@ -112,9 +108,7 @@ class TestEnhancedRiskManager:
         mock_df = Mock()
         mock_df.__len__ = Mock(return_value=50)
         mock_df.__getitem__ = Mock(
-            return_value=Mock(
-                iloc=Mock(__getitem__=Mock(side_effect=[95, 100]))  # -5% loss
-            )
+            return_value=Mock(iloc=Mock(__getitem__=Mock(side_effect=[95, 100])))  # -5% loss
         )
         mock_load_data.return_value = mock_df
 
@@ -123,9 +117,7 @@ class TestEnhancedRiskManager:
 
     @patch("utils.dataframe_utils.safe_get_latest")
     @patch("src.data.loader.load_data")
-    def test_market_regime_factor_sideway(
-        self, mock_load_data, mock_safe_get_latest, risk_manager
-    ):
+    def test_market_regime_factor_sideway(self, mock_load_data, mock_safe_get_latest, risk_manager):
         """Test market regime factor in sideway market"""
         # Mock VNINDEX data showing sideway market (-2% to 2%)
         mock_df = Mock()
@@ -133,9 +125,7 @@ class TestEnhancedRiskManager:
         # Mock the "close" column access for iloc[-20]
         close_column_mock = Mock()
         close_column_mock.iloc = Mock()
-        close_column_mock.iloc.__getitem__ = Mock(
-            return_value=100
-        )  # Past close (20 days ago)
+        close_column_mock.iloc.__getitem__ = Mock(return_value=100)  # Past close (20 days ago)
         mock_df.__getitem__ = Mock(return_value=close_column_mock)
         mock_load_data.return_value = mock_df
         mock_safe_get_latest.return_value = 101  # Current close price
@@ -216,9 +206,7 @@ class TestEnhancedRiskManager:
         assert orders["aggressive"] < orders["moderate"] < orders["conservative"]
 
     @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
-    def test_calculate_enhanced_position_size_basic(
-        self, mock_parent_calc, risk_manager
-    ):
+    def test_calculate_enhanced_position_size_basic(self, mock_parent_calc, risk_manager):
         """Test basic enhanced position size calculation"""
         # Mock parent class method
         mock_parent_calc.return_value = {
@@ -243,9 +231,7 @@ class TestEnhancedRiskManager:
         assert result["shares"] > 0
 
     @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
-    def test_calculate_enhanced_position_size_zero_shares(
-        self, mock_parent_calc, risk_manager
-    ):
+    def test_calculate_enhanced_position_size_zero_shares(self, mock_parent_calc, risk_manager):
         """Test enhanced position size when base calculation returns zero"""
         # Mock parent class to return zero shares
         mock_parent_calc.return_value = {
@@ -268,9 +254,7 @@ class TestEnhancedRiskManager:
         assert result["shares"] == 0
 
     @patch("src.strategies.risk_management.RiskManager.calculate_position_size")
-    def test_calculate_enhanced_position_size_rounded_to_lot(
-        self, mock_parent_calc, risk_manager
-    ):
+    def test_calculate_enhanced_position_size_rounded_to_lot(self, mock_parent_calc, risk_manager):
         """Test that position size is rounded to lot of 100"""
         # Mock parent class method
         mock_parent_calc.return_value = {

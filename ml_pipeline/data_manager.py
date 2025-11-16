@@ -38,14 +38,10 @@ class DataManager:
                 logger.info(f"Loading cached features for {symbol}")
                 return pd.read_parquet(feature_path)
             except Exception:
-                logger.warning(
-                    f"Failed to load cached features for {symbol}, will reload"
-                )
+                logger.warning(f"Failed to load cached features for {symbol}, will reload")
 
         try:
-            logger.info(
-                f"Loading data for {symbol} (lookback={self.config.lookback} days)"
-            )
+            logger.info(f"Loading data for {symbol} (lookback={self.config.lookback} days)")
             raw = load_data(symbol, lookback=self.config.lookback, use_cache=True)
             if raw.empty:
                 logger.warning(f"No data returned for {symbol}")

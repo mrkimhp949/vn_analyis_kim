@@ -152,9 +152,7 @@ class TestConservativePositionSizer:
         assert "VNM" not in sizer.current_positions
         assert sizer.realized_pnl == 2500000  # 500 * (85000 - 80000)
 
-    @pytest.mark.skip(
-        reason="Methods get_portfolio_status not in EnhancedPositionSizer"
-    )
+    @pytest.mark.skip(reason="Methods get_portfolio_status not in EnhancedPositionSizer")
     def test_portfolio_status(self, sizer):
         """Test portfolio status calculation"""
         sizer.add_position("VNM", 500, 80000)

@@ -185,9 +185,7 @@ class DataValidator:
         # Ensure positive values
         for col in available_critical:
             df[col] = df[col].abs()
-            df.loc[df[col] == 0, col] = (
-                df[col].replace(0, np.nan).fillna(method="ffill")
-            )
+            df.loc[df[col] == 0, col] = df[col].replace(0, np.nan).fillna(method="ffill")
 
         return df
 

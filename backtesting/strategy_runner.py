@@ -64,9 +64,7 @@ class StrategyRunner:
         trading_dates = sorted(list(all_dates))
         return [d for d in trading_dates if start_date.date() <= d <= end_date.date()]
 
-    def _check_exits_for_date(
-        self, current_date, data_cache: dict, current_prices: dict
-    ):
+    def _check_exits_for_date(self, current_date, data_cache: dict, current_prices: dict):
         """Check exit conditions for all open positions"""
         for symbol in list(self.engine.positions.keys()):
             if symbol not in data_cache:
@@ -99,9 +97,7 @@ class StrategyRunner:
                     date=datetime.combine(current_date, datetime.min.time()),
                     exit_price=current_price,
                     reason=(
-                        exit_decision.exit_reason.value
-                        if exit_decision.exit_reason
-                        else "Unknown"
+                        exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
                     ),
                 )
 
@@ -153,8 +149,7 @@ class StrategyRunner:
                             else entry_signal.entry_price * 1.15
                         ),
                         reason=(
-                            f"{entry_signal.strength.value}: "
-                            f"{', '.join(entry_signal.reasons)}"
+                            f"{entry_signal.strength.value}: " f"{', '.join(entry_signal.reasons)}"
                         ),
                     )
             except Exception:
@@ -165,9 +160,7 @@ class StrategyRunner:
         for symbol in list(self.engine.positions.keys()):
             if symbol in data_cache:
                 df = data_cache[symbol]
-                final_price = df[df["time"].dt.date <= end_date.date()]["close"].iloc[
-                    -1
-                ]
+                final_price = df[df["time"].dt.date <= end_date.date()]["close"].iloc[-1]
                 self.engine.close_position(
                     symbol=symbol,
                     date=end_date,
@@ -234,9 +227,7 @@ class StrategyRunner:
         return results
 
 
-def run_simple_backtest(
-    symbols: List[str] = None, months_back: int = 12
-) -> BacktestResult:
+def run_simple_backtest(symbols: List[str] = None, months_back: int = 12) -> BacktestResult:
     """
     Quick helper function to run a simple backtest
 

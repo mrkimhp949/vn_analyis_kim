@@ -84,9 +84,7 @@ class WalkForwardTester:
 
         for symbol in symbols:
             try:
-                symbol_results = self._test_symbol(
-                    symbol, strategy_function, initial_capital
-                )
+                symbol_results = self._test_symbol(symbol, strategy_function, initial_capital)
                 all_results.extend(symbol_results)
             except Exception:
                 logger.error(f"Error testing {symbol}")
@@ -233,22 +231,14 @@ class WalkForwardTester:
         )
 
         # Best and worst windows
-        best_window = (
-            df.loc[df["test_return"].idxmax()].to_dict() if not df.empty else {}
-        )
-        worst_window = (
-            df.loc[df["test_return"].idxmin()].to_dict() if not df.empty else {}
-        )
+        best_window = df.loc[df["test_return"].idxmax()].to_dict() if not df.empty else {}
+        worst_window = df.loc[df["test_return"].idxmin()].to_dict() if not df.empty else {}
 
         # Stability score (0-100)
         # Higher is better: consistent returns, low drawdown, high win rate
         stability_score = min(
             100,
-            (
-                positive_windows_pct * 0.4
-                + (100 - avg_max_dd) * 0.3
-                + avg_win_rate * 0.3
-            ),
+            (positive_windows_pct * 0.4 + (100 - avg_max_dd) * 0.3 + avg_win_rate * 0.3),
         )
 
         return {

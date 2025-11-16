@@ -128,9 +128,7 @@ class TestAPIEndpoints:
     def test_remove_from_portfolio(self):
         """Test removing position from portfolio"""
         # First add a position
-        self.client.post(
-            "/portfolio/add", params={"symbol": "TEST", "shares": 100, "price": 50000}
-        )
+        self.client.post("/portfolio/add", params={"symbol": "TEST", "shares": 100, "price": 50000})
 
         # Then remove it
         response = self.client.post("/portfolio/remove", params={"symbol": "TEST"})

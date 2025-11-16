@@ -127,10 +127,7 @@ class NoSignalAnalyzer:
                     warnings_str = " ".join(entry_signal.warnings)
                     if "trend" in warnings_str.lower():
                         results["entry_filters"]["failed_trend"] += 1
-                    if (
-                        "support" in warnings_str.lower()
-                        or "resistance" in warnings_str.lower()
-                    ):
+                    if "support" in warnings_str.lower() or "resistance" in warnings_str.lower():
                         results["entry_filters"]["failed_support"] += 1
                     if "volume" in warnings_str.lower():
                         results["entry_filters"]["failed_volume"] += 1
@@ -148,15 +145,11 @@ class NoSignalAnalyzer:
         # Calculate averages
         if results["ml_analysis"]["total"] > 0:
             results["ml_analysis"]["buy_rate"] = (
-                results["ml_analysis"]["buy_signals"]
-                / results["ml_analysis"]["total"]
-                * 100
+                results["ml_analysis"]["buy_signals"] / results["ml_analysis"]["total"] * 100
             )
 
         # Generate recommendations
-        results["recommendations"] = self._generate_recommendations(
-            results, entry_logic
-        )
+        results["recommendations"] = self._generate_recommendations(results, entry_logic)
 
         return results
 
@@ -177,9 +170,7 @@ class NoSignalAnalyzer:
             )
 
         # Check confidence distribution
-        low_conf = (
-            results["confidence_ranges"]["0-20"] + results["confidence_ranges"]["20-40"]
-        )
+        low_conf = results["confidence_ranges"]["0-20"] + results["confidence_ranges"]["20-40"]
         if low_conf / total > 0.5:
             recommendations.append(
                 f"⚠️ {low_conf/total*100:.1f}% mã có confidence <40%. "
@@ -273,15 +264,11 @@ class NoSignalAnalyzer:
         lines.append(
             f"• ❌ Failed confidence: {filters['failed_confidence']} ({fail_conf_pct:.1f}%)"
         )
-        lines.append(
-            f"• ❌ Failed trend: {filters['failed_trend']} ({fail_trend_pct:.1f}%)"
-        )
+        lines.append(f"• ❌ Failed trend: {filters['failed_trend']} ({fail_trend_pct:.1f}%)")
         lines.append(
             f"• ❌ Failed support/resistance: {filters['failed_support']} ({fail_sr_pct:.1f}%)"
         )
-        lines.append(
-            f"• ❌ Failed volume: {filters['failed_volume']} ({fail_vol_pct:.1f}%)"
-        )
+        lines.append(f"• ❌ Failed volume: {filters['failed_volume']} ({fail_vol_pct:.1f}%)")
         lines.append(
             f"• ❌ Failed volatility: {filters['failed_volatility']} ({fail_vola_pct:.1f}%)"
         )

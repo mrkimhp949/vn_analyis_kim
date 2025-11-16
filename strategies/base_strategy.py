@@ -33,9 +33,7 @@ class BaseStrategy(ABC):
         """
 
     @abstractmethod
-    def generate_signals(
-        self, market_data: Dict[str, pd.DataFrame]
-    ) -> List[Dict[str, Any]]:
+    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
         """
         Phương thức cốt lõi để tạo ra các tín hiệu giao dịch.
 
@@ -102,9 +100,7 @@ class BaseStrategy(ABC):
         # Làm tròn xuống theo lô 100
         return (shares // 100) * 100
 
-    def determine_exit_levels(
-        self, signal: Dict[str, Any]
-    ) -> Dict[str, Optional[float]]:
+    def determine_exit_levels(self, signal: Dict[str, Any]) -> Dict[str, Optional[float]]:
         """
         Xác định các mức dừng lỗ (stop-loss) và chốt lời (take-profit).
 

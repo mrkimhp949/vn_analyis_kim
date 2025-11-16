@@ -24,19 +24,13 @@ def setup_logging():
     except Exception:
         # Fallback: bọc stream với UTF-8 nếu cần
         try:
-            sys.stdout = io.TextIOWrapper(
-                sys.stdout.buffer, encoding="utf-8", errors="replace"
-            )
-            sys.stderr = io.TextIOWrapper(
-                sys.stderr.buffer, encoding="utf-8", errors="replace"
-            )
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
         except Exception:
             pass
 
     # Handlers với UTF-8
-    file_handler = logging.FileHandler(
-        os.path.join(log_dir, "trading_bot.log"), encoding="utf-8"
-    )
+    file_handler = logging.FileHandler(os.path.join(log_dir, "trading_bot.log"), encoding="utf-8")
     console_handler = logging.StreamHandler(stream=sys.stdout)
 
     # Configure root logger

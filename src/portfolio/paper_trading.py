@@ -214,9 +214,7 @@ class PaperTradingAccount:
         try:
             # Determine shares to sell and perform DB update
             direct_partial = (
-                shares is not None
-                and isinstance(shares, int)
-                and 0 < shares < available_shares
+                shares is not None and isinstance(shares, int) and 0 < shares < available_shares
             )
 
             if direct_partial:
@@ -341,8 +339,7 @@ class PaperTradingAccount:
         sell_trades = [t for t in trades if "SELL" in t.get("action", "")]
 
         total_commission = sum(
-            (t.get("price", 0) * t.get("shares", 0) * self.commission_rate)
-            for t in trades
+            (t.get("price", 0) * t.get("shares", 0) * self.commission_rate) for t in trades
         )
 
         portfolio_value = self.get_portfolio_value()

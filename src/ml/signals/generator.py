@@ -97,14 +97,10 @@ class MLSignalGenerator:
                 tech_score = self._calculate_technical_score(latest)
 
                 # Ensemble Decision
-                signal, confidence, reason = self._make_decision(
-                    ml_score, tech_score, latest
-                )
+                signal, confidence, reason = self._make_decision(ml_score, tech_score, latest)
 
                 # ENHANCEMENT: Calibrate confidence based on historical accuracy
-                calibrated_confidence = self._calibrate_confidence(
-                    confidence, signal, ml_score
-                )
+                calibrated_confidence = self._calibrate_confidence(confidence, signal, ml_score)
 
                 # Also use ml_monitor if available
                 if use_monitoring and ml_monitor:
@@ -128,9 +124,7 @@ class MLSignalGenerator:
                     "price": latest["close"],
                     "rsi": latest.get("rsi", 50),
                     "ema_trend": (
-                        "UP"
-                        if latest.get("ema20", 0) > latest.get("ema50", 0)
-                        else "DOWN"
+                        "UP" if latest.get("ema20", 0) > latest.get("ema50", 0) else "DOWN"
                     ),
                 }
             else:
@@ -313,9 +307,7 @@ class MLSignalGenerator:
 
         return signal, int(confidence), " | ".join(reasons)
 
-    def _calibrate_confidence(
-        self, raw_confidence: float, signal: str, ml_score: float
-    ) -> float:
+    def _calibrate_confidence(self, raw_confidence: float, signal: str, ml_score: float) -> float:
         """
         ENHANCEMENT: Calibrate confidence based on historical performance
 
@@ -396,9 +388,9 @@ class MLSignalGenerator:
 
         # Log statistics periodically
         if len(self._confidence_history) % 20 == 0:
-            overall_accuracy = sum(
-                1 for _, result in self._confidence_history if result
-            ) / len(self._confidence_history)
+            overall_accuracy = sum(1 for _, result in self._confidence_history if result) / len(
+                self._confidence_history
+            )
             print(
                 f"📊 ML Signal accuracy (last {len(self._confidence_history)} predictions): "
                 f"{overall_accuracy:.1%}"
@@ -411,9 +403,7 @@ class MLSignalGenerator:
         try:
             # 1. Load VN-Index data
             print("   - Đang tải dữ liệu VNINDEX cho việc tính toán features...")
-            index_df = load_data(
-                "VNINDEX", lookback="5y", use_cache=True, is_index=True
-            )
+            index_df = load_data("VNINDEX", lookback="5y", use_cache=True, is_index=True)
             if index_df.empty:
                 print("❌ Không thể tải dữ liệu VNINDEX. Dừng training.")
                 return
@@ -450,9 +440,7 @@ class MLSignalGenerator:
             self.predictor.save_scaler()
 
             # 6. Train models with improved config
-            print(
-                "   - Huấn luyện RandomForest với class_weight='balanced' và params mới..."
-            )
+            print("   - Huấn luyện RandomForest với class_weight='balanced' và params mới...")
             self.predictor.train_random_forest(X_train, y_train)
 
             # (Optional) Train LSTM - hiện tại đang tắt để tập trung vào RandomForest

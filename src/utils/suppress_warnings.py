@@ -70,9 +70,7 @@ warnings.filterwarnings("ignore", message=".*jax.xla_computation is deprecated.*
 
 # Suppress TensorFlow Lite JAX warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="tensorflow.lite")
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module="tensorflow.lite.python.util"
-)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="tensorflow.lite.python.util")
 warnings.filterwarnings(
     "ignore", message=".*jax.xla_computation is deprecated. Please use the AOT APIs.*"
 )

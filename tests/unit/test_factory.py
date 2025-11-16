@@ -540,9 +540,7 @@ class TestCreateTestOrchestrator:
         mock_entry_service = MagicMock(name="mock_entry")
 
         # Act
-        create_test_orchestrator(
-            ml_generator=mock_ml_generator, entry_service=mock_entry_service
-        )
+        create_test_orchestrator(ml_generator=mock_ml_generator, entry_service=mock_entry_service)
 
         # Assert
         call_args = mock_orchestrator_class.call_args

@@ -179,9 +179,7 @@ def compare_profiles():
     print("=" * 60)
 
     print(
-        "\n{:<15} {:<12} {:<12} {:<12}".format(
-            "Regime", "Conservative", "Balanced", "Aggressive"
-        )
+        "\n{:<15} {:<12} {:<12} {:<12}".format("Regime", "Conservative", "Balanced", "Aggressive")
     )
     print("-" * 60)
 

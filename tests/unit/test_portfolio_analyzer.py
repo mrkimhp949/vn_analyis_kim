@@ -120,9 +120,7 @@ class TestPortfolioAnalyzer:
         mock_load_data.return_value = mock_df
 
         # Mock ML signal
-        analyzer.ml_generator.analyze = Mock(
-            return_value={"signal": "BUY", "confidence": 0.8}
-        )
+        analyzer.ml_generator.analyze = Mock(return_value={"signal": "BUY", "confidence": 0.8})
 
         # Mock exit decision
         mock_exit_decision = Mock()
@@ -171,9 +169,7 @@ class TestPortfolioAnalyzer:
     @patch("src.portfolio.analyzer.load_data")
     def test_analyze_current_portfolio_empty(self, mock_load_data, analyzer):
         """Test analyzing empty portfolio"""
-        analyzer.market_analyzer.analyze_market_regime = Mock(
-            return_value={"regime": "NEUTRAL"}
-        )
+        analyzer.market_analyzer.analyze_market_regime = Mock(return_value={"regime": "NEUTRAL"})
 
         result = analyzer.analyze_current_portfolio({})
 
@@ -203,13 +199,9 @@ class TestPortfolioAnalyzer:
         mock_load_data.return_value = mock_df
 
         # Mock dependencies
-        analyzer.market_analyzer.analyze_market_regime = Mock(
-            return_value={"regime": "BULLISH"}
-        )
+        analyzer.market_analyzer.analyze_market_regime = Mock(return_value={"regime": "BULLISH"})
 
-        analyzer.ml_generator.analyze = Mock(
-            return_value={"signal": "BUY", "confidence": 0.7}
-        )
+        analyzer.ml_generator.analyze = Mock(return_value={"signal": "BUY", "confidence": 0.7})
 
         mock_exit_decision = Mock()
         mock_exit_decision.should_exit = False

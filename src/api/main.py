@@ -10,9 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 # Add project root to Python path for direct execution
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -129,9 +127,7 @@ def _run_weekly_model_retraining():
 # ═══════════════════════════════════════════════════════════
 
 
-def _check_weekly_retrain(
-    now, current_weekday, current_hour, current_minute, last_model_retrain
-):
+def _check_weekly_retrain(now, current_weekday, current_hour, current_minute, last_model_retrain):
     """Check and run weekly model retraining on Sunday at 20:00"""
     if (
         current_weekday == 6
@@ -191,9 +187,7 @@ def _check_signal_scan(now, current_hour, current_minute, last_signal_scan):
     return False, None, last_signal_scan
 
 
-def _check_portfolio(
-    now, current_weekday, current_hour, current_minute, last_portfolio_check
-):
+def _check_portfolio(now, current_weekday, current_hour, current_minute, last_portfolio_check):
     """Check and send portfolio update on Friday at 14:45"""
     from src.market.schedule import is_trading_day
 

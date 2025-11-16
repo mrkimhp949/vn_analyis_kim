@@ -51,17 +51,13 @@ class PortfolioOptimizer:
             chosen_method = "HRP"
         else:
             weights = self._risk_budgeting_allocation(returns_df)
-            chosen_method = (
-                "RiskBudgeting" if method != "hrp" else "RiskBudgeting(Fallback)"
-            )
+            chosen_method = "RiskBudgeting" if method != "hrp" else "RiskBudgeting(Fallback)"
 
         if weights is None or weights.empty:
             return None
 
         cov = returns_df.cov()
-        annualized_vol = float(
-            np.sqrt(np.dot(weights.values, cov @ weights.values)) * np.sqrt(252)
-        )
+        annualized_vol = float(np.sqrt(np.dot(weights.values, cov @ weights.values)) * np.sqrt(252))
 
         return OptimizationResult(
             weights=weights.to_dict(),
@@ -119,9 +115,7 @@ class PortfolioOptimizer:
         variance = float(w.T @ cov_slice.values @ w)
         return variance
 
-    def _recursive_bisection(
-        self, cov: pd.DataFrame, ordered_symbols: List[str]
-    ) -> pd.Series:
+    def _recursive_bisection(self, cov: pd.DataFrame, ordered_symbols: List[str]) -> pd.Series:
         weights = pd.Series(1.0, index=ordered_symbols)
         clusters = [ordered_symbols]
 

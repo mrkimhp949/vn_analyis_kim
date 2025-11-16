@@ -184,9 +184,7 @@ class TestBacktestEngine:
         )
 
         # Update equity with current prices
-        self.engine.update_equity(
-            date=datetime(2024, 1, 5), current_prices={"VCB": 62000}
-        )
+        self.engine.update_equity(date=datetime(2024, 1, 5), current_prices={"VCB": 62000})
 
         assert len(self.engine.equity_curve) == 1
         assert self.engine.equity_curve[0]["equity"] > self.config.initial_capital
@@ -203,9 +201,7 @@ class TestBacktestEngine:
                 take_profit=55000,
             )
 
-            self.engine.update_equity(
-                date=datetime(2024, 1, 5), current_prices={f"SYM{i}": 52000}
-            )
+            self.engine.update_equity(date=datetime(2024, 1, 5), current_prices={f"SYM{i}": 52000})
 
             self.engine.close_position(
                 symbol=f"SYM{i}",

@@ -20,9 +20,7 @@ class TestIndicatorUtils:
 
     def test_get_atr_with_valid_atr_column(self):
         """Test ATR calculation with valid ATR column"""
-        df = pd.DataFrame(
-            {"close": [100, 101, 102, 103, 104], "atr": [2.0, 2.1, 2.2, 2.3, 2.4]}
-        )
+        df = pd.DataFrame({"close": [100, 101, 102, 103, 104], "atr": [2.0, 2.1, 2.2, 2.3, 2.4]})
 
         result = IndicatorUtils.get_atr(df)
 
@@ -62,9 +60,7 @@ class TestIndicatorUtils:
 
     def test_get_atr_with_zero_atr(self):
         """Test ATR calculation when ATR is zero"""
-        df = pd.DataFrame(
-            {"close": [100, 101, 102, 103, 104], "atr": [2.0, 2.1, 2.2, 2.3, 0.0]}
-        )
+        df = pd.DataFrame({"close": [100, 101, 102, 103, 104], "atr": [2.0, 2.1, 2.2, 2.3, 0.0]})
 
         result = IndicatorUtils.get_atr(df, default_pct=0.02)
 
@@ -74,9 +70,7 @@ class TestIndicatorUtils:
 
     def test_get_atr_with_negative_atr(self):
         """Test ATR calculation when ATR is negative"""
-        df = pd.DataFrame(
-            {"close": [100, 101, 102, 103, 104], "atr": [2.0, 2.1, 2.2, 2.3, -1.0]}
-        )
+        df = pd.DataFrame({"close": [100, 101, 102, 103, 104], "atr": [2.0, 2.1, 2.2, 2.3, -1.0]})
 
         result = IndicatorUtils.get_atr(df, default_pct=0.02)
 
@@ -354,9 +348,7 @@ class TestStopLossCalculator:
         atr = 2_000
         support_level = 96_000
 
-        stop_loss, reason = StopLossCalculator.calculate_stop_loss(
-            entry_price, atr, support_level
-        )
+        stop_loss, reason = StopLossCalculator.calculate_stop_loss(entry_price, atr, support_level)
 
         # Should use support level (96,000) as it's higher than ATR stop (96,000)
         assert stop_loss == 96_000
@@ -588,12 +580,8 @@ class TestIntegration:
 
         # Calculate stop loss and take profits
         entry_price = df["close"].iloc[-1]
-        stop_loss, reason = StopLossCalculator.calculate_stop_loss(
-            entry_price, atr, support
-        )
-        take_profits = StopLossCalculator.calculate_take_profit_targets(
-            entry_price, atr
-        )
+        stop_loss, reason = StopLossCalculator.calculate_stop_loss(entry_price, atr, support)
+        take_profits = StopLossCalculator.calculate_take_profit_targets(entry_price, atr)
 
         # Validate results
         assert atr == 2.9
