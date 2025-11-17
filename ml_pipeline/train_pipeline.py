@@ -2,10 +2,17 @@ import argparse
 import json
 import logging
 import os
+import sys
+from pathlib import Path
 
-from features import get_feature_columns
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-from config import TICKERS
+from src.config.legacy_config import TICKERS
+from src.ml.features.enhanced import get_feature_columns
+
 from ml_pipeline.data_manager import DataIngestionConfig, DataManager
 from ml_pipeline.feature_selection import select_features_with_shap
 from ml_pipeline.model_trainer import EnsembleTrainer, TrainingConfig

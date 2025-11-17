@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import List, Optional
 
 import pandas as pd
-from data_loader import load_data
-from features import add_ml_features
+from src.data.loader import load_data
+from src.ml.features.technical import add_ml_features
 
 logger = logging.getLogger(__name__)
 
