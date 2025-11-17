@@ -2,8 +2,9 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from features import add_ml_features, get_feature_columns
-from ml_models import MLPredictor
+from src.ml.features.technical import add_ml_features
+from src.ml.features.enhanced import get_feature_columns
+from src.ml.models.predictor import MLPredictor
 
 from strategies.base_strategy import BaseStrategy
 
@@ -54,7 +55,7 @@ class MlStrategy(BaseStrategy):
             List[Dict[str, Any]]: Danh sách các tín hiệu được tạo ra.
         """
         signals = []
-        vnindex_df = kwargs.get("vnindex_d")
+        vnindex_df = kwargs.get("vnindex_df")
 
         for symbol, df in market_data.items():
             if df.empty or len(df) < 50:

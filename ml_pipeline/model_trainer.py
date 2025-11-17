@@ -294,7 +294,7 @@ class EnsembleTrainer:
             metrics.append(fold_metrics)
 
             logger.info(
-                "Fold %d/%d - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4",
+                "Fold %d/%d - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4f",
                 fold_idx + 1,
                 self.config.n_splits,
                 fold_metrics["accuracy"],
@@ -339,7 +339,7 @@ class EnsembleTrainer:
             stacking_metrics["auc_like"] = float(np.mean(np.abs(stacking_proba - meta_targets)))
 
             logger.info(
-                "Stacking meta-model metrics - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4",
+                "Stacking meta-model metrics - Acc: %.4f | F1: %.4f | Precision: %.4f | Recall: %.4f",
                 stacking_metrics["accuracy"],
                 stacking_metrics["f1"],
                 stacking_metrics["precision"],
@@ -458,7 +458,7 @@ class EnsembleTrainer:
         logger.info(f"✅ Training complete. Metrics saved to {metrics_file}")
         if "accuracy" in metrics_summary:
             logger.info(
-                "Final CV metrics - Accuracy: %.4f ± %.4f | F1: %.4f ± %.4",
+                "Final CV metrics - Accuracy: %.4f ± %.4f | F1: %.4f ± %.4f",
                 metrics_summary["accuracy"]["mean"],
                 metrics_summary["accuracy"]["std"],
                 metrics_summary["f1"]["mean"],
