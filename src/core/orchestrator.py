@@ -359,15 +359,19 @@ class TradingOrchestrator:
         """Kiểm tra và xử lý các vị thế đang nắm giữ."""
         positions = self.portfolio_manager.get_positions()
         if not positions:
+            logging.info("📊 Không có vị thế nào đang nắm giữ")
             return
 
         logging.info(f"\n📊 Kiểm tra {len(positions)} vị thế đang nắm giữ...")
+        logging.info(f"📋 Danh sách vị thế: {list(positions.keys())}")
 
         tasks = [
             self._check_single_position(symbol, pos_data, market_regime)
             for symbol, pos_data in positions.items()
         ]
         await asyncio.gather(*tasks)
+        
+        logging.info(f"✅ Đã hoàn thành kiểm tra {len(positions)} vị thế")
 
     async def _check_single_position(
         self,
@@ -413,8 +417,21 @@ class TradingOrchestrator:
                 partial_exits=pos_data.get("partial_exits", []),
             )
 
+            # Debug logging
+            if exit_decision:
+                pnl_pct = ((current_price - pos_data["avg_price"]) / pos_data["avg_price"]) * 100
+                logging.debug(
+                    f"[{symbol}] Exit check: should_exit={exit_decision.should_exit}, "
+                    f"reason={exit_decision.exit_reason}, P&L={pnl_pct:.2f}%"
+                )
+            
             if exit_decision and exit_decision.should_exit:
+                logging.info(f"🚪 Tín hiệu thoát cho {symbol}: {exit_decision.exit_reason.value}")
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
+            else:
+                # Log khi không có exit signal để debug
+                if exit_decision:
+                    logging.debug(f"[{symbol}] Không có tín hiệu thoát - HOLD")
 
         except Exception:
             logging.error(f"Lỗi khi kiểm tra vị thế {symbol}", exc_info=True)
@@ -422,9 +439,13 @@ class TradingOrchestrator:
     async def execute_exit(self, symbol, pos_data, exit_decision, current_price):
         """Thực hiện thoát lệnh bán dựa trên quyết định thoát."""
         try:
+            logging.info(f"🚪 Bắt đầu thực thi exit cho {symbol}")
+            
             # Gửi thông báo thoát lệnh
             msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
+            logging.info(f"📤 Gửi thông báo exit cho {symbol}")
             await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
+            logging.info(f"✅ Đã gửi thông báo exit cho {symbol}")
 
             # Ghi nhận kết quả giao dịch vào Circuit Breaker
             # Use avg_price from DB as entry price

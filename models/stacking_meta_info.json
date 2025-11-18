@@ -1,0 +1,8 @@
+{
+  "model_type": "lightgbm",
+  "feature_names": [
+    "r_prob",
+    "gb_prob",
+    "xgb_prob"
+  ]
+}

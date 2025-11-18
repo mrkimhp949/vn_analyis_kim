@@ -204,17 +204,51 @@ class MLPredictor:
             raise ValueError("RF model not initialized")
 
     def load_models(self):
-        """Load pre-trained models và scaler"""
+        """Load pre-trained models và scaler
+        
+        Ưu tiên tìm models theo thứ tự:
+        1. Ensemble models (ensemble_rf.pkl, ensemble_scaler.pkl) - nếu có
+        2. Standard models (random_forest.pkl, scaler.pkl) - fallback
+        """
         self.ensure_models_dir()
 
         models_loaded = False
 
         try:
+            # Ưu tiên 1: Tìm ensemble models (từ ml_pipeline)
+            ensemble_rf_path = os.path.join(self.models_dir, "ensemble_rf.pkl")
+            ensemble_scaler_path = os.path.join(self.models_dir, "ensemble_scaler.pkl")
+            
+            # Ưu tiên 2: Tìm standard models
             rf_path = os.path.join(self.models_dir, "random_forest.pkl")
             scaler_path = os.path.join(self.models_dir, "scaler.pkl")
+            
             info_path = os.path.join(self.models_dir, "model_info.json")
 
-            if os.path.exists(rf_path) and os.path.exists(scaler_path):
+            # Thử load ensemble models trước
+            if os.path.exists(ensemble_rf_path) and os.path.exists(ensemble_scaler_path):
+                logger.info("📦 Tìm thấy ensemble models, đang load...")
+                try:
+                    self.rf_model = joblib.load(ensemble_rf_path)
+                    self.scaler = joblib.load(ensemble_scaler_path)
+                    logger.info(f"✅ Loaded ensemble models (expecting {self.expected_features} features)")
+                    models_loaded = True
+                    self.ml_enabled = True
+                    self.using_dummy_models = False
+                except Exception as e:
+                    logger.warning(f"⚠️ Lỗi khi load ensemble models: {e}")
+                    logger.info("🔄 Thử load standard models...")
+                    # Fallback to standard models
+                    if os.path.exists(rf_path) and os.path.exists(scaler_path):
+                        self.rf_model = joblib.load(rf_path)
+                        self.scaler = joblib.load(scaler_path)
+                        logger.info(f"✅ Loaded standard models (expecting {self.expected_features} features)")
+                        models_loaded = True
+                        self.ml_enabled = True
+                        self.using_dummy_models = False
+                    else:
+                        raise  # Re-raise if standard models also don't exist
+            elif os.path.exists(rf_path) and os.path.exists(scaler_path):
                 # Load metadata first to validate
                 if os.path.exists(info_path):
                     with open(info_path, "r") as f:
@@ -250,40 +284,60 @@ class MLPredictor:
                 self.ml_enabled = True
                 self.using_dummy_models = False
             else:
-                # CRITICAL: No models found
-                logger.critical(
-                    "\n" + "=" * 70 + "\n"
-                    "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
-                    f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
-                    "\n"
-                    "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
-                    "\n"
-                    "🔧 ĐỂ SỬA LỖI NÀY:\n"
-                    "1. Chạy lệnh: python scripts/train_models.py\n"
-                    "2. Hoặc: python -m src.ml.training.pipeline\n"
-                    "3. Sau khi train xong, khởi động lại bot\n"
-                    "\n"
-                    "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
+                # Kiểm tra xem có bất kỳ model nào khác không
+                has_any_model = (
+                    os.path.exists(ensemble_rf_path) or 
+                    os.path.exists(rf_path) or
+                    os.path.exists(os.path.join(self.models_dir, "ensemble_gb.pkl")) or
+                    os.path.exists(os.path.join(self.models_dir, "ensemble_xgb.pkl"))
                 )
+                
+                if has_any_model:
+                    # Có models nhưng không đầy đủ - cảnh báo nhẹ
+                    logger.warning(
+                        f"⚠️ Không tìm thấy đầy đủ model files. "
+                        f"Đã tìm thấy một số models nhưng thiếu RF model hoặc scaler.\n"
+                        f"Thư mục: {os.path.abspath(self.models_dir)}\n"
+                        f"Bot sẽ tiếp tục nhưng ML có thể không hoạt động đầy đủ."
+                    )
+                else:
+                    # CRITICAL: No models found at all
+                    logger.critical(
+                        "\n" + "=" * 70 + "\n"
+                        "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
+                        f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
+                        "\n"
+                        "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
+                        "\n"
+                        "🔧 ĐỂ SỬA LỖI NÀY:\n"
+                        "1. Chạy lệnh: python scripts/init_models.py (tạo dummy models)\n"
+                        "2. Hoặc: python -m ml_pipeline.train_pipeline (train models thật)\n"
+                        "3. Sau khi train xong, khởi động lại bot\n"
+                        "\n"
+                        "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
+                    )
 
                 # DISABLE ML instead of creating dummy models
                 self.ml_enabled = False
                 self.using_dummy_models = False
                 models_loaded = False
 
-        except Exception:
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             logger.critical(
                 "\n" + "=" * 70 + "\n"
                 "⚠️⚠️⚠️ LỖI KHI LOAD ML MODELS ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
-                "Lỗi\n"
-                "\n"
+                f"Lỗi: {type(e).__name__}: {str(e)}\n"
+                f"\nChi tiết:\n{error_details}\n"
                 "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
                 "\n"
                 "🔧 ĐỂ SỬA LỖI NÀY:\n"
                 "1. Kiểm tra log chi tiết ở trên\n"
                 "2. Xóa models cũ (nếu bị corrupt): rm -rf models/\n"
-                "3. Train lại: python scripts/train_models.py\n"
-                "4. Khởi động lại bot\n"
+                "3. Chạy: python scripts/init_models.py (tạo dummy models)\n"
+                "4. Hoặc train lại: python -m ml_pipeline.train_pipeline\n"
+                "5. Khởi động lại bot\n"
                 "\n"
                 "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
             )
