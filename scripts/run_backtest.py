@@ -119,8 +119,8 @@ class Backtester:
             df = load_data(symbol, lookback=lookback)
             if df.empty:
                 raise ValueError(f"Không có dữ liệu cho {symbol}")
-        except Exception:
-            print(f"❌ Lỗi load data {symbol}")
+        except (IOError, ValueError, KeyError, OSError) as e:
+            print(f"❌ Lỗi load data {symbol}: {e}")
             return {
                 "symbol": symbol,
                 "initial_capital": self.initial_capital,
@@ -220,7 +220,14 @@ class Backtester:
                 price = current_row["close"]
                 day_high = current_row.get("high", price)
                 day_low = current_row.get("low", price)
-                atr_value = current_row.get("atr", current_data["close"].rolling(14).std().iloc[-1])
+                # Calculate ATR with fallback for insufficient data
+                if "atr" in current_row and pd.notna(current_row["atr"]):
+                    atr_value = current_row["atr"]
+                elif len(current_data) >= 14:
+                    atr_value = current_data["close"].rolling(14).std().iloc[-1]
+                    atr_value = atr_value if pd.notna(atr_value) else price * 0.02
+                else:
+                    atr_value = price * 0.02  # Default to 2% of price if insufficient data
 
                 # Kiểm tra stop-loss / take-profit khi đang giữ vị thế
                 if position > 0 and position_data:
@@ -256,6 +263,10 @@ class Backtester:
 
                 # Áp dụng slippage
                 execution_price = self._apply_slippage(price, signal)
+
+                # Validate confidence is a valid number
+                if not isinstance(confidence, (int, float)) or pd.isna(confidence):
+                    confidence = 0  # Default to 0 if invalid
 
                 # CHỈ VÀO LỆNH KHI CONFIDENCE >= THRESHOLD
                 if signal == "BUY" and confidence >= confidence_threshold and position == 0:
@@ -345,8 +356,8 @@ class Backtester:
                     }
                 )
 
-            except Exception:
-                print(f"⚠️ Lỗi ngày {current_row['time'].date()}")
+            except (KeyError, ValueError, AttributeError, IndexError, TypeError) as e:
+                print(f"⚠️ Lỗi ngày {current_row['time'].date()}: {e}")
 
         # Close any open position
         if position > 0:
@@ -372,10 +383,13 @@ class Backtester:
         final_capital = capital
         total_return = (final_capital - self.initial_capital) / self.initial_capital * 100
 
-        # Buy & Hold comparison
+        # Buy & Hold comparison (with division by zero protection)
+        start_price = df.iloc[50]["close"] if len(df) > 50 else df.iloc[0]["close"]
         buy_hold_return = (
-            (df.iloc[-1]["close"] - df.iloc[50]["close"]) / df.iloc[50]["close"]
-        ) * 100
+            ((df.iloc[-1]["close"] - start_price) / start_price) * 100
+            if start_price > 0
+            else 0
+        )
 
         # Analyze trades
         trades_df = pd.DataFrame(trades)
@@ -388,13 +402,22 @@ class Backtester:
         max_consecutive_losses = 0
 
         if len(trades_df) > 0:
-            buy_trades = trades_df[trades_df["type"] == "BUY"]
-            sell_trades = trades_df[trades_df["type"] == "SELL"]
+            # Properly pair BUY-SELL trades by time order (FIFO)
+            trade_pairs = []
+            open_buys = []  # Stack of open BUY positions
 
-            for i in range(min(len(buy_trades), len(sell_trades))):
-                buy_price = buy_trades.iloc[i]["price"]
-                sell_price = sell_trades.iloc[i]["price"]
-                shares_traded = sell_trades.iloc[i]["shares"]
+            for idx, trade in trades_df.iterrows():
+                if trade["type"] == "BUY":
+                    open_buys.append(trade)
+                elif trade["type"] == "SELL" and open_buys:
+                    buy_trade = open_buys.pop(0)  # FIFO: first in, first out
+                    trade_pairs.append((buy_trade, trade))
+
+            # Calculate P&L for each properly paired trade
+            for buy_trade, sell_trade in trade_pairs:
+                buy_price = buy_trade["price"]
+                sell_price = sell_trade["price"]
+                shares_traded = sell_trade["shares"]
                 pnl = (
                     (sell_price - buy_price) * shares_traded
                     - (buy_price * shares_traded * self.commission)
@@ -446,7 +469,8 @@ class Backtester:
             else 0
         )
         calmar_ratio = (annual_return / (max_drawdown / 100)) if max_drawdown > 0 else 0
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float("inf")
+        # Profit factor: if no losses, return gross_profit (or 0 if no profit either)
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0)
 
         # Average confidence
         avg_confidence = trades_df["confidence"].mean() if len(trades_df) > 0 else 0
@@ -488,8 +512,8 @@ class Backtester:
                 return self.run_backtest(
                     symbol, lookback=lookback, confidence_threshold=confidence_threshold
                 )
-            except Exception:
-                print(f"❌ Lỗi {symbol}")
+            except (KeyError, ValueError, IOError, OSError, RuntimeError) as e:
+                print(f"❌ Lỗi {symbol}: {e}")
                 return None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -557,8 +581,8 @@ class Backtester:
         try:
             os.makedirs("backtest_results", exist_ok=True)
             print(f"📁 Thư mục backtest_results: {os.path.abspath('backtest_results')}")
-        except Exception:
-            print("❌ Lỗi tạo thư mục")
+        except OSError as e:
+            print(f"❌ Lỗi tạo thư mục: {e}")
             return
 
         portfolio_df = results["portfolio_values"]
@@ -695,8 +719,8 @@ class Backtester:
 
             plt.show()
 
-        except Exception:
-            print("❌ Lỗi khi lưu biểu đồ")
+        except (IOError, OSError, KeyError, ValueError) as e:
+            print(f"❌ Lỗi khi lưu biểu đồ: {e}")
             import traceback
 
             traceback.print_exc()
@@ -712,8 +736,8 @@ class Backtester:
                     symbol, lookback=lookback, confidence_threshold=confidence_threshold
                 )
                 all_results.append(result)
-            except Exception:
-                print(f"❌ Lỗi backtest {symbol}")
+            except (KeyError, ValueError, IOError, OSError, RuntimeError) as e:
+                print(f"❌ Lỗi backtest {symbol}: {e}")
 
         # Summary
         self._print_summary(all_results)
@@ -799,7 +823,7 @@ class Backtester:
                         try:
                             if len(str(cell.value)) > max_length:
                                 max_length = len(str(cell.value))
-                        except Exception:
+                        except (AttributeError, TypeError):
                             pass
                     adjusted_width = min(max_length + 2, 50)
                     worksheet.column_dimensions[column_letter].width = adjusted_width
@@ -866,8 +890,8 @@ class Backtester:
                 detailed_summary.to_csv(csv_filename, index=False, encoding="cp1252")
             print(f"✅ Đã xuất CSV: {csv_filename}\n")
 
-        except Exception:
-            print("❌ Lỗi khi xuất file\n")
+        except (IOError, OSError, KeyError, ValueError) as e:
+            print(f"❌ Lỗi khi xuất file: {e}\n")
             import traceback
 
             traceback.print_exc()
