@@ -6,6 +6,11 @@ import os
 import sys
 from datetime import datetime
 
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import pandas as pd
 from run_backtest import Backtester
 

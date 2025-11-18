@@ -135,7 +135,9 @@ class StrategyRunner:
                 }
 
             try:
-                entry_signal = self.entry_logic.analyze_entry(df_up_to_date, ml_signal)
+                entry_signal = self.entry_logic.analyze_entry(
+                    df_up_to_date, ml_signal, market_regime=None, symbol=symbol
+                )
 
                 if entry_signal.signal_type == "BUY":
                     self.engine.open_position(

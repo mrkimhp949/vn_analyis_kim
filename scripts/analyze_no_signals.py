@@ -113,7 +113,7 @@ class NoSignalAnalyzer:
 
                 # Entry logic analysis
                 entry_signal = entry_logic.analyze_entry(
-                    df=df, ml_signal=ml_signal, market_regime=market_regime
+                    df=df, ml_signal=ml_signal, market_regime=market_regime, symbol=symbol
                 )
 
                 if entry_signal.should_enter:

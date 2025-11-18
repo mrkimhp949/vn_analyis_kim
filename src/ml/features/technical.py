@@ -105,11 +105,11 @@ def add_ml_features(df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None) -
     # Target: Price direction next day
     df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
 
-    # Fill NaN values
+    # Fill NaN values and ensure all features are float64
     feature_cols = get_feature_columns()
     for col in feature_cols:
         if col in df.columns:
-            df[col] = df[col].fillna(0)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('float64')
 
     return df
 

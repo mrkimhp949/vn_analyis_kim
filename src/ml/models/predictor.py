@@ -36,9 +36,49 @@ class MLPredictor:
         except Exception:
             logger.error("⚠️ Không thể tạo thư mục models")
 
+    def _get_feature_count(self, obj):
+        """Helper: lấy số lượng features của model hoặc scaler."""
+        if obj is None:
+            return None
+        if hasattr(obj, "n_features_in_"):
+            return getattr(obj, "n_features_in_")
+        if hasattr(obj, "mean_"):
+            mean = getattr(obj, "mean_", None)
+            return len(mean) if mean is not None else None
+        return None
+
+    def _validate_feature_count(self, rf_model, scaler, model_label):
+        """Đảm bảo models tải lên khớp với số lượng features hiện tại."""
+        expected = self.expected_features
+        rf_features = self._get_feature_count(rf_model)
+        scaler_features = self._get_feature_count(scaler)
+
+        mismatches = []
+        if rf_features and rf_features != expected:
+            mismatches.append(f"RF={rf_features}")
+        if scaler_features and scaler_features != expected:
+            mismatches.append(f"Scaler={scaler_features}")
+
+        if mismatches:
+            logger.warning(
+                "⚠️ %s models feature mismatch (%s). Pipeline expects %s features. "
+                "Bỏ qua %s models. Hãy train lại models (python -m ml_pipeline.train_pipeline) "
+                "hoặc xóa thư mục models/ nếu cần.",
+                model_label.capitalize(),
+                ", ".join(mismatches),
+                expected,
+                model_label,
+            )
+            return False
+
+        return True
+
     def create_dummy_models(self):
-        """Tạo models mẫu với ĐÚNG 18 features"""
-        logger.info("🔄 Creating dummy models with 18 features...")
+        """Tạo models mẫu phù hợp với số lượng features hiện tại."""
+        logger.info(
+            "🔄 Creating dummy models with %s features...",
+            self.expected_features,
+        )
 
         # Tạo scaler mẫu với 18 features
         self.scaler = StandardScaler()
@@ -53,9 +93,14 @@ class MLPredictor:
         y_dummy = np.random.randint(0, 2, 100)
         self.rf_model.fit(X_dummy, y_dummy)
 
+        # Đánh dấu đang sử dụng dummy models
+        self.using_dummy_models = True
+        self.ml_enabled = True
+
         # Lưu models
         self.save_models()
         logger.info("✅ Dummy models created and saved")
+
 
     def save_models(self):
         """Lưu models"""
@@ -177,6 +222,10 @@ class MLPredictor:
 
         # Kiểm tra số features
         if X_arr.shape[1] != self.expected_features:
+            logger.warning(
+                f"⚠️ Feature mismatch: got {X_arr.shape[1]}, expected {self.expected_features}. "
+                f"Models need retraining. Falling back to technical analysis."
+            )
             # Ném lỗi để tầng trên (ml_signals.analyze) fallback sang Technical Analysis
             raise ValueError(
                 f"Feature mismatch: got {X_arr.shape[1]}, expected {self.expected_features}"
@@ -185,11 +234,19 @@ class MLPredictor:
         # Scale features
         try:
             if hasattr(self.scaler, "mean_"):
+                # Check for NaN or infinite values
+                if np.any(np.isnan(X_arr)) or np.any(np.isinf(X_arr)):
+                    logger.warning(f"⚠️ Found NaN/inf values in features. NaN count: {np.sum(np.isnan(X_arr))}, Inf count: {np.sum(np.isinf(X_arr))}")
+                    # Replace NaN/inf with 0
+                    X_arr = np.nan_to_num(X_arr, nan=0.0, posinf=0.0, neginf=0.0)
+                
                 X_scaled = self.scaler.transform(X_arr)
             else:
                 X_scaled = X_arr
-        except Exception:
-            logger.error("⚠️ Lỗi scaling")
+        except Exception as e:
+            logger.error(f"⚠️ Lỗi scaling: {str(e)}")
+            logger.error(f"⚠️ X_arr shape: {X_arr.shape}, dtype: {X_arr.dtype}")
+            logger.error(f"⚠️ X_arr sample: {X_arr[0] if len(X_arr) > 0 else 'empty'}")
             X_scaled = X_arr
 
         # RF prediction
@@ -197,9 +254,10 @@ class MLPredictor:
             try:
                 rf_pred = self.rf_model.predict_proba(X_scaled)[:, 1]
                 return rf_pred
-            except Exception:
-                logger.error("⚠️ RF predict error")
-                raise ValueError("Model prediction failed")
+            except Exception as e:
+                logger.error(f"⚠️ RF predict error: {str(e)}")
+                logger.error(f"⚠️ X_scaled shape: {X_scaled.shape}, dtype: {X_scaled.dtype}")
+                raise ValueError(f"Model prediction failed: {str(e)}")
         else:
             raise ValueError("RF model not initialized")
 
@@ -229,27 +287,28 @@ class MLPredictor:
             if os.path.exists(ensemble_rf_path) and os.path.exists(ensemble_scaler_path):
                 logger.info("📦 Tìm thấy ensemble models, đang load...")
                 try:
-                    self.rf_model = joblib.load(ensemble_rf_path)
-                    self.scaler = joblib.load(ensemble_scaler_path)
-                    logger.info(f"✅ Loaded ensemble models (expecting {self.expected_features} features)")
-                    models_loaded = True
-                    self.ml_enabled = True
-                    self.using_dummy_models = False
-                except Exception as e:
-                    logger.warning(f"⚠️ Lỗi khi load ensemble models: {e}")
-                    logger.info("🔄 Thử load standard models...")
-                    # Fallback to standard models
-                    if os.path.exists(rf_path) and os.path.exists(scaler_path):
-                        self.rf_model = joblib.load(rf_path)
-                        self.scaler = joblib.load(scaler_path)
-                        logger.info(f"✅ Loaded standard models (expecting {self.expected_features} features)")
+                    candidate_rf = joblib.load(ensemble_rf_path)
+                    candidate_scaler = joblib.load(ensemble_scaler_path)
+
+                    if self._validate_feature_count(candidate_rf, candidate_scaler, "ensemble"):
+                        self.rf_model = candidate_rf
+                        self.scaler = candidate_scaler
+                        logger.info(
+                            "✅ Loaded ensemble models (expecting %s features)",
+                            self.expected_features,
+                        )
                         models_loaded = True
                         self.ml_enabled = True
                         self.using_dummy_models = False
                     else:
-                        raise  # Re-raise if standard models also don't exist
-            elif os.path.exists(rf_path) and os.path.exists(scaler_path):
-                # Load metadata first to validate
+                        logger.info("🔄 Bỏ qua ensemble models, thử standard models...")
+                except Exception as e:
+                    logger.warning(f"⚠️ Lỗi khi load ensemble models: {e}")
+                    logger.info("🔄 Thử load standard models...")
+
+            # Nếu chưa load được, thử standard models
+            if not models_loaded and os.path.exists(rf_path) and os.path.exists(scaler_path):
+                # Load metadata trước để xác thực
                 if os.path.exists(info_path):
                     with open(info_path, "r") as f:
                         import json
@@ -269,13 +328,22 @@ class MLPredictor:
                                 )
                                 logger.warning("🔄 Recreating models with current feature set...")
                                 self.create_dummy_models()
+                                self.ml_enabled = True
                                 return True
                         except Exception:
                             logger.warning("Could not verify features")
 
-                # Load models
-                self.rf_model = joblib.load(rf_path)
-                self.scaler = joblib.load(scaler_path)
+                candidate_rf = joblib.load(rf_path)
+                candidate_scaler = joblib.load(scaler_path)
+
+                if not self._validate_feature_count(candidate_rf, candidate_scaler, "standard"):
+                    logger.info("🔄 Recreating dummy models để khớp số features hiện tại...")
+                    self.create_dummy_models()
+                    self.ml_enabled = True
+                    return True
+
+                self.rf_model = candidate_rf
+                self.scaler = candidate_scaler
 
                 logger.info(
                     f"✅ Loaded trained models (expecting {self.expected_features} features)"
@@ -283,15 +351,16 @@ class MLPredictor:
                 models_loaded = True
                 self.ml_enabled = True
                 self.using_dummy_models = False
-            else:
+
+            if not models_loaded:
                 # Kiểm tra xem có bất kỳ model nào khác không
                 has_any_model = (
-                    os.path.exists(ensemble_rf_path) or 
-                    os.path.exists(rf_path) or
-                    os.path.exists(os.path.join(self.models_dir, "ensemble_gb.pkl")) or
-                    os.path.exists(os.path.join(self.models_dir, "ensemble_xgb.pkl"))
+                    os.path.exists(ensemble_rf_path)
+                    or os.path.exists(rf_path)
+                    or os.path.exists(os.path.join(self.models_dir, "ensemble_gb.pkl"))
+                    or os.path.exists(os.path.join(self.models_dir, "ensemble_xgb.pkl"))
                 )
-                
+
                 if has_any_model:
                     # Có models nhưng không đầy đủ - cảnh báo nhẹ
                     logger.warning(
@@ -303,8 +372,12 @@ class MLPredictor:
                 else:
                     # CRITICAL: No models found at all
                     logger.critical(
-                        "\n" + "=" * 70 + "\n"
-                        "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
+                        "\n"
+                        + "=" * 70
+                        + "\n"
+                        "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
+                        + "=" * 70
+                        + "\n"
                         f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
                         "\n"
                         "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
@@ -314,7 +387,8 @@ class MLPredictor:
                         "2. Hoặc: python -m ml_pipeline.train_pipeline (train models thật)\n"
                         "3. Sau khi train xong, khởi động lại bot\n"
                         "\n"
-                        "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
+                        "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n"
+                        + "=" * 70
                     )
 
                 # DISABLE ML instead of creating dummy models
