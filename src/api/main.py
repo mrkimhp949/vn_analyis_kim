@@ -166,6 +166,34 @@ def _check_sector_analysis(
     return False, None, last_sector_analysis
 
 
+def _check_ticker_validation(now, current_hour, current_minute, last_ticker_validation):
+    """Check and run ticker validation every day at 9:00 AM"""
+    # Chạy mỗi ngày lúc 9:00 sáng, không chỉ ngày giao dịch
+    if (
+        current_hour == 9
+        and current_minute == 0
+        and last_ticker_validation != now.date()
+    ):
+        try:
+            print(f"\n🔍 [{now.strftime('%A').upper()}] TỰ ĐỘNG VALIDATE TICKERS (9:00 AM)")
+            from src.data.ticker_loader import get_ticker_loader
+            
+            loader = get_ticker_loader()
+            # Clear cache để force validate lại
+            loader.clear_validation_cache()
+            # Force validate lại tất cả tickers
+            validated = loader.get_validated_tickers(
+                force_validate=True,
+                min_volume=100_000,
+            )
+            print(f"✅ Đã validate lại {len(validated)} tickers")
+            return True, 61, now.date()
+        except Exception as e:
+            print(f"❌ Lỗi validate tickers: {e}")
+            return True, 61, last_ticker_validation
+    return False, None, last_ticker_validation
+
+
 def _check_signal_scan(now, current_hour, current_minute, last_signal_scan):
     """Check and run signal scan on trading days at 9:15"""
     from src.market.schedule import is_trading_day
@@ -301,6 +329,7 @@ def _update_last_trackers(new_val, trackers):
         # Update all date trackers
         for key in [
             "last_sector_analysis",
+            "last_ticker_validation",
             "last_signal_scan",
             "last_portfolio_check",
             "last_daily_summary",
@@ -325,6 +354,7 @@ def schedule_job():
     # Track last execution times
     trackers = {
         "last_sector_analysis": None,
+        "last_ticker_validation": None,
         "last_signal_scan": None,
         "last_portfolio_check": None,
         "last_news_refresh": None,
@@ -350,6 +380,15 @@ def schedule_job():
             )
             if ran:
                 trackers["last_model_retrain"] = new_retrain
+                time.sleep(sleep_sec)
+                continue
+
+            # Check ticker validation (runs every day at 9:00 AM, not just trading days)
+            ran, sleep_sec, new_validation = _check_ticker_validation(
+                now, current_hour, current_minute, trackers["last_ticker_validation"]
+            )
+            if ran:
+                trackers["last_ticker_validation"] = new_validation
                 time.sleep(sleep_sec)
                 continue
 
@@ -527,6 +566,8 @@ async def read_root():
         "endpoints": {
             "health": "/health",
             "run_bot": "/run-bot (POST)",
+            "cache_clear": "/cache/clear (POST) - Xóa validation cache thủ công",
+            "cache_stats": "/cache/stats (GET) - Thống kê validation cache",
             "docs": "/docs",
         },
     }
@@ -779,6 +820,60 @@ async def remove_from_portfolio(symbol: str, shares: int = None):
         else:
             return {"status": "error", "message": message}
 
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/cache/clear")
+async def clear_cache(api_key: str = Security(verify_api_key)):
+    """Xóa tất cả các file cache (báo, tín hiệu, data)"""
+    try:
+        from src.utils.cache_manager import clear_all_caches
+        
+        report = clear_all_caches()
+        
+        return {
+            "status": "success",
+            "message": "Cache cleared successfully.",
+            "details": report
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Failed to clear cache: {str(e)}"}
+        )
+
+
+@app.get("/cache/stats")
+@rate_limit_relaxed
+async def get_cache_stats(request: Request):
+    """Lấy thống kê validation cache"""
+    try:
+        from src.data.ticker_loader import get_ticker_loader
+        import os
+        import json
+        
+        loader = get_ticker_loader()
+        cache_file = loader.cache_file
+        
+        if os.path.exists(cache_file):
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+            
+            stats = {
+                "validated_count": len(cache_data.get("validated", {})),
+                "invalid_count": len(cache_data.get("invalid", {})),
+                "last_updated": cache_data.get("last_updated"),
+            }
+        else:
+            stats = {"status": "no_cache"}
+        
+        return {
+            "status": "success",
+            "cache_stats": stats,
+            "timestamp": datetime.now(tz).isoformat(),
+        }
+    
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

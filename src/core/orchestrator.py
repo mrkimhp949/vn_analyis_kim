@@ -413,7 +413,7 @@ class TradingOrchestrator:
                 partial_exits=pos_data.get("partial_exits", []),
             )
 
-            if exit_decision and exit_decision["reason"]:
+            if exit_decision and exit_decision.should_exit:
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
 
         except Exception:
