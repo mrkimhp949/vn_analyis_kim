@@ -386,9 +386,7 @@ class Backtester:
         # Buy & Hold comparison (with division by zero protection)
         start_price = df.iloc[50]["close"] if len(df) > 50 else df.iloc[0]["close"]
         buy_hold_return = (
-            ((df.iloc[-1]["close"] - start_price) / start_price) * 100
-            if start_price > 0
-            else 0
+            ((df.iloc[-1]["close"] - start_price) / start_price) * 100 if start_price > 0 else 0
         )
 
         # Analyze trades
@@ -470,7 +468,11 @@ class Backtester:
         )
         calmar_ratio = (annual_return / (max_drawdown / 100)) if max_drawdown > 0 else 0
         # Profit factor: if no losses, return gross_profit (or 0 if no profit either)
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0)
+        profit_factor = (
+            (gross_profit / gross_loss)
+            if gross_loss > 0
+            else (gross_profit if gross_profit > 0 else 0)
+        )
 
         # Average confidence
         avg_confidence = trades_df["confidence"].mean() if len(trades_df) > 0 else 0

@@ -49,6 +49,10 @@ class Trade:
     commission: float = 0.0
     slippage_cost: float = 0.0
 
+    # Entry costs (stored when position is opened)
+    entry_commission: float = 0.0
+    entry_slippage: float = 0.0
+
     # Metadata
     entry_reason: str = ""
     exit_reason: str = ""
@@ -68,15 +72,20 @@ class Trade:
         self.exit_reason = exit_reason
         self.holding_days = (exit_date - self.entry_date).days
 
-        # Calculate costs
-        entry_commission = self.shares * self.entry_price * commission_rate
-        exit_commission = self.shares * self.exit_price * commission_rate
+        # Calculate exit costs
+        exit_value = self.shares * exit_price
+        exit_commission = exit_value * commission_rate
+        exit_slippage = exit_value * slippage
+
+        # Total costs (entry costs were already stored when position opened)
+        entry_commission = getattr(
+            self, "entry_commission", self.shares * self.entry_price * commission_rate
+        )
+        entry_slippage = getattr(self, "entry_slippage", self.shares * self.entry_price * slippage)
         self.commission = entry_commission + exit_commission
+        self.slippage_cost = entry_slippage + exit_slippage
 
-        # Slippage cost (assumes adverse price movement)
-        self.slippage_cost = self.shares * self.entry_price * slippage
-
-        # PnL calculation
+        # PnL calculation (net of all costs)
         gross_pnl = self.shares * (self.exit_price - self.entry_price)
         self.pnl = gross_pnl - self.commission - self.slippage_cost
         self.pnl_percent = (self.pnl / (self.shares * self.entry_price)) * 100
@@ -193,10 +202,14 @@ class BacktestEngine:
             logger.warning(f"Cannot open {symbol}: Shares = 0")
             return None
 
+        # Calculate costs including commission and slippage
         actual_cost = shares * entry_price
+        entry_commission = actual_cost * self.config.commission_rate
+        entry_slippage = actual_cost * self.config.slippage
+        total_cost = actual_cost + entry_commission + entry_slippage
 
-        # Check if can open
-        if not self.can_open_position(symbol, actual_cost):
+        # Check if can open (need to have enough for cost + commission + slippage)
+        if not self.can_open_position(symbol, total_cost):
             return None
 
         # Create trade
@@ -210,12 +223,16 @@ class BacktestEngine:
             entry_reason=reason,
         )
 
-        # Update capital
-        self.capital -= actual_cost
+        # Store entry commission and slippage for later PnL calculation
+        trade.entry_commission = entry_commission
+        trade.entry_slippage = entry_slippage
+
+        # Update capital - subtract total cost including commission and slippage
+        self.capital -= total_cost
         self.positions[symbol] = trade
 
         logger.info(
-            f"✅ OPEN {symbol} @ {entry_price:,.0f} x {shares} shares = {actual_cost:,.0f} VND"
+            f"✅ OPEN {symbol} @ {entry_price:,.0f} x {shares} shares = {actual_cost:,.0f} VND (fee: {entry_commission:,.0f} + slippage: {entry_slippage:,.0f})"
         )
         return trade
 
@@ -239,8 +256,11 @@ class BacktestEngine:
         )
 
         # Update capital
+        # Only subtract exit commission and slippage (entry costs were already deducted when opening)
         exit_value = trade.shares * exit_price
-        self.capital += exit_value - trade.commission - trade.slippage_cost
+        exit_commission = exit_value * self.config.commission_rate
+        exit_slippage = exit_value * self.config.slippage
+        self.capital += exit_value - exit_commission - exit_slippage
 
         # Move to completed trades
         del self.positions[symbol]

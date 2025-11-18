@@ -370,7 +370,7 @@ class TradingOrchestrator:
             for symbol, pos_data in positions.items()
         ]
         await asyncio.gather(*tasks)
-        
+
         logging.info(f"✅ Đã hoàn thành kiểm tra {len(positions)} vị thế")
 
     async def _check_single_position(
@@ -424,7 +424,7 @@ class TradingOrchestrator:
                     f"[{symbol}] Exit check: should_exit={exit_decision.should_exit}, "
                     f"reason={exit_decision.exit_reason}, P&L={pnl_pct:.2f}%"
                 )
-            
+
             if exit_decision and exit_decision.should_exit:
                 logging.info(f"🚪 Tín hiệu thoát cho {symbol}: {exit_decision.exit_reason.value}")
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
@@ -440,7 +440,7 @@ class TradingOrchestrator:
         """Thực hiện thoát lệnh bán dựa trên quyết định thoát."""
         try:
             logging.info(f"🚪 Bắt đầu thực thi exit cho {symbol}")
-            
+
             # Gửi thông báo thoát lệnh
             msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
             logging.info(f"📤 Gửi thông báo exit cho {symbol}")

@@ -169,15 +169,11 @@ def _check_sector_analysis(
 def _check_ticker_validation(now, current_hour, current_minute, last_ticker_validation):
     """Check and run ticker validation every day at 9:00 AM"""
     # Chạy mỗi ngày lúc 9:00 sáng, không chỉ ngày giao dịch
-    if (
-        current_hour == 9
-        and current_minute == 0
-        and last_ticker_validation != now.date()
-    ):
+    if current_hour == 9 and current_minute == 0 and last_ticker_validation != now.date():
         try:
             print(f"\n🔍 [{now.strftime('%A').upper()}] TỰ ĐỘNG VALIDATE TICKERS (9:00 AM)")
             from src.data.ticker_loader import get_ticker_loader
-            
+
             loader = get_ticker_loader()
             # Clear cache để force validate lại
             loader.clear_validation_cache()
@@ -319,6 +315,137 @@ def _check_pnl_record(now, current_hour, current_minute, last_pnl_record):
     return False, None, last_pnl_record
 
 
+def _send_backtest_summary(result, previous_result=None):
+    """Send backtest results summary via Telegram"""
+    try:
+        from src.notifications.telegram import bot_instance
+        from src.config.legacy_config import CHAT_ID
+
+        if not bot_instance or not CHAT_ID:
+            print("⚠️ Bot instance hoặc CHAT_ID không có, bỏ qua gửi Telegram")
+            return
+
+        message = "📊 **BACKTEST STRATEGY - TUẦN NÀY**\n\n"
+        message += f"📅 Thời gian: {result.start_date.strftime('%d/%m/%Y')} → {result.end_date.strftime('%d/%m/%Y')}\n"
+        message += f"⏱️ Period: {(result.end_date - result.start_date).days} ngày\n\n"
+
+        message += "**📈 Performance:**\n"
+        message += f"💰 Return: *{result.total_return_pct:+.2f}%*\n"
+        message += f"📊 Sharpe Ratio: *{result.sharpe_ratio:.2f}*\n"
+        message += f"📉 Max Drawdown: *{result.max_drawdown_pct:.2f}%*\n\n"
+
+        message += "**🔄 Trade Statistics:**\n"
+        message += f"Tổng trades: *{result.total_trades}*\n"
+        message += f"Win Rate: *{result.win_rate:.1f}%* ({result.winning_trades}W/{result.losing_trades}L)\n"
+        message += f"Profit Factor: *{result.profit_factor:.2f}*\n\n"
+
+        # Compare with previous if available
+        if previous_result:
+            return_diff = result.total_return_pct - previous_result.get("total_return_pct", 0)
+            sharpe_diff = result.sharpe_ratio - previous_result.get("sharpe_ratio", 0)
+
+            message += "**📊 So với tuần trước:**\n"
+            if return_diff > 0:
+                message += f"✅ Return: +{return_diff:.2f}% (cải thiện)\n"
+            elif return_diff < 0:
+                message += f"❌ Return: {return_diff:.2f}% (giảm)\n"
+            else:
+                message += "➡️ Return: Không đổi\n"
+
+            if abs(sharpe_diff) > 0.1:
+                if sharpe_diff > 0:
+                    message += f"✅ Sharpe: +{sharpe_diff:.2f} (tốt hơn)\n"
+                else:
+                    message += f"⚠️ Sharpe: {sharpe_diff:.2f} (tệ hơn)\n"
+
+        message += f"\n🕐 {datetime.now().strftime('%H:%M %d/%m/%Y')}"
+
+        # Send via asyncio (from sync context in scheduler)
+        async def send_msg():
+            await bot_instance.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
+
+        asyncio.run(send_msg())
+        print("✅ Đã gửi backtest summary qua Telegram")
+
+    except Exception as e:
+        print(f"❌ Lỗi gửi backtest summary: {e}")
+
+
+def _check_weekly_backtest(now, current_weekday, current_hour, current_minute, last_backtest):
+    """Check and run weekly backtest on Sunday at 21:00 (after model retrain)"""
+    if (
+        current_weekday == 6  # Sunday
+        and current_hour == 21
+        and current_minute == 0
+        and last_backtest != now.date()
+    ):
+        try:
+            print("\n📊 [CHỦ NHẬT 21:00] TỰ ĐỘNG CHẠY BACKTEST STRATEGY")
+            from backtesting.strategy_runner import run_simple_backtest
+            import json
+            from pathlib import Path
+
+            # Load previous result for comparison
+            previous_result = None
+            backtest_results_dir = Path("backtest_results")
+            backtest_results_dir.mkdir(exist_ok=True)
+            last_result_file = backtest_results_dir / "last_weekly_backtest.json"
+
+            if last_result_file.exists():
+                try:
+                    with open(last_result_file, "r", encoding="utf-8") as f:
+                        previous_result = json.load(f)
+                    print(
+                        f"📖 Loaded previous result: {previous_result.get('total_return_pct', 0):.2f}%"
+                    )
+                except Exception:
+                    pass
+
+            # Run backtest on 100 validated symbols
+            print("🔄 Đang chạy backtest trên 100 mã đã validate...")
+            result = run_simple_backtest(
+                symbols=None,  # Auto load from List.csv
+                months_back=6,  # Test 6 months
+                max_symbols=100,  # Limit to 100 symbols
+                min_volume=100_000,
+                use_validated_only=True,
+            )
+
+            # Save current result
+            result_dict = {
+                "start_date": result.start_date.isoformat(),
+                "end_date": result.end_date.isoformat(),
+                "total_return_pct": result.total_return_pct,
+                "sharpe_ratio": result.sharpe_ratio,
+                "max_drawdown_pct": result.max_drawdown_pct,
+                "total_trades": result.total_trades,
+                "win_rate": result.win_rate,
+                "winning_trades": result.winning_trades,
+                "losing_trades": result.losing_trades,
+                "profit_factor": result.profit_factor,
+                "annualized_return": result.annualized_return,
+                "last_updated": now.isoformat(),
+            }
+
+            with open(last_result_file, "w", encoding="utf-8") as f:
+                json.dump(result_dict, f, indent=2, ensure_ascii=False)
+
+            print(f"✅ Backtest hoàn tất! Return: {result.total_return_pct:+.2f}%")
+            print(f"   Sharpe: {result.sharpe_ratio:.2f}, Trades: {result.total_trades}")
+
+            # Send summary via Telegram
+            _send_backtest_summary(result, previous_result)
+
+            return True, 61, now.date()
+        except Exception as e:
+            print(f"❌ Lỗi backtest: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return True, 61, last_backtest
+    return False, None, last_backtest
+
+
 def _update_last_trackers(new_val, trackers):
     """Update all last_* tracker variables based on new_val type"""
     if isinstance(new_val, tuple):
@@ -335,6 +462,7 @@ def _update_last_trackers(new_val, trackers):
             "last_daily_summary",
             "last_pnl_record",
             "last_model_retrain",
+            "last_backtest",
         ]:
             if trackers[key] != new_val:
                 trackers[key] = new_val
@@ -361,6 +489,7 @@ def schedule_job():
         "last_daily_summary": None,
         "last_pnl_record": None,
         "last_model_retrain": None,
+        "last_backtest": None,
     }
 
     while True:
@@ -380,6 +509,19 @@ def schedule_job():
             )
             if ran:
                 trackers["last_model_retrain"] = new_retrain
+                time.sleep(sleep_sec)
+                continue
+
+            # Check weekly backtest (Sunday at 21:00, after model retrain)
+            ran, sleep_sec, new_backtest = _check_weekly_backtest(
+                now,
+                current_weekday,
+                current_hour,
+                current_minute,
+                trackers["last_backtest"],
+            )
+            if ran:
+                trackers["last_backtest"] = new_backtest
                 time.sleep(sleep_sec)
                 continue
 
@@ -829,18 +971,14 @@ async def clear_cache(api_key: str = Security(verify_api_key)):
     """Xóa tất cả các file cache (báo, tín hiệu, data)"""
     try:
         from src.utils.cache_manager import clear_all_caches
-        
+
         report = clear_all_caches()
-        
-        return {
-            "status": "success",
-            "message": "Cache cleared successfully.",
-            "details": report
-        }
+
+        return {"status": "success", "message": "Cache cleared successfully.", "details": report}
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": f"Failed to clear cache: {str(e)}"}
+            content={"status": "error", "message": f"Failed to clear cache: {str(e)}"},
         )
 
 
@@ -852,14 +990,14 @@ async def get_cache_stats(request: Request):
         from src.data.ticker_loader import get_ticker_loader
         import os
         import json
-        
+
         loader = get_ticker_loader()
         cache_file = loader.cache_file
-        
+
         if os.path.exists(cache_file):
             with open(cache_file, "r", encoding="utf-8") as f:
                 cache_data = json.load(f)
-            
+
             stats = {
                 "validated_count": len(cache_data.get("validated", {})),
                 "invalid_count": len(cache_data.get("invalid", {})),
@@ -867,13 +1005,13 @@ async def get_cache_stats(request: Request):
             }
         else:
             stats = {"status": "no_cache"}
-        
+
         return {
             "status": "success",
             "cache_stats": stats,
             "timestamp": datetime.now(tz).isoformat(),
         }
-    
+
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

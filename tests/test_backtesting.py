@@ -36,6 +36,7 @@ class TestBacktestEngine:
 
     def test_open_position_valid(self):
         """Test opening a valid position"""
+        initial_capital = self.engine.capital
         trade = self.engine.open_position(
             symbol="VCB",
             date=datetime(2024, 1, 1),
@@ -50,7 +51,16 @@ class TestBacktestEngine:
         assert trade.entry_price == 60000
         assert trade.shares > 0
         assert "VCB" in self.engine.positions
-        assert self.engine.capital < 100_000_000  # Capital reduced
+        assert self.engine.capital < initial_capital  # Capital reduced
+        # Verify entry costs are stored
+        assert hasattr(trade, "entry_commission")
+        assert hasattr(trade, "entry_slippage")
+        assert trade.entry_commission > 0
+        assert trade.entry_slippage > 0
+        # Verify capital was reduced by total cost (price + commission + slippage)
+        position_cost = trade.shares * trade.entry_price
+        total_cost = position_cost + trade.entry_commission + trade.entry_slippage
+        assert self.engine.capital == initial_capital - total_cost
 
     def test_open_position_max_positions(self):
         """Test cannot exceed max positions"""
@@ -154,6 +164,10 @@ class TestBacktestEngine:
             take_profit=66000,
         )
 
+        # Set entry costs (as would be done when opening position via engine)
+        trade.entry_commission = 100 * 60000 * 0.0015  # Entry commission
+        trade.entry_slippage = 100 * 60000 * 0.001  # Entry slippage
+
         trade.close_trade(
             exit_date=datetime(2024, 1, 15),
             exit_price=65000,
@@ -162,11 +176,17 @@ class TestBacktestEngine:
             slippage=0.001,
         )
 
-        # Verify commission was charged
+        # Verify commission was charged (both entry and exit)
         assert trade.commission > 0
+        entry_commission = 100 * 60000 * 0.0015
+        exit_commission = 100 * 65000 * 0.0015
+        assert trade.commission == entry_commission + exit_commission
 
-        # Verify slippage cost was calculated
+        # Verify slippage cost was calculated (both entry and exit)
         assert trade.slippage_cost > 0
+        entry_slippage = 100 * 60000 * 0.001
+        exit_slippage = 100 * 65000 * 0.001
+        assert trade.slippage_cost == entry_slippage + exit_slippage
 
         # Verify PnL is net of costs
         gross_pnl = 100 * (65000 - 60000)
