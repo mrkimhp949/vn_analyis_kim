@@ -550,6 +550,7 @@ class TradingOrchestrator:
                 df=df,
                 ml_signal=ml_signal,
                 market_regime=market_regime,
+                symbol=symbol,
             )
 
             # Validate entry signal
