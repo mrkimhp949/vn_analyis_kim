@@ -425,13 +425,13 @@ class ImprovedEntryLogic:
 
             reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
 
-        # Step 5: Determine signal strength and position multiplier
-        strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
-        position_multiplier = self._calculate_position_multiplier(
-            strength, adjusted_confidence, warnings, market_regime
-        )
+            # Step 5: Determine signal strength and position multiplier
+            strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
+            position_multiplier = self._calculate_position_multiplier(
+                strength, adjusted_confidence, warnings, market_regime
+            )
 
-        # Step 6: Build entry signal
+            # Step 6: Build entry signal
             return EntrySignal(
                 should_enter=True,
                 signal_type="BUY",
