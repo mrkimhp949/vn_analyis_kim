@@ -49,14 +49,25 @@ class EntrySignal:
 
 class ImprovedEntryLogic:
     """
-    Logic vào lệnh nâng cao với multiple filters:
+    Logic vào lệnh nâng cao với 12 filters:
 
-    1. Trend Filter - Chỉ vào lệnh theo xu hướng
-    2. Support/Resistance - Vào gần support
-    3. Volume Confirmation - Volume tăng khi breakout
-    4. Risk/Reward Check - R:R >= 2:1
-    5. Market Regime Check - Thị trường phải OK
-    6. Volatility Filter - Không vào khi vol quá cao
+    1. Market Regime - Thị trường phải tradeable
+    2. Trend Alignment - EMA alignment (20/50/200)
+    3. Support/Resistance - Vào gần support, tránh resistance
+    4. Volume Confirmation - Volume + OBV + trend
+    5. Liquidity Check - Tiered thresholds (large/mid/small/micro caps)
+    6. Volatility Filter - ATR/Price trong range hợp lý
+    7. RSI Check - Tránh overbought
+    8. Price Action - Candlestick patterns
+    9. Sector Strength - Relative strength vs market
+    10. Multi-Timeframe - Weekly/monthly trend confirmation
+    11. Market Breadth - Advance/decline ratio
+    12. Portfolio Correlation - Đa dạng hóa portfolio
+
+    Features:
+    - Dynamic penalty scaling based on market regime (BULL/BEAR/SIDEWAYS)
+    - ML fallback to technical analysis when ML signal unavailable
+    - Tiered liquidity thresholds for different market cap sizes
     """
 
     def __init__(
@@ -254,7 +265,7 @@ class ImprovedEntryLogic:
             )
             adjustments.append(+5)
 
-        # FILTER 5: VOLATILITY CHECK
+        # FILTER 6: VOLATILITY CHECK
         volatility_check = self._check_volatility(df)
         if volatility_check["too_high"]:
             warnings.append(f"⚠️ Volatility cao: {volatility_check['value']:.2f}%")
@@ -263,7 +274,7 @@ class ImprovedEntryLogic:
             reasons.append("✅ Volatility vừa phải")
             adjustments.append(+5)
 
-        # FILTER 6: RSI CHECK
+        # FILTER 7: RSI CHECK
         rsi_check = self._check_rsi(df)
         if rsi_check["overbought"]:
             warnings.append(f"⚠️ RSI overbought: {rsi_check['value']:.1f}")
@@ -272,7 +283,7 @@ class ImprovedEntryLogic:
             reasons.append(f"✅ RSI: {rsi_check['value']:.1f}")
             adjustments.append(+5)
 
-        # FILTER 7: PRICE ACTION
+        # FILTER 8: PRICE ACTION
         price_action = self._check_price_action(df)
         if price_action["bullish_pattern"]:
             reasons.append(f"✅ Pattern: {price_action['pattern']}")
@@ -281,7 +292,7 @@ class ImprovedEntryLogic:
             warnings.append(f"⚠️ Pattern: {price_action['pattern']}")
             adjustments.append(-10)
 
-        # FILTER 8: SECTOR STRENGTH
+        # FILTER 9: SECTOR STRENGTH
         sector_strength_check = self._check_sector_strength(df, market_regime)
         if sector_strength_check["is_leading"]:
             reasons.append(f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)")
@@ -290,7 +301,7 @@ class ImprovedEntryLogic:
             warnings.append(f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)")
             adjustments.append(-15)
 
-        # FILTER 9: MULTI-TIMEFRAME CONFIRMATION (NEW)
+        # FILTER 10: MULTI-TIMEFRAME CONFIRMATION
         mtf_check = self._check_multi_timeframe_trend(df)
         if not mtf_check["weekly_up"]:
             warnings.append(f"⚠️ Weekly trend yếu ({mtf_check['weekly_change']:.1f}%)")
@@ -303,7 +314,7 @@ class ImprovedEntryLogic:
         else:
             reasons.append(f"✅ Monthly trend tăng ({mtf_check['monthly_change']:+.1f}%)")
 
-        # FILTER 10: MARKET BREADTH (NEW)
+        # FILTER 11: MARKET BREADTH
         breadth_check = self._check_market_breadth(market_regime)
         if breadth_check["weak"]:
             warnings.append("⚠️ Market breadth yếu (ít mã tham gia tăng)")
@@ -312,7 +323,7 @@ class ImprovedEntryLogic:
             reasons.append("✅ Market breadth mạnh (nhiều mã tham gia)")
             adjustments.append(+5)
 
-        # FILTER 11: PORTFOLIO CORRELATION (NEW)
+        # FILTER 12: PORTFOLIO CORRELATION
         correlation_check = self._check_portfolio_correlation(
             df, getattr(self, "_current_symbol", None)
         )
@@ -631,6 +642,9 @@ class ImprovedEntryLogic:
                 min_volume_threshold = self.liquidity_tiers["small"]["min_volume"]
             else:
                 # Below all tiers - use small cap threshold for evaluation
+                # NOTE: Micro caps (<1B VND) will fail this threshold check and get -15 penalty,
+                # but won't be rejected unless critical (<500M VND). This allows micro caps
+                # to still be considered but with lower confidence scores.
                 tier = "micro"
                 min_value_threshold = self.liquidity_tiers["small"]["min_value"]
                 min_volume_threshold = self.liquidity_tiers["small"]["min_volume"]
