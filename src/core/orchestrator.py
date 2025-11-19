@@ -413,7 +413,7 @@ class TradingOrchestrator:
                 partial_exits=pos_data.get("partial_exits", []),
             )
 
-            if exit_decision and exit_decision["reason"]:
+            if exit_decision and exit_decision.should_exit:
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
 
         except Exception:
@@ -431,11 +431,18 @@ class TradingOrchestrator:
             pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
             self.circuit_breaker.record_trade(pnl)
 
+            # Get exit reason safely (can be None)
+            exit_reason_str = (
+                exit_decision.exit_reason.value
+                if exit_decision.exit_reason
+                else exit_decision.message
+            )
+
             success, sell_msg, _ = self.paper_account.execute_sell(
                 symbol=symbol,
                 price=current_price,
                 exit_type=exit_decision.exit_type,
-                reason=exit_decision.exit_reason.value,
+                reason=exit_reason_str,
             )
             if success:
                 logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
@@ -639,6 +646,7 @@ class TradingOrchestrator:
                         if entry_signal.take_profit_targets
                         else None
                     )
+                    # ENHANCEMENT: Pass limit order info if applicable
                     success, message, trade = self.paper_account.execute_buy(
                         symbol=symbol,
                         shares=position_size_info.shares,
@@ -647,6 +655,8 @@ class TradingOrchestrator:
                         signal_reason=", ".join(entry_signal.reasons),
                         stop_loss=entry_signal.stop_loss,
                         take_profit=take_profit,
+                        is_limit_order=getattr(entry_signal, "is_limit_order", False),
+                        limit_price=getattr(entry_signal, "limit_price", None),
                     )
 
                     if not success:

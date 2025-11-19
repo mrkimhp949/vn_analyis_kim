@@ -83,7 +83,7 @@ class ImprovedExitStrategy:
         symbol: str,
         entry_price: float,
         current_price: float,
-        stop_loss: float,
+        stop_loss: Optional[float],
         take_profit_targets: List[float],
         entry_date: datetime,
         df: pd.DataFrame,
@@ -98,7 +98,7 @@ class ImprovedExitStrategy:
             symbol: Mã cổ phiếu
             entry_price: Giá vào
             current_price: Giá hiện tại
-            stop_loss: Stop loss ban đầu
+            stop_loss: Stop loss ban đầu (có thể None, sẽ dùng fallback 7% dưới entry)
             take_profit_targets: List [TP1, TP2, TP3]
             entry_date: Ngày vào lệnh
             df: DataFrame với OHLCV + indicators
@@ -130,7 +130,12 @@ class ImprovedExitStrategy:
         # ====================================================================
         # CHECK 1: STOP LOSS (Ưu tiên cao nhất)
         # ====================================================================
-        if current_price <= stop_loss:
+        # Use stop_loss if available, otherwise fallback to 7% below entry
+        effective_stop_loss = stop_loss
+        if effective_stop_loss is None or effective_stop_loss <= 0:
+            effective_stop_loss = entry_price * 0.93  # 7% below entry as fallback
+
+        if current_price <= effective_stop_loss:
             return ExitDecision(
                 should_exit=True,
                 exit_reason=ExitReason.STOP_LOSS,

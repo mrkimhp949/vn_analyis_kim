@@ -666,38 +666,53 @@ async def analyze_sectors():
 
 
 @app.get("/portfolio")
-async def get_portfolio():
-    """Lấy thông tin portfolio hiện tại"""
+async def get_portfolio(refresh: bool = False):
+    """Lấy thông tin portfolio hiện tại (tùy chọn làm mới giá).
+
+    Query params:
+        refresh=true sẽ tải lại giá close mới nhất cho từng mã trước khi tính toán.
+    """
     try:
-        from src.portfolio.manager import PortfolioManager
+        from src.portfolio.manager import get_portfolio_manager
 
-        manager = PortfolioManager()
-
-        portfolio_data = {
-            "current_holdings": manager.get_current_holdings(),
-            "portfolio_summary": manager.get_portfolio_summary(),
-            "analyzed_at": datetime.now(tz).isoformat(),
-        }
-
-        return JSONResponse(portfolio_data)
-
+        pm = get_portfolio_manager()
+        if refresh:
+            pm.refresh_all_prices()
+        positions_detail = pm.export_positions_detail()
+        totals = pm.get_portfolio_value()
+        return JSONResponse(
+            {
+                "status": "ok",
+                "refreshed": refresh,
+                "timestamp": datetime.now(tz).isoformat(),
+                "positions": positions_detail,
+                "totals": totals,
+            }
+        )
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.get("/portfolio/analysis")
-async def get_portfolio_analysis():
-    """Lấy phân tích portfolio chi tiết"""
+async def get_portfolio_analysis(refresh: bool = False):
+    """Lấy phân tích portfolio chi tiết (Markdown text) với tùy chọn refresh giá."""
     try:
-        from src.portfolio.manager import PortfolioManager
+        from src.portfolio.manager import get_portfolio_manager
 
-        manager = PortfolioManager()
-
-        analysis = manager.analyze_portfolio()
-        return JSONResponse(analysis)
-
+        pm = get_portfolio_manager()
+        if refresh:
+            pm.refresh_all_prices()
+        analysis_text = pm.get_detailed_analysis()
+        return JSONResponse(
+            {
+                "status": "ok",
+                "refreshed": refresh,
+                "timestamp": datetime.now(tz).isoformat(),
+                "analysis_markdown": analysis_text,
+            }
+        )
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.post("/portfolio/add")

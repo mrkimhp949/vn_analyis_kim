@@ -11,6 +11,7 @@ import pytest
 
 from src.strategies.entry_logic import EntrySignal, ImprovedEntryLogic
 from src.strategies.exit_logic import ExitDecision, ExitReason, ImprovedExitStrategy
+from src.utils.indicators import StopLossCalculator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -137,6 +138,67 @@ class TestImprovedEntryLogic:
             rr_ratio = reward / risk
 
             assert rr_ratio >= self.entry_logic.min_risk_reward
+
+    def test_entry_signal_contains_telemetry(self):
+        """Ensure telemetry is attached for successful BUY signals"""
+        df = self.create_sample_dataframe(trend="up", volume_surge=True, rsi=45)
+        ml_signal = {"signal": "BUY", "confidence": 80, "reason": "Telemetry test"}
+
+        result = self.entry_logic.analyze_entry(df, ml_signal)
+
+        if result.signal_type == "BUY":
+            assert result.telemetry is not None
+            assert "base_confidence" in result.telemetry
+            assert isinstance(result.telemetry.get("adjustments"), list)
+            assert "confidence_after_filters" in result.telemetry
+
+    def test_low_confidence_no_signal_has_telemetry(self, monkeypatch):
+        """Force adjustments to drop confidence below threshold and ensure telemetry exists"""
+
+        def fake_run(self, df, signal_type, current_price, market_regime):
+            return True, [], [], [-50], [{"filter": "mock", "delta": -50, "note": "test"}]
+
+        monkeypatch.setattr(ImprovedEntryLogic, "_run_all_filters", fake_run)
+
+        df = self.create_sample_dataframe(trend="up", volume_surge=True, rsi=45)
+        ml_signal = {"signal": "BUY", "confidence": 65, "reason": "Telemetry fail test"}
+
+        result = self.entry_logic.analyze_entry(df, ml_signal)
+
+        assert result.signal_type == "HOLD"
+        assert result.telemetry is not None
+        assert result.telemetry.get("confidence_after_filters") is not None
+        assert result.warnings[0].startswith("Confidence sau adjustment")
+
+    def test_missing_take_profit_targets_returns_hold(self, monkeypatch):
+        """Guard against insufficient take profit targets"""
+
+        def fake_tp(entry_price, atr, risk_reward_ratios):
+            return [entry_price * 1.02]  # Only one TP
+
+        monkeypatch.setattr(
+            StopLossCalculator,
+            "calculate_take_profit_targets",
+            staticmethod(fake_tp),
+        )
+
+        monkeypatch.setattr(
+            ImprovedEntryLogic,
+            "_check_volume_confirmation",
+            lambda self, df, market_regime: {
+                "confirmed": True,
+                "reason": "Test override",
+                "surge": True,
+            },
+        )
+
+        df = self.create_sample_dataframe(trend="up", volume_surge=True, rsi=45)
+        ml_signal = {"signal": "BUY", "confidence": 80, "reason": "TP guard test"}
+
+        result = self.entry_logic.analyze_entry(df, ml_signal)
+
+        assert result.signal_type == "HOLD"
+        assert any("take profit" in warning.lower() for warning in result.warnings)
 
 
 class TestImprovedExitStrategy:

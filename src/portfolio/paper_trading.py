@@ -28,6 +28,8 @@ class PaperTrade:
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     status: str = "PENDING"  # PENDING, FILLED, CANCELLED, REJECTED
+    order_type: str = "MARKET"  # MARKET or LIMIT
+    limit_price: Optional[float] = None  # For LIMIT orders
 
 
 class PaperTradingAccount:
@@ -64,6 +66,7 @@ class PaperTradingAccount:
                 "cash": self.initial_capital,
                 "positions": {},  # DEPRECATED
                 "trades": [],  # List of PaperTrade
+                "pending_orders": [],  # NEW: List of pending limit orders
                 "daily_pnl": [],  # [{date, pnl, equity}]
                 "created_at": datetime.now().isoformat(),
             }
@@ -72,12 +75,16 @@ class PaperTradingAccount:
             try:
                 with open(self.account_file, "r", encoding="utf-8") as f:
                     self.account = json.load(f)
+                    # Ensure pending_orders exists
+                    if "pending_orders" not in self.account:
+                        self.account["pending_orders"] = []
             except Exception:
                 self.account = {
                     "initial_capital": self.initial_capital,
                     "cash": self.initial_capital,
                     "positions": {},
                     "trades": [],
+                    "pending_orders": [],
                     "daily_pnl": [],
                     "created_at": datetime.now().isoformat(),
                 }
@@ -96,14 +103,32 @@ class PaperTradingAccount:
         signal_reason: Optional[str] = None,
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
+        is_limit_order: bool = False,
+        limit_price: Optional[float] = None,
     ) -> Tuple[bool, str, Optional[PaperTrade]]:
         """
-        Thực thi lệnh mua
+        Thực thi lệnh mua (Market hoặc Limit order)
+
+        Args:
+            is_limit_order: True nếu là limit order
+            limit_price: Giá limit nếu is_limit_order = True
 
         Returns:
             (success, message, trade)
         """
-        # Apply slippage
+        # ENHANCEMENT: Handle limit orders
+        if is_limit_order and limit_price is not None:
+            return self._create_limit_order(
+                symbol=symbol,
+                shares=shares,
+                limit_price=limit_price,
+                signal_confidence=signal_confidence,
+                signal_reason=signal_reason,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
+
+        # Market order: Apply slippage
         execution_price = price * (1 + self.slippage_pct)
 
         # Calculate cost
@@ -131,6 +156,8 @@ class PaperTradingAccount:
             stop_loss=stop_loss,
             take_profit=take_profit,
             status="FILLED",
+            order_type="MARKET",
+            limit_price=None,
         )
 
         # Use PortfolioManager to add the position to the database
@@ -381,7 +408,170 @@ class PaperTradingAccount:
             f"💸 Tổng phí (ước tính): {stats.get('total_commission', 0):,.0f} VNĐ",
         ]
 
+        # Show pending limit orders if any
+        pending_orders = self.account.get("pending_orders", [])
+        if pending_orders:
+            lines.append(f"\n⏳ Đang chờ {len(pending_orders)} limit order(s):")
+            for order in pending_orders[:5]:  # Show max 5
+                lines.append(
+                    f"  • {order['symbol']}: {order['shares']} CP @ {order.get('limit_price', order['price']):,.0f} VNĐ"
+                )
+
         return "\n".join(lines)
+
+    def _create_limit_order(
+        self,
+        symbol: str,
+        shares: int,
+        limit_price: float,
+        signal_confidence: Optional[float] = None,
+        signal_reason: Optional[str] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> Tuple[bool, str, Optional[PaperTrade]]:
+        """
+        NEW: Tạo limit order (pending order)
+
+        Limit order sẽ được check và fill khi giá đạt limit_price
+        """
+        # Check if enough cash for limit order
+        total_cost = limit_price * shares * (1 + self.commission_rate)
+        if total_cost > self.account["cash"]:
+            return (
+                False,
+                f"Không đủ tiền cho limit order. Cần {total_cost:,.0f} VNĐ, có {self.account['cash']:,.0f} VNĐ",
+                None,
+            )
+
+        # Create pending limit order
+        limit_order = PaperTrade(
+            symbol=symbol.upper(),
+            action="BUY",
+            shares=shares,
+            price=limit_price,
+            timestamp=datetime.now().isoformat(),
+            signal_confidence=signal_confidence,
+            signal_reason=signal_reason,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            status="PENDING",
+            order_type="LIMIT",
+            limit_price=limit_price,
+        )
+
+        # Add to pending orders
+        self.account["pending_orders"].append(asdict(limit_order))
+        self.save_account()
+
+        return (
+            True,
+            f"⏳ Limit order đặt: {shares} CP {symbol} @ {limit_price:,.0f} VNĐ (chờ fill)",
+            limit_order,
+        )
+
+    def check_limit_orders(
+        self, current_prices: Dict[str, float]
+    ) -> List[Tuple[bool, str, PaperTrade]]:
+        """
+        NEW: Check và fill limit orders nếu giá đạt limit price
+
+        Args:
+            current_prices: Dict mapping symbol -> current_price
+
+        Returns:
+            List of (filled, message, trade) tuples
+        """
+        filled_orders = []
+        remaining_orders = []
+
+        for order_dict in self.account.get("pending_orders", []):
+            symbol = order_dict["symbol"]
+            limit_price = order_dict.get("limit_price", order_dict["price"])
+
+            if symbol not in current_prices:
+                # No price data - keep order pending
+                remaining_orders.append(order_dict)
+                continue
+
+            current_price = current_prices[symbol]
+
+            # Check if limit order should be filled
+            # For BUY limit order: fill if price <= limit_price
+            if order_dict["action"] == "BUY" and current_price <= limit_price:
+                # Fill the order
+                filled_order = PaperTrade(**order_dict)
+                filled_order.status = "FILLED"
+
+                # Calculate execution price (with slippage)
+                execution_price = current_price * (1 + self.slippage_pct)
+                filled_order.price = execution_price
+
+                # Calculate cost
+                gross_cost = execution_price * filled_order.shares
+                commission = gross_cost * self.commission_rate
+                total_cost = gross_cost + commission
+
+                # Check if still enough cash
+                if total_cost > self.account["cash"]:
+                    # Not enough cash - cancel order
+                    filled_order.status = "CANCELLED"
+                    filled_orders.append(
+                        (
+                            False,
+                            f"❌ Limit order {symbol} cancelled - không đủ tiền",
+                            filled_order,
+                        )
+                    )
+                    continue
+
+                # Deduct cash
+                self.account["cash"] -= total_cost
+
+                # Add position to portfolio
+                try:
+                    self.portfolio_manager.add_position(
+                        symbol=symbol.upper(),
+                        shares=filled_order.shares,
+                        entry_price=execution_price,
+                        stop_loss=filled_order.stop_loss,
+                        take_profit=filled_order.take_profit,
+                        metadata={
+                            "signal_confidence": filled_order.signal_confidence,
+                            "signal_reason": filled_order.signal_reason,
+                            "order_type": "LIMIT",
+                        },
+                    )
+                except Exception:
+                    # Failed to add position - refund cash and cancel
+                    self.account["cash"] += total_cost
+                    filled_order.status = "CANCELLED"
+                    filled_orders.append(
+                        (
+                            False,
+                            f"❌ Limit order {symbol} cancelled - lỗi DB",
+                            filled_order,
+                        )
+                    )
+                    continue
+
+                # Record filled trade
+                self.account["trades"].append(asdict(filled_order))
+                filled_orders.append(
+                    (
+                        True,
+                        f"✅ Limit order filled: {filled_order.shares} CP {symbol} @ {execution_price:,.0f} VNĐ",
+                        filled_order,
+                    )
+                )
+            else:
+                # Order not yet fillable - keep pending
+                remaining_orders.append(order_dict)
+
+        # Update pending orders
+        self.account["pending_orders"] = remaining_orders
+        self.save_account()
+
+        return filled_orders
 
 
 # Global instance

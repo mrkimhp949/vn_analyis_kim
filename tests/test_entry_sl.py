@@ -19,7 +19,9 @@ def test_stop_loss_below_entry():
     high = close + np.abs(np.random.normal(50, 20, n))
     low = close - np.abs(np.random.normal(50, 20, n))
     openp = close - np.random.normal(0, 30, n)
-    volume = np.random.uniform(800, 1200, n)
+    # Use realistic volume to pass liquidity check (50k+ shares)
+    # With price ~10k, this gives ~500M-600M VND avg_value (above small cap threshold)
+    volume = np.random.uniform(50_000, 60_000, n)
 
     df = pd.DataFrame(
         {"open": openp, "high": high, "low": low, "close": close, "volume": volume},
@@ -37,6 +39,9 @@ def test_stop_loss_below_entry():
         min_risk_reward=1.4,  # Slightly lower to allow for R:R ~ 1.5
         require_trend_alignment=False,
         require_volume_confirmation=False,
+        # Use lower liquidity thresholds for test (small cap tier: 1B VND, 50k volume)
+        min_liquidity_value=1_000_000_000,  # 1B VND (small cap threshold)
+        min_avg_volume=50_000,
     )
 
     signal = logic.analyze_entry(df, ml_signal)
