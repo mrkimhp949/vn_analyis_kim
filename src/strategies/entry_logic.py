@@ -7,7 +7,7 @@ Cải thiện logic vào lệnh với nhiều điều kiện hơn
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -49,6 +49,7 @@ class EntrySignal:
     is_limit_order: bool = False  # True if should use limit order instead of market
     limit_price: Optional[float] = None  # Limit price if is_limit_order = True
     entry_type: str = "MARKET"  # 'MARKET', 'LIMIT', 'PULLBACK', 'BREAKOUT'
+    telemetry: Optional[Dict] = None  # Chi tiết chấm điểm để debug/monitor
 
 
 class ImprovedEntryLogic:
@@ -167,13 +168,31 @@ class ImprovedEntryLogic:
 
         return (True, signal_type, base_confidence, close_price)
 
+    def _add_adjustment(
+        self,
+        adjustments: List[int],
+        breakdown: List[Dict],
+        filter_name: str,
+        delta: int,
+        note: str,
+    ):
+        """Add adjustment và lưu telemetry cho filter"""
+        adjustments.append(delta)
+        breakdown.append(
+            {
+                "filter": filter_name,
+                "delta": delta,
+                "note": note,
+            }
+        )
+
     def _run_all_filters(
         self,
         df: pd.DataFrame,
         signal_type: str,
         current_price: float,
         market_regime: Optional[Dict],
-    ) -> tuple[bool, list, list, list]:
+    ) -> tuple[bool, list, list, list, list]:
         """
         Run all entry filters
 
@@ -183,6 +202,7 @@ class ImprovedEntryLogic:
         reasons = []
         warnings = []
         adjustments = []
+        adjustment_breakdown = []
 
         # Determine adjustment scaling factor based on market regime
         # BULL: Scale penalties down (0.7x) to allow more signals
@@ -203,162 +223,355 @@ class ImprovedEntryLogic:
 
         # FILTER 1: MARKET REGIME
         if market_regime and not market_regime.get("tradeable", True):
+            adjustment_breakdown.append(
+                {
+                    "filter": "market_regime",
+                    "delta": None,
+                    "note": "Market regime not tradeable",
+                }
+            )
             return (
                 False,
                 [],
                 [],
                 [],
+                adjustment_breakdown,
             )
 
         # FILTER 2: TREND ALIGNMENT
         trend_check = self._check_trend_alignment(df, signal_type)
         if not trend_check["aligned"]:
+            adjustment_breakdown.append(
+                {
+                    "filter": "trend_alignment",
+                    "delta": None,
+                    "note": trend_check["reason"],
+                }
+            )
             if self.require_trend_alignment:
-                return (False, [], [], [])
+                return (False, [], [], [], adjustment_breakdown)
             else:
                 warnings.append(f"⚠️ Trend: {trend_check['reason']}")
-                adjustments.append(-10)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "trend_alignment",
+                    -10,
+                    trend_check["reason"],
+                )
         else:
             reasons.append(f"✅ Trend: {trend_check['reason']}")
             if trend_check["strength"] > 50:
-                adjustments.append(+5)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "trend_alignment",
+                    +5,
+                    "Strong alignment",
+                )
 
         # FILTER 3: SUPPORT/RESISTANCE
         sr_check = self._check_support_resistance(df, current_price)
         if sr_check["too_close_to_resistance"]:
-            warnings.append(f"⚠️ Gần resistance: {sr_check['distance_to_resistance']:.1f}%")
-            adjustments.append(-15)
+            warning_msg = f"⚠️ Gần resistance: {sr_check['distance_to_resistance']:.1f}%"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "support_resistance",
+                -15,
+                warning_msg,
+            )
         elif sr_check["bouncing_from_support"]:
             # Bouncing from support is a STRONG reversal signal
             reasons.append(
                 f"✅ Bouncing from support (+{sr_check['distance_to_support']:.1f}%) - REVERSAL"
             )
-            adjustments.append(+15)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "support_resistance",
+                +15,
+                "Bouncing from support",
+            )
         elif sr_check["near_support"]:
             reasons.append(f"✅ Gần support (+{sr_check['distance_to_support']:.1f}%)")
-            adjustments.append(+10)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "support_resistance",
+                +10,
+                "Near support",
+            )
 
         # FILTER 4: VOLUME CONFIRMATION
         # ENHANCEMENT: Pass market_regime for dynamic threshold adjustment
         volume_check = self._check_volume_confirmation(df, market_regime)
         if not volume_check["confirmed"]:
+            volume_note = volume_check["reason"]
+            adjustment_breakdown.append(
+                {
+                    "filter": "volume",
+                    "delta": None,
+                    "note": volume_note,
+                }
+            )
             if self.require_volume_confirmation:
-                return (False, [], [], [])
+                return (False, [], [], [], adjustment_breakdown)
             else:
-                warnings.append(f"⚠️ Volume: {volume_check['reason']}")
-                adjustments.append(-10)
+                warning_msg = f"⚠️ Volume: {volume_note}"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "volume",
+                    -10,
+                    volume_note,
+                )
         else:
             reasons.append(f"✅ Volume: {volume_check['reason']}")
             if volume_check["surge"]:
-                adjustments.append(+5)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "volume",
+                    +5,
+                    "Volume surge",
+                )
 
         # FILTER 5: LIQUIDITY CHECK (NEW)
         liquidity_check = self._check_liquidity(df, current_price)
         if liquidity_check["critical"]:
+            adjustment_breakdown.append(
+                {
+                    "filter": "liquidity",
+                    "delta": None,
+                    "note": "Critical liquidity",
+                }
+            )
             return (
                 False,
                 [],
                 [],
                 [],
+                adjustment_breakdown,
             )
         elif not liquidity_check["sufficient"]:
             tier = liquidity_check.get("tier", "unknown")
-            warnings.append(
+            warning_msg = (
                 f"⚠️ Thanh khoản thấp ({tier} cap) "
                 f"(avg value: {liquidity_check['avg_value'] / 1_000_000_000:.2f}B VND)"
             )
-            adjustments.append(-15)
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "liquidity",
+                -15,
+                warning_msg,
+            )
         else:
             tier = liquidity_check.get("tier", "unknown")
             reasons.append(
                 f"✅ Thanh khoản tốt ({tier} cap) "
                 f"(avg value: {liquidity_check['avg_value'] / 1_000_000_000:.1f}B VND)"
             )
-            adjustments.append(+5)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "liquidity",
+                +5,
+                "Good liquidity",
+            )
 
         # FILTER 6: VOLATILITY CHECK
         volatility_check = self._check_volatility(df)
         if volatility_check["too_high"]:
-            warnings.append(f"⚠️ Volatility cao: {volatility_check['value']:.2f}%")
-            adjustments.append(-15)
+            warning_msg = f"⚠️ Volatility cao: {volatility_check['value']:.2f}%"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "volatility",
+                -15,
+                warning_msg,
+            )
         elif volatility_check["optimal"]:
             reasons.append("✅ Volatility vừa phải")
-            adjustments.append(+5)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "volatility",
+                +5,
+                "Optimal volatility",
+            )
 
         # FILTER 7: RSI CHECK
         rsi_check = self._check_rsi(df)
         if rsi_check["overbought"]:
-            warnings.append(f"⚠️ RSI overbought: {rsi_check['value']:.1f}")
-            adjustments.append(-10)
+            warning_msg = f"⚠️ RSI overbought: {rsi_check['value']:.1f}"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "rsi",
+                -10,
+                warning_msg,
+            )
         elif rsi_check["oversold"]:
             # Oversold RSI (<30) is a STRONG buy signal
             reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (strong buy)")
-            adjustments.append(+15)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "rsi",
+                +15,
+                "Oversold RSI",
+            )
         elif rsi_check["optimal"]:
             reasons.append(f"✅ RSI: {rsi_check['value']:.1f}")
-            adjustments.append(+5)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "rsi",
+                +5,
+                "Optimal RSI",
+            )
 
         # FILTER 8: PRICE ACTION
         price_action = self._check_price_action(df)
         if price_action["bullish_pattern"]:
-            reasons.append(f"✅ Pattern: {price_action['pattern']}")
-            adjustments.append(+10)
+            pattern_note = f"Pattern: {price_action['pattern']}"
+            reasons.append(f"✅ {pattern_note}")
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "price_action",
+                +10,
+                pattern_note,
+            )
         elif price_action["bearish_pattern"]:
-            warnings.append(f"⚠️ Pattern: {price_action['pattern']}")
-            adjustments.append(-10)
+            warning_msg = f"⚠️ Pattern: {price_action['pattern']}"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "price_action",
+                -10,
+                warning_msg,
+            )
 
         # FILTER 9: SECTOR STRENGTH
         sector_strength_check = self._check_sector_strength(df, market_regime)
         if sector_strength_check["is_leading"]:
-            reasons.append(f"✅ Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)")
-            adjustments.append(+10)
+            reason_msg = f"Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)"
+            reasons.append(f"✅ {reason_msg}")
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "sector_strength",
+                +10,
+                reason_msg,
+            )
         elif sector_strength_check["is_lagging"]:
-            warnings.append(f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)")
-            adjustments.append(-15)
+            warning_msg = f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "sector_strength",
+                -15,
+                warning_msg,
+            )
 
         # FILTER 10: MULTI-TIMEFRAME CONFIRMATION
         mtf_check = self._check_multi_timeframe_trend(df)
         if not mtf_check["weekly_up"]:
-            warnings.append(f"⚠️ Weekly trend yếu ({mtf_check['weekly_change']:.1f}%)")
-            adjustments.append(-5)
+            warning_msg = f"⚠️ Weekly trend yếu ({mtf_check['weekly_change']:.1f}%)"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "multi_timeframe",
+                -5,
+                warning_msg,
+            )
         else:
             reasons.append(f"✅ Weekly trend tăng ({mtf_check['weekly_change']:+.1f}%)")
         if not mtf_check["monthly_up"]:
-            warnings.append(f"⚠️ Monthly trend yếu ({mtf_check['monthly_change']:.1f}%)")
-            adjustments.append(-5)
+            warning_msg = f"⚠️ Monthly trend yếu ({mtf_check['monthly_change']:.1f}%)"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "multi_timeframe",
+                -5,
+                warning_msg,
+            )
         else:
             reasons.append(f"✅ Monthly trend tăng ({mtf_check['monthly_change']:+.1f}%)")
 
         # FILTER 11: MARKET BREADTH
         breadth_check = self._check_market_breadth(market_regime)
         if breadth_check["weak"]:
-            warnings.append("⚠️ Market breadth yếu (ít mã tham gia tăng)")
-            adjustments.append(-10)
+            warning_msg = "⚠️ Market breadth yếu (ít mã tham gia tăng)"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "market_breadth",
+                -10,
+                warning_msg,
+            )
         elif breadth_check["strong"]:
             reasons.append("✅ Market breadth mạnh (nhiều mã tham gia)")
-            adjustments.append(+5)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "market_breadth",
+                +5,
+                "Market breadth strong",
+            )
 
         # FILTER 12: PORTFOLIO CORRELATION
         correlation_check = self._check_portfolio_correlation(
             df, getattr(self, "_current_symbol", None)
         )
         if correlation_check["too_high"]:
-            warnings.append(
+            warning_msg = (
                 f"⚠️ Correlation cao với portfolio: {correlation_check['max_correlation']:.2f}"
             )
-            adjustments.append(-20)  # Penalty lớn cho high correlation
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "portfolio_correlation",
+                -20,
+                warning_msg,
+            )  # Penalty lớn cho high correlation
         elif correlation_check["good_diversification"]:
             reasons.append(f"✅ Đa dạng hóa tốt (corr: {correlation_check['max_correlation']:.2f})")
-            adjustments.append(+5)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "portfolio_correlation",
+                +5,
+                "Good diversification",
+            )
 
         # FILTER 13: EARNINGS/EVENTS (NEW)
         symbol = getattr(self, "_current_symbol", None)
         events_check = self._check_earnings_events(df, symbol)
         if events_check["too_close_to_event"]:
-            warnings.append(
-                f"⚠️ Gần sự kiện: {events_check['event_type']} trong {events_check['days_until']} ngày"
-            )
-            adjustments.append(-25)  # Penalty lớn - tránh mua trước earnings/events
+            warning_msg = f"⚠️ Gần sự kiện: {events_check['event_type']} trong {events_check['days_until']} ngày"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "events",
+                -25,
+                warning_msg,
+            )  # Penalty lớn - tránh mua trước earnings/events
         elif events_check["event_passed"]:
             reasons.append(
                 f"✅ Sự kiện đã qua: {events_check['event_type']} ({events_check['days_since']} ngày trước)"
@@ -367,24 +580,41 @@ class ImprovedEntryLogic:
         # FILTER 14: FUNDAMENTAL FILTERS (NEW)
         fundamental_check = self._check_fundamentals(df, symbol, current_price)
         if fundamental_check["poor_fundamentals"]:
-            warnings.append(f"⚠️ Fundamentals: {fundamental_check['reason']}")
-            adjustments.append(-15)  # Penalty cho poor fundamentals
+            warning_msg = f"⚠️ Fundamentals: {fundamental_check['reason']}"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "fundamentals",
+                -15,
+                warning_msg,
+            )  # Penalty cho poor fundamentals
         elif fundamental_check["good_fundamentals"]:
             reasons.append(f"✅ Fundamentals: {fundamental_check['reason']}")
-            adjustments.append(+5)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "fundamentals",
+                +5,
+                "Good fundamentals",
+            )
 
         # Apply scaling factor to all adjustments (only to penalties, not bonuses)
         # This prevents confidence from dropping too fast in favorable markets
         if adjustment_scale != 1.0:
             scaled_adjustments = []
-            for adj in adjustments:
+            for idx, adj in enumerate(adjustments):
                 if adj < 0:  # Only scale penalties (negative adjustments)
-                    scaled_adjustments.append(int(adj * adjustment_scale))
+                    new_adj = int(adj * adjustment_scale)
+                    scaled_adjustments.append(new_adj)
+                    if idx < len(adjustment_breakdown):
+                        adjustment_breakdown[idx]["delta"] = new_adj
+                        adjustment_breakdown[idx]["note"] += " (scaled)"
                 else:  # Keep bonuses unchanged
                     scaled_adjustments.append(adj)
             adjustments = scaled_adjustments
 
-        return (True, reasons, warnings, adjustments)
+        return (True, reasons, warnings, adjustments, adjustment_breakdown)
 
     def _calculate_prices_and_risk(
         self, df: pd.DataFrame, entry_price: float, sr_check: Dict
@@ -427,6 +657,16 @@ class ImprovedEntryLogic:
                 f"(entry={entry_price:.0f}, sl={stop_loss:.0f})"
             )
             return (False, error_msg, 0, 0, [], 0)
+
+        if len(take_profit_targets) < 2:
+            return (
+                False,
+                "Không đủ take profit targets để tính reward",
+                0,
+                0,
+                take_profit_targets,
+                0,
+            )
 
         reward = take_profit_targets[1] - entry_price  # Use TP2
         if reward <= 0:
@@ -475,16 +715,28 @@ class ImprovedEntryLogic:
             signal_type = signal_or_reason
 
             # Step 2: Run all filters
-            passed, reasons, warnings, adjustments = self._run_all_filters(
-                df, signal_type, current_price, market_regime
-            )
+            (
+                passed,
+                reasons,
+                warnings,
+                adjustments,
+                adjustment_breakdown,
+            ) = self._run_all_filters(df, signal_type, current_price, market_regime)
             if not passed:
                 regime_name = market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
-                return self._no_signal(f"Thị trường: {regime_name}")
+                return self._no_signal(
+                    f"Thị trường: {regime_name}",
+                    telemetry={
+                        "base_confidence": base_confidence,
+                        "adjustments": adjustment_breakdown,
+                        "reason": "Filters rejected",
+                    },
+                )
 
             # Step 3: Calculate adjusted confidence
-            adjusted_confidence = base_confidence + sum(adjustments)
-            adjusted_confidence = max(0, min(adjusted_confidence, 100))
+            confidence_after_filters = base_confidence + sum(adjustments)
+            confidence_after_filters = max(0, min(confidence_after_filters, 100))
+            adjusted_confidence = confidence_after_filters
 
             # Step 3b: Apply performance feedback
             adjusted_confidence, perf_msg = self._apply_performance_feedback(adjusted_confidence)
@@ -494,9 +746,20 @@ class ImprovedEntryLogic:
                 else:
                     reasons.append(perf_msg)
 
+            telemetry = {
+                "base_confidence": base_confidence,
+                "adjustments": adjustment_breakdown,
+                "confidence_after_filters": confidence_after_filters,
+                "confidence_after_performance": adjusted_confidence,
+                "min_confidence_threshold": self.min_confidence,
+                "performance_feedback": perf_msg,
+                "market_regime": market_regime,
+            }
+
             if adjusted_confidence < self.min_confidence:
                 return self._no_signal(
-                    f"Confidence sau adjustment: {adjusted_confidence}% < {self.min_confidence}%"
+                    f"Confidence sau adjustment: {adjusted_confidence}% < {self.min_confidence}%",
+                    telemetry=telemetry,
                 )
 
             # Step 4: Calculate prices and risk/reward
@@ -546,6 +809,7 @@ class ImprovedEntryLogic:
                 return self._no_signal(error_msg)
 
             reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
+            telemetry["risk_reward"] = risk_reward
 
             # Step 5: Determine signal strength and position multiplier
             strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
@@ -569,6 +833,7 @@ class ImprovedEntryLogic:
                 is_limit_order=is_limit_order,
                 limit_price=limit_price,
                 entry_type=optimized_entry.get("entry_type", "MARKET"),
+                telemetry=telemetry,
             )
         finally:
             self._current_symbol = None
@@ -1717,7 +1982,7 @@ class ImprovedEntryLogic:
         else:
             return "HOLD"
 
-    def _no_signal(self, reason: str) -> EntrySignal:
+    def _no_signal(self, reason: str, telemetry: Optional[Dict] = None) -> EntrySignal:
         """Return no signal"""
         return EntrySignal(
             should_enter=False,
@@ -1733,6 +1998,7 @@ class ImprovedEntryLogic:
             is_limit_order=False,
             limit_price=None,
             entry_type="MARKET",
+            telemetry=telemetry,
         )
 
     def format_signal_message(self, signal: EntrySignal, symbol: str) -> str:
