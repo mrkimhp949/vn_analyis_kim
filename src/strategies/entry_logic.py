@@ -7,11 +7,12 @@ Cải thiện logic vào lệnh với nhiều điều kiện hơn
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
 # Import utilities
+from src.monitoring.performance import get_performance_monitor
 from src.utils.indicators import IndicatorUtils, StopLossCalculator
 from src.utils.validation import DataValidator
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
@@ -59,13 +60,17 @@ class ImprovedEntryLogic:
     """
 
     def __init__(
-        self,
-        min_confidence: int = 60,
-        min_risk_reward: float = 2.0,
-        support_distance_percent: float = 3.0,
-        require_trend_alignment: bool = True,
-        require_volume_confirmation: bool = True,
-        portfolio_manager=None,
+            self,
+            min_confidence: int = 60,
+            min_risk_reward: float = 2.0,
+            support_distance_percent: float = 3.0,
+            require_trend_alignment: bool = True,
+            require_volume_confirmation: bool = True,
+            portfolio_manager=None,
+            performance_monitor=None,
+            min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
+            min_avg_volume: int = 150_000,
+            use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
     ):
         """
         Args:
@@ -83,9 +88,21 @@ class ImprovedEntryLogic:
         self.require_trend_alignment = require_trend_alignment
         self.require_volume_confirmation = require_volume_confirmation
         self.portfolio_manager = portfolio_manager
+        self.performance_monitor = performance_monitor or get_performance_monitor()
+        self.min_liquidity_value = min_liquidity_value
+        self.min_avg_volume = min_avg_volume
+        self.use_tiered_liquidity = use_tiered_liquidity
+        self._current_symbol = None
+
+        # Tiered liquidity thresholds (small/mid/large caps)
+        self.liquidity_tiers = {
+            "large": {"min_value": 5_000_000_000, "min_volume": 150_000},  # 5B VND
+            "mid": {"min_value": 2_000_000_000, "min_volume": 80_000},     # 2B VND
+            "small": {"min_value": 1_000_000_000, "min_volume": 50_000},   # 1B VND
+        }
 
     def _validate_initial_signal(
-        self, df: pd.DataFrame, ml_signal: Optional[Dict]
+            self, df: pd.DataFrame, ml_signal: Optional[Dict]
     ) -> tuple[bool, str, float, float]:
         """
         Validate initial data and ML signal
@@ -136,11 +153,11 @@ class ImprovedEntryLogic:
         return (True, signal_type, base_confidence, close_price)
 
     def _run_all_filters(
-        self,
-        df: pd.DataFrame,
-        signal_type: str,
-        current_price: float,
-        market_regime: Optional[Dict],
+            self,
+            df: pd.DataFrame,
+            signal_type: str,
+            current_price: float,
+            market_regime: Optional[Dict],
     ) -> tuple[bool, list, list, list]:
         """
         Run all entry filters
@@ -151,6 +168,23 @@ class ImprovedEntryLogic:
         reasons = []
         warnings = []
         adjustments = []
+
+        # Determine adjustment scaling factor based on market regime
+        # BULL: Scale penalties down (0.7x) to allow more signals
+        # BEAR/HIGH_VOL: Scale penalties up (1.2x) to be more selective
+        # SIDEWAYS: Normal (1.0x)
+        adjustment_scale = 1.0
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
+            regime_confidence = market_regime.get("confidence", 50)
+
+            if regime == "BULL" and regime_confidence >= 70:
+                adjustment_scale = 0.7  # Lighter penalties in strong bull market
+            elif regime == "BEAR":
+                adjustment_scale = 1.2  # Heavier penalties in bear market
+            elif regime == "HIGH_VOLATILITY":
+                adjustment_scale = 1.3  # Even heavier in high volatility
+            # SIDEWAYS or other: keep 1.0
 
         # FILTER 1: MARKET REGIME
         if market_regime and not market_regime.get("tradeable", True):
@@ -196,6 +230,30 @@ class ImprovedEntryLogic:
             if volume_check["surge"]:
                 adjustments.append(+5)
 
+        # FILTER 5: LIQUIDITY CHECK (NEW)
+        liquidity_check = self._check_liquidity(df, current_price)
+        if liquidity_check["critical"]:
+            return (
+                False,
+                [],
+                [],
+                [],
+            )
+        elif not liquidity_check["sufficient"]:
+            tier = liquidity_check.get("tier", "unknown")
+            warnings.append(
+                f"⚠️ Thanh khoản thấp ({tier} cap) "
+                f"(avg value: {liquidity_check['avg_value'] / 1_000_000_000:.2f}B VND)"
+            )
+            adjustments.append(-15)
+        else:
+            tier = liquidity_check.get("tier", "unknown")
+            reasons.append(
+                f"✅ Thanh khoản tốt ({tier} cap) "
+                f"(avg value: {liquidity_check['avg_value'] / 1_000_000_000:.1f}B VND)"
+            )
+            adjustments.append(+5)
+
         # FILTER 5: VOLATILITY CHECK
         volatility_check = self._check_volatility(df)
         if volatility_check["too_high"]:
@@ -232,10 +290,56 @@ class ImprovedEntryLogic:
             warnings.append(f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)")
             adjustments.append(-15)
 
+        # FILTER 9: MULTI-TIMEFRAME CONFIRMATION (NEW)
+        mtf_check = self._check_multi_timeframe_trend(df)
+        if not mtf_check["weekly_up"]:
+            warnings.append(f"⚠️ Weekly trend yếu ({mtf_check['weekly_change']:.1f}%)")
+            adjustments.append(-5)
+        else:
+            reasons.append(f"✅ Weekly trend tăng ({mtf_check['weekly_change']:+.1f}%)")
+        if not mtf_check["monthly_up"]:
+            warnings.append(f"⚠️ Monthly trend yếu ({mtf_check['monthly_change']:.1f}%)")
+            adjustments.append(-5)
+        else:
+            reasons.append(f"✅ Monthly trend tăng ({mtf_check['monthly_change']:+.1f}%)")
+
+        # FILTER 10: MARKET BREADTH (NEW)
+        breadth_check = self._check_market_breadth(market_regime)
+        if breadth_check["weak"]:
+            warnings.append("⚠️ Market breadth yếu (ít mã tham gia tăng)")
+            adjustments.append(-10)
+        elif breadth_check["strong"]:
+            reasons.append("✅ Market breadth mạnh (nhiều mã tham gia)")
+            adjustments.append(+5)
+
+        # FILTER 11: PORTFOLIO CORRELATION (NEW)
+        correlation_check = self._check_portfolio_correlation(
+            df, getattr(self, "_current_symbol", None)
+        )
+        if correlation_check["too_high"]:
+            warnings.append(
+                f"⚠️ Correlation cao với portfolio: {correlation_check['max_correlation']:.2f}"
+            )
+            adjustments.append(-20)  # Penalty lớn cho high correlation
+        elif correlation_check["good_diversification"]:
+            reasons.append(f"✅ Đa dạng hóa tốt (corr: {correlation_check['max_correlation']:.2f})")
+            adjustments.append(+5)
+
+        # Apply scaling factor to all adjustments (only to penalties, not bonuses)
+        # This prevents confidence from dropping too fast in favorable markets
+        if adjustment_scale != 1.0:
+            scaled_adjustments = []
+            for adj in adjustments:
+                if adj < 0:  # Only scale penalties (negative adjustments)
+                    scaled_adjustments.append(int(adj * adjustment_scale))
+                else:  # Keep bonuses unchanged
+                    scaled_adjustments.append(adj)
+            adjustments = scaled_adjustments
+
         return (True, reasons, warnings, adjustments)
 
     def _calculate_prices_and_risk(
-        self, df: pd.DataFrame, entry_price: float, sr_check: Dict
+            self, df: pd.DataFrame, entry_price: float, sr_check: Dict
     ) -> tuple[bool, str, float, float, list, float]:
         """
         Calculate entry price, stop loss, take profit targets, and risk/reward
@@ -288,7 +392,11 @@ class ImprovedEntryLogic:
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
 
     def analyze_entry(
-        self, df: pd.DataFrame, ml_signal: Dict, market_regime: Optional[Dict] = None
+            self,
+            df: pd.DataFrame,
+            ml_signal: Dict,
+            market_regime: Optional[Dict] = None,
+            symbol: Optional[str] = None,
     ) -> EntrySignal:
         """
         Phân tích đầy đủ để quyết định có nên vào lệnh
@@ -304,73 +412,85 @@ class ImprovedEntryLogic:
         # ENHANCEMENT: Adjust thresholds dynamically based on market regime
         self._adjust_thresholds_for_market(market_regime)
 
-        # Step 1: Validate initial signal
-        (
-            is_valid,
-            signal_or_reason,
-            base_confidence,
-            current_price,
-        ) = self._validate_initial_signal(df, ml_signal)
-        if not is_valid:
-            return self._no_signal(signal_or_reason)
+        self._current_symbol = symbol
+        try:
+            # Step 1: Validate initial signal
+            (
+                is_valid,
+                signal_or_reason,
+                base_confidence,
+                current_price,
+            ) = self._validate_initial_signal(df, ml_signal)
+            if not is_valid:
+                return self._no_signal(signal_or_reason)
 
-        signal_type = signal_or_reason
+            signal_type = signal_or_reason
 
-        # Step 2: Run all filters
-        passed, reasons, warnings, adjustments = self._run_all_filters(
-            df, signal_type, current_price, market_regime
-        )
-        if not passed:
-            regime_name = market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
-            return self._no_signal(f"Thị trường: {regime_name}")
+            # Step 2: Run all filters
+            passed, reasons, warnings, adjustments = self._run_all_filters(
+                df, signal_type, current_price, market_regime
+            )
+            if not passed:
+                regime_name = market_regime.get("regime", "UNKNOWN") if market_regime else "N/A"
+                return self._no_signal(f"Thị trường: {regime_name}")
 
-        # Step 3: Calculate adjusted confidence
-        adjusted_confidence = base_confidence + sum(adjustments)
-        adjusted_confidence = max(0, min(adjusted_confidence, 100))
+            # Step 3: Calculate adjusted confidence
+            adjusted_confidence = base_confidence + sum(adjustments)
+            adjusted_confidence = max(0, min(adjusted_confidence, 100))
 
-        if adjusted_confidence < self.min_confidence:
-            return self._no_signal(
-                f"Confidence sau adjustment: {adjusted_confidence}% < " f"{self.min_confidence}%"
+            # Step 3b: Apply performance feedback
+            adjusted_confidence, perf_msg = self._apply_performance_feedback(adjusted_confidence)
+            if perf_msg:
+                if perf_msg.startswith("⚠️"):
+                    warnings.append(perf_msg)
+                else:
+                    reasons.append(perf_msg)
+
+            if adjusted_confidence < self.min_confidence:
+                return self._no_signal(
+                    f"Confidence sau adjustment: {adjusted_confidence}% < {self.min_confidence}%"
+                )
+
+            # Step 4: Calculate prices and risk/reward
+            # Use safe access instead of df.iloc[-1]
+            close_price = safe_get_latest(df, "close", 0)
+            entry_price = DataValidator.validate_price(close_price, "entry_price")
+            sr_check = self._check_support_resistance(df, current_price)
+
+            (
+                success,
+                error_msg,
+                stop_loss,
+                reward,
+                take_profit_targets,
+                risk_reward,
+            ) = self._calculate_prices_and_risk(df, entry_price, sr_check)
+            if not success:
+                return self._no_signal(error_msg)
+
+            reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
+
+            # Step 5: Determine signal strength and position multiplier
+            strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
+            position_multiplier = self._calculate_position_multiplier(
+                strength, adjusted_confidence, warnings, market_regime
             )
 
-        # Step 4: Calculate prices and risk/reward
-        # Use safe access instead of df.iloc[-1]
-        close_price = safe_get_latest(df, "close", 0)
-        entry_price = DataValidator.validate_price(close_price, "entry_price")
-        sr_check = self._check_support_resistance(df, current_price)
-
-        (
-            success,
-            error_msg,
-            stop_loss,
-            reward,
-            take_profit_targets,
-            risk_reward,
-        ) = self._calculate_prices_and_risk(df, entry_price, sr_check)
-        if not success:
-            return self._no_signal(error_msg)
-
-        reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
-
-        # Step 5: Determine signal strength and position multiplier
-        strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
-        position_multiplier = self._calculate_position_multiplier(
-            strength, adjusted_confidence, warnings, market_regime
-        )
-
-        # Step 6: Build entry signal
-        return EntrySignal(
-            should_enter=True,
-            signal_type="BUY",
-            confidence=int(adjusted_confidence),
-            strength=strength,
-            position_size_multiplier=position_multiplier,
-            reasons=reasons,
-            warnings=warnings,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            take_profit_targets=take_profit_targets,
-        )
+            # Step 6: Build entry signal
+            return EntrySignal(
+                should_enter=True,
+                signal_type="BUY",
+                confidence=int(adjusted_confidence),
+                strength=strength,
+                position_size_multiplier=position_multiplier,
+                reasons=reasons,
+                warnings=warnings,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit_targets=take_profit_targets,
+            )
+        finally:
+            self._current_symbol = None
 
     # ========================================================================
     # HELPER METHODS - FILTERS
@@ -470,6 +590,100 @@ class ImprovedEntryLogic:
             "resistance_level": resistance,
             "distance_to_support": distance_to_support,
             "distance_to_resistance": distance_to_resistance,
+        }
+
+    def _check_liquidity(self, df: pd.DataFrame, current_price: float) -> Dict:
+        """
+        NEW: Kiểm tra thanh khoản (giá * volume) với tiered thresholds
+        """
+        if "volume" not in df.columns or len(df) < 5:
+            return {
+                "sufficient": True,
+                "critical": False,
+                "current_value": 0.0,
+                "avg_value": 0.0,
+                "tier": "unknown",
+            }
+
+        current_volume = safe_get_latest(df, "volume", 0)
+        avg_volume = df["volume"].tail(20).mean()
+        avg_value = avg_volume * current_price
+        current_value = current_volume * current_price
+
+        # Determine appropriate tier and thresholds
+        if self.use_tiered_liquidity:
+            # Try from highest to lowest tier
+            tier = None
+            min_value_threshold = 0
+            min_volume_threshold = 0
+
+            if avg_value >= self.liquidity_tiers["large"]["min_value"]:
+                tier = "large"
+                min_value_threshold = self.liquidity_tiers["large"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["large"]["min_volume"]
+            elif avg_value >= self.liquidity_tiers["mid"]["min_value"]:
+                tier = "mid"
+                min_value_threshold = self.liquidity_tiers["mid"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["mid"]["min_volume"]
+            elif avg_value >= self.liquidity_tiers["small"]["min_value"]:
+                tier = "small"
+                min_value_threshold = self.liquidity_tiers["small"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["small"]["min_volume"]
+            else:
+                # Below all tiers - use small cap threshold for evaluation
+                tier = "micro"
+                min_value_threshold = self.liquidity_tiers["small"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["small"]["min_volume"]
+
+            sufficient_value = avg_value >= min_value_threshold
+            sufficient_volume = avg_volume >= min_volume_threshold
+            sufficient = sufficient_value and sufficient_volume
+            critical = avg_value < (min_value_threshold * 0.5)
+        else:
+            # Legacy: Use original fixed thresholds
+            tier = "fixed"
+            sufficient_value = avg_value >= self.min_liquidity_value
+            sufficient_volume = avg_volume >= self.min_avg_volume
+            sufficient = sufficient_value and sufficient_volume
+            critical = avg_value < (self.min_liquidity_value * 0.5)
+
+        return {
+            "sufficient": sufficient,
+            "critical": critical,
+            "current_value": current_value,
+            "avg_value": avg_value,
+            "avg_volume": avg_volume,
+            "current_volume": current_volume,
+            "tier": tier,
+        }
+
+    def _check_multi_timeframe_trend(self, df: pd.DataFrame) -> Dict:
+        """
+        NEW: Confirm xu hướng trên nhiều timeframe (daily/weekly/monthly)
+        """
+        if len(df) < 5:
+            return {
+                "weekly_up": True,
+                "monthly_up": True,
+                "weekly_change": 0.0,
+                "monthly_change": 0.0,
+            }
+
+        current_close = safe_get_latest(df, "close", 0)
+        weekly_close = df["close"].iloc[-5] if len(df) >= 5 else current_close
+        monthly_close = df["close"].iloc[-20] if len(df) >= 20 else weekly_close
+
+        weekly_change = ((current_close / weekly_close) - 1) * 100 if weekly_close else 0
+        monthly_change = ((current_close / monthly_close) - 1) * 100 if monthly_close else 0
+
+        weekly_up = weekly_change >= 0
+        monthly_up = monthly_change >= 0
+
+        return {
+            "weekly_up": weekly_up,
+            "monthly_up": monthly_up,
+            "weekly_change": weekly_change,
+            "monthly_change": monthly_change,
         }
 
     def _calculate_obv(self, df: pd.DataFrame) -> pd.Series:
@@ -580,8 +794,8 @@ class ImprovedEntryLogic:
         if obv_bullish:
             confidence_score += 0.3
 
-        # Determine if confirmed (threshold: 0.6)
-        confirmed = confidence_score >= 0.6
+        # Determine if confirmed (threshold: 0.5 - relaxed from 0.6 to allow more signals)
+        confirmed = confidence_score >= 0.5
 
         # Generate detailed reason
         reasons = []
@@ -676,10 +890,10 @@ class ImprovedEntryLogic:
 
         # Bullish engulfing
         if (
-            prev["close"] < prev["open"]  # Prev bearish
-            and latest["close"] > latest["open"]  # Current bullish
-            and latest["close"] > prev["open"]
-            and latest["open"] < prev["close"]
+                prev["close"] < prev["open"]  # Prev bearish
+                and latest["close"] > latest["open"]  # Current bullish
+                and latest["close"] > prev["open"]
+                and latest["open"] < prev["close"]
         ):
             return {
                 "bullish_pattern": True,
@@ -704,10 +918,10 @@ class ImprovedEntryLogic:
 
         # Bearish patterns
         if (
-            prev["close"] > prev["open"]
-            and latest["close"] < latest["open"]
-            and latest["close"] < prev["open"]
-            and latest["open"] > prev["close"]
+                prev["close"] > prev["open"]
+                and latest["close"] < latest["open"]
+                and latest["close"] < prev["open"]
+                and latest["open"] > prev["close"]
         ):
             return {
                 "bullish_pattern": False,
@@ -748,12 +962,101 @@ class ImprovedEntryLogic:
             "sector_perf": sector_perf,
         }
 
+    def _check_portfolio_correlation(self, df: pd.DataFrame, symbol: Optional[str]) -> Dict:
+        """
+        NEW: Kiểm tra correlation với portfolio hiện tại
+
+        Returns:
+            Dict with correlation analysis
+        """
+        if not symbol or not self.portfolio_manager:
+            return {
+                "too_high": False,
+                "good_diversification": False,
+                "max_correlation": 0.0,
+            }
+
+        try:
+            from src.risk.metrics import calculate_portfolio_correlation_risk
+
+            # Lấy danh sách positions hiện tại
+            positions = self.portfolio_manager.get_positions()
+            if not positions or len(positions) == 0:
+                return {
+                    "too_high": False,
+                    "good_diversification": True,  # Portfolio rỗng = diversification tốt
+                    "max_correlation": 0.0,
+                }
+
+            # Tính correlation với portfolio
+            existing_symbols = list(positions.keys())
+            all_symbols = existing_symbols + [symbol]
+
+            correlation_metrics = calculate_portfolio_correlation_risk(
+                all_symbols,
+                lookback=60,
+                max_avg_correlation=0.70,
+            )
+
+            max_correlation = correlation_metrics.get("max_correlation", 0.0)
+            avg_correlation = correlation_metrics.get("avg_correlation", 0.0)
+
+            # Threshold: > 0.7 = quá cao, < 0.3 = diversification tốt
+            too_high = max_correlation > 0.70
+            good_diversification = max_correlation < 0.30 and avg_correlation < 0.25
+
+            return {
+                "too_high": too_high,
+                "good_diversification": good_diversification,
+                "max_correlation": max_correlation,
+                "avg_correlation": avg_correlation,
+            }
+        except Exception as e:
+            logger.warning(f"⚠️ Error checking portfolio correlation: {e}")
+            return {
+                "too_high": False,
+                "good_diversification": False,
+                "max_correlation": 0.0,
+            }
+
+    def _check_market_breadth(self, market_regime: Optional[Dict]) -> Dict:
+        """
+        NEW: Kiểm tra breadth của thị trường (số mã tăng/giảm)
+        """
+        if not market_regime:
+            return {"strong": False, "weak": False}
+
+        details = market_regime.get("details", {})
+        breadth = market_regime.get("breadth") or details.get("breadth") or {}
+
+        advancers = breadth.get("advancers") or breadth.get("advancing") or 0
+        decliners = breadth.get("decliners") or breadth.get("declining") or 0
+        unchanged = breadth.get("unchanged", 0)
+
+        total = advancers + decliners
+        if total == 0:
+            return {"strong": False, "weak": False}
+
+        advance_ratio = advancers / total
+
+        strong = advance_ratio >= 0.6
+        weak = advance_ratio <= 0.4
+
+        return {
+            "strong": strong,
+            "weak": weak,
+            "advance_ratio": advance_ratio,
+            "advancers": advancers,
+            "decliners": decliners,
+            "unchanged": unchanged,
+        }
+
     # ========================================================================
     # SCORING & DECISION
     # ========================================================================
 
     def _calculate_signal_strength(
-        self, confidence: int, risk_reward: float, warnings: list
+            self, confidence: int, risk_reward: float, warnings: list
     ) -> SignalStrength:
         """Tính độ mạnh của signal"""
 
@@ -781,12 +1084,43 @@ class ImprovedEntryLogic:
         else:
             return SignalStrength.VERY_WEAK
 
+    def _apply_performance_feedback(self, confidence: float) -> Tuple[float, Optional[str]]:
+        """
+        NEW: Điều chỉnh confidence dựa trên historical performance
+        """
+        if not self.performance_monitor:
+            return confidence, None
+
+        try:
+            metrics = self.performance_monitor.get_metrics()
+        except Exception:
+            return confidence, None
+
+        total_trades = metrics.get("total_trades", 0)
+        if total_trades < 20:
+            return confidence, None
+
+        win_rate = metrics.get("win_rate", 0)
+        adjustment = 0
+        if win_rate >= 60:
+            adjustment = +5
+        elif win_rate <= 45:
+            adjustment = -5
+
+        new_confidence = max(0, min(100, confidence + adjustment))
+
+        if adjustment > 0:
+            return new_confidence, f"📈 Hiệu suất tốt (Win rate {win_rate:.1f}%)"
+        elif adjustment < 0:
+            return new_confidence, f"⚠️ Hiệu suất giảm (Win rate {win_rate:.1f}%)"
+        return confidence, None
+
     def _calculate_position_multiplier(
-        self,
-        strength: SignalStrength,
-        confidence: int,
-        warnings: list,
-        market_regime: Optional[Dict],
+            self,
+            strength: SignalStrength,
+            confidence: int,
+            warnings: list,
+            market_regime: Optional[Dict],
     ) -> float:
         """
         Tính multiplier cho position size
@@ -1029,7 +1363,7 @@ if __name__ == "__main__":
         require_volume_confirmation=False,  # Relax for testing
     )
 
-    signal = entry_logic.analyze_entry(df, ml_signal)
+    signal = entry_logic.analyze_entry(df, ml_signal, symbol=symbol)
 
     # Print result
     print("\n" + "=" * 70)
