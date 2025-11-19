@@ -67,9 +67,7 @@ class TradingConfig:
     # Entry logic
     min_confidence: int = 40  # Reduced from 45 to allow more signals
     min_risk_reward: float = 1.8  # Reduced from 2.0 to be less strict
-    support_distance_percent: float = (
-        5.0  # Increased from 3.0 to allow more flexibility  # Max distance to support (%)
-    )
+    support_distance_percent: float = 3.0  # Max distance to support (%) - tighter for better R:R
 
     # Exit logic
     stop_loss_percent: float = -7.0

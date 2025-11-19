@@ -68,8 +68,9 @@ class ImprovedEntryLogic:
         require_volume_confirmation: bool = True,
         portfolio_manager=None,
         performance_monitor=None,
-        min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value
+        min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
         min_avg_volume: int = 150_000,
+        use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
     ):
         """
         Args:
@@ -90,10 +91,15 @@ class ImprovedEntryLogic:
         self.performance_monitor = performance_monitor or get_performance_monitor()
         self.min_liquidity_value = min_liquidity_value
         self.min_avg_volume = min_avg_volume
+        self.use_tiered_liquidity = use_tiered_liquidity
         self._current_symbol = None
-        self.performance_monitor = performance_monitor or get_performance_monitor()
-        self.min_liquidity_value = min_liquidity_value
-        self.min_avg_volume = min_avg_volume
+
+        # Tiered liquidity thresholds (small/mid/large caps)
+        self.liquidity_tiers = {
+            "large": {"min_value": 5_000_000_000, "min_volume": 150_000},  # 5B VND
+            "mid": {"min_value": 2_000_000_000, "min_volume": 80_000},     # 2B VND
+            "small": {"min_value": 1_000_000_000, "min_volume": 50_000},   # 1B VND
+        }
 
     def _validate_initial_signal(
         self, df: pd.DataFrame, ml_signal: Optional[Dict]
@@ -163,6 +169,23 @@ class ImprovedEntryLogic:
         warnings = []
         adjustments = []
 
+        # Determine adjustment scaling factor based on market regime
+        # BULL: Scale penalties down (0.7x) to allow more signals
+        # BEAR/HIGH_VOL: Scale penalties up (1.2x) to be more selective
+        # SIDEWAYS: Normal (1.0x)
+        adjustment_scale = 1.0
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
+            regime_confidence = market_regime.get("confidence", 50)
+
+            if regime == "BULL" and regime_confidence >= 70:
+                adjustment_scale = 0.7  # Lighter penalties in strong bull market
+            elif regime == "BEAR":
+                adjustment_scale = 1.2  # Heavier penalties in bear market
+            elif regime == "HIGH_VOLATILITY":
+                adjustment_scale = 1.3  # Even heavier in high volatility
+            # SIDEWAYS or other: keep 1.0
+
         # FILTER 1: MARKET REGIME
         if market_regime and not market_regime.get("tradeable", True):
             return (
@@ -217,14 +240,17 @@ class ImprovedEntryLogic:
                 [],
             )
         elif not liquidity_check["sufficient"]:
+            tier = liquidity_check.get("tier", "unknown")
             warnings.append(
-                "⚠️ Thanh khoản thấp "
+                f"⚠️ Thanh khoản thấp ({tier} cap) "
                 f"(avg value: {liquidity_check['avg_value'] / 1_000_000_000:.2f}B VND)"
             )
             adjustments.append(-15)
         else:
+            tier = liquidity_check.get("tier", "unknown")
             reasons.append(
-                f"✅ Thanh khoản tốt (avg value: {liquidity_check['avg_value'] / 1_000_000_000:.1f}B VND)"
+                f"✅ Thanh khoản tốt ({tier} cap) "
+                f"(avg value: {liquidity_check['avg_value'] / 1_000_000_000:.1f}B VND)"
             )
             adjustments.append(+5)
 
@@ -298,6 +324,17 @@ class ImprovedEntryLogic:
         elif correlation_check["good_diversification"]:
             reasons.append(f"✅ Đa dạng hóa tốt (corr: {correlation_check['max_correlation']:.2f})")
             adjustments.append(+5)
+
+        # Apply scaling factor to all adjustments (only to penalties, not bonuses)
+        # This prevents confidence from dropping too fast in favorable markets
+        if adjustment_scale != 1.0:
+            scaled_adjustments = []
+            for adj in adjustments:
+                if adj < 0:  # Only scale penalties (negative adjustments)
+                    scaled_adjustments.append(int(adj * adjustment_scale))
+                else:  # Keep bonuses unchanged
+                    scaled_adjustments.append(adj)
+            adjustments = scaled_adjustments
 
         return (True, reasons, warnings, adjustments)
 
@@ -557,7 +594,7 @@ class ImprovedEntryLogic:
 
     def _check_liquidity(self, df: pd.DataFrame, current_price: float) -> Dict:
         """
-        NEW: Kiểm tra thanh khoản (giá * volume)
+        NEW: Kiểm tra thanh khoản (giá * volume) với tiered thresholds
         """
         if "volume" not in df.columns or len(df) < 5:
             return {
@@ -565,6 +602,7 @@ class ImprovedEntryLogic:
                 "critical": False,
                 "current_value": 0.0,
                 "avg_value": 0.0,
+                "tier": "unknown",
             }
 
         current_volume = safe_get_latest(df, "volume", 0)
@@ -572,10 +610,42 @@ class ImprovedEntryLogic:
         avg_value = avg_volume * current_price
         current_value = current_volume * current_price
 
-        sufficient_value = avg_value >= self.min_liquidity_value
-        sufficient_volume = avg_volume >= self.min_avg_volume
-        sufficient = sufficient_value and sufficient_volume
-        critical = avg_value < (self.min_liquidity_value * 0.5)
+        # Determine appropriate tier and thresholds
+        if self.use_tiered_liquidity:
+            # Try from highest to lowest tier
+            tier = None
+            min_value_threshold = 0
+            min_volume_threshold = 0
+
+            if avg_value >= self.liquidity_tiers["large"]["min_value"]:
+                tier = "large"
+                min_value_threshold = self.liquidity_tiers["large"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["large"]["min_volume"]
+            elif avg_value >= self.liquidity_tiers["mid"]["min_value"]:
+                tier = "mid"
+                min_value_threshold = self.liquidity_tiers["mid"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["mid"]["min_volume"]
+            elif avg_value >= self.liquidity_tiers["small"]["min_value"]:
+                tier = "small"
+                min_value_threshold = self.liquidity_tiers["small"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["small"]["min_volume"]
+            else:
+                # Below all tiers - use small cap threshold for evaluation
+                tier = "micro"
+                min_value_threshold = self.liquidity_tiers["small"]["min_value"]
+                min_volume_threshold = self.liquidity_tiers["small"]["min_volume"]
+
+            sufficient_value = avg_value >= min_value_threshold
+            sufficient_volume = avg_volume >= min_volume_threshold
+            sufficient = sufficient_value and sufficient_volume
+            critical = avg_value < (min_value_threshold * 0.5)
+        else:
+            # Legacy: Use original fixed thresholds
+            tier = "fixed"
+            sufficient_value = avg_value >= self.min_liquidity_value
+            sufficient_volume = avg_volume >= self.min_avg_volume
+            sufficient = sufficient_value and sufficient_volume
+            critical = avg_value < (self.min_liquidity_value * 0.5)
 
         return {
             "sufficient": sufficient,
@@ -584,6 +654,7 @@ class ImprovedEntryLogic:
             "avg_value": avg_value,
             "avg_volume": avg_volume,
             "current_volume": current_volume,
+            "tier": tier,
         }
 
     def _check_multi_timeframe_trend(self, df: pd.DataFrame) -> Dict:
@@ -723,8 +794,8 @@ class ImprovedEntryLogic:
         if obv_bullish:
             confidence_score += 0.3
 
-        # Determine if confirmed (threshold: 0.6)
-        confirmed = confidence_score >= 0.6
+        # Determine if confirmed (threshold: 0.5 - relaxed from 0.6 to allow more signals)
+        confirmed = confidence_score >= 0.5
 
         # Generate detailed reason
         reasons = []
