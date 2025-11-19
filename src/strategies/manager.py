@@ -72,7 +72,9 @@ class StrategyManager:
 
         # 3. Exit Strategy
         try:
-            self.exit_strategy = ImprovedExitStrategy()
+            self.exit_strategy = ImprovedExitStrategy(
+                default_stop_loss_pct=self.trading_config.trading.stop_loss_percent
+            )
             logging.info("✅ ImprovedExitStrategy initialized")
         except Exception:
             logging.critical("❌ Không thể khởi tạo ExitStrategy", exc_info=True)

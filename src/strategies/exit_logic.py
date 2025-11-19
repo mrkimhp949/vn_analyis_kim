@@ -66,14 +66,16 @@ class ImprovedExitStrategy:
         trailing_stop_activation: float = 0.08,  # Kích hoạt trailing khi lời 8%
         trailing_stop_distance: float = 0.05,  # Trailing 5% from high
         max_holding_days: int = 20,  # Tối đa 20 ngày
-        time_decay_threshold: float = 0.02,
-    ):  # Nếu <2% lời sau 20 ngày → thoát
+        time_decay_threshold: float = 0.02,  # Nếu <2% lời sau 20 ngày → thoát
+        default_stop_loss_pct: float = -7.0,
+    ):
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
         self.trailing_activation = trailing_stop_activation
         self.trailing_distance = trailing_stop_distance
         self.max_holding_days = max_holding_days
         self.time_decay_threshold = time_decay_threshold
+        self.default_stop_loss_pct = default_stop_loss_pct
 
         # Tracking
         self.position_highs = {}  # {symbol: highest_price_since_entry}
@@ -112,6 +114,9 @@ class ImprovedExitStrategy:
 
         if partial_exits is None:
             partial_exits = []
+
+        # Ensure stop loss is valid even if missing from stored position
+        stop_loss = self._ensure_stop_loss(symbol, entry_price, stop_loss)
 
         # Calculate P&L
         pnl_percent = ((current_price - entry_price) / entry_price) * 100
@@ -365,6 +370,34 @@ class ImprovedExitStrategy:
                 }
 
         return {"should_exit": False}
+
+    def _ensure_stop_loss(self, symbol: str, entry_price: float, stop_loss: Optional[float]) -> float:
+        """
+        Ensure stop loss is a valid float. Fallback to config/default percent if missing.
+        """
+        if isinstance(stop_loss, (int, float)) and stop_loss > 0:
+            return float(stop_loss)
+
+        fallback = self._calculate_default_stop_loss(entry_price)
+        logger.warning(
+            f"[{symbol}] Stop loss missing/invalid ({stop_loss}). "
+            f"Using fallback {fallback:,.2f} ({self.default_stop_loss_pct:+.1f}%)"
+        )
+        return fallback
+
+    def _calculate_default_stop_loss(self, entry_price: float) -> float:
+        """
+        Calculate fallback stop loss using configured default percentage.
+        """
+        pct = self.default_stop_loss_pct if self.default_stop_loss_pct != 0 else -7.0
+        if pct >= 0:
+            pct = -abs(pct) if pct else -7.0
+        multiplier = 1 + (pct / 100.0)
+        # Ensure multiplier keeps stop loss below entry and positive
+        multiplier = min(multiplier, 0.99)
+        multiplier = max(multiplier, 0.01)
+        fallback = entry_price * multiplier if entry_price > 0 else entry_price
+        return float(fallback) if fallback and fallback > 0 else max(entry_price * 0.9, 0.01)
 
     def _check_profit_protection(
         self,
