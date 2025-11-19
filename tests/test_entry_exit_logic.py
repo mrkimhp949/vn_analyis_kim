@@ -182,6 +182,16 @@ class TestImprovedEntryLogic:
             staticmethod(fake_tp),
         )
 
+        monkeypatch.setattr(
+            ImprovedEntryLogic,
+            "_check_volume_confirmation",
+            lambda self, df, market_regime: {
+                "confirmed": True,
+                "reason": "Test override",
+                "surge": True,
+            },
+        )
+
         df = self.create_sample_dataframe(trend="up", volume_surge=True, rsi=45)
         ml_signal = {"signal": "BUY", "confidence": 80, "reason": "TP guard test"}
 
