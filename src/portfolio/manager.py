@@ -365,6 +365,36 @@ class PortfolioManager:
             metadata=metadata,
         )
 
+    def refresh_all_prices(self, lookback: int = 5) -> Dict[str, float]:
+        """Load latest close price for each position and update metadata.
+
+        Returns: dict mapping symbol -> updated price (or existing avg_price if failed).
+        """
+        positions = self.db.get_positions()
+        updated = {}
+        if not positions:
+            return updated
+        try:
+            from src.data.loader import load_data
+        except Exception:
+            # Data loader unavailable; skip refresh
+            return updated
+
+        for symbol, pos in positions.items():
+            try:
+                # Use required_bars=1 since we only need the latest price
+                df = load_data(symbol, lookback=lookback, use_cache=True, required_bars=1)
+                if df is not None and not df.empty:
+                    latest = float(df.iloc[-1]["close"])
+                    self.update_position_price(symbol, latest)
+                    updated[symbol] = latest
+                else:
+                    updated[symbol] = pos["avg_price"]
+            except Exception:
+                # Keep existing price on failure
+                updated[symbol] = pos["avg_price"]
+        return updated
+
     def get_portfolio_value(self) -> Dict:
         """Calculate current portfolio value"""
         positions = self.db.get_positions()
@@ -523,6 +553,10 @@ class PortfolioManager:
 
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
+        # Fetch and update latest prices for all positions first
+        self.refresh_all_prices(lookback=10)
+
+        # Re-fetch positions after price update
         positions = self.db.get_positions()
         portfolio = self.get_portfolio_value()
         metrics = self.monitor.get_metrics()
@@ -565,6 +599,30 @@ class PortfolioManager:
             lines.append(f"• Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
 
         return "\n".join(lines)
+
+    def export_positions_detail(self) -> Dict[str, Dict]:
+        """Structured positions with current price & PnL for API JSON usage."""
+        positions = self.db.get_positions()
+        detail = {}
+        for symbol, pos in positions.items():
+            shares = pos["shares"]
+            entry_price = pos["avg_price"]
+            current_price = pos.get("metadata", {}).get("last_price", entry_price)
+            value = shares * current_price
+            cost = shares * entry_price
+            pnl = value - cost
+            pnl_pct = (pnl / cost * 100) if cost > 0 else 0
+            detail[symbol] = {
+                "shares": shares,
+                "avg_price": entry_price,
+                "current_price": current_price,
+                "value": value,
+                "cost": cost,
+                "pnl": pnl,
+                "pnl_percent": pnl_pct,
+                "last_updated": pos.get("metadata", {}).get("last_updated"),
+            }
+        return detail
 
 
 # Singleton

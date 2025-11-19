@@ -413,7 +413,7 @@ class TradingOrchestrator:
                 partial_exits=pos_data.get("partial_exits", []),
             )
 
-            if exit_decision and exit_decision["reason"]:
+            if exit_decision and exit_decision.should_exit:
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
 
         except Exception:
@@ -431,11 +431,18 @@ class TradingOrchestrator:
             pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
             self.circuit_breaker.record_trade(pnl)
 
+            # Get exit reason safely (can be None)
+            exit_reason_str = (
+                exit_decision.exit_reason.value
+                if exit_decision.exit_reason
+                else exit_decision.message
+            )
+
             success, sell_msg, _ = self.paper_account.execute_sell(
                 symbol=symbol,
                 price=current_price,
                 exit_type=exit_decision.exit_type,
-                reason=exit_decision.exit_reason.value,
+                reason=exit_reason_str,
             )
             if success:
                 logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
