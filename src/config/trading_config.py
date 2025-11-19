@@ -86,9 +86,6 @@ class TradingConfig:
     max_sector_exposure: float = 0.40  # 40% max per sector
     max_loss_per_day_pct: float = 5.0  # Max loss per day (%) for circuit breaker
 
-    # Approval mode
-    require_manual_approval: bool = True  # Require manual approval before buying (default: True)
-
     @classmethod
     def from_env(cls):
         return cls(
@@ -108,7 +105,6 @@ class TradingConfig:
             max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.20)),
             max_sector_exposure=float(os.getenv("MAX_SECTOR_EXPOSURE", 0.40)),
             max_loss_per_day_pct=float(os.getenv("MAX_LOSS_PER_DAY_PCT", 5.0)),
-            require_manual_approval=os.getenv("REQUIRE_MANUAL_APPROVAL", "true").lower() == "true",
         )
 
     def validate(self):

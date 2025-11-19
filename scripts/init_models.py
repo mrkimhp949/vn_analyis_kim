@@ -5,21 +5,10 @@ Chạy: python scripts/init_models.py
 
 import os
 import sys
-from pathlib import Path
-
-# Fix encoding for Windows
-if sys.platform == "win32":
-    import codecs
-
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer, "strict")
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
 
 from src.ml.models.predictor import MLPredictor
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 def init_models():

@@ -532,106 +532,6 @@ async def _handle_add_callback(query, symbol):
     )
 
 
-async def _handle_approve_signal(query, symbol: str):
-    """Handle approve signal callback - Execute buy"""
-    try:
-        from src.services.signal_approval_store import get_signal_approval_store
-        from src.portfolio.paper_trading import get_paper_account
-
-        approval_store = get_signal_approval_store()
-        pending_signal = approval_store.get_pending_signal(symbol)
-
-        if not pending_signal:
-            await query.edit_message_text(
-                f"❌ Signal cho {symbol} không tìm thấy hoặc đã hết hạn.\n\n"
-                f"Có thể đã được approve/reject hoặc quá 24 giờ.",
-                parse_mode="Markdown",
-            )
-            return
-
-        entry_signal = pending_signal["entry_signal"]
-        position_size = pending_signal["position_size"]
-
-        # Execute buy
-        paper_account = get_paper_account()
-        take_profit = (
-            entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else None
-        )
-
-        success, message, trade = paper_account.execute_buy(
-            symbol=symbol,
-            shares=position_size.shares,
-            price=entry_signal.entry_price,
-            signal_confidence=entry_signal.confidence,
-            signal_reason=", ".join(entry_signal.reasons),
-            stop_loss=entry_signal.stop_loss,
-            take_profit=take_profit,
-        )
-
-        if success:
-            # Remove from approval store
-            approval_store.remove_pending_signal(symbol)
-
-            # Confirm in portfolio lock
-            from src.portfolio.lock import get_portfolio_lock
-
-            portfolio_lock = get_portfolio_lock()
-            portfolio_lock.confirm_position(symbol)
-
-            await query.edit_message_text(
-                f"✅ **ĐÃ MUA {symbol}**\n\n"
-                f"{message}\n\n"
-                f"Giá: {entry_signal.entry_price:,.0f} VNĐ\n"
-                f"Số CP: {position_size.shares}\n"
-                f"Giá trị: {position_size.value:,.0f} VNĐ",
-                parse_mode="Markdown",
-            )
-            logger.info(f"✅ User approved and bought {symbol}")
-        else:
-            await query.edit_message_text(
-                f"❌ **LỖI KHI MUA {symbol}**\n\n" f"{message}", parse_mode="Markdown"
-            )
-            logger.error(f"❌ Failed to buy {symbol} after approval: {message}")
-
-    except Exception as e:
-        logger.error(f"❌ Error approving signal {symbol}: {e}", exc_info=True)
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", parse_mode="Markdown")
-
-
-async def _handle_reject_signal(query, symbol: str):
-    """Handle reject signal callback - Cancel pending"""
-    try:
-        from src.services.signal_approval_store import get_signal_approval_store
-        from src.portfolio.lock import get_portfolio_lock
-
-        approval_store = get_signal_approval_store()
-        pending_signal = approval_store.get_pending_signal(symbol)
-
-        if not pending_signal:
-            await query.edit_message_text(
-                f"❌ Signal cho {symbol} không tìm thấy hoặc đã hết hạn.",
-                parse_mode="Markdown",
-            )
-            return
-
-        # Remove from approval store
-        approval_store.remove_pending_signal(symbol)
-
-        # Cancel in portfolio lock
-        portfolio_lock = get_portfolio_lock()
-        portfolio_lock.cancel_position(symbol)
-
-        await query.edit_message_text(
-            f"❌ **ĐÃ TỪ CHỐI {symbol}**\n\n" f"Signal đã được reject và xóa khỏi pending list.",
-            parse_mode="Markdown",
-        )
-        logger.info(f"❌ User rejected signal for {symbol}")
-
-    except Exception as e:
-        logger.error(f"❌ Error rejecting signal {symbol}: {e}", exc_info=True)
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", parse_mode="Markdown")
-
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý callback từ inline buttons"""
     query = update.callback_query
@@ -665,14 +565,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("add:"):
         symbol = data.split(":")[1]
         await _handle_add_callback(query, symbol)
-
-    elif data.startswith("approve:"):
-        symbol = data.split(":")[1]
-        await _handle_approve_signal(query, symbol)
-
-    elif data.startswith("reject:"):
-        symbol = data.split(":")[1]
-        await _handle_reject_signal(query, symbol)
 
 
 async def send_daily_summary_to_all():

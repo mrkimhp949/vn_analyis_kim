@@ -37,8 +37,6 @@ def test_stop_loss_below_entry():
         min_risk_reward=1.4,  # Slightly lower to allow for R:R ~ 1.5
         require_trend_alignment=False,
         require_volume_confirmation=False,
-        min_liquidity_value=1_000_000,  # 1M VND - low threshold for synthetic test data
-        min_avg_volume=100,  # Low volume threshold for test
     )
 
     signal = logic.analyze_entry(df, ml_signal)

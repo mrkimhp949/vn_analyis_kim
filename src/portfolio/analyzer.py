@@ -270,7 +270,7 @@ class PortfolioAnalyzer:
 
                     # Kiểm tra entry signal
                     entry_signal = self.entry_logic.analyze_entry(
-                        df=df, ml_signal=ml_signal, market_regime=market_regime, symbol=symbol
+                        df=df, ml_signal=ml_signal, market_regime=market_regime
                     )
 
                     if entry_signal.should_enter:

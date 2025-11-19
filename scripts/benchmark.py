@@ -166,7 +166,7 @@ def benchmark_entry_logic():
     ml_signal = {"signal": "BUY", "confidence": 75, "reason": "Test"}
 
     def analyze():
-        logic.analyze_entry(df, ml_signal, symbol="BENCH")
+        logic.analyze_entry(df, ml_signal)
 
     return analyze
 

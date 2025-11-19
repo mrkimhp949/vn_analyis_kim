@@ -79,3 +79,4 @@ feature_store/*.parquet
 # OS
 .DS_Store
 Thumbs.db
+data/database/trading.db

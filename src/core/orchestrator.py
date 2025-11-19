@@ -359,19 +359,15 @@ class TradingOrchestrator:
         """Kiểm tra và xử lý các vị thế đang nắm giữ."""
         positions = self.portfolio_manager.get_positions()
         if not positions:
-            logging.info("📊 Không có vị thế nào đang nắm giữ")
             return
 
         logging.info(f"\n📊 Kiểm tra {len(positions)} vị thế đang nắm giữ...")
-        logging.info(f"📋 Danh sách vị thế: {list(positions.keys())}")
 
         tasks = [
             self._check_single_position(symbol, pos_data, market_regime)
             for symbol, pos_data in positions.items()
         ]
         await asyncio.gather(*tasks)
-
-        logging.info(f"✅ Đã hoàn thành kiểm tra {len(positions)} vị thế")
 
     async def _check_single_position(
         self,
@@ -403,21 +399,12 @@ class TradingOrchestrator:
                     logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
                     # Tiếp tục với ml_signal = None
 
-            # Get stop_loss with fallback
-            stop_loss = pos_data.get("stop_loss")
-            if stop_loss is None or stop_loss <= 0:
-                # Fallback to 7% below entry price if not set
-                stop_loss = pos_data["avg_price"] * 0.93
-                logging.warning(
-                    f"[{symbol}] Stop loss không có, dùng mặc định: {stop_loss:,.0f} (-7%)"
-                )
-
             exit_decision = self.exit_strategy.check_exit(
                 symbol=symbol,
                 # Positions stored in DB expose 'avg_price' as the effective entry price
                 entry_price=pos_data["avg_price"],
                 current_price=current_price,
-                stop_loss=stop_loss,
+                stop_loss=pos_data.get("stop_loss"),
                 take_profit_targets=pos_data.get("take_profit_targets", []),
                 entry_date=datetime.fromisoformat(pos_data["entry_date"]),
                 df=df,
@@ -426,66 +413,18 @@ class TradingOrchestrator:
                 partial_exits=pos_data.get("partial_exits", []),
             )
 
-            # Debug logging
-            if exit_decision:
-                pnl_pct = ((current_price - pos_data["avg_price"]) / pos_data["avg_price"]) * 100
-                exit_reason_str = (
-                    exit_decision.exit_reason.value if exit_decision.exit_reason else "None"
-                )
-                logging.debug(
-                    f"[{symbol}] Exit check: should_exit={exit_decision.should_exit}, "
-                    f"reason={exit_reason_str}, P&L={pnl_pct:.2f}%, urgency={exit_decision.urgency}"
-                )
-            else:
-                logging.warning(
-                    f"[{symbol}] Exit decision is None - có thể có lỗi trong check_exit"
-                )
-
-            if exit_decision and exit_decision.should_exit:
-                exit_reason_str = (
-                    exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
-                )
-                logging.info(
-                    f"🚪 Tín hiệu thoát cho {symbol}: {exit_reason_str} (Urgency: {exit_decision.urgency}/5)"
-                )
+            if exit_decision and exit_decision["reason"]:
                 await self.execute_exit(symbol, pos_data, exit_decision, current_price)
-            else:
-                # Log khi không có exit signal để debug
-                if exit_decision:
-                    pnl_pct = (
-                        (current_price - pos_data["avg_price"]) / pos_data["avg_price"]
-                    ) * 100
-                    logging.debug(
-                        f"[{symbol}] Không có tín hiệu thoát - HOLD (P&L: {pnl_pct:+.2f}%)"
-                    )
 
-        except Exception as e:
-            logging.error(
-                f"❌ Lỗi khi kiểm tra vị thế {symbol}: {type(e).__name__}: {str(e)}", exc_info=True
-            )
-            # Try to send error notification
-            try:
-                if self.bot and self.chat_id:
-                    await self.bot.send_message(
-                        self.chat_id,
-                        f"⚠️ *Lỗi kiểm tra exit cho {symbol}*\n\n"
-                        f"Lỗi: {type(e).__name__}: {str(e)}\n\n"
-                        f"Vui lòng check log để biết thêm chi tiết.",
-                        parse_mode="Markdown",
-                    )
-            except Exception:
-                pass  # Ignore notification errors
+        except Exception:
+            logging.error(f"Lỗi khi kiểm tra vị thế {symbol}", exc_info=True)
 
     async def execute_exit(self, symbol, pos_data, exit_decision, current_price):
         """Thực hiện thoát lệnh bán dựa trên quyết định thoát."""
         try:
-            logging.info(f"🚪 Bắt đầu thực thi exit cho {symbol}")
-
             # Gửi thông báo thoát lệnh
             msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
-            logging.info(f"📤 Gửi thông báo exit cho {symbol}")
             await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
-            logging.info(f"✅ Đã gửi thông báo exit cho {symbol}")
 
             # Ghi nhận kết quả giao dịch vào Circuit Breaker
             # Use avg_price from DB as entry price
@@ -524,23 +463,8 @@ class TradingOrchestrator:
                 logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
                 await self.bot.send_message(self.chat_id, f"❌ Lỗi bán {symbol}: {sell_msg}")
 
-        except Exception as e:
-            logging.error(
-                f"❌ Lỗi khi thực hiện thoát lệnh {symbol}: {type(e).__name__}: {str(e)}",
-                exc_info=True,
-            )
-            # Try to send error notification
-            try:
-                if self.bot and self.chat_id:
-                    await self.bot.send_message(
-                        self.chat_id,
-                        f"❌ *Lỗi thực hiện exit cho {symbol}*\n\n"
-                        f"Lỗi: {type(e).__name__}: {str(e)}\n\n"
-                        f"Vui lòng check log để biết thêm chi tiết.",
-                        parse_mode="Markdown",
-                    )
-            except Exception:
-                pass  # Ignore notification errors
+        except Exception:
+            logging.error(f"Lỗi khi thực hiện thoát lệnh {symbol}", exc_info=True)
 
     async def scan_for_new_entries(self, current_tickers, existing_symbols, market_regime):
         """Quét song song để tìm các tín hiệu vào lệnh mới."""
@@ -605,7 +529,6 @@ class TradingOrchestrator:
                 df=df,
                 ml_signal=ml_signal,
                 market_regime=market_regime,
-                symbol=symbol,
             )
 
             # Validate entry signal
@@ -698,103 +621,49 @@ class TradingOrchestrator:
                     )
 
                     # Gửi thông báo Telegram (có thể tạo position_size_info giả để hiển thị)
-                    require_approval = (
-                        getattr(self.config, "require_manual_approval", True)
-                        if self.config
-                        else True
-                    )
                     await self.send_buy_signal_notification(
-                        symbol,
-                        entry_signal,
-                        position_size_info,
-                        news_sentiment,
-                        require_approval=require_approval,
+                        symbol, entry_signal, position_size_info, news_sentiment
                     )
                     return {"signal": True, "skipped_buy": True}
 
                 # Normal flow: Execute buy for new positions
                 # ENHANCED: position_size_info is EnhancedPositionSize object, not dict
                 if position_size_info and position_size_info.shares > 0:
-                    # Check if manual approval required
-                    require_approval = (
-                        getattr(self.config, "require_manual_approval", True)
-                        if self.config
-                        else True
+                    # Đánh dấu mã này đang chờ xử lý để tránh quét lại
+                    # Pass position value for exposure tracking
+                    self.portfolio_lock.add_pending(symbol, position_size_info.value)
+
+                    # Thực hiện paper trade (BUY)
+                    take_profit = (
+                        entry_signal.take_profit_targets[0]
+                        if entry_signal.take_profit_targets
+                        else None
+                    )
+                    success, message, trade = self.paper_account.execute_buy(
+                        symbol=symbol,
+                        shares=position_size_info.shares,
+                        price=entry_signal.entry_price,
+                        signal_confidence=entry_signal.confidence,
+                        signal_reason=", ".join(entry_signal.reasons),
+                        stop_loss=entry_signal.stop_loss,
+                        take_profit=take_profit,
                     )
 
-                    if require_approval:
-                        # Manual approval mode: Save signal và gửi notification với approve/reject buttons
-                        from src.services.signal_approval_store import get_signal_approval_store
+                    if not success:
+                        logging.error(f"❌ Paper trade failed for {symbol}: {message}")
+                        # Cancel pending if trade failed
+                        self.portfolio_lock.cancel_position(symbol)
+                        return None
 
-                        approval_store = get_signal_approval_store()
+                    # Confirm pending position after successful trade
+                    self.portfolio_lock.confirm_position(symbol)
+                    logging.info(f"✅ Paper trade successful: {message}")
 
-                        # Add to approval store
-                        if approval_store.add_pending_signal(
-                            symbol=symbol,
-                            entry_signal=entry_signal,
-                            position_size=position_size_info,
-                            news_sentiment=news_sentiment,
-                        ):
-                            # Đánh dấu pending trong portfolio lock để tránh quét lại
-                            self.portfolio_lock.add_pending(symbol, position_size_info.value)
-
-                            # Gửi thông báo với approve/reject buttons
-                            await self.send_buy_signal_notification(
-                                symbol,
-                                entry_signal,
-                                position_size_info,
-                                news_sentiment,
-                                require_approval=True,
-                            )
-
-                            logging.info(f"📋 [{symbol}] Signal đã được lưu, chờ approval từ user")
-                            return {"signal": True, "pending_approval": True}
-                        else:
-                            logging.warning(
-                                f"⚠️ [{symbol}] Không thể lưu signal vào approval store (có thể đã tồn tại)"
-                            )
-                            return None
-                    else:
-                        # Auto mode: Mua tự động như cũ
-                        # Đánh dấu mã này đang chờ xử lý để tránh quét lại
-                        # Pass position value for exposure tracking
-                        self.portfolio_lock.add_pending(symbol, position_size_info.value)
-
-                        # Thực hiện paper trade (BUY)
-                        take_profit = (
-                            entry_signal.take_profit_targets[0]
-                            if entry_signal.take_profit_targets
-                            else None
-                        )
-                        success, message, trade = self.paper_account.execute_buy(
-                            symbol=symbol,
-                            shares=position_size_info.shares,
-                            price=entry_signal.entry_price,
-                            signal_confidence=entry_signal.confidence,
-                            signal_reason=", ".join(entry_signal.reasons),
-                            stop_loss=entry_signal.stop_loss,
-                            take_profit=take_profit,
-                        )
-
-                        if not success:
-                            logging.error(f"❌ Paper trade failed for {symbol}: {message}")
-                            # Cancel pending if trade failed
-                            self.portfolio_lock.cancel_position(symbol)
-                            return None
-
-                        # Confirm pending position after successful trade
-                        self.portfolio_lock.confirm_position(symbol)
-                        logging.info(f"✅ Paper trade successful: {message}")
-
-                        # Gửi thông báo Telegram
-                        await self.send_buy_signal_notification(
-                            symbol,
-                            entry_signal,
-                            position_size_info,
-                            news_sentiment,
-                            require_approval=False,
-                        )
-                        return {"signal": True}
+                    # Gửi thông báo Telegram
+                    await self.send_buy_signal_notification(
+                        symbol, entry_signal, position_size_info, news_sentiment
+                    )
+                    return {"signal": True}
 
             # 5. Watchlist Logic
             # ... (logic để thêm vào watchlist nếu không phải tín hiệu mua)
@@ -810,12 +679,7 @@ class TradingOrchestrator:
             return None
 
     async def send_buy_signal_notification(
-        self,
-        symbol,
-        entry_signal,
-        position_size_info,
-        news_sentiment,
-        require_approval: bool = False,
+        self, symbol, entry_signal, position_size_info, news_sentiment
     ):
         """Gửi thông báo tín hiệu mua qua Telegram."""
         # Tính toán R:R cho mục tiêu đầu tiên
@@ -859,26 +723,7 @@ class TradingOrchestrator:
             # "**--- Tin tức ---**\n"
             # f"**Sentiment:** {news_sentiment['comment']} ({news_sentiment['score']:.2f})\n"
         )
-
-        # Add approve/reject buttons if manual approval required
-        if require_approval:
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-            keyboard = [
-                [
-                    InlineKeyboardButton("✅ Approve (Mua)", callback_data=f"approve:{symbol}"),
-                    InlineKeyboardButton("❌ Reject (Từ chối)", callback_data=f"reject:{symbol}"),
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            message += "⚠️ *Chờ approval từ bạn*\n\nNhấn nút để approve/reject signal này."
-
-            await self.bot.send_message(
-                self.chat_id, message, parse_mode="Markdown", reply_markup=reply_markup
-            )
-        else:
-            await self.bot.send_message(self.chat_id, message, parse_mode="Markdown")
+        await self.bot.send_message(self.chat_id, message, parse_mode="Markdown")
 
     async def perform_post_scan_risk_analysis(self):
         """Thực hiện phân tích rủi ro sau khi quét."""

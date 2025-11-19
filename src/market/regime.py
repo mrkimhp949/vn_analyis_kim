@@ -19,16 +19,13 @@ logger = logging.getLogger(__name__)
 
 try:
     from hmmlearn.hmm import GaussianHMM  # type: ignore
-    from hmmlearn.base import ConvergenceWarning  # type: ignore
 
     HMM_AVAILABLE = True
 
     # Suppress hmmlearn convergence warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning, module="hmmlearn")
-    warnings.filterwarnings("ignore", category=ConvergenceWarning, module="hmmlearn")
 except ImportError:  # pragma: no cover - optional dependency
     HMM_AVAILABLE = False
-    ConvergenceWarning = None  # type: ignore
     logger.info("hmmlearn not installed. HMM-based regime detection disabled.")
 
 
@@ -249,37 +246,16 @@ class MarketRegimeAnalyzer:
             hmm = GaussianHMM(
                 n_components=3,
                 covariance_type="diag",  # Changed from "full" for better convergence
-                n_iter=200,  # Increased iterations for better convergence
-                tol=1e-3,  # Tighter tolerance but still relaxed enough
+                n_iter=100,  # Reduced iterations (was 200)
+                tol=1e-2,  # Relaxed tolerance for convergence
                 random_state=42,
                 verbose=False,
             )
 
             # Fit with convergence monitoring suppressed
             with warnings.catch_warnings():
-                # Suppress all hmmlearn warnings (convergence and runtime)
-                warnings.filterwarnings("ignore", category=RuntimeWarning, module="hmmlearn")
-                if ConvergenceWarning:
-                    warnings.filterwarnings(
-                        "ignore", category=ConvergenceWarning, module="hmmlearn"
-                    )
-                # Log if convergence fails but continue anyway
-                try:
-                    hmm.fit(returns_array)
-                except Exception as e:
-                    logger.debug(f"HMM fit failed: {e}")
-                    # Try with even more relaxed parameters
-                    hmm = GaussianHMM(
-                        n_components=3,
-                        covariance_type="diag",
-                        n_iter=50,
-                        tol=1e-1,  # Very relaxed tolerance
-                        random_state=42,
-                        verbose=False,
-                    )
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore")
-                        hmm.fit(returns_array)
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                hmm.fit(returns_array)
 
             hidden_states = hmm.predict(returns_array)
             state_probs = hmm.predict_proba(returns_array)

@@ -4,15 +4,12 @@ Mô phỏng thực thi lệnh để test strategy mà không cần tiền thật
 """
 
 import json
-import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from src.portfolio.manager import get_portfolio_manager
-
-logger = logging.getLogger(__name__)
 
 PAPER_TRADING_FILE = "paper_trading.json"
 
@@ -155,33 +152,8 @@ class PaperTradingAccount:
         # Update cash
         self.account["cash"] -= total_cost
 
-        # Record trade log (in-memory for backward compatibility)
+        # Record trade log
         self.account["trades"].append(asdict(trade))
-
-        # Calculate slippage cost
-        slippage_cost = price * self.slippage_pct * shares
-
-        # Save to database for persistence and querying
-        try:
-            if self.portfolio_manager:
-                self.portfolio_manager.db.save_trade(
-                    symbol=symbol.upper(),
-                    action="BUY",
-                    shares=shares,
-                    price=execution_price,
-                    total_value=total_cost,
-                    trade_date=datetime.now().isoformat(),
-                    reason=signal_reason or "Paper trading",
-                    metadata={
-                        "signal_confidence": signal_confidence,
-                        "stop_loss": stop_loss,
-                        "take_profit": take_profit,
-                        "commission": commission,
-                        "slippage": slippage_cost,
-                    },
-                )
-        except Exception as e:
-            logger.warning(f"Failed to save trade to DB: {e}")
 
         self.save_account()
 
@@ -293,31 +265,6 @@ class PaperTradingAccount:
                 status="FILLED",
             )
             self.account["trades"].append(asdict(trade))
-
-            # Calculate exit slippage cost
-            exit_slippage_cost = price * self.slippage_pct * shares_to_sell
-
-            # Save to database for persistence and querying
-            try:
-                if self.portfolio_manager:
-                    self.portfolio_manager.db.save_trade(
-                        symbol=symbol.upper(),
-                        action=f"SELL_{exit_type}" if not direct_partial else "SELL_PARTIAL",
-                        shares=shares_to_sell,
-                        price=execution_price,
-                        total_value=gross_proceeds,
-                        trade_date=datetime.now().isoformat(),
-                        reason=reason or "Paper trading exit",
-                        metadata={
-                            "exit_type": exit_type,
-                            "commission": commission,
-                            "slippage": exit_slippage_cost,
-                            "partial": direct_partial,
-                        },
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to save trade to DB: {e}")
-
             self.save_account()
 
             return (
@@ -376,34 +323,10 @@ class PaperTradingAccount:
         self.save_account()
 
     def get_trade_history(self, symbol: Optional[str] = None) -> List[Dict]:
-        """Lấy lịch sử giao dịch từ database"""
+        """Lấy lịch sử giao dịch"""
         if not self.portfolio_manager:
-            # Fallback to in-memory trades if DB not available
-            if symbol:
-                return [
-                    t
-                    for t in self.account.get("trades", [])
-                    if t.get("symbol", "").upper() == symbol.upper()
-                ]
-            return self.account.get("trades", [])
-
-        try:
-            trades = self.portfolio_manager.db.get_trades(symbol, limit=100)
-            # Ensure all trades have required fields
-            for trade in trades:
-                if "timestamp" not in trade and "trade_date" in trade:
-                    trade["timestamp"] = trade["trade_date"]
-            return trades
-        except Exception as e:
-            logger.error(f"Error getting trades from DB: {e}, falling back to in-memory")
-            # Fallback to in-memory trades
-            if symbol:
-                return [
-                    t
-                    for t in self.account.get("trades", [])
-                    if t.get("symbol", "").upper() == symbol.upper()
-                ]
-            return self.account.get("trades", [])
+            return []
+        return self.portfolio_manager.db.get_trades(symbol)
 
     def get_statistics(self) -> Dict:
         """Lấy thống kê trading"""

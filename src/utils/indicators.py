@@ -141,9 +141,6 @@ class StopLossCalculator:
         # Calculate ATR-based stop
         atr_stop = entry_price - (atr * atr_multiplier)
 
-        # Calculate ATR as percentage of price (for dynamic minimum)
-        atr_pct = atr / entry_price if entry_price > 0 else 0
-
         # Validate support level
         valid_support = None
         if support_level is not None:
@@ -162,26 +159,15 @@ class StopLossCalculator:
             stop_loss = atr_stop
             reason = "ATR-based"
 
-        # Calculate dynamic minimum based on ATR percentage
-        # Formula: min(max(2.0x ATR%, 1.5%), min_stop_pct)
-        # This ensures:
-        # - Mã ít biến động (ATR < 0.75%): dùng 1.5% minimum
-        # - Mã biến động bình thường (ATR ~1-1.5%): dùng ~2-3% (2x ATR)
-        # - Mã biến động cao (ATR > 1.5%): dùng min_stop_pct (3%) as cap
-        dynamic_min_pct = min(max(2.0 * atr_pct, 0.015), min_stop_pct)
-
-        min_stop = entry_price * (1 - dynamic_min_pct)
-
-        # Only warn if we need to adjust significantly (>= 0.5% difference)
-        # Use >= 0.0049 to account for floating point precision (0.015 - 0.01 ≈ 0.005)
-        original_stop_pct = (entry_price - stop_loss) / entry_price if entry_price > 0 else 0
-        if stop_loss > min_stop and (dynamic_min_pct - original_stop_pct) >= 0.0049:
+        # Enforce minimum stop distance
+        min_stop = entry_price * (1 - min_stop_pct)
+        if stop_loss > min_stop:
             logger.warning(
-                f"Stop loss {stop_loss:.0f} ({original_stop_pct*100:.2f}%) too close to entry {entry_price:.0f}, "
-                f"using dynamic minimum {dynamic_min_pct*100:.2f}% (ATR: {atr_pct*100:.2f}%)"
+                f"Stop loss {stop_loss:.0f} too close to entry {entry_price:.0f}, "
+                f"using minimum {min_stop_pct*100}%"
             )
             stop_loss = min_stop
-            reason = f"Dynamic minimum {dynamic_min_pct*100:.2f}% stop"
+            reason = f"Minimum {min_stop_pct*100}% stop"
 
         # Enforce maximum stop distance
         max_stop = entry_price * (1 - max_stop_pct)

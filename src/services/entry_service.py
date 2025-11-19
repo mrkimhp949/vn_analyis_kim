@@ -136,7 +136,7 @@ class EntrySignalService:
 
             # Entry logic
             entry_signal = self.entry_logic.analyze_entry(
-                df=df, ml_signal=ml_signal, market_regime=market_regime, symbol=symbol
+                df=df, ml_signal=ml_signal, market_regime=market_regime
             )
 
             # Check if should enter
