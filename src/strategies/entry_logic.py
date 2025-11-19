@@ -60,17 +60,17 @@ class ImprovedEntryLogic:
     """
 
     def __init__(
-            self,
-            min_confidence: int = 60,
-            min_risk_reward: float = 2.0,
-            support_distance_percent: float = 3.0,
-            require_trend_alignment: bool = True,
-            require_volume_confirmation: bool = True,
-            portfolio_manager=None,
-            performance_monitor=None,
-            min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
-            min_avg_volume: int = 150_000,
-            use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
+        self,
+        min_confidence: int = 60,
+        min_risk_reward: float = 2.0,
+        support_distance_percent: float = 3.0,
+        require_trend_alignment: bool = True,
+        require_volume_confirmation: bool = True,
+        portfolio_manager=None,
+        performance_monitor=None,
+        min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
+        min_avg_volume: int = 150_000,
+        use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
     ):
         """
         Args:
@@ -97,12 +97,12 @@ class ImprovedEntryLogic:
         # Tiered liquidity thresholds (small/mid/large caps)
         self.liquidity_tiers = {
             "large": {"min_value": 5_000_000_000, "min_volume": 150_000},  # 5B VND
-            "mid": {"min_value": 2_000_000_000, "min_volume": 80_000},     # 2B VND
-            "small": {"min_value": 1_000_000_000, "min_volume": 50_000},   # 1B VND
+            "mid": {"min_value": 2_000_000_000, "min_volume": 80_000},  # 2B VND
+            "small": {"min_value": 1_000_000_000, "min_volume": 50_000},  # 1B VND
         }
 
     def _validate_initial_signal(
-            self, df: pd.DataFrame, ml_signal: Optional[Dict]
+        self, df: pd.DataFrame, ml_signal: Optional[Dict]
     ) -> tuple[bool, str, float, float]:
         """
         Validate initial data and ML signal
@@ -153,11 +153,11 @@ class ImprovedEntryLogic:
         return (True, signal_type, base_confidence, close_price)
 
     def _run_all_filters(
-            self,
-            df: pd.DataFrame,
-            signal_type: str,
-            current_price: float,
-            market_regime: Optional[Dict],
+        self,
+        df: pd.DataFrame,
+        signal_type: str,
+        current_price: float,
+        market_regime: Optional[Dict],
     ) -> tuple[bool, list, list, list]:
         """
         Run all entry filters
@@ -339,7 +339,7 @@ class ImprovedEntryLogic:
         return (True, reasons, warnings, adjustments)
 
     def _calculate_prices_and_risk(
-            self, df: pd.DataFrame, entry_price: float, sr_check: Dict
+        self, df: pd.DataFrame, entry_price: float, sr_check: Dict
     ) -> tuple[bool, str, float, float, list, float]:
         """
         Calculate entry price, stop loss, take profit targets, and risk/reward
@@ -392,11 +392,11 @@ class ImprovedEntryLogic:
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
 
     def analyze_entry(
-            self,
-            df: pd.DataFrame,
-            ml_signal: Dict,
-            market_regime: Optional[Dict] = None,
-            symbol: Optional[str] = None,
+        self,
+        df: pd.DataFrame,
+        ml_signal: Dict,
+        market_regime: Optional[Dict] = None,
+        symbol: Optional[str] = None,
     ) -> EntrySignal:
         """
         Phân tích đầy đủ để quyết định có nên vào lệnh
@@ -890,10 +890,10 @@ class ImprovedEntryLogic:
 
         # Bullish engulfing
         if (
-                prev["close"] < prev["open"]  # Prev bearish
-                and latest["close"] > latest["open"]  # Current bullish
-                and latest["close"] > prev["open"]
-                and latest["open"] < prev["close"]
+            prev["close"] < prev["open"]  # Prev bearish
+            and latest["close"] > latest["open"]  # Current bullish
+            and latest["close"] > prev["open"]
+            and latest["open"] < prev["close"]
         ):
             return {
                 "bullish_pattern": True,
@@ -918,10 +918,10 @@ class ImprovedEntryLogic:
 
         # Bearish patterns
         if (
-                prev["close"] > prev["open"]
-                and latest["close"] < latest["open"]
-                and latest["close"] < prev["open"]
-                and latest["open"] > prev["close"]
+            prev["close"] > prev["open"]
+            and latest["close"] < latest["open"]
+            and latest["close"] < prev["open"]
+            and latest["open"] > prev["close"]
         ):
             return {
                 "bullish_pattern": False,
@@ -1056,7 +1056,7 @@ class ImprovedEntryLogic:
     # ========================================================================
 
     def _calculate_signal_strength(
-            self, confidence: int, risk_reward: float, warnings: list
+        self, confidence: int, risk_reward: float, warnings: list
     ) -> SignalStrength:
         """Tính độ mạnh của signal"""
 
@@ -1116,11 +1116,11 @@ class ImprovedEntryLogic:
         return confidence, None
 
     def _calculate_position_multiplier(
-            self,
-            strength: SignalStrength,
-            confidence: int,
-            warnings: list,
-            market_regime: Optional[Dict],
+        self,
+        strength: SignalStrength,
+        confidence: int,
+        warnings: list,
+        market_regime: Optional[Dict],
     ) -> float:
         """
         Tính multiplier cho position size
