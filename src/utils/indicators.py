@@ -172,9 +172,10 @@ class StopLossCalculator:
 
         min_stop = entry_price * (1 - dynamic_min_pct)
 
-        # Only warn if we need to adjust significantly (> 0.5% difference)
+        # Only warn if we need to adjust significantly (>= 0.5% difference)
+        # Use >= 0.0049 to account for floating point precision (0.015 - 0.01 ≈ 0.005)
         original_stop_pct = (entry_price - stop_loss) / entry_price if entry_price > 0 else 0
-        if stop_loss > min_stop and (dynamic_min_pct - original_stop_pct) > 0.005:
+        if stop_loss > min_stop and (dynamic_min_pct - original_stop_pct) >= 0.0049:
             logger.warning(
                 f"Stop loss {stop_loss:.0f} ({original_stop_pct*100:.2f}%) too close to entry {entry_price:.0f}, "
                 f"using dynamic minimum {dynamic_min_pct*100:.2f}% (ATR: {atr_pct*100:.2f}%)"

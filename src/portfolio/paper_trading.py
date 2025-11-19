@@ -158,6 +158,9 @@ class PaperTradingAccount:
         # Record trade log (in-memory for backward compatibility)
         self.account["trades"].append(asdict(trade))
 
+        # Calculate slippage cost
+        slippage_cost = price * self.slippage_pct * shares
+
         # Save to database for persistence and querying
         try:
             if self.portfolio_manager:
@@ -166,7 +169,7 @@ class PaperTradingAccount:
                     action="BUY",
                     shares=shares,
                     price=execution_price,
-                    total_value=actual_cost,
+                    total_value=total_cost,
                     trade_date=datetime.now().isoformat(),
                     reason=signal_reason or "Paper trading",
                     metadata={
@@ -174,7 +177,7 @@ class PaperTradingAccount:
                         "stop_loss": stop_loss,
                         "take_profit": take_profit,
                         "commission": commission,
-                        "slippage": slippage,
+                        "slippage": slippage_cost,
                     },
                 )
         except Exception as e:
@@ -291,6 +294,9 @@ class PaperTradingAccount:
             )
             self.account["trades"].append(asdict(trade))
 
+            # Calculate exit slippage cost
+            exit_slippage_cost = price * self.slippage_pct * shares_to_sell
+
             # Save to database for persistence and querying
             try:
                 if self.portfolio_manager:
@@ -305,7 +311,7 @@ class PaperTradingAccount:
                         metadata={
                             "exit_type": exit_type,
                             "commission": commission,
-                            "slippage": exit_slippage,
+                            "slippage": exit_slippage_cost,
                             "partial": direct_partial,
                         },
                     )
