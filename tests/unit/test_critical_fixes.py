@@ -54,9 +54,13 @@ class TestStopLossCalculator:
             entry_price=100_000, atr=500, support_level=None  # Very small ATR
         )
 
-        # Should enforce minimum 3% stop
-        assert sl >= 97_000, f"Stop loss {sl} below minimum"
-        assert "Minimum" in reason
+        # Should enforce dynamic minimum (1.5% for ATR 0.5%)
+        # Dynamic min = min(max(2.0 * 0.5%, 1.5%), 3%) = 1.5%
+        assert sl >= 98_500, f"Stop loss {sl} below dynamic minimum (expected >= 98,500)"
+        # Reason should contain "minimum" (case-insensitive) or "Dynamic minimum"
+        assert (
+            "minimum" in reason.lower() or "Dynamic" in reason
+        ), f"Reason should indicate minimum enforcement: {reason}"
 
     def test_maximum_stop_enforcement(self):
         """Test maximum stop loss enforcement"""

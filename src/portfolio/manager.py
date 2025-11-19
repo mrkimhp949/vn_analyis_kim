@@ -365,6 +365,40 @@ class PortfolioManager:
             metadata=metadata,
         )
 
+    def _update_all_position_prices(self, positions: Dict):
+        """Fetch and update latest prices for all positions"""
+        if not positions:
+            return
+
+        from src.data.loader import load_data
+        from utils.dataframe_utils import safe_get_latest
+
+        logger.debug(f"Fetching latest prices for {len(positions)} positions...")
+
+        for symbol, pos in positions.items():
+            try:
+                # Load latest data (just a few days to get current price)
+                # Use required_bars=1 since we only need the latest price
+                df = load_data(symbol, lookback=10, use_cache=True, required_bars=1)
+
+                if df.empty or len(df) == 0:
+                    logger.warning(f"[{symbol}] Không có data để lấy giá hiện tại")
+                    continue
+
+                # Get latest close price
+                current_price = safe_get_latest(df, "close", 0)
+
+                if current_price > 0:
+                    self.update_position_price(symbol, float(current_price))
+                    logger.debug(f"[{symbol}] Updated price: {current_price:,.0f}")
+                else:
+                    logger.warning(f"[{symbol}] Invalid price: {current_price}")
+
+            except Exception as e:
+                logger.warning(f"[{symbol}] Lỗi fetch giá hiện tại: {type(e).__name__}: {str(e)}")
+                # Continue với các symbol khác
+                continue
+
     def get_portfolio_value(self) -> Dict:
         """Calculate current portfolio value"""
         positions = self.db.get_positions()
@@ -524,6 +558,12 @@ class PortfolioManager:
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
         positions = self.db.get_positions()
+
+        # Fetch latest prices for all positions
+        self._update_all_position_prices(positions)
+
+        # Re-get positions after update (in case prices changed)
+        positions = self.db.get_positions()
         portfolio = self.get_portfolio_value()
         metrics = self.monitor.get_metrics()
 
@@ -537,23 +577,90 @@ class PortfolioManager:
         lines.append(f"📈 *P&L:* {portfolio['pnl']:+,.0f} VNĐ ({portfolio['pnl_percent']:+.1f}%)")
         lines.append(f"📦 *Positions:* {portfolio['num_positions']}")
 
-        # Individual positions
+        # Individual positions - Show all purchases separately
         if positions:
             lines.append("\n🎯 *POSITIONS:*")
             for symbol, pos in positions.items():
                 shares = pos["shares"]
-                entry_price = pos["avg_price"]
-                current_price = pos.get("metadata", {}).get("last_price", entry_price)
+                current_price = pos.get("metadata", {}).get("last_price", pos["avg_price"])
 
-                pos_value = shares * current_price
-                pos_cost = shares * entry_price
-                pos_pnl = pos_value - pos_cost
-                pos_pnl_pct = (pos_pnl / pos_cost * 100) if pos_cost > 0 else 0
+                # Get all BUY trades for this symbol
+                buy_trades = self.db.get_trades(symbol=symbol, limit=100)
+                buy_trades = [t for t in buy_trades if t.get("action") == "BUY"]
 
-                lines.append(f"• {symbol}: {shares:,} CP @ {entry_price:,.0f}")
-                lines.append(
-                    f"  Current: {current_price:,.0f} | P&L: {pos_pnl:+,.0f} ({pos_pnl_pct:+.1f}%)"
-                )
+                if buy_trades:
+                    # Get SELL trades for summary
+                    sell_trades = [
+                        t
+                        for t in self.db.get_trades(symbol=symbol, limit=100)
+                        if "SELL" in t.get("action", "")
+                    ]
+                    total_bought = sum(t.get("shares", 0) for t in buy_trades)
+                    total_sold = sum(t.get("shares", 0) for t in sell_trades)
+
+                    lines.append(f"\n📌 *{symbol}*")
+                    lines.append(
+                        f"Tổng CP hiện tại: {shares:,} (Đã mua: {total_bought:,}, Đã bán: {total_sold:,})"
+                    )
+                    lines.append(f"Giá hiện tại: {current_price:,.0f} VNĐ\n")
+
+                    # Show each purchase separately - User wants to see all purchases to compare
+                    lines.append("💰 *TẤT CẢ CÁC LẦN MUA:*")
+
+                    # Sort by date (oldest first)
+                    sorted_buys = sorted(buy_trades, key=lambda x: x.get("trade_date", "") or "")
+
+                    total_all_purchases_cost = 0
+                    for i, trade in enumerate(sorted_buys, 1):
+                        trade_shares = trade.get("shares", 0)
+                        trade_price = trade.get("price", 0)
+                        trade_date = (
+                            trade.get("trade_date", "")[:10] if trade.get("trade_date") else "N/A"
+                        )
+                        trade_cost = trade_shares * trade_price
+                        total_all_purchases_cost += trade_cost
+
+                        # Calculate P&L for this purchase (if CP still in portfolio)
+                        trade_value = trade_shares * current_price
+                        trade_pnl = trade_value - trade_cost
+                        trade_pnl_pct = (trade_pnl / trade_cost * 100) if trade_cost > 0 else 0
+
+                        emoji = "📈" if trade_pnl >= 0 else "📉"
+                        lines.append(
+                            f"  {i}. {trade_shares:,} CP @ {trade_price:,.0f} VNĐ ({trade_date})"
+                        )
+                        lines.append(
+                            f"     Vốn: {trade_cost:,.0f} VNĐ | "
+                            f"Giá trị: {trade_value:,.0f} VNĐ | "
+                            f"{emoji} P&L: {trade_pnl:+,.0f} VNĐ ({trade_pnl_pct:+.1f}%)"
+                        )
+
+                    # Overall position P&L (using avg_price for current position)
+                    entry_price = pos["avg_price"]
+                    total_value = shares * current_price
+                    total_cost = shares * entry_price
+                    total_pnl = total_value - total_cost
+                    total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+                    overall_emoji = "📈" if total_pnl >= 0 else "📉"
+
+                    lines.append(
+                        f"\n  {overall_emoji} *Tổng CP hiện tại:* {shares:,} CP @ {entry_price:,.0f} VNĐ (TB)"
+                    )
+                    lines.append(f"  Tổng vốn: {total_cost:,.0f} VNĐ | ")
+                    lines.append(f"Giá trị: {total_value:,.0f} VNĐ | ")
+                    lines.append(f"P&L: {total_pnl:+,.0f} VNĐ ({total_pnl_pct:+.1f}%)")
+                else:
+                    # Fallback to old format if no trades found
+                    entry_price = pos["avg_price"]
+                    pos_value = shares * current_price
+                    pos_cost = shares * entry_price
+                    pos_pnl = pos_value - pos_cost
+                    pos_pnl_pct = (pos_pnl / pos_cost * 100) if pos_cost > 0 else 0
+
+                    lines.append(f"• {symbol}: {shares:,} CP @ {entry_price:,.0f} (avg)")
+                    lines.append(
+                        f"  Current: {current_price:,.0f} | P&L: {pos_pnl:+,.0f} ({pos_pnl_pct:+.1f}%)"
+                    )
 
         # Performance metrics
         if metrics["total_trades"] > 0:

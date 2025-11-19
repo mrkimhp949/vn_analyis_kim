@@ -101,7 +101,6 @@ class MLPredictor:
         self.save_models()
         logger.info("✅ Dummy models created and saved")
 
-
     def save_models(self):
         """Lưu models"""
         self.ensure_models_dir()
@@ -236,10 +235,12 @@ class MLPredictor:
             if hasattr(self.scaler, "mean_"):
                 # Check for NaN or infinite values
                 if np.any(np.isnan(X_arr)) or np.any(np.isinf(X_arr)):
-                    logger.warning(f"⚠️ Found NaN/inf values in features. NaN count: {np.sum(np.isnan(X_arr))}, Inf count: {np.sum(np.isinf(X_arr))}")
+                    logger.warning(
+                        f"⚠️ Found NaN/inf values in features. NaN count: {np.sum(np.isnan(X_arr))}, Inf count: {np.sum(np.isinf(X_arr))}"
+                    )
                     # Replace NaN/inf with 0
                     X_arr = np.nan_to_num(X_arr, nan=0.0, posinf=0.0, neginf=0.0)
-                
+
                 X_scaled = self.scaler.transform(X_arr)
             else:
                 X_scaled = X_arr
@@ -263,7 +264,7 @@ class MLPredictor:
 
     def load_models(self):
         """Load pre-trained models và scaler
-        
+
         Ưu tiên tìm models theo thứ tự:
         1. Ensemble models (ensemble_rf.pkl, ensemble_scaler.pkl) - nếu có
         2. Standard models (random_forest.pkl, scaler.pkl) - fallback
@@ -276,11 +277,11 @@ class MLPredictor:
             # Ưu tiên 1: Tìm ensemble models (từ ml_pipeline)
             ensemble_rf_path = os.path.join(self.models_dir, "ensemble_rf.pkl")
             ensemble_scaler_path = os.path.join(self.models_dir, "ensemble_scaler.pkl")
-            
+
             # Ưu tiên 2: Tìm standard models
             rf_path = os.path.join(self.models_dir, "random_forest.pkl")
             scaler_path = os.path.join(self.models_dir, "scaler.pkl")
-            
+
             info_path = os.path.join(self.models_dir, "model_info.json")
 
             # Thử load ensemble models trước
@@ -372,12 +373,8 @@ class MLPredictor:
                 else:
                     # CRITICAL: No models found at all
                     logger.critical(
-                        "\n"
-                        + "=" * 70
-                        + "\n"
-                        "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n"
-                        + "=" * 70
-                        + "\n"
+                        "\n" + "=" * 70 + "\n"
+                        "⚠️⚠️⚠️ CẢNH BÁO NGHIÊM TRỌNG: ML MODELS KHÔNG TỒN TẠI ⚠️⚠️⚠️\n" + "=" * 70 + "\n"
                         f"Model files không tìm thấy tại: {os.path.abspath(self.models_dir)}\n"
                         "\n"
                         "❌ BOT SẼ KHÔNG SỬ DỤNG ML PREDICTIONS!\n"
@@ -387,8 +384,7 @@ class MLPredictor:
                         "2. Hoặc: python -m ml_pipeline.train_pipeline (train models thật)\n"
                         "3. Sau khi train xong, khởi động lại bot\n"
                         "\n"
-                        "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n"
-                        + "=" * 70
+                        "⚠️  Trading sẽ tiếp tục KHÔNG CÓ ML SIGNALS\n" + "=" * 70
                     )
 
                 # DISABLE ML instead of creating dummy models
@@ -398,6 +394,7 @@ class MLPredictor:
 
         except Exception as e:
             import traceback
+
             error_details = traceback.format_exc()
             logger.critical(
                 "\n" + "=" * 70 + "\n"

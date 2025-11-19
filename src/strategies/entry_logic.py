@@ -287,9 +287,13 @@ class ImprovedEntryLogic:
             adjustments.append(+5)
 
         # FILTER 11: PORTFOLIO CORRELATION (NEW)
-        correlation_check = self._check_portfolio_correlation(df, getattr(self, '_current_symbol', None))
+        correlation_check = self._check_portfolio_correlation(
+            df, getattr(self, "_current_symbol", None)
+        )
         if correlation_check["too_high"]:
-            warnings.append(f"⚠️ Correlation cao với portfolio: {correlation_check['max_correlation']:.2f}")
+            warnings.append(
+                f"⚠️ Correlation cao với portfolio: {correlation_check['max_correlation']:.2f}"
+            )
             adjustments.append(-20)  # Penalty lớn cho high correlation
         elif correlation_check["good_diversification"]:
             reasons.append(f"✅ Đa dạng hóa tốt (corr: {correlation_check['max_correlation']:.2f})")
@@ -351,7 +355,11 @@ class ImprovedEntryLogic:
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
 
     def analyze_entry(
-        self, df: pd.DataFrame, ml_signal: Dict, market_regime: Optional[Dict] = None, symbol: Optional[str] = None
+        self,
+        df: pd.DataFrame,
+        ml_signal: Dict,
+        market_regime: Optional[Dict] = None,
+        symbol: Optional[str] = None,
     ) -> EntrySignal:
         """
         Phân tích đầy đủ để quyết định có nên vào lệnh
@@ -425,13 +433,13 @@ class ImprovedEntryLogic:
 
             reasons.append(f"✅ R:R ratio: {risk_reward:.2f}")
 
-        # Step 5: Determine signal strength and position multiplier
-        strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
-        position_multiplier = self._calculate_position_multiplier(
-            strength, adjusted_confidence, warnings, market_regime
-        )
+            # Step 5: Determine signal strength and position multiplier
+            strength = self._calculate_signal_strength(adjusted_confidence, risk_reward, warnings)
+            position_multiplier = self._calculate_position_multiplier(
+                strength, adjusted_confidence, warnings, market_regime
+            )
 
-        # Step 6: Build entry signal
+            # Step 6: Build entry signal
             return EntrySignal(
                 should_enter=True,
                 signal_type="BUY",
@@ -886,7 +894,7 @@ class ImprovedEntryLogic:
     def _check_portfolio_correlation(self, df: pd.DataFrame, symbol: Optional[str]) -> Dict:
         """
         NEW: Kiểm tra correlation với portfolio hiện tại
-        
+
         Returns:
             Dict with correlation analysis
         """
@@ -896,10 +904,10 @@ class ImprovedEntryLogic:
                 "good_diversification": False,
                 "max_correlation": 0.0,
             }
-        
+
         try:
             from src.risk.metrics import calculate_portfolio_correlation_risk
-            
+
             # Lấy danh sách positions hiện tại
             positions = self.portfolio_manager.get_positions()
             if not positions or len(positions) == 0:
@@ -908,24 +916,24 @@ class ImprovedEntryLogic:
                     "good_diversification": True,  # Portfolio rỗng = diversification tốt
                     "max_correlation": 0.0,
                 }
-            
+
             # Tính correlation với portfolio
             existing_symbols = list(positions.keys())
             all_symbols = existing_symbols + [symbol]
-            
+
             correlation_metrics = calculate_portfolio_correlation_risk(
                 all_symbols,
                 lookback=60,
                 max_avg_correlation=0.70,
             )
-            
+
             max_correlation = correlation_metrics.get("max_correlation", 0.0)
             avg_correlation = correlation_metrics.get("avg_correlation", 0.0)
-            
+
             # Threshold: > 0.7 = quá cao, < 0.3 = diversification tốt
             too_high = max_correlation > 0.70
             good_diversification = max_correlation < 0.30 and avg_correlation < 0.25
-            
+
             return {
                 "too_high": too_high,
                 "good_diversification": good_diversification,

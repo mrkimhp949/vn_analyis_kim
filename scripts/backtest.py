@@ -46,8 +46,8 @@ def main():
     # === Khởi tạo backtester ===
     try:
         backtester = Backtester(initial_capital=100_000_000, commission=0.0015)
-    except Exception:
-        print("❌ Lỗi khởi tạo backtester")
+    except (ImportError, AttributeError, ValueError, OSError) as e:
+        print(f"❌ Lỗi khởi tạo backtester: {e}")
         import traceback
 
         traceback.print_exc()
@@ -91,9 +91,9 @@ def main():
             else:
                 print("\n" + "=" * 60)
                 print("✅ HOÀN THÀNH!")
-                print("📊 Return: {result['total_return']:.2f}%")
+                print(f"📊 Return: {result['total_return']:.2f}%")
                 print(f"🔄 Trades: {result['total_trades']}")
-                print("🎯 Win Rate: {result['win_rate']:.2f}%")
+                print(f"🎯 Win Rate: {result['win_rate']:.2f}%")
                 print(f"⚖️ Sharpe Ratio: {result.get('sharpe_ratio', 0):.2f}")
                 print("=" * 60)
 
@@ -116,8 +116,8 @@ def main():
                         result["trades"].to_csv(file, index=False, encoding="utf-8-sig")
                         print(f"💾 Đã lưu: {file}")
 
-        except Exception:
-            print("\n❌ Lỗi backtest")
+        except (KeyError, ValueError, IOError, OSError, RuntimeError) as e:
+            print(f"\n❌ Lỗi backtest: {e}")
             import traceback
 
             traceback.print_exc()
@@ -138,8 +138,8 @@ def main():
                 TICKERS[:5], lookback=lookback, confidence_threshold=threshold
             )
             print("\n✅ Kết quả đã lưu trong thư mục: backtest_results/")
-        except Exception:
-            print("\n❌ Lỗi")
+        except (KeyError, ValueError, IOError, OSError, RuntimeError) as e:
+            print(f"\n❌ Lỗi: {e}")
             import traceback
 
             traceback.print_exc()
@@ -157,13 +157,13 @@ def main():
         lookback = input("Số ngày lịch sử (mặc định: 500): ").strip()
         lookback = int(lookback) if lookback else 500
 
-        print("\n🧪 So sánh các threshold cho {symbol}...\n")
+        print(f"\n🧪 So sánh các threshold cho {symbol}...\n")
 
         thresholds = [30, 40, 50, 60, 70]
         comparison_results = []
 
         for threshold in thresholds:
-            print("⏳ Đang test threshold {threshold}%...")
+            print(f"⏳ Đang test threshold {threshold}%...")
             try:
                 result = backtester.run_backtest(
                     symbol, lookback=lookback, confidence_threshold=threshold
@@ -178,9 +178,9 @@ def main():
                         "Avg Confidence": result.get("avg_confidence", 0),
                     }
                 )
-                print("  ✅ {threshold}%: Return {result['total_return']:.2f}%")
-            except Exception:
-                print("  ⚠️ Lỗi threshold {threshold}%")
+                print(f"  ✅ {threshold}%: Return {result['total_return']:.2f}%")
+            except (KeyError, ValueError, RuntimeError) as e:
+                print(f"  ⚠️ Lỗi threshold {threshold}%: {e}")
 
         if comparison_results:
             df = pd.DataFrame(comparison_results)
@@ -219,8 +219,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n\n👋 Đã hủy bởi người dùng!")
-    except Exception:
-        print("\n❌ Lỗi không mong đợi")
+    except Exception as e:
+        print(f"\n❌ Lỗi không mong đợi: {e}")
         import traceback
 
         traceback.print_exc()
