@@ -666,11 +666,11 @@ async def analyze_sectors():
 
 
 @app.get("/portfolio")
-async def get_portfolio(refresh: bool = False):
-    """Lấy thông tin portfolio hiện tại (tùy chọn làm mới giá).
+async def get_portfolio(refresh: bool = True):
+    """Lấy thông tin portfolio hiện tại (mặc định làm mới giá).
 
     Query params:
-        refresh=true sẽ tải lại giá close mới nhất cho từng mã trước khi tính toán.
+        refresh=false để không tải lại giá (sử dụng giá cũ từ database).
     """
     try:
         from src.portfolio.manager import get_portfolio_manager
@@ -694,8 +694,8 @@ async def get_portfolio(refresh: bool = False):
 
 
 @app.get("/portfolio/analysis")
-async def get_portfolio_analysis(refresh: bool = False):
-    """Lấy phân tích portfolio chi tiết (Markdown text) với tùy chọn refresh giá."""
+async def get_portfolio_analysis(refresh: bool = True):
+    """Lấy phân tích portfolio chi tiết (Markdown text) với mặc định refresh giá."""
     try:
         from src.portfolio.manager import get_portfolio_manager
 

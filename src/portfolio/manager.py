@@ -383,7 +383,8 @@ class PortfolioManager:
         for symbol, pos in positions.items():
             try:
                 # Use required_bars=1 since we only need the latest price
-                df = load_data(symbol, lookback=lookback, use_cache=True, required_bars=1)
+                # Use use_cache=False to always fetch fresh prices from TCBS API
+                df = load_data(symbol, lookback=lookback, use_cache=False, required_bars=1)
                 if df is not None and not df.empty:
                     latest = float(df.iloc[-1]["close"])
                     self.update_position_price(symbol, latest)
