@@ -472,6 +472,9 @@ def _update_last_trackers(new_val, trackers):
 def schedule_job():
     """Scheduler với improved logic, error handling và VN trading schedule"""
     print("🤖 Bot khởi động với Portfolio Management!")
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     from src.market.schedule import (
         is_trading_day,
@@ -492,12 +495,33 @@ def schedule_job():
         "last_backtest": None,
     }
 
+    loop_count = 0
+    last_heartbeat = time.time()
+
     while True:
         try:
             now = datetime.now(tz)
             current_hour = now.hour
             current_minute = now.minute
             current_weekday = now.weekday()
+
+            # Heartbeat log mỗi 5 phút để biết scheduler đang chạy
+            loop_count += 1
+            current_time = time.time()
+            if current_time - last_heartbeat > 300:  # 5 minutes
+                is_trading = should_run_scheduled_task(now)
+                logger.info(
+                    f"💓 Scheduler heartbeat - Loop: {loop_count}, "
+                    f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"Trading: {is_trading}, "
+                    f"Weekday: {current_weekday} ({['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][current_weekday]})"
+                )
+                print(
+                    f"💓 Scheduler heartbeat - Loop: {loop_count}, "
+                    f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"Trading: {is_trading}"
+                )
+                last_heartbeat = current_time
 
             # Quick check for weekly retrain first
             ran, sleep_sec, new_retrain = _check_weekly_retrain(
@@ -537,10 +561,17 @@ def schedule_job():
             # If not trading time, sleep appropriately
             if not should_run_scheduled_task(now):
                 if not is_trading_day(now):
-                    time.sleep(3600)
+                    # Not a trading day (T3/T7), sleep 1 hour
+                    sleep_time = 3600
+                    logger.debug(f"⏸️ Not trading day (T3/T7), sleeping {sleep_time}s")
+                    time.sleep(sleep_time)
                 elif not is_trading_hour(now):
-                    time.sleep(1800)
+                    # Trading day but not trading hour, sleep 30 minutes
+                    sleep_time = 1800
+                    logger.debug(f"⏸️ Not trading hour, sleeping {sleep_time}s")
+                    time.sleep(sleep_time)
                 else:
+                    # Unexpected state, sleep 60s
                     time.sleep(60)
                 continue
 
@@ -599,8 +630,12 @@ def schedule_job():
             # Short sleep to be responsive during trading hours
             time.sleep(30)
 
-        except Exception:
-            print("❌ Lỗi scheduler")
+        except Exception as e:
+            import traceback
+
+            logger.error(f"❌ Lỗi scheduler: {type(e).__name__}: {str(e)}", exc_info=True)
+            print(f"❌ Lỗi scheduler: {type(e).__name__}: {str(e)}")
+            traceback.print_exc()
             time.sleep(60)
 
 
@@ -635,11 +670,29 @@ async def lifespan(app: FastAPI):
 
     # Khởi động scheduler trong thread riêng
     try:
-        scheduler_thread = threading.Thread(target=schedule_job, daemon=True)
+        scheduler_thread = threading.Thread(
+            target=schedule_job, daemon=True, name="SchedulerThread"
+        )
         scheduler_thread.start()
-        print("✅ Scheduler started")
-    except Exception:
-        print("❌ Lỗi khởi động scheduler")
+        print(
+            f"✅ Scheduler started (Thread: {scheduler_thread.name}, ID: {scheduler_thread.ident})"
+        )
+
+        # Verify thread is alive after a short delay
+        def verify_scheduler():
+            time.sleep(2)
+            if scheduler_thread.is_alive():
+                print(f"✅ Scheduler thread verified alive: {scheduler_thread.name}")
+            else:
+                print(f"❌ WARNING: Scheduler thread died immediately!")
+
+        verify_thread = threading.Thread(target=verify_scheduler, daemon=True)
+        verify_thread.start()
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Lỗi khởi động scheduler: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
 
     # Khởi động Telegram bot trong thread riêng
     try:
@@ -738,6 +791,24 @@ async def health_check(request: Request):
         "last_scan": health_status["last_scan"],
         "checks": health_status["checks"],
     }
+
+    # Kiểm tra scheduler thread
+    try:
+        scheduler_threads = [t for t in threading.enumerate() if t.name == "SchedulerThread"]
+        if scheduler_threads:
+            scheduler_thread = scheduler_threads[0]
+            health_info["scheduler"] = {
+                "status": "running" if scheduler_thread.is_alive() else "dead",
+                "thread_name": scheduler_thread.name,
+                "thread_id": scheduler_thread.ident,
+                "is_alive": scheduler_thread.is_alive(),
+            }
+        else:
+            health_info["scheduler"] = {"status": "not_found", "thread_name": None}
+            health_info["status"] = "degraded"
+    except Exception as e:
+        health_info["scheduler"] = {"status": "error", "error": str(e)}
+        health_info["status"] = "degraded"
 
     # Kiểm tra các components
     try:

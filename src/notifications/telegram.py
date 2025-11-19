@@ -102,44 +102,57 @@ async def send_daily_summary_to_user(user_id: int):
 
 async def send_daily_summary_to_all():
     """Gửi daily summary cho tất cả users có subscription"""
-    if not subscription_manager or not bot_instance:
+    if not bot_instance:
+        print("⚠️ Bot instance không có, không thể gửi daily summary")
         return
 
     try:
-        # Lấy tất cả users có subscription
-        for user_data in subscription_manager.subscriptions.get("users", {}).values():
-            # This is a bit hacky, but we need to get user IDs
-            pass
-
-        # Get all user IDs from subscriptions
-        user_ids = set()
-        for symbol, subscribers in subscription_manager.subscriptions.get(
-            "symbol_subscribers", {}
-        ).items():
-            user_ids.update(subscribers)
-        for sector, subscribers in subscription_manager.subscriptions.get(
-            "sector_subscribers", {}
-        ).items():
-            user_ids.update(subscribers)
-
-        # Also include default chat_id if no subscriptions
         from src.config.legacy_config import CHAT_ID
 
+        # Get all user IDs from subscriptions (if available)
+        user_ids = set()
+
+        if subscription_manager:
+            try:
+                # Get all user IDs from subscriptions
+                for symbol, subscribers in subscription_manager.subscriptions.get(
+                    "symbol_subscribers", {}
+                ).items():
+                    user_ids.update(subscribers)
+                for sector, subscribers in subscription_manager.subscriptions.get(
+                    "sector_subscribers", {}
+                ).items():
+                    user_ids.update(subscribers)
+            except Exception as e:
+                print(f"⚠️ Lỗi lấy subscribers: {e}")
+
+        # Always include default chat_id (even if no subscription manager)
         if CHAT_ID:
             user_ids.add(str(CHAT_ID))
+
+        if not user_ids:
+            print("⚠️ Không có user nào để gửi daily summary")
+            return
+
+        print(f"📤 Gửi daily summary cho {len(user_ids)} user(s)...")
 
         # Gửi cho từng user
         for user_id_str in user_ids:
             try:
                 user_id = int(user_id_str)
                 await send_daily_summary_to_user(user_id)
+                print(f"✅ Đã gửi daily summary cho user {user_id}")
             except ValueError:
+                print(f"⚠️ Invalid user_id: {user_id_str}")
                 continue
-            except Exception:
-                print(f"⚠️ Lỗi gửi summary cho user {user_id_str}")
+            except Exception as e:
+                print(f"⚠️ Lỗi gửi summary cho user {user_id_str}: {type(e).__name__}: {str(e)}")
 
-    except Exception:
-        print("❌ Lỗi send_daily_summary_to_all")
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Lỗi send_daily_summary_to_all: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
 
 
 def set_bot_instance(bot: Bot):

@@ -40,10 +40,14 @@ def setup_logging():
         handlers=[file_handler, console_handler],
     )
 
-    # Giảm log level cho một số thư viện
+    # Giảm log level cho một số thư viện (HTTP clients)
     logging.getLogger("telegram").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(
+        logging.WARNING
+    )  # Suppress httpx INFO logs (Telegram API calls)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)  # httpx uses httpcore underneath
 
     # Tensorflow logging
     try:
