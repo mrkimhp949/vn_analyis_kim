@@ -646,6 +646,7 @@ class TradingOrchestrator:
                         if entry_signal.take_profit_targets
                         else None
                     )
+                    # ENHANCEMENT: Pass limit order info if applicable
                     success, message, trade = self.paper_account.execute_buy(
                         symbol=symbol,
                         shares=position_size_info.shares,
@@ -654,6 +655,8 @@ class TradingOrchestrator:
                         signal_reason=", ".join(entry_signal.reasons),
                         stop_loss=entry_signal.stop_loss,
                         take_profit=take_profit,
+                        is_limit_order=getattr(entry_signal, "is_limit_order", False),
+                        limit_price=getattr(entry_signal, "limit_price", None),
                     )
 
                     if not success:
