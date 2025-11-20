@@ -60,6 +60,7 @@ class EntrySignalService:
         existing_symbols: set,
         market_regime: Dict,
         vnindex_df: Optional[pd.DataFrame] = None,
+        notification_service=None,
     ) -> List[Dict]:
         """
         Scan tickers for entry signals
@@ -69,11 +70,14 @@ class EntrySignalService:
             existing_symbols: Set of symbols already in portfolio
             market_regime: Market regime information
             vnindex_df: VNINDEX DataFrame for correlation
+            notification_service: Notification service for sending alerts
 
         Returns:
             List of entry signals
         """
         signals = []
+        no_signal_symbols = []
+        no_signal_reasons = {}
 
         # Scan in parallel
         tasks = [
@@ -83,16 +87,76 @@ class EntrySignalService:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Collect valid signals
-        for result in results:
+        # Collect valid signals and track symbols with no signal
+        for symbol, result in zip(tickers, results):
             if isinstance(result, Exception):
-                logger.error(f"Scan error: {result}")
+                logger.error(f"Scan error for {symbol}: {result}")
+                no_signal_symbols.append(symbol)
+                no_signal_reasons[symbol] = f"Lỗi: {str(result)}"
                 continue
 
             if result and result.get("signal"):
                 signals.append(result)
+            else:
+                no_signal_symbols.append(symbol)
+                if hasattr(result, "warnings") and result.warnings:
+                    no_signal_reasons[symbol] = ", ".join(result.warnings)
+                else:
+                    no_signal_reasons[symbol] = "Không rõ lý do"
 
-        logger.info(f"📊 Found {len(signals)} entry signals from {len(tickers)} tickers")
+        # Only log if we found signals, otherwise we'll send a notification
+        if len(signals) > 0:
+            logger.info(f"📊 Found {len(signals)} entry signals from {len(tickers)} tickers")
+
+        # Send notification if no signals found and notification service is available
+        if notification_service and len(signals) == 0 and len(no_signal_symbols) > 0:
+            try:
+                # Group and count reasons
+                reason_counts = {}
+                for reason in no_signal_reasons.values():
+                    # Clean up the reason to group similar reasons
+                    clean_reason = reason.split("(")[0].strip() if "(" in reason else reason
+                    clean_reason = (
+                        clean_reason.split(":")[0].strip() if ":" in clean_reason else clean_reason
+                    )
+                    reason_counts[clean_reason] = reason_counts.get(clean_reason, 0) + 1
+
+                # Create summary message
+                summary = "🔍 *TỔNG HỢP KHÔNG TÌM THẤY TÍN HIỆU MUA*\n"
+                summary += f"📊 Đã quét: {len(tickers)} mã cổ phiếu\n"
+                summary += f"📉 Không tìm thấy tín hiệu: {len(no_signal_symbols)} mã\n\n"
+
+                # Add summary by reason (sorted by count)
+                summary += "*CHI TIẾT THEO NGUYÊN NHÂN:*\n"
+                for reason, count in sorted(
+                    reason_counts.items(), key=lambda x: x[1], reverse=True
+                ):
+                    percentage = (count / len(no_signal_symbols)) * 100
+                    summary += f"• {reason}: {count} mã ({percentage:.1f}%)\n"
+
+                # Add top 3 most common reasons with example symbols
+                top_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                if top_reasons:
+                    summary += "\n*NGUYÊN NHÂN CHÍNH:*\n"
+                    for reason, count in top_reasons:
+                        # Find first 2 example symbols for this reason
+                        examples = [
+                            s
+                            for s, r in no_signal_reasons.items()
+                            if (r.startswith(reason) or reason in r)
+                        ][:2]
+                        examples_str = ", ".join(examples) if examples else "Không có ví dụ"
+                        summary += f"• {reason}: {count} mã (VD: {examples_str})\n"
+
+                # Add timestamp
+                from datetime import datetime
+
+                summary += f"\n⏰ {datetime.now().strftime('%H:%M %d/%m/%Y')}"
+
+                await notification_service.send_message(summary)
+
+            except Exception as e:
+                logger.error(f"Error sending no-signal notification: {e}")
 
         return signals
 
@@ -136,11 +200,15 @@ class EntrySignalService:
 
             # Entry logic
             entry_signal = self.entry_logic.analyze_entry(
-                df=df, ml_signal=ml_signal, market_regime=market_regime
+                df=df, ml_signal=ml_signal, market_regime=market_regime, symbol=symbol
             )
 
             # Check if should enter
             if not entry_signal.should_enter:
+                # Log detailed reason for no entry
+                if entry_signal.warnings:
+                    reason = ", ".join(entry_signal.warnings)
+                    logger.debug(f"[{symbol}] Không tìm thấy tín hiệu mua: {reason}")
                 return None
 
             # Calculate position size

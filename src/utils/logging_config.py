@@ -40,10 +40,15 @@ def setup_logging():
         handlers=[file_handler, console_handler],
     )
 
-    # Giảm log level cho một số thư viện
-    logging.getLogger("telegram").setLevel(logging.WARNING)
+    # Giảm log level cho các thư viện gây nhiễu
+    logging.getLogger("telegram").setLevel(logging.ERROR)  # Chỉ hiển thị lỗi
+    logging.getLogger("telegram.bot").setLevel(logging.ERROR)
+    logging.getLogger("telegram.ext").setLevel(logging.ERROR)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(
+        logging.WARNING
+    )  # Thêm cho phiên bản mới của python-telegram-bot
 
     # Tensorflow logging
     try:

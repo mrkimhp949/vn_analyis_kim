@@ -1983,7 +1983,35 @@ class ImprovedEntryLogic:
             return "HOLD"
 
     def _no_signal(self, reason: str, telemetry: Optional[Dict] = None) -> EntrySignal:
-        """Return no signal"""
+        """Return no signal with detailed reason"""
+        # Build detailed warning message
+        warnings = [reason]  # Start with the main reason
+
+        # Add telemetry details if available
+        if telemetry:
+            details = []
+            if "adjustment_breakdown" in telemetry:
+                for adj in telemetry["adjustment_breakdown"]:
+                    if adj.get("delta", 0) < 0:  # Only show negative adjustments (rejections)
+                        detail = f"{adj.get('filter', 'Unknown')}: {adj.get('note', 'No reason')}"
+                        details.append(detail)
+                        warnings.append(detail)  # Add each detail as a separate warning
+
+            # Add base confidence if available
+            if "base_confidence" in telemetry:
+                details.append(f"Base confidence: {telemetry['base_confidence']:.1f}%")
+
+            warning_msg = f"{reason} ({'; '.join(details)})" if details else reason
+
+            if details:
+                warning_msg = f"{reason} ({'; '.join(details)})"
+
+        # Log the detailed reason
+        if self._current_symbol:
+            logger.warning(f"[No Signal] {self._current_symbol}: {warning_msg}")
+        else:
+            logger.warning(f"[No Signal] {warning_msg}")
+
         return EntrySignal(
             should_enter=False,
             signal_type="HOLD",
@@ -1991,7 +2019,7 @@ class ImprovedEntryLogic:
             strength=SignalStrength.NO_SIGNAL,
             position_size_multiplier=0.0,
             reasons=[],
-            warnings=[reason],
+            warnings=warnings,
             entry_price=0,
             stop_loss=0,
             take_profit_targets=[],

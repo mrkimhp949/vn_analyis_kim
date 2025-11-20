@@ -477,45 +477,116 @@ class TradingOrchestrator:
         """Quét song song để tìm các tín hiệu vào lệnh mới."""
         signal_count = 0
         watchlist_candidates = []
+        no_signal_symbols = []
+        no_signal_reasons = {}
         results_lock = asyncio.Lock()
 
         async def _scan_ticker(symbol: str):
             nonlocal signal_count
             try:
                 # Skip only if pending (being processed)
-                # ENHANCED: Don't skip if already in portfolio - we still want to generate signals
-                # The actual buy execution will check if symbol already has a position
                 if self.portfolio_lock.is_pending(symbol):
                     return
 
-                # Logic xử lý được chuyển hết vào process_single_ticker_for_entry
                 entry_result = await self.process_single_ticker_for_entry(symbol, market_regime)
 
-                if entry_result and entry_result.get("signal"):
-                    async with results_lock:
-                        signal_count += 1
-                elif entry_result and entry_result.get("is_watchlist"):
-                    async with results_lock:
-                        watchlist_candidates.append(entry_result)
+                if entry_result:
+                    if entry_result.get("signal"):
+                        async with results_lock:
+                            signal_count += 1
+                    elif entry_result.get("warnings"):
+                        async with results_lock:
+                            no_signal_symbols.append(entry_result["symbol"])
+                            no_signal_reasons[entry_result["symbol"]] = entry_result["warnings"]
+                    elif entry_result.get("is_watchlist"):
+                        async with results_lock:
+                            watchlist_candidates.append(entry_result)
 
-            except Exception:
-                logging.error(f"Lỗi nghiêm trọng khi quét mã {symbol}", exc_info=True)
+            except Exception as e:
+                logging.error(f"Lỗi nghiêm trọng khi quét mã {symbol}: {str(e)}", exc_info=True)
+                async with results_lock:
+                    no_signal_symbols.append(symbol)
+                    no_signal_reasons[symbol] = [f"Lỗi khi quét: {str(e)}"]
 
         tasks = [_scan_ticker(symbol) for symbol in current_tickers]
         await asyncio.gather(*tasks)
+
+        # Gửi thông báo tổng hợp nếu không có tín hiệu nào
+        if (
+            signal_count == 0
+            and no_signal_symbols
+            and hasattr(self, "notification_service")
+            and self.notification_service
+        ):
+            await self._send_no_signal_summary(
+                current_tickers, no_signal_symbols, no_signal_reasons
+            )
+
         return signal_count, watchlist_candidates
+
+    async def _send_no_signal_summary(self, all_tickers, no_signal_symbols, no_signal_reasons):
+        """Gửi thông báo tổng hợp khi không tìm thấy tín hiệu mua nào."""
+        try:
+            # Nhóm các lý do tương tự lại với nhau
+            reason_counts = {}
+            for symbol, reasons in no_signal_reasons.items():
+                for reason in reasons:
+                    # Làm sạch lý do để nhóm các lý do tương tự
+                    clean_reason = reason.split("(")[0].strip() if "(" in reason else reason
+                    clean_reason = (
+                        clean_reason.split(":")[0].strip() if ":" in clean_reason else clean_reason
+                    )
+                    reason_counts[clean_reason] = reason_counts.get(clean_reason, 0) + 1
+
+            # Tạo thông báo tổng hợp
+            summary = "🔍 *TỔNG HỢP KHÔNG TÌM THẤY TÍN HIỆU MUA*\n"
+            summary += f"📊 Đã quét: {len(all_tickers)} mã\n"
+            summary += f"📉 Không tìm thấy tín hiệu: {len(no_signal_symbols)} mã\n\n"
+
+            # Thêm chi tiết theo nguyên nhân
+            summary += "*CHI TIẾT THEO NGUYÊN NHÂN:*\n"
+            for reason, count in sorted(reason_counts.items(), key=lambda x: x[1], reverse=True):
+                percentage = (count / len(no_signal_symbols)) * 100
+                summary += f"• {reason}: {count} mã ({percentage:.1f}%)\n"
+
+            # Thêm ví dụ cho các lý do phổ biến
+            top_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            if top_reasons:
+                summary += "\n*VÍ DỤ:*\n"
+                for reason, _ in top_reasons:
+                    examples = [
+                        s
+                        for s, reasons in no_signal_reasons.items()
+                        if any(r.startswith(reason) for r in reasons)
+                    ][:2]
+                    if examples:
+                        summary += f"• {reason}: {', '.join(examples)}\n"
+
+            summary += f"\n⏰ {datetime.now().strftime('%H:%M %d/%m/%Y')}"
+
+            # Gửi thông báo
+            await self.notification_service.send_message(summary)
+
+        except Exception as e:
+            logging.error(f"Lỗi khi gửi thông báo tổng hợp không tín hiệu: {str(e)}", exc_info=True)
 
     async def process_single_ticker_for_entry(self, symbol: str, market_regime: dict):
         """
         Xử lý logic để tìm tín hiệu vào lệnh cho một mã cổ phiếu.
         Bao gồm: Lấy dữ liệu, phân tích ML, kiểm tra entry logic, phân tích tin tức,
                  tính toán position size và gửi thông báo.
+        Returns:
+            - dict: Chứa 'signal': True nếu có tín hiệu, hoặc 'warnings' nếu không có tín hiệu
         """
         try:
             # Lấy dữ liệu
             df = load_data(symbol, lookback=LOOKBACK)
             if df.empty or len(df) < 50:  # Cần đủ dữ liệu để phân tích
-                return None
+                return {
+                    "symbol": symbol,
+                    "warnings": ["Không đủ dữ liệu lịch sử"],
+                    "is_watchlist": False,
+                }
 
             # Phân tích ML với error handling
             ml_signal = None
@@ -530,7 +601,11 @@ class TradingOrchestrator:
             # 1. Entry Logic with validation
             if not self.entry_logic:
                 logging.error("❌ Entry logic not initialized")
-                return None
+                return {
+                    "symbol": symbol,
+                    "warnings": ["Lỗi: Entry logic chưa được khởi tạo"],
+                    "is_watchlist": False,
+                }
 
             entry_signal = self.entry_logic.analyze_entry(
                 df=df,
@@ -539,8 +614,9 @@ class TradingOrchestrator:
             )
 
             # Validate entry signal
-            if not entry_signal:
-                return None
+            if not entry_signal or not entry_signal.should_enter:
+                warnings = getattr(entry_signal, "warnings", ["Không rõ lý do"])
+                return {"symbol": symbol, "warnings": warnings, "is_watchlist": False}
 
             # 2. News Analysis (nếu có tín hiệu)
             news_sentiment = {"score": 0.5, "comment": "Neutral"}
@@ -678,15 +754,13 @@ class TradingOrchestrator:
             # 5. Watchlist Logic
             # ... (logic để thêm vào watchlist nếu không phải tín hiệu mua)
             return None
-        except DataLoadError:
-            # logging.warning(f"[{symbol}] Lỗi tải dữ liệu") # Giảm log nhiễu
-            return None
-        except Exception:
-            logging.error(f"[{symbol}] Lỗi không xác định trong process_single_ticker_for_entry")
-            import traceback
 
-            logging.error(traceback.format_exc())
-            return None
+        except DataLoadError:
+            return {"symbol": symbol, "warnings": ["Lỗi tải dữ liệu"], "is_watchlist": False}
+        except Exception as e:
+            error_msg = f"Lỗi không xác định: {str(e)}"
+            logging.error(f"[{symbol}] {error_msg}", exc_info=True)
+            return {"symbol": symbol, "warnings": [error_msg], "is_watchlist": False}
 
     async def send_buy_signal_notification(
         self, symbol, entry_signal, position_size_info, news_sentiment
