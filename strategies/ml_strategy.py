@@ -2,10 +2,21 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from src.ml.features.technical import add_ml_features
-from src.ml.features.enhanced import get_feature_columns
-from src.ml.models.predictor import MLPredictor
 
+# Try to use enhanced features first, fallback to basic features
+try:
+    from src.ml.features.enhanced import add_enhanced_features as add_ml_features
+    from src.ml.features.enhanced import get_feature_columns
+
+    logging.getLogger(__name__).info("✅ Using ENHANCED features (28+ features)")
+    use_enhanced_features = True
+except ImportError:
+    from src.ml.features.technical import add_ml_features, get_feature_columns
+
+    logging.getLogger(__name__).warning("⚠️ Using BASIC features (28 features)")
+    use_enhanced_features = False
+
+from src.ml.models.predictor import MLPredictor
 from strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
