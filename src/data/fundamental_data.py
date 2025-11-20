@@ -1,7 +1,7 @@
 """
 Fundamental Data Integration
 Provides P/E ratio, debt ratio, earnings dates from multiple sources
-Supports: VNDirect, SSI, FiinTrade APIs
+Supports: CSV, VNDirect, SSI, FiinTrade APIs
 """
 
 import logging
@@ -338,13 +338,15 @@ class FiinTradeProvider(FundamentalDataProvider):
 class FundamentalDataManager:
     """
     Manager for fundamental data from multiple sources
-    Uses fallback strategy: VNDirect -> SSI -> FiinTrade
+    Uses fallback strategy: CSV -> VNDirect -> SSI -> FiinTrade
     Caches data to minimize API calls
     """
 
     def __init__(
         self,
-        vndirect_enabled: bool = True,
+        csv_enabled: bool = True,
+        csv_path: str = "data/fundamental_ratios.csv",
+        vndirect_enabled: bool = False,
         ssi_enabled: bool = False,
         fiintrade_enabled: bool = False,
         ssi_api_key: Optional[str] = None,
@@ -354,6 +356,14 @@ class FundamentalDataManager:
         self.providers = []
 
         # Initialize providers in priority order
+        # CSV first (most reliable for production)
+        if csv_enabled:
+            try:
+                from src.data.csv_fundamental_provider import CSVFundamentalProvider
+                self.providers.append(CSVFundamentalProvider(csv_path=csv_path))
+            except ImportError:
+                logger.warning("⚠️ CSV Fundamental Provider not available")
+
         if vndirect_enabled:
             self.providers.append(VNDirectProvider())
 
@@ -430,7 +440,9 @@ _fundamental_manager = None
 
 
 def get_fundamental_manager(
-    vndirect_enabled: bool = True,
+    csv_enabled: bool = True,
+    csv_path: str = "data/fundamental_ratios.csv",
+    vndirect_enabled: bool = False,
     ssi_api_key: Optional[str] = None,
     fiintrade_api_key: Optional[str] = None,
 ) -> FundamentalDataManager:
@@ -438,6 +450,8 @@ def get_fundamental_manager(
     global _fundamental_manager
     if _fundamental_manager is None:
         _fundamental_manager = FundamentalDataManager(
+            csv_enabled=csv_enabled,
+            csv_path=csv_path,
             vndirect_enabled=vndirect_enabled,
             ssi_enabled=bool(ssi_api_key),
             fiintrade_enabled=bool(fiintrade_api_key),
