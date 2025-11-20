@@ -1769,8 +1769,6 @@ class ImprovedEntryLogic:
         Returns:
             Dict with event info
         """
-        from datetime import datetime, timedelta
-
         if not symbol:
             return {
                 "too_close_to_event": False,
@@ -1780,138 +1778,140 @@ class ImprovedEntryLogic:
                 "days_since": None,
             }
 
-        # Get current date
-        today = datetime.now().date()
+        try:
+            # Use earnings calendar provider
+            from src.data.earnings_calendar import get_earnings_calendar
 
-        # Check earnings dates (quarterly earnings)
-        # VN stocks typically report earnings in: Jan (Q4), Apr (Q1), Jul (Q2), Oct (Q3)
-        current_month = today.month
-        current_day = today.day
+            calendar = get_earnings_calendar()
+            result = calendar.check_event_proximity(
+                symbol=symbol, avoid_days_before=5, prefer_days_after=10
+            )
 
-        # Estimate next earnings month (simplified - assume quarterly)
-        earnings_months = [1, 4, 7, 10]  # Jan, Apr, Jul, Oct
+            return result
 
-        days_until_earnings = None
-        earnings_month = None
-
-        for month in earnings_months:
-            # Calculate next earnings date
-            if month > current_month or (month == current_month and current_day < 15):
-                # Next earnings is in this year
-                earnings_date = datetime(today.year, month, 15).date()
-            else:
-                # Next earnings is next year
-                earnings_date = datetime(today.year + 1, month, 15).date()
-
-            days_until = (earnings_date - today).days
-
-            if days_until_earnings is None or days_until < days_until_earnings:
-                days_until_earnings = days_until
-                earnings_month = month
-
-        # Check if too close to earnings (within 5 days)
-        too_close = (
-            days_until_earnings is not None
-            and days_until_earnings <= 5
-            and days_until_earnings >= 0
-        )
-
-        # Check if earnings just passed (within 10 days ago)
-        days_since_earnings = None
-        event_passed = False
-
-        for month in earnings_months:
-            # Check if earnings was recently
-            earnings_date = datetime(today.year, month, 15).date()
-            if today >= earnings_date:
-                days_since = (today - earnings_date).days
-                if days_since <= 10:
-                    days_since_earnings = days_since
-                    event_passed = True
-                    break
-
-        return {
-            "too_close_to_event": too_close,
-            "event_passed": event_passed,
-            "event_type": "Earnings" if too_close or event_passed else None,
-            "days_until": days_until_earnings,
-            "days_since": days_since_earnings,
-        }
+        except Exception as e:
+            logger.warning(f"[{symbol}] Error checking earnings events: {e}")
+            # Fallback to no event
+            return {
+                "too_close_to_event": False,
+                "event_passed": False,
+                "event_type": None,
+                "days_until": None,
+                "days_since": None,
+            }
 
     def _check_fundamentals(
         self, df: pd.DataFrame, symbol: Optional[str], current_price: float
     ) -> Dict:
         """
-        NEW: Check fundamental filters (P/E ratio, Debt ratio)
+        NEW: Check fundamental filters (P/E ratio, Debt ratio, ROE, etc.)
 
-        Note: This is a simplified check. In production, would fetch from external data source.
-        For now, uses heuristics based on price action and market cap estimation.
+        Fetches real fundamental data from TCBS API or other sources.
 
         Returns:
             Dict with fundamental analysis
         """
-        if not symbol or len(df) < 20:
+        if not symbol:
             return {
                 "poor_fundamentals": False,
                 "good_fundamentals": False,
                 "reason": None,
             }
 
-        # Get market cap estimate from price * average volume * price
-        # This is a rough estimate
-        avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
-        market_cap_estimate = current_price * avg_volume * 250  # Rough estimate (250 trading days)
+        try:
+            # Use fundamental data provider
+            from src.data.fundamental_provider import get_fundamental_provider
 
-        # Try to get P/E from metadata or external source
-        # For now, use heuristics
-        pe_ratio = None
-        debt_ratio = None
+            provider = get_fundamental_provider()
+            fundamentals = provider.get_fundamentals(symbol)
 
-        # Attempt to get from metadata if available
-        if "pe_ratio" in df.columns and not df["pe_ratio"].isnull().all():
-            pe_ratio = safe_get_latest(df, "pe_ratio", None)
+            if not fundamentals:
+                # No data available - don't penalize
+                return {
+                    "poor_fundamentals": False,
+                    "good_fundamentals": False,
+                    "reason": "Fundamental data unavailable",
+                }
 
-        if "debt_ratio" in df.columns and not df["debt_ratio"].isnull().all():
-            debt_ratio = safe_get_latest(df, "debt_ratio", None)
+            # Extract metrics
+            pe_ratio = fundamentals.get("pe_ratio")
+            pb_ratio = fundamentals.get("pb_ratio")
+            roe = fundamentals.get("roe")
+            debt_ratio = fundamentals.get("debt_ratio")
+            profit_margin = fundamentals.get("profit_margin")
 
-        # If no data available, use conservative approach - don't penalize
-        # In production, would fetch from fundamental data API
-        if pe_ratio is None and debt_ratio is None:
+            reasons = []
+            poor_fundamentals = False
+            good_fundamentals = False
+
+            # P/E Ratio check
+            if pe_ratio is not None and pe_ratio > 0:
+                if pe_ratio > 30:
+                    poor_fundamentals = True
+                    reasons.append(f"P/E cao ({pe_ratio:.1f})")
+                elif pe_ratio < 5:
+                    # P/E quá thấp có thể là dấu hiệu vấn đề
+                    reasons.append(f"P/E rất thấp ({pe_ratio:.1f})")
+                elif 8 <= pe_ratio <= 20:
+                    good_fundamentals = True
+                    reasons.append(f"P/E hợp lý ({pe_ratio:.1f})")
+
+            # P/B Ratio check
+            if pb_ratio is not None and pb_ratio > 0:
+                if pb_ratio > 5:
+                    poor_fundamentals = True
+                    reasons.append(f"P/B cao ({pb_ratio:.1f})")
+                elif pb_ratio < 1:
+                    # P/B < 1 có thể là cơ hội (undervalued)
+                    good_fundamentals = True
+                    reasons.append(f"P/B thấp ({pb_ratio:.1f})")
+
+            # ROE check
+            if roe is not None:
+                if roe < 5:  # ROE < 5%
+                    poor_fundamentals = True
+                    reasons.append(f"ROE thấp ({roe:.1f}%)")
+                elif roe >= 15:  # ROE >= 15%
+                    good_fundamentals = True
+                    reasons.append(f"ROE tốt ({roe:.1f}%)")
+
+            # Debt Ratio check
+            if debt_ratio is not None:
+                if debt_ratio > 2.0:  # Debt/Equity > 200%
+                    poor_fundamentals = True
+                    reasons.append(f"Nợ cao (D/E: {debt_ratio:.1f})")
+                elif debt_ratio < 0.5:  # Debt/Equity < 50%
+                    good_fundamentals = True
+                    reasons.append(f"Nợ thấp (D/E: {debt_ratio:.1f})")
+
+            # Profit Margin check
+            if profit_margin is not None:
+                if profit_margin < 0:  # Negative margin
+                    poor_fundamentals = True
+                    reasons.append(f"Lỗ ({profit_margin:.1f}%)")
+                elif profit_margin >= 10:  # >= 10% margin
+                    good_fundamentals = True
+                    reasons.append(f"Margin tốt ({profit_margin:.1f}%)")
+
+            return {
+                "poor_fundamentals": poor_fundamentals,
+                "good_fundamentals": good_fundamentals and not poor_fundamentals,
+                "reason": " | ".join(reasons) if reasons else "No clear signals",
+                "pe_ratio": pe_ratio,
+                "pb_ratio": pb_ratio,
+                "roe": roe,
+                "debt_ratio": debt_ratio,
+                "profit_margin": profit_margin,
+            }
+
+        except Exception as e:
+            logger.warning(f"[{symbol}] Error checking fundamentals: {e}")
+            # Fallback - don't penalize
             return {
                 "poor_fundamentals": False,
                 "good_fundamentals": False,
-                "reason": "Fundamental data unavailable",
+                "reason": f"Error: {str(e)}",
             }
-
-        reasons = []
-        poor_fundamentals = False
-
-        # P/E Ratio check
-        if pe_ratio is not None:
-            if pe_ratio > 30:
-                poor_fundamentals = True
-                reasons.append(f"P/E cao ({pe_ratio:.1f})")
-            elif pe_ratio < 5:
-                # P/E quá thấp có thể là dấu hiệu vấn đề
-                reasons.append(f"P/E rất thấp ({pe_ratio:.1f})")
-            elif 8 <= pe_ratio <= 20:
-                reasons.append(f"P/E hợp lý ({pe_ratio:.1f})")
-
-        # Debt Ratio check
-        if debt_ratio is not None:
-            if debt_ratio > 0.7:  # 70% debt
-                poor_fundamentals = True
-                reasons.append(f"Nợ cao ({debt_ratio*100:.1f}%)")
-            elif debt_ratio < 0.3:  # < 30% debt
-                reasons.append(f"Nợ thấp ({debt_ratio*100:.1f}%)")
-
-        return {
-            "poor_fundamentals": poor_fundamentals,
-            "good_fundamentals": len(reasons) > 0 and not poor_fundamentals,
-            "reason": " | ".join(reasons) if reasons else None,
-            "pe_ratio": pe_ratio,
-            "debt_ratio": debt_ratio,
-        }
 
     def _calculate_technical_confidence(self, df: pd.DataFrame) -> float:
         """
