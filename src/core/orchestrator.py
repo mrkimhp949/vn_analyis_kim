@@ -512,12 +512,7 @@ class TradingOrchestrator:
         await asyncio.gather(*tasks)
 
         # Gửi thông báo tổng hợp nếu không có tín hiệu nào
-        if (
-            signal_count == 0
-            and no_signal_symbols
-            and hasattr(self, "notification_service")
-            and self.notification_service
-        ):
+        if signal_count == 0 and no_signal_symbols:
             await self._send_no_signal_summary(
                 current_tickers, no_signal_symbols, no_signal_reasons
             )
@@ -564,8 +559,12 @@ class TradingOrchestrator:
 
             summary += f"\n⏰ {datetime.now().strftime('%H:%M %d/%m/%Y')}"
 
-            # Gửi thông báo
-            await self.notification_service.send_message(summary)
+            # Gửi thông báo qua Telegram bot
+            if self.bot and self.chat_id:
+                await self.bot.send_message(self.chat_id, summary, parse_mode="Markdown")
+                logging.info("✅ Đã gửi thông báo tổng hợp không tìm thấy tín hiệu")
+            else:
+                logging.warning("⚠️ Không thể gửi thông báo: bot hoặc chat_id không khả dụng")
 
         except Exception as e:
             logging.error(f"Lỗi khi gửi thông báo tổng hợp không tín hiệu: {str(e)}", exc_info=True)
