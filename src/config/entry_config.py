@@ -324,7 +324,8 @@ class EntryLogicConfig:
             use_simplified_filters=os.getenv("USE_SIMPLIFIED_FILTERS", "true").lower() == "true",
             use_tiered_liquidity=os.getenv("USE_TIERED_LIQUIDITY", "true").lower() == "true",
             require_trend_alignment=os.getenv("REQUIRE_TREND_ALIGNMENT", "false").lower() == "true",
-            require_volume_confirmation=os.getenv("REQUIRE_VOLUME_CONFIRMATION", "false").lower() == "true",
+            require_volume_confirmation=os.getenv("REQUIRE_VOLUME_CONFIRMATION", "false").lower()
+            == "true",
         )
 
     def validate(self):
@@ -341,7 +342,9 @@ class EntryLogicConfig:
             )
 
         if not (0 < self.risk.max_portfolio_drawdown <= 1.0):
-            raise ValueError(f"max_portfolio_drawdown must be 0-1, got {self.risk.max_portfolio_drawdown}")
+            raise ValueError(
+                f"max_portfolio_drawdown must be 0-1, got {self.risk.max_portfolio_drawdown}"
+            )
 
     def summary(self) -> str:
         """Get configuration summary"""
@@ -359,7 +362,9 @@ class EntryLogicConfig:
         lines.append(f"  Min R:R Ratio: {self.risk.min_risk_reward}")
         lines.append(f"  Stop Loss ATR: {self.risk.stop_loss_atr_multiplier}x")
         lines.append(f"  Max Portfolio Drawdown: {self.risk.max_portfolio_drawdown*100}%")
-        lines.append(f"  Position Multiplier: {self.risk.position_multiplier_min} - {self.risk.position_multiplier_max}")
+        lines.append(
+            f"  Position Multiplier: {self.risk.position_multiplier_min} - {self.risk.position_multiplier_max}"
+        )
 
         lines.append("\n📈 Market Regime Adjustments:")
         lines.append(f"  Bull Adjustment: {self.regime.bull_confidence_adjustment:+d}")

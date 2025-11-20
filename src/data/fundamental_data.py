@@ -130,7 +130,9 @@ class VNDirectProvider(FundamentalDataProvider):
             # Calculate debt ratio from debt/equity if available
             if fundamental.debt_to_equity is not None:
                 # debt_ratio = debt / (debt + equity) = (debt/equity) / (1 + debt/equity)
-                fundamental.debt_ratio = fundamental.debt_to_equity / (1 + fundamental.debt_to_equity)
+                fundamental.debt_ratio = fundamental.debt_to_equity / (
+                    1 + fundamental.debt_to_equity
+                )
 
             logger.debug(f"✅ Got fundamental data for {symbol} from VNDirect")
             return fundamental
@@ -315,12 +317,16 @@ class FiinTradeProvider(FundamentalDataProvider):
             data = response.json()
 
             return {
-                "last_earnings_date": datetime.fromisoformat(data.get("lastEarningsDate"))
-                if data.get("lastEarningsDate")
-                else None,
-                "next_earnings_date": datetime.fromisoformat(data.get("nextEarningsDate"))
-                if data.get("nextEarningsDate")
-                else None,
+                "last_earnings_date": (
+                    datetime.fromisoformat(data.get("lastEarningsDate"))
+                    if data.get("lastEarningsDate")
+                    else None
+                ),
+                "next_earnings_date": (
+                    datetime.fromisoformat(data.get("nextEarningsDate"))
+                    if data.get("nextEarningsDate")
+                    else None
+                ),
                 "source": "FiinTrade",
             }
 
@@ -362,7 +368,9 @@ class FundamentalDataManager:
 
         logger.info(f"📊 Fundamental Data Manager initialized with {len(self.providers)} providers")
 
-    def get_fundamental_data(self, symbol: str, use_cache: bool = True) -> Optional[FundamentalData]:
+    def get_fundamental_data(
+        self, symbol: str, use_cache: bool = True
+    ) -> Optional[FundamentalData]:
         """
         Get fundamental data with fallback across multiple providers
 
@@ -378,7 +386,9 @@ class FundamentalDataManager:
             cached = self.cache[symbol]
             age_hours = (datetime.now() - cached.timestamp).total_seconds() / 3600
             if age_hours < self.cache_ttl_hours and cached.is_valid():
-                logger.debug(f"📦 Using cached fundamental data for {symbol} (age: {age_hours:.1f}h)")
+                logger.debug(
+                    f"📦 Using cached fundamental data for {symbol} (age: {age_hours:.1f}h)"
+                )
                 return cached
 
         # Try each provider until we get valid data
@@ -474,7 +484,9 @@ if __name__ == "__main__":
         print(f"  ROE: {data.roe}%")
         print(f"  ROA: {data.roa}%")
         print(f"  EPS: {data.eps}")
-        print(f"  Market Cap: {data.market_cap:,.0f} VND" if data.market_cap else "  Market Cap: N/A")
+        print(
+            f"  Market Cap: {data.market_cap:,.0f} VND" if data.market_cap else "  Market Cap: N/A"
+        )
         print(f"  Valid: {data.is_valid()}")
     else:
         print(f"❌ No fundamental data available for {symbol}")

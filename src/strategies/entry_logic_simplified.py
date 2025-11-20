@@ -137,8 +137,8 @@ class SimplifiedEntryLogic:
             self._adjust_thresholds_for_market(market_regime)
 
             # STEP 2: Validate initial signal
-            is_valid, signal_or_reason, base_confidence, current_price = self._validate_initial_signal(
-                df, ml_signal
+            is_valid, signal_or_reason, base_confidence, current_price = (
+                self._validate_initial_signal(df, ml_signal)
             )
             if not is_valid:
                 return self._no_signal(signal_or_reason)
@@ -166,7 +166,9 @@ class SimplifiedEntryLogic:
             confidence_after_filters = max(0, min(confidence_after_filters, 100))
 
             # Apply performance feedback
-            adjusted_confidence, perf_msg = self._apply_performance_feedback(confidence_after_filters)
+            adjusted_confidence, perf_msg = self._apply_performance_feedback(
+                confidence_after_filters
+            )
             if perf_msg:
                 (warnings if perf_msg.startswith("⚠️") else reasons).append(perf_msg)
 
@@ -191,7 +193,9 @@ class SimplifiedEntryLogic:
 
             # Entry optimization
             optimized_entry = self._optimize_entry_price(df, close_price, sr_check, market_regime)
-            entry_price = DataValidator.validate_price(optimized_entry["entry_price"], "entry_price")
+            entry_price = DataValidator.validate_price(
+                optimized_entry["entry_price"], "entry_price"
+            )
 
             # Limit order logic
             is_limit_order = optimized_entry.get("entry_type") in ["PULLBACK", "BREAKOUT"]
@@ -200,7 +204,10 @@ class SimplifiedEntryLogic:
             price_diff_pct = (
                 abs(entry_price - close_price) / close_price * 100 if close_price > 0 else 0
             )
-            if is_limit_order and price_diff_pct < self.config.entry_optimization.limit_order_min_diff:
+            if (
+                is_limit_order
+                and price_diff_pct < self.config.entry_optimization.limit_order_min_diff
+            ):
                 is_limit_order = False
                 limit_price = None
                 entry_price = close_price
@@ -294,8 +301,7 @@ class SimplifiedEntryLogic:
         if not liquidity_check["sufficient"]:
             tier = liquidity_check.get("tier", "unknown")
             warning_msg = (
-                f"⚠️ Low liquidity ({tier} cap) "
-                f"({liquidity_check['avg_value']/1e9:.2f}B VND)"
+                f"⚠️ Low liquidity ({tier} cap) " f"({liquidity_check['avg_value']/1e9:.2f}B VND)"
             )
             warnings.append(warning_msg)
             self._add_adjustment(
@@ -385,7 +391,9 @@ class SimplifiedEntryLogic:
         volume_check = self._check_volume_confirmation(df, market_regime)
         if not volume_check["confirmed"]:
             if self.config.require_volume_confirmation:
-                breakdown.append({"filter": "volume", "delta": None, "note": volume_check["reason"]})
+                breakdown.append(
+                    {"filter": "volume", "delta": None, "note": volume_check["reason"]}
+                )
                 return False, [], [], [], breakdown
             else:
                 warnings.append(f"⚠️ Volume: {volume_check['reason']}")
@@ -445,9 +453,7 @@ class SimplifiedEntryLogic:
         # ============================================================
         correlation_check = self._check_portfolio_correlation(df, self._current_symbol)
         if correlation_check["too_high"]:
-            warning_msg = (
-                f"⚠️ High correlation: {correlation_check['max_correlation']:.2f}"
-            )
+            warning_msg = f"⚠️ High correlation: {correlation_check['max_correlation']:.2f}"
             warnings.append(warning_msg)
             self._add_adjustment(
                 adjustments,
@@ -457,7 +463,9 @@ class SimplifiedEntryLogic:
                 warning_msg,
             )
         elif correlation_check["good_diversification"]:
-            reasons.append(f"✅ Good diversification (corr: {correlation_check['max_correlation']:.2f})")
+            reasons.append(
+                f"✅ Good diversification (corr: {correlation_check['max_correlation']:.2f})"
+            )
             self._add_adjustment(
                 adjustments,
                 breakdown,
@@ -759,7 +767,9 @@ class SimplifiedEntryLogic:
 
         return {
             "overbought": rsi > self.config.filters.rsi_overbought,
-            "optimal": self.config.filters.rsi_optimal_min <= rsi <= self.config.filters.rsi_optimal_max,
+            "optimal": self.config.filters.rsi_optimal_min
+            <= rsi
+            <= self.config.filters.rsi_optimal_max,
             "oversold": rsi < self.config.filters.rsi_oversold,
             "value": rsi,
         }

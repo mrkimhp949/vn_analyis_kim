@@ -362,7 +362,9 @@ class AdvancedTechnicalAnalysis:
             support = safe_rolling_operation(df, "low", 20, "min", 0)
             resistance = safe_rolling_operation(df, "high", 20, "max", 0)
 
-            distance_to_support = ((current_price - support) / support) * 100 if support > 0 else 100
+            distance_to_support = (
+                ((current_price - support) / support) * 100 if support > 0 else 100
+            )
             distance_to_resistance = (
                 ((resistance - current_price) / current_price) * 100 if current_price > 0 else 100
             )
@@ -395,9 +397,7 @@ class AdvancedTechnicalAnalysis:
             logger.warning(f"⚠️ Support/Resistance analysis error: {e}")
             return 0.0
 
-    def _analyze_relative_strength(
-        self, df: pd.DataFrame, index_df: pd.DataFrame
-    ) -> float:
+    def _analyze_relative_strength(self, df: pd.DataFrame, index_df: pd.DataFrame) -> float:
         """
         Analyze relative strength vs market index
         Returns: -1.0 to +1.0
