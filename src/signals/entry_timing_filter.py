@@ -140,9 +140,7 @@ class EntryTimingFilter:
             components=components,
         )
 
-    def _check_time_of_day(
-        self, current_time: pd.Timestamp, strict_mode: bool
-    ) -> Dict[str, any]:
+    def _check_time_of_day(self, current_time: pd.Timestamp, strict_mode: bool) -> Dict[str, any]:
         """Check if time of day is suitable for entry"""
         current_time_only = current_time.time()
 
@@ -239,9 +237,12 @@ class EntryTimingFilter:
 
         # CHECK: Acceptable volume (50%-100%)
         # Linear interpolation between 0.9 and 1.0
-        adjustment = 0.9 + (volume_ratio - self.min_volume_ratio) / (
-            self.optimal_volume_ratio - self.min_volume_ratio
-        ) * 0.1
+        adjustment = (
+            0.9
+            + (volume_ratio - self.min_volume_ratio)
+            / (self.optimal_volume_ratio - self.min_volume_ratio)
+            * 0.1
+        )
 
         return {
             "allowed": True,

@@ -127,9 +127,7 @@ def demo_feature_importance():
                 f"  - Could reduce from {len(predictor.feature_importance)} "
                 f"to {len(threshold_80)} features"
             )
-            print(
-                f"  - This would speed up training/prediction and reduce overfitting risk\n"
-            )
+            print(f"  - This would speed up training/prediction and reduce overfitting risk\n")
 
             # Show least important features
             print("\n🗑️  LEAST IMPORTANT FEATURES (candidates for removal):")
@@ -177,9 +175,7 @@ def demo_position_sizing_with_regime():
     print(f"📈 Example Trade: {symbol}")
     print(f"  Entry Price:   {entry_price:,} VND")
     print(f"  Stop Loss:     {stop_loss:,} VND  (-{(1-stop_loss/entry_price)*100:.1f}%)")
-    print(
-        f"  Take Profit:   {take_profit:,} VND  (+{(take_profit/entry_price-1)*100:.1f}%)"
-    )
+    print(f"  Take Profit:   {take_profit:,} VND  (+{(take_profit/entry_price-1)*100:.1f}%)")
     print(f"  Confidence:    {confidence}%")
     print()
 

@@ -214,9 +214,7 @@ class MLPredictor:
                 )
 
             # Find features for cumulative threshold
-            selected_features = importance_df[
-                importance_df["cumulative"] <= cumulative_threshold
-            ]
+            selected_features = importance_df[importance_df["cumulative"] <= cumulative_threshold]
             # Always include at least one more feature to exceed threshold
             if len(selected_features) < len(importance_df):
                 selected_features = importance_df.iloc[: len(selected_features) + 1]
@@ -240,9 +238,7 @@ class MLPredictor:
             logger.error(f"❌ Error analyzing feature importance: {e}", exc_info=True)
             return None
 
-    def select_top_features(
-        self, X: np.ndarray, cumulative_threshold: float = 0.8
-    ) -> np.ndarray:
+    def select_top_features(self, X: np.ndarray, cumulative_threshold: float = 0.8) -> np.ndarray:
         """
         Select top features based on importance
 

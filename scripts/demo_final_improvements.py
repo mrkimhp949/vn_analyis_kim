@@ -99,7 +99,8 @@ def demo_entry_timing_filter():
 
     print("\n" + "-" * 80)
     print("\n💡 USAGE IN TRADING:")
-    print("""
+    print(
+        """
 from src.signals import validate_entry_timing
 
 # Before entering a trade
@@ -119,7 +120,8 @@ if result.allowed:
         execute_trade(...)
 else:
     logger.warning(f"Entry blocked: {result.reason}")
-    """)
+    """
+    )
     print("-" * 80 + "\n")
 
 
@@ -232,7 +234,8 @@ def demo_portfolio_risk_monitor():
     # Usage guide
     print("-" * 80)
     print("\n💡 USAGE IN TRADING BOT:")
-    print("""
+    print(
+        """
 from src.risk import get_portfolio_monitor
 
 # Initialize monitor once at startup
@@ -263,7 +266,8 @@ print(monitor.get_risk_summary())
 
 # Get data for dashboard/API
 dashboard_data = monitor.get_dashboard_data()
-    """)
+    """
+    )
     print("-" * 80 + "\n")
 
 

@@ -218,8 +218,7 @@ class PortfolioRiskMonitor:
 
         # Convert to percentages
         sector_exposures = {
-            sector: (value / self.total_capital) * 100
-            for sector, value in sector_exposures.items()
+            sector: (value / self.total_capital) * 100 for sector, value in sector_exposures.items()
         }
 
         # Correlation risk (simplified - assume 50% correlation)
@@ -305,9 +304,7 @@ class PortfolioRiskMonitor:
                 f"exceeds limit ({self.max_position_size*100:.0f}%)"
             )
         elif largest_position_pct >= self.alert_thresholds["position_warning"] * 100:
-            alerts.append(
-                f"⚠️ WARNING: Large position detected ({largest_position_pct:.1f}%)"
-            )
+            alerts.append(f"⚠️ WARNING: Large position detected ({largest_position_pct:.1f}%)")
 
         # Sector exposure alerts
         for sector, exposure_pct in sector_exposures.items():
@@ -317,9 +314,7 @@ class PortfolioRiskMonitor:
                     f"exceeds limit ({self.max_sector_exposure*100:.0f}%)"
                 )
             elif exposure_pct >= self.alert_thresholds["sector_warning"] * 100:
-                alerts.append(
-                    f"⚠️ WARNING: High {sector} sector exposure ({exposure_pct:.1f}%)"
-                )
+                alerts.append(f"⚠️ WARNING: High {sector} sector exposure ({exposure_pct:.1f}%)")
 
         return alerts
 
