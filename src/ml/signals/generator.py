@@ -145,75 +145,104 @@ class MLSignalGenerator:
             return self._fallback_technical_analysis(df)
 
     def _fallback_technical_analysis(self, df):
-        """Phân tích kỹ thuật khi ML không khả dụng"""
+        """
+        IMPROVED: Use advanced technical analysis fallback
+        Much more sophisticated than basic EMA/RSI checks
+        """
         try:
-            # Cố gắng thêm các feature cơ bản mà không cần index_df
-            if "rsi" not in df.columns:
-                df = add_ml_features(df.copy(), index_df=None)
+            # Use advanced technical fallback
+            from src.ml.signals.technical_fallback import analyze_technical
 
-            # Get latest row for analysis
-            latest = df.iloc[-1]
+            # Try to load index for better analysis
+            index_df = None
+            try:
+                index_df = load_data("VNINDEX", lookback=200, is_index=True)
+            except Exception:
+                pass
 
-            # Simple technical signals
-            signal = "HOLD"
-            confidence = 0
-            reasons = []
-
-            # EMA crossover
-            ema20 = latest.get("ema20", 0)
-            ema50 = latest.get("ema50", 0)
-            if ema20 > ema50:
-                signal = "BUY"
-                confidence += 30
-                reasons.append("EMA20 > EMA50")
-            else:
-                signal = "SELL"
-                confidence += 20
-                reasons.append("EMA20 < EMA50")
-
-            # RSI
-            rsi = latest.get("rsi", 50)
-            if rsi < 35:  # Nới lỏng điều kiện mua
-                signal = "BUY"
-                confidence += 40
-                reasons.append(f"RSI potential reversal ({rsi:.1f})")
-            elif rsi > 65:  # Nới lỏng điều kiện bán
-                signal = "SELL"
-                confidence += 40
-                reasons.append(f"RSI potential peak ({rsi:.1f})")
-
-            # MACD
-            macd_diff = latest.get("macd_dif", 0)
-            if macd_diff > 0:
-                confidence += 10
-                reasons.append("MACD bullish")
-            else:
-                confidence -= 10
-                reasons.append("MACD bearish")
+            # Run advanced technical analysis
+            tech_signal = analyze_technical(df, index_df)
 
             return {
-                "signal": signal,
-                "confidence": min(confidence, 100),
-                "ml_score": 0.5,
-                "technical_score": {"trend": 0, "momentum": 0, "volatility": 0},
-                "reason": "Fallback: " + " | ".join(reasons),
-                "price": latest["close"],
-                "rsi": rsi,
-                "ema_trend": "UP" if ema20 > ema50 else "DOWN",
+                "signal": tech_signal.signal,
+                "confidence": tech_signal.confidence,
+                "ml_score": tech_signal.ml_score,  # 0.5 for technical-only
+                "technical_score": tech_signal.components,
+                "reason": tech_signal.reason,
+                "price": safe_get_latest(df, "close", 0),
+                "rsi": safe_get_latest(df, "rsi", 50),
+                "ema_trend": "UP" if tech_signal.components.get("trend", 0) > 0 else "DOWN",
             }
-        except Exception:
-            print("⚠️ Lỗi fallback analysis")
-            # Return default values
-            return {
-                "signal": "HOLD",
-                "confidence": 0,
-                "ml_score": 0.5,
-                "technical_score": {"trend": 0, "momentum": 0, "volatility": 0},
-                "reason": "Lỗi phân tích",
-                "price": 0,
-                "rsi": 50,
-                "ema_trend": "UNKNOWN",
-            }
+
+        except Exception as e:
+            print(f"⚠️ Advanced fallback failed: {e}, using basic fallback")
+
+            # BASIC FALLBACK (last resort)
+            try:
+                if "rsi" not in df.columns:
+                    df = add_ml_features(df.copy(), index_df=None)
+
+                latest = df.iloc[-1]
+
+                # Simple technical signals
+                signal = "HOLD"
+                confidence = 0
+                reasons = []
+
+                # EMA crossover
+                ema20 = latest.get("ema20", 0)
+                ema50 = latest.get("ema50", 0)
+                if ema20 > ema50:
+                    signal = "BUY"
+                    confidence += 30
+                    reasons.append("EMA20 > EMA50")
+                else:
+                    signal = "SELL"
+                    confidence += 20
+                    reasons.append("EMA20 < EMA50")
+
+                # RSI
+                rsi = latest.get("rsi", 50)
+                if rsi < 35:
+                    signal = "BUY"
+                    confidence += 40
+                    reasons.append(f"RSI reversal ({rsi:.1f})")
+                elif rsi > 65:
+                    signal = "SELL"
+                    confidence += 40
+                    reasons.append(f"RSI peak ({rsi:.1f})")
+
+                # MACD
+                macd_diff = latest.get("macd_dif", 0)
+                if macd_diff > 0:
+                    confidence += 10
+                    reasons.append("MACD bullish")
+                else:
+                    confidence -= 10
+                    reasons.append("MACD bearish")
+
+                return {
+                    "signal": signal,
+                    "confidence": min(confidence, 100),
+                    "ml_score": 0.5,
+                    "technical_score": {"trend": 0, "momentum": 0, "volatility": 0},
+                    "reason": "Basic Fallback: " + " | ".join(reasons),
+                    "price": latest["close"],
+                    "rsi": rsi,
+                    "ema_trend": "UP" if ema20 > ema50 else "DOWN",
+                }
+            except Exception:
+                print("⚠️ Basic fallback failed")
+                return {
+                    "signal": "HOLD",
+                    "confidence": 0,
+                    "ml_score": 0.5,
+                    "technical_score": {"trend": 0, "momentum": 0, "volatility": 0},
+                    "reason": "Fallback error",
+                    "price": 0,
+                    "rsi": 50,
+                    "ema_trend": "UNKNOWN",
+                }
 
     def _calculate_technical_score(self, latest):
         """Tính điểm Technical Analysis"""

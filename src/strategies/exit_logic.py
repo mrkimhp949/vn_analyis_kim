@@ -371,7 +371,9 @@ class ImprovedExitStrategy:
 
         return {"should_exit": False}
 
-    def _ensure_stop_loss(self, symbol: str, entry_price: float, stop_loss: Optional[float]) -> float:
+    def _ensure_stop_loss(
+        self, symbol: str, entry_price: float, stop_loss: Optional[float]
+    ) -> float:
         """
         Ensure stop loss is a valid float. Fallback to config/default percent if missing.
         """
