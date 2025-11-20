@@ -847,6 +847,22 @@ async def paper_trades_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors in telegram bot"""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+
+    # Try to notify user about the error
+    try:
+        if update and update.effective_message:
+            await update.effective_message.reply_text(
+                "❌ Đã xảy ra lỗi khi xử lý yêu cầu của bạn.\n"
+                "Vui lòng thử lại sau."
+            )
+    except Exception:
+        # If we can't even send the error message, just log it
+        pass
+
+
 async def run_bot_async():
     """Hàm async chạy bot"""
     print("✅ Telegram Bot đang khởi động...")
@@ -868,6 +884,9 @@ async def run_bot_async():
         set_bot_instance(app.bot)
     except ImportError:
         pass
+
+    # Đăng ký error handler TRƯỚC KHI đăng ký các handlers khác
+    app.add_error_handler(error_handler)
 
     # Đăng ký tất cả command handlers
     app.add_handler(CommandHandler("start", start))
@@ -918,15 +937,29 @@ def start_bot_listener():
             print(f"❌ Lỗi cấu hình Telegram Bot: {str(e)}")
             print("💡 Vui lòng kiểm tra TELEGRAM_TOKEN trong .env file")
             break
-        except TgNetworkError:
+        except TgNetworkError as e:
             print(f"⚠️ Mất kết nối Telegram. Thử lại sau {backoff}s...")
+            print(f"   Chi tiết: {str(e)}")
             time.sleep(backoff)
             backoff = min(backoff * 2, 300)
         except Exception as e:
-            print(f"❌ Lỗi Telegram Bot: {str(e)}")
-            import traceback
+            error_name = type(e).__name__
+            error_msg = str(e)
 
-            traceback.print_exc()
+            # Check if it's a network-related error (httpx, connection, timeout, etc.)
+            is_network_error = any(
+                keyword in error_name.lower()
+                for keyword in ["network", "connection", "timeout", "httpx", "http"]
+            )
+
+            if is_network_error:
+                print(f"⚠️ Lỗi kết nối ({error_name}). Thử lại sau {backoff}s...")
+                print(f"   Chi tiết: {error_msg[:200]}")
+            else:
+                print(f"❌ Lỗi Telegram Bot ({error_name}): {error_msg}")
+                import traceback
+                traceback.print_exc()
+
             time.sleep(backoff)
             backoff = min(backoff * 2, 300)
         finally:
