@@ -365,10 +365,16 @@ class PortfolioManager:
             metadata=metadata,
         )
 
-    def refresh_all_prices(self, lookback: int = 5) -> Dict[str, float]:
-        """Load latest close price for each position and update metadata.
+    def refresh_all_prices(self, lookback: int = 5, force_refresh: bool = True) -> Dict[str, float]:
+        """
+        Load latest close price for each position and update metadata.
 
-        Returns: dict mapping symbol -> updated price (or existing avg_price if failed).
+        Args:
+            lookback: Number of days to look back
+            force_refresh: If True, bypass cache and fetch fresh data from API (default: True)
+
+        Returns:
+            dict mapping symbol -> updated price (or existing avg_price if failed).
         """
         positions = self.db.get_positions()
         updated = {}
@@ -380,19 +386,36 @@ class PortfolioManager:
             # Data loader unavailable; skip refresh
             return updated
 
+        logger.info(
+            f"🔄 Refreshing prices for {len(positions)} positions "
+            f"(force_refresh={force_refresh})..."
+        )
+
         for symbol, pos in positions.items():
             try:
-                # Use required_bars=1 since we only need the latest price
-                df = load_data(symbol, lookback=lookback, use_cache=True, required_bars=1)
+                # CRITICAL FIX: Use use_cache=False when force_refresh=True
+                # This ensures we always get the LATEST price from API, not stale cache
+                use_cache = not force_refresh
+                df = load_data(
+                    symbol,
+                    lookback=lookback,
+                    use_cache=use_cache,
+                    required_bars=1,
+                )
                 if df is not None and not df.empty:
                     latest = float(df.iloc[-1]["close"])
                     self.update_position_price(symbol, latest)
                     updated[symbol] = latest
+                    logger.debug(f"  ✅ {symbol}: {latest:,.0f} VNĐ (fresh from API)")
                 else:
                     updated[symbol] = pos["avg_price"]
-            except Exception:
+                    logger.warning(f"  ⚠️ {symbol}: No data, using avg price {pos['avg_price']:,.0f}")
+            except Exception as e:
                 # Keep existing price on failure
                 updated[symbol] = pos["avg_price"]
+                logger.warning(f"  ❌ {symbol}: Error - {e}, using avg price")
+
+        logger.info(f"✅ Price refresh completed: {len(updated)}/{len(positions)} updated")
         return updated
 
     def get_portfolio_value(self) -> Dict:
@@ -553,8 +576,8 @@ class PortfolioManager:
 
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
-        # Fetch and update latest prices for all positions first
-        self.refresh_all_prices(lookback=10)
+        # CRITICAL: Force refresh prices from API (bypass cache) to get REAL-TIME prices
+        self.refresh_all_prices(lookback=10, force_refresh=True)
 
         # Re-fetch positions after price update
         positions = self.db.get_positions()
@@ -600,8 +623,17 @@ class PortfolioManager:
 
         return "\n".join(lines)
 
-    def export_positions_detail(self) -> Dict[str, Dict]:
-        """Structured positions with current price & PnL for API JSON usage."""
+    def export_positions_detail(self, force_refresh: bool = True) -> Dict[str, Dict]:
+        """
+        Structured positions with current price & PnL for API JSON usage.
+
+        Args:
+            force_refresh: If True, refresh prices from API before exporting (default: True)
+        """
+        # Force refresh prices if requested
+        if force_refresh:
+            self.refresh_all_prices(lookback=5, force_refresh=True)
+
         positions = self.db.get_positions()
         detail = {}
         for symbol, pos in positions.items():
