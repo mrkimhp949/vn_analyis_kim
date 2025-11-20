@@ -406,7 +406,6 @@ class PortfolioManager:
                     latest = float(df.iloc[-1]["close"])
                     self.update_position_price(symbol, latest)
                     updated[symbol] = latest
-                    logger.debug(f"  ✅ {symbol}: {latest:,.0f} VNĐ (fresh from API)")
                 else:
                     updated[symbol] = pos["avg_price"]
                     logger.warning(
