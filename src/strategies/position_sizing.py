@@ -86,6 +86,7 @@ class EnhancedPositionSizer:
         portfolio_risk: Optional[float] = None,
         win_rate: Optional[float] = None,
         avg_win_loss_ratio: Optional[float] = None,
+        auto_detect_regime: bool = True,
     ) -> EnhancedPositionSize:
         """
         Calculate position size với Kelly Criterion và portfolio context
@@ -97,17 +98,61 @@ class EnhancedPositionSizer:
             take_profit: Take profit target
             confidence: 0-100
             signal_strength: Signal strength
-            market_regime: Market regime info
+            market_regime: Market regime info (auto-detected if None and auto_detect_regime=True)
             sector: Stock sector
             portfolio_risk: Current portfolio risk percentage
             win_rate: Historical win rate (0-1)
             avg_win_loss_ratio: Average win/loss ratio
+            auto_detect_regime: Auto-detect regime if market_regime not provided (default: True)
 
         Returns:
             EnhancedPositionSize
         """
         warnings = []
         adjustments = {}
+
+        # =================================================================
+        # AUTO-DETECT MARKET REGIME (if not provided)
+        # =================================================================
+        if market_regime is None and auto_detect_regime:
+            try:
+                from src.data.loader import load_data
+                from src.market.regime_detector import detect_regime
+
+                # Load VNINDEX data
+                vnindex_df = load_data("VNINDEX", lookback=250, is_index=True)
+
+                if vnindex_df is not None and not vnindex_df.empty:
+                    regime_obj = detect_regime(vnindex_df)
+
+                    # Convert to dict format
+                    market_regime = {
+                        "regime": regime_obj.regime,
+                        "confidence": regime_obj.confidence,
+                        "tradeable": regime_obj.tradeable,
+                        "description": regime_obj.description,
+                    }
+
+                    logger.info(
+                        f"🔍 Auto-detected market regime: {regime_obj.regime} "
+                        f"(confidence: {regime_obj.confidence:.1f}%, tradeable: {regime_obj.tradeable})"
+                    )
+
+                    # Add to adjustments for tracking
+                    adjustments["regime_auto_detected"] = True
+                    adjustments["regime"] = regime_obj.regime
+
+                    # WARNING: If not tradeable, reduce size significantly
+                    if not regime_obj.tradeable:
+                        warnings.append(
+                            f"⚠️ Market regime {regime_obj.regime} is NOT TRADEABLE. "
+                            "Consider skipping this trade."
+                        )
+                else:
+                    logger.warning("⚠️ Could not load VNINDEX for regime detection")
+            except Exception as e:
+                logger.warning(f"⚠️ Auto regime detection failed: {e}")
+                # Continue without regime info
 
         # =================================================================
         # CHECK 1: Portfolio Risk Limit
@@ -402,7 +447,7 @@ class EnhancedPositionSizer:
             if regime == "BULL":
                 regime_mult = 1.1
             elif regime == "BEAR":
-                regime_mult = 0.5
+                regime_mult = 0.7  # BALANCED: Changed from 0.5 to 0.7 (less restrictive)
             elif regime == "HIGH_VOLATILITY":
                 regime_mult = 0.6
             else:

@@ -559,46 +559,6 @@ class ImprovedEntryLogic:
                 "Good diversification",
             )
 
-        # FILTER 13: EARNINGS/EVENTS (NEW)
-        symbol = getattr(self, "_current_symbol", None)
-        events_check = self._check_earnings_events(df, symbol)
-        if events_check["too_close_to_event"]:
-            warning_msg = f"⚠️ Gần sự kiện: {events_check['event_type']} trong {events_check['days_until']} ngày"
-            warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "events",
-                -25,
-                warning_msg,
-            )  # Penalty lớn - tránh mua trước earnings/events
-        elif events_check["event_passed"]:
-            reasons.append(
-                f"✅ Sự kiện đã qua: {events_check['event_type']} ({events_check['days_since']} ngày trước)"
-            )
-
-        # FILTER 14: FUNDAMENTAL FILTERS (NEW)
-        fundamental_check = self._check_fundamentals(df, symbol, current_price)
-        if fundamental_check["poor_fundamentals"]:
-            warning_msg = f"⚠️ Fundamentals: {fundamental_check['reason']}"
-            warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "fundamentals",
-                -15,
-                warning_msg,
-            )  # Penalty cho poor fundamentals
-        elif fundamental_check["good_fundamentals"]:
-            reasons.append(f"✅ Fundamentals: {fundamental_check['reason']}")
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "fundamentals",
-                +5,
-                "Good fundamentals",
-            )
-
         # Apply scaling factor to all adjustments (only to penalties, not bonuses)
         # This prevents confidence from dropping too fast in favorable markets
         if adjustment_scale != 1.0:
@@ -1759,160 +1719,6 @@ class ImprovedEntryLogic:
             "optimization_reason": None,
         }
 
-    def _check_earnings_events(self, df: pd.DataFrame, symbol: Optional[str]) -> Dict:
-        """
-        NEW: Check earnings dates and major events
-
-        Tránh mua trước earnings/sự kiện quan trọng trong 5 ngày
-        VN stock market: Earnings thường công bố vào cuối quý (tháng 3, 6, 9, 12)
-
-        Returns:
-            Dict with event info
-        """
-        from datetime import datetime, timedelta
-
-        if not symbol:
-            return {
-                "too_close_to_event": False,
-                "event_passed": False,
-                "event_type": None,
-                "days_until": None,
-                "days_since": None,
-            }
-
-        # Get current date
-        today = datetime.now().date()
-
-        # Check earnings dates (quarterly earnings)
-        # VN stocks typically report earnings in: Jan (Q4), Apr (Q1), Jul (Q2), Oct (Q3)
-        current_month = today.month
-        current_day = today.day
-
-        # Estimate next earnings month (simplified - assume quarterly)
-        earnings_months = [1, 4, 7, 10]  # Jan, Apr, Jul, Oct
-
-        days_until_earnings = None
-        earnings_month = None
-
-        for month in earnings_months:
-            # Calculate next earnings date
-            if month > current_month or (month == current_month and current_day < 15):
-                # Next earnings is in this year
-                earnings_date = datetime(today.year, month, 15).date()
-            else:
-                # Next earnings is next year
-                earnings_date = datetime(today.year + 1, month, 15).date()
-
-            days_until = (earnings_date - today).days
-
-            if days_until_earnings is None or days_until < days_until_earnings:
-                days_until_earnings = days_until
-                earnings_month = month
-
-        # Check if too close to earnings (within 5 days)
-        too_close = (
-            days_until_earnings is not None
-            and days_until_earnings <= 5
-            and days_until_earnings >= 0
-        )
-
-        # Check if earnings just passed (within 10 days ago)
-        days_since_earnings = None
-        event_passed = False
-
-        for month in earnings_months:
-            # Check if earnings was recently
-            earnings_date = datetime(today.year, month, 15).date()
-            if today >= earnings_date:
-                days_since = (today - earnings_date).days
-                if days_since <= 10:
-                    days_since_earnings = days_since
-                    event_passed = True
-                    break
-
-        return {
-            "too_close_to_event": too_close,
-            "event_passed": event_passed,
-            "event_type": "Earnings" if too_close or event_passed else None,
-            "days_until": days_until_earnings,
-            "days_since": days_since_earnings,
-        }
-
-    def _check_fundamentals(
-        self, df: pd.DataFrame, symbol: Optional[str], current_price: float
-    ) -> Dict:
-        """
-        NEW: Check fundamental filters (P/E ratio, Debt ratio)
-
-        Note: This is a simplified check. In production, would fetch from external data source.
-        For now, uses heuristics based on price action and market cap estimation.
-
-        Returns:
-            Dict with fundamental analysis
-        """
-        if not symbol or len(df) < 20:
-            return {
-                "poor_fundamentals": False,
-                "good_fundamentals": False,
-                "reason": None,
-            }
-
-        # Get market cap estimate from price * average volume * price
-        # This is a rough estimate
-        avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
-        market_cap_estimate = current_price * avg_volume * 250  # Rough estimate (250 trading days)
-
-        # Try to get P/E from metadata or external source
-        # For now, use heuristics
-        pe_ratio = None
-        debt_ratio = None
-
-        # Attempt to get from metadata if available
-        if "pe_ratio" in df.columns and not df["pe_ratio"].isnull().all():
-            pe_ratio = safe_get_latest(df, "pe_ratio", None)
-
-        if "debt_ratio" in df.columns and not df["debt_ratio"].isnull().all():
-            debt_ratio = safe_get_latest(df, "debt_ratio", None)
-
-        # If no data available, use conservative approach - don't penalize
-        # In production, would fetch from fundamental data API
-        if pe_ratio is None and debt_ratio is None:
-            return {
-                "poor_fundamentals": False,
-                "good_fundamentals": False,
-                "reason": "Fundamental data unavailable",
-            }
-
-        reasons = []
-        poor_fundamentals = False
-
-        # P/E Ratio check
-        if pe_ratio is not None:
-            if pe_ratio > 30:
-                poor_fundamentals = True
-                reasons.append(f"P/E cao ({pe_ratio:.1f})")
-            elif pe_ratio < 5:
-                # P/E quá thấp có thể là dấu hiệu vấn đề
-                reasons.append(f"P/E rất thấp ({pe_ratio:.1f})")
-            elif 8 <= pe_ratio <= 20:
-                reasons.append(f"P/E hợp lý ({pe_ratio:.1f})")
-
-        # Debt Ratio check
-        if debt_ratio is not None:
-            if debt_ratio > 0.7:  # 70% debt
-                poor_fundamentals = True
-                reasons.append(f"Nợ cao ({debt_ratio*100:.1f}%)")
-            elif debt_ratio < 0.3:  # < 30% debt
-                reasons.append(f"Nợ thấp ({debt_ratio*100:.1f}%)")
-
-        return {
-            "poor_fundamentals": poor_fundamentals,
-            "good_fundamentals": len(reasons) > 0 and not poor_fundamentals,
-            "reason": " | ".join(reasons) if reasons else None,
-            "pe_ratio": pe_ratio,
-            "debt_ratio": debt_ratio,
-        }
-
     def _calculate_technical_confidence(self, df: pd.DataFrame) -> float:
         """
         Calculate confidence from technical indicators when ML signal is unavailable
@@ -1983,7 +1789,35 @@ class ImprovedEntryLogic:
             return "HOLD"
 
     def _no_signal(self, reason: str, telemetry: Optional[Dict] = None) -> EntrySignal:
-        """Return no signal"""
+        """Return no signal with detailed reason"""
+        # Build detailed warning message
+        warnings = [reason]  # Start with the main reason
+        warning_msg = reason  # Initialize with base reason
+
+        # Add telemetry details if available
+        if telemetry:
+            details = []
+            if "adjustment_breakdown" in telemetry:
+                for adj in telemetry["adjustment_breakdown"]:
+                    if adj.get("delta", 0) < 0:  # Only show negative adjustments (rejections)
+                        detail = f"{adj.get('filter', 'Unknown')}: {adj.get('note', 'No reason')}"
+                        details.append(detail)
+                        warnings.append(detail)  # Add each detail as a separate warning
+
+            # Add base confidence if available
+            if "base_confidence" in telemetry:
+                details.append(f"Base confidence: {telemetry['base_confidence']:.1f}%")
+
+            # Update warning_msg with details if available
+            if details:
+                warning_msg = f"{reason} ({'; '.join(details)})"
+
+        # Log the detailed reason at DEBUG level (not WARNING)
+        if self._current_symbol:
+            logger.debug(f"[No Signal] {self._current_symbol}: {warning_msg}")
+        else:
+            logger.debug(f"[No Signal] {warning_msg}")
+
         return EntrySignal(
             should_enter=False,
             signal_type="HOLD",
@@ -1991,7 +1825,7 @@ class ImprovedEntryLogic:
             strength=SignalStrength.NO_SIGNAL,
             position_size_multiplier=0.0,
             reasons=[],
-            warnings=[reason],
+            warnings=warnings,
             entry_price=0,
             stop_loss=0,
             take_profit_targets=[],

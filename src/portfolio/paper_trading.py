@@ -328,11 +328,11 @@ class PaperTradingAccount:
 
         daily_record = {
             "date": today,
-            "equity": portfolio_value.get("total_positions_value", 0) + current_cash,
-            "pnl": portfolio_value.get("total_pnl", 0),
-            "return_pct": portfolio_value.get("total_pnl_percent", 0),
+            "equity": portfolio_value.get("total_value", 0) + current_cash,
+            "pnl": portfolio_value.get("pnl", 0),
+            "return_pct": portfolio_value.get("pnl_percent", 0),
             "cash": current_cash,
-            "positions_value": portfolio_value.get("total_positions_value", 0),
+            "positions_value": portfolio_value.get("total_value", 0),
         }
 
         # Check if already recorded today
@@ -377,10 +377,9 @@ class PaperTradingAccount:
             "buy_trades": len(buy_trades),
             "sell_trades": len(sell_trades),
             "total_commission": total_commission,
-            "current_portfolio_value": portfolio_value.get("total_positions_value", 0)
-            + current_cash,
-            "current_pnl": portfolio_value.get("total_pnl", 0),
-            "current_return_pct": portfolio_value.get("total_pnl_percent", 0),
+            "current_portfolio_value": portfolio_value.get("total_value", 0) + current_cash,
+            "current_pnl": portfolio_value.get("pnl", 0),
+            "current_return_pct": portfolio_value.get("pnl_percent", 0),
             "num_positions": portfolio_value.get("num_positions", 0),
         }
 
@@ -392,17 +391,17 @@ class PaperTradingAccount:
         stats = self.get_statistics()
         portfolio_value = self.get_portfolio_value()
         current_cash = self.account.get("cash", 0)
-        total_value = portfolio_value.get("total_positions_value", 0) + current_cash
+        total_value = portfolio_value.get("total_value", 0) + current_cash
 
         lines = [
             "📊 *Paper Trading Account (DB-backed):*\n",
             f"💰 Vốn ban đầu: {self.initial_capital:,.0f} VNĐ",
             f"💵 Tiền mặt (ước tính): {current_cash:,.0f} VNĐ",
-            f"📈 Giá trị vị thế: {portfolio_value.get('total_positions_value', 0):,.0f} VNĐ",
+            f"📈 Giá trị vị thế: {portfolio_value.get('total_value', 0):,.0f} VNĐ",
             f"💼 Tổng giá trị: {total_value:,.0f} VNĐ",
-            f"{'📈' if portfolio_value.get('total_pnl', 0) >= 0 else '📉'} P&L: "
-            f"{portfolio_value.get('total_pnl', 0):+,.0f} VNĐ "
-            f"({portfolio_value.get('total_pnl_percent', 0):+.2f}%)",
+            f"{'📈' if portfolio_value.get('pnl', 0) >= 0 else '📉'} P&L: "
+            f"{portfolio_value.get('pnl', 0):+,.0f} VNĐ "
+            f"({portfolio_value.get('pnl_percent', 0):+.2f}%)",
             f"📊 Số vị thế: {portfolio_value.get('num_positions', 0)}",
             f"🔄 Tổng giao dịch: {stats.get('total_trades', 0)}",
             f"💸 Tổng phí (ước tính): {stats.get('total_commission', 0):,.0f} VNĐ",

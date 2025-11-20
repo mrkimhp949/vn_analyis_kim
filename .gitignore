@@ -80,3 +80,4 @@ feature_store/*.parquet
 .DS_Store
 Thumbs.db
 data/database/trading.db
+metrics_backup.json

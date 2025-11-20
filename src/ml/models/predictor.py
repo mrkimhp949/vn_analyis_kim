@@ -17,6 +17,8 @@ class MLPredictor:
         self.models_dir = "models"
         self.ml_enabled = True  # NEW: Flag to track if ML is usable
         self.using_dummy_models = False  # NEW: Flag to track dummy models
+        self.feature_importance = None  # NEW: Feature importance scores
+        self.selected_features = None  # NEW: Selected feature indices
         self.ensure_models_dir()
         # Đồng bộ số features mong đợi với features.get_feature_columns()
         try:
@@ -79,6 +81,13 @@ class MLPredictor:
             except Exception:
                 pass
 
+            # NEW: Save feature importance if available
+            if self.feature_importance is not None:
+                importance_path = os.path.join(self.models_dir, "feature_importance.csv")
+                self.feature_importance.to_csv(importance_path, index=False)
+                metadata["has_feature_importance"] = True
+                logger.info(f"✅ Feature importance saved to {importance_path}")
+
             with open(os.path.join(self.models_dir, "model_info.json"), "w") as f:
                 import json
 
@@ -115,6 +124,10 @@ class MLPredictor:
         )
 
         self.rf_model.fit(X_train, y_train)
+
+        # NEW: Analyze feature importance
+        self.analyze_feature_importance()
+
         self.save_models()
         logger.info("✅ Random Forest trained & saved!")
 
@@ -152,6 +165,113 @@ class MLPredictor:
 
         except Exception:
             logger.error("❌ Error during model evaluation")
+
+    def analyze_feature_importance(self, top_n: int = None, cumulative_threshold: float = 0.8):
+        """
+        Analyze and log feature importance from Random Forest
+
+        Args:
+            top_n: Number of top features to display (default: all)
+            cumulative_threshold: Keep features up to this cumulative importance (0.8 = 80%)
+
+        Returns:
+            DataFrame with feature importance
+        """
+        if self.rf_model is None:
+            logger.warning("Model not trained yet. Cannot analyze feature importance.")
+            return None
+
+        try:
+            from src.ml.features.technical import get_feature_columns
+
+            feature_names = get_feature_columns()
+
+            # Get feature importance from Random Forest
+            importances = self.rf_model.feature_importances_
+
+            # Create DataFrame
+            importance_df = pd.DataFrame(
+                {"feature": feature_names, "importance": importances}
+            ).sort_values("importance", ascending=False)
+
+            # Calculate cumulative importance
+            importance_df["cumulative"] = importance_df["importance"].cumsum()
+
+            # Store for later use
+            self.feature_importance = importance_df
+
+            # Log results
+            logger.info("\n" + "=" * 70)
+            logger.info("📊 FEATURE IMPORTANCE ANALYSIS")
+            logger.info("=" * 70)
+
+            display_n = top_n if top_n else len(importance_df)
+            for idx, row in importance_df.head(display_n).iterrows():
+                logger.info(
+                    f"  {idx+1:2d}. {row['feature']:25s} "
+                    f"Importance: {row['importance']:6.4f} "
+                    f"(Cumulative: {row['cumulative']:6.2%})"
+                )
+
+            # Find features for cumulative threshold
+            selected_features = importance_df[importance_df["cumulative"] <= cumulative_threshold]
+            # Always include at least one more feature to exceed threshold
+            if len(selected_features) < len(importance_df):
+                selected_features = importance_df.iloc[: len(selected_features) + 1]
+
+            logger.info("\n" + "-" * 70)
+            logger.info(
+                f"✅ Top {len(selected_features)} features explain "
+                f"{selected_features['cumulative'].iloc[-1]:.1%} of variance"
+            )
+            logger.info(
+                f"   Could reduce from {len(feature_names)} to {len(selected_features)} features"
+            )
+            logger.info("=" * 70 + "\n")
+
+            # Store selected feature indices
+            self.selected_features = selected_features.index.tolist()
+
+            return importance_df
+
+        except Exception as e:
+            logger.error(f"❌ Error analyzing feature importance: {e}", exc_info=True)
+            return None
+
+    def select_top_features(self, X: np.ndarray, cumulative_threshold: float = 0.8) -> np.ndarray:
+        """
+        Select top features based on importance
+
+        Args:
+            X: Feature matrix (n_samples, n_features)
+            cumulative_threshold: Keep features up to this cumulative importance
+
+        Returns:
+            Reduced feature matrix with only top features
+        """
+        if self.feature_importance is None:
+            logger.warning("Feature importance not analyzed. Using all features.")
+            return X
+
+        # Get features that contribute to cumulative threshold
+        selected = self.feature_importance[
+            self.feature_importance["cumulative"] <= cumulative_threshold
+        ]
+
+        # Include one more to exceed threshold
+        if len(selected) < len(self.feature_importance):
+            selected = self.feature_importance.iloc[: len(selected) + 1]
+
+        # Get feature indices
+        feature_indices = selected.index.tolist()
+
+        logger.info(
+            f"🔍 Feature selection: Using {len(feature_indices)}/{X.shape[1]} features "
+            f"(explaining {selected['cumulative'].iloc[-1]:.1%} variance)"
+        )
+
+        # Return selected features
+        return X[:, feature_indices]
 
     def predict(self, X):
         """
@@ -242,6 +362,15 @@ class MLPredictor:
                 # Load models
                 self.rf_model = joblib.load(rf_path)
                 self.scaler = joblib.load(scaler_path)
+
+                # NEW: Load feature importance if available
+                importance_path = os.path.join(self.models_dir, "feature_importance.csv")
+                if os.path.exists(importance_path):
+                    try:
+                        self.feature_importance = pd.read_csv(importance_path)
+                        logger.info(f"✅ Loaded feature importance from {importance_path}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not load feature importance: {e}")
 
                 logger.info(
                     f"✅ Loaded trained models (expecting {self.expected_features} features)"

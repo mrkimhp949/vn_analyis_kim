@@ -89,7 +89,7 @@ class Backtester:
         start_date=None,
         end_date=None,
         lookback=500,
-        confidence_threshold=50,
+        confidence_threshold=45,  # BALANCED: Lowered from 50 to 45 for more signals
     ):
         """
         Chạy backtest trên 1 cổ phiếu với ML + Risk Management
@@ -470,7 +470,7 @@ class Backtester:
         return results
 
     def run_multiple_backtest_parallel(
-        self, symbols, lookback=500, confidence_threshold=50, max_workers=3
+        self, symbols, lookback=500, confidence_threshold=45, max_workers=3  # BALANCED
     ):
         """Chạy backtest song song cho nhiều cổ phiếu"""
         print("🚀 Chạy backtest song song {len(symbols)} mã (workers: {max_workers})")
@@ -693,7 +693,7 @@ class Backtester:
 
             traceback.print_exc()
 
-    def run_multiple_backtest(self, symbols, lookback=500, confidence_threshold=50):
+    def run_multiple_backtest(self, symbols, lookback=500, confidence_threshold=45):  # BALANCED
         """Chạy backtest cho nhiều cổ phiếu
         Thêm tham số confidence_threshold để đồng bộ với giao diện gọi."""
         all_results = []

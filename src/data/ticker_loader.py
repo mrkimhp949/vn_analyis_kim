@@ -12,7 +12,21 @@ import pandas as pd
 
 
 class TickerLoader:
-    """Load và validate tất cả tickers từ List.csv"""
+    """
+    Load và validate tất cả tickers từ List.csv
+
+    Cache Strategy:
+    - Validation cache chỉ valid trong CÙNG NGÀY
+    - Cache tự động expire vào 00:00 mỗi ngày
+    - Lý do: Volume và price thay đổi mỗi ngày giao dịch
+    - Đảm bảo validation luôn dựa trên data mới nhất
+
+    Volume Validation (Hybrid Approach):
+    - Today volume >= 50% of min_volume (đảm bảo thanh khoản TỨC THÌ)
+    - Average 30-day volume >= 100% of min_volume (đảm bảo thanh khoản DÀI HẠN)
+    - Tránh bỏ lỡ cơ hội (ticker có volume đột biến hôm nay)
+    - Tránh vào lệnh không thoát được (ticker "chết" với volume thấp)
+    """
 
     def __init__(self, csv_file="List.csv", cache_file="ticker_validation_cache.json"):
         self.csv_file = csv_file
@@ -40,15 +54,23 @@ class TickerLoader:
         with open(self.cache_file, "w", encoding="utf-8") as f:
             json.dump(self.validation_cache, f, indent=2, ensure_ascii=False)
 
-    def _is_cache_valid(self, symbol: str, max_age_days: int = 7) -> bool:
-        """Check xem cache còn valid không"""
+    def _is_cache_valid(self, symbol: str) -> bool:
+        """
+        Check xem cache còn valid không
+
+        Cache chỉ valid trong CÙNG NGÀY vì volume/price thay đổi mỗi ngày.
+        Cache sẽ expire vào 00:00 của ngày tiếp theo.
+        """
         if symbol in self.validation_cache["validated"]:
             cached_date = self.validation_cache["validated"][symbol].get("date")
             if cached_date:
                 try:
                     cache_time = datetime.fromisoformat(cached_date)
-                    age = (datetime.now() - cache_time).days
-                    return age < max_age_days
+                    today = datetime.now().date()
+                    cache_date = cache_time.date()
+
+                    # Cache chỉ valid nếu cùng ngày
+                    return cache_date == today
                 except (ValueError, TypeError):
                     pass
         return False
@@ -85,17 +107,47 @@ class TickerLoader:
 
     def validate_ticker(self, symbol: str, min_volume: int = 100_000) -> bool:
         """
-        Validate một ticker
+        Validate một ticker với HYBRID volume check
+
+        Kiểm tra CẢ 2 điều kiện:
+        1. Today volume >= 50% min_volume (50k default)
+           → Đảm bảo có thanh khoản TỨC THÌ để vào/ra lệnh
+        2. Average 30-day volume >= 100% min_volume (100k default)
+           → Đảm bảo thanh khoản NHẤT QUÁN, không phải ticker "chết"
+
+        Lợi ích:
+        - Không bỏ lỡ ticker có volume đột biến (breakout, news tích cực)
+        - Không vào lệnh ticker không thanh khoản (khó thoát)
+        - Linh hoạt với các ngày volume thấp tạm thời
+
+        Args:
+            symbol: Mã ticker
+            min_volume: Volume tối thiểu (default: 100,000)
 
         Returns:
             True nếu valid, False nếu invalid
         """
-        # Check cache first
+        # Check validated cache first (same day only)
         if self._is_cache_valid(symbol):
             return True
 
+        # Check invalid cache (also expire same day)
         if symbol in self.validation_cache["invalid"]:
-            return False
+            invalid_date = self.validation_cache["invalid"][symbol].get("date")
+            if invalid_date:
+                try:
+                    invalid_time = datetime.fromisoformat(invalid_date)
+                    today = datetime.now().date()
+                    invalid_cache_date = invalid_time.date()
+
+                    # Nếu invalid cache cùng ngày, skip validation
+                    if invalid_cache_date == today:
+                        return False
+                    # Nếu invalid cache từ ngày khác, xóa và re-validate
+                    else:
+                        del self.validation_cache["invalid"][symbol]
+                except (ValueError, TypeError):
+                    pass
 
         try:
             from src.data.loader import load_data
@@ -112,20 +164,48 @@ class TickerLoader:
                 self._save_cache()
                 return False
 
-            # Check volume
-            avg_volume = df["volume"].mean()
-            if avg_volume < min_volume:
+            # HYBRID VOLUME CHECK: Check both today and average volume
+            # This ensures both immediate and long-term liquidity
+
+            # 1. Today's volume (most recent bar)
+            today_volume = float(df["volume"].iloc[-1])
+
+            # 2. Average volume over lookback period
+            avg_volume = float(df["volume"].mean())
+
+            # Validation criteria:
+            # - Today volume >= 50% of min_volume (ensures immediate liquidity)
+            # - Average volume >= 100% of min_volume (ensures consistent liquidity)
+            min_today_volume = min_volume * 0.5
+            min_avg_volume = min_volume
+
+            # Check today volume
+            if today_volume < min_today_volume:
                 self.validation_cache["invalid"][symbol] = {
-                    "reason": f"Low volume ({avg_volume:,.0f})",
+                    "reason": f"Low today volume ({today_volume:,.0f} < {min_today_volume:,.0f})",
                     "date": datetime.now().isoformat(),
+                    "today_volume": today_volume,
+                    "avg_volume": avg_volume,
                 }
                 self._save_cache()
                 return False
 
-            # Valid - cache it
+            # Check average volume
+            if avg_volume < min_avg_volume:
+                self.validation_cache["invalid"][symbol] = {
+                    "reason": f"Low avg volume ({avg_volume:,.0f} < {min_avg_volume:,.0f})",
+                    "date": datetime.now().isoformat(),
+                    "today_volume": today_volume,
+                    "avg_volume": avg_volume,
+                }
+                self._save_cache()
+                return False
+
+            # Valid - cache it with both metrics
             self.validation_cache["validated"][symbol] = {
                 "date": datetime.now().isoformat(),
-                "avg_volume": float(avg_volume),
+                "today_volume": today_volume,
+                "avg_volume": avg_volume,
             }
             self._save_cache()
             return True

@@ -230,6 +230,16 @@ class PortfolioManager:
         pnl = exit_value - entry_value_of_sold_part
         pnl_percent = (pnl / entry_value_of_sold_part) * 100 if entry_value_of_sold_part > 0 else 0
 
+        # Track partial exit in performance monitor
+        self.monitor.track_trade(
+            symbol=symbol,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            shares=shares_to_sell,
+            entry_date=pos["entry_date"],
+            exit_date=datetime.now().isoformat(),
+        )
+
         # Log the partial sell trade
         self.db.save_trade(
             symbol=symbol,

@@ -344,7 +344,7 @@ class FundamentalDataManager:
 
     def __init__(
         self,
-        vndirect_enabled: bool = True,
+        vndirect_enabled: bool = False,
         ssi_enabled: bool = False,
         fiintrade_enabled: bool = False,
         ssi_api_key: Optional[str] = None,
@@ -430,7 +430,7 @@ _fundamental_manager = None
 
 
 def get_fundamental_manager(
-    vndirect_enabled: bool = True,
+    vndirect_enabled: bool = False,
     ssi_api_key: Optional[str] = None,
     fiintrade_api_key: Optional[str] = None,
 ) -> FundamentalDataManager:

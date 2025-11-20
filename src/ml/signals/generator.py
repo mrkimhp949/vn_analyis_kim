@@ -324,10 +324,11 @@ class MLSignalGenerator:
         confidence = min(abs(combined_signal) * 25 + abs(ml_score - 0.5) * 100, 100)
 
         # Decision
-        if combined_signal >= 1.0:
+        # BALANCED: Lowered BUY threshold from 1.0 to 0.85 for more opportunities
+        if combined_signal >= 0.85:
             signal = "BUY"
             reasons.insert(0, f"ML({ml_score:.2f})")
-        elif combined_signal <= -1.0:
+        elif combined_signal <= -0.85:
             signal = "SELL"
             reasons.insert(0, f"ML({ml_score:.2f})")
         else:
