@@ -377,8 +377,7 @@ class PaperTradingAccount:
             "buy_trades": len(buy_trades),
             "sell_trades": len(sell_trades),
             "total_commission": total_commission,
-            "current_portfolio_value": portfolio_value.get("total_value", 0)
-            + current_cash,
+            "current_portfolio_value": portfolio_value.get("total_value", 0) + current_cash,
             "current_pnl": portfolio_value.get("pnl", 0),
             "current_return_pct": portfolio_value.get("pnl_percent", 0),
             "num_positions": portfolio_value.get("num_positions", 0),

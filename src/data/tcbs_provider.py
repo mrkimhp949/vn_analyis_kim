@@ -9,6 +9,7 @@ from datetime import datetime
 
 try:
     from vnstock import Vnstock
+
     VNSTOCK_AVAILABLE = True
 except ImportError:
     VNSTOCK_AVAILABLE = False
@@ -28,7 +29,7 @@ class TCBSProvider(FundamentalDataProvider):
     2. TCBS (Techcom Securities) - Backup
     """
 
-    def __init__(self, timeout: int = 10, source: str = 'VCI'):
+    def __init__(self, timeout: int = 10, source: str = "VCI"):
         """
         Initialize TCBS provider
 
@@ -37,9 +38,7 @@ class TCBSProvider(FundamentalDataProvider):
             source: Data source ('VCI', 'TCBS', 'MSN', etc.)
         """
         if not VNSTOCK_AVAILABLE:
-            raise ImportError(
-                "vnstock package not installed. Run: pip install vnstock"
-            )
+            raise ImportError("vnstock package not installed. Run: pip install vnstock")
 
         self.timeout = timeout
         self.source = source
@@ -61,7 +60,7 @@ class TCBSProvider(FundamentalDataProvider):
             stock = self.vnstock.stock(symbol=symbol, source=self.source)
 
             # Get financial ratios (yearly data, Vietnamese language)
-            ratios = stock.finance.ratio(period='year', lang='vi')
+            ratios = stock.finance.ratio(period="year", lang="vi")
 
             if ratios.empty or len(ratios) == 0:
                 logger.warning(f"No ratio data for {symbol} from {self.source}")
@@ -72,29 +71,25 @@ class TCBSProvider(FundamentalDataProvider):
 
             # Extract P/E ratio
             pe_ratio = self._extract_value(
-                latest,
-                ['pe', 'priceToEarning', 'PE', 'p/e', 'price_to_earning']
+                latest, ["pe", "priceToEarning", "PE", "p/e", "price_to_earning"]
             )
 
             # Extract P/B ratio
             pb_ratio = self._extract_value(
-                latest,
-                ['pb', 'priceToBook', 'PB', 'p/b', 'price_to_book']
+                latest, ["pb", "priceToBook", "PB", "p/b", "price_to_book"]
             )
 
             # Extract other ratios
-            roe = self._extract_value(latest, ['roe', 'ROE', 'returnOnEquity'])
-            roa = self._extract_value(latest, ['roa', 'ROA', 'returnOnAssets'])
+            roe = self._extract_value(latest, ["roe", "ROE", "returnOnEquity"])
+            roa = self._extract_value(latest, ["roa", "ROA", "returnOnAssets"])
             debt_to_equity = self._extract_value(
-                latest,
-                ['de', 'debtToEquity', 'DE', 'debt_equity']
+                latest, ["de", "debtToEquity", "DE", "debt_equity"]
             )
-            eps = self._extract_value(latest, ['eps', 'EPS', 'earningsPerShare'])
+            eps = self._extract_value(latest, ["eps", "EPS", "earningsPerShare"])
 
             # Try to get market cap
             market_cap = self._extract_value(
-                latest,
-                ['marketCap', 'market_cap', 'von_hoa', 'vonHoa']
+                latest, ["marketCap", "market_cap", "von_hoa", "vonHoa"]
             )
 
             # Create FundamentalData object
@@ -119,22 +114,17 @@ class TCBSProvider(FundamentalDataProvider):
                 )
                 return fundamental
             else:
-                logger.warning(
-                    f"⚠️ {symbol} data from {self.source} missing P/E and P/B"
-                )
+                logger.warning(f"⚠️ {symbol} data from {self.source} missing P/E and P/B")
                 return None
 
         except Exception as e:
             logger.warning(f"⚠️ {self.source} error for {symbol}: {e}")
 
             # If VCI failed, try TCBS as fallback
-            if self.source == 'VCI':
+            if self.source == "VCI":
                 logger.info(f"🔄 Trying TCBS fallback for {symbol}...")
                 try:
-                    fallback_provider = TCBSProvider(
-                        timeout=self.timeout,
-                        source='TCBS'
-                    )
+                    fallback_provider = TCBSProvider(timeout=self.timeout, source="TCBS")
                     return fallback_provider.get_fundamental_data(symbol)
                 except Exception as fallback_error:
                     logger.warning(f"⚠️ TCBS fallback also failed: {fallback_error}")
@@ -181,7 +171,7 @@ class TCBSProvider(FundamentalDataProvider):
 
         val_str = str(val).lower().strip()
 
-        if val_str in ['nan', 'none', '', 'null', 'n/a', '-']:
+        if val_str in ["nan", "none", "", "null", "n/a", "-"]:
             return False
 
         return True
@@ -200,7 +190,7 @@ class TCBSProvider(FundamentalDataProvider):
 
 
 # Convenience function
-def get_tcbs_fundamental_data(symbol: str, source: str = 'VCI') -> Optional[FundamentalData]:
+def get_tcbs_fundamental_data(symbol: str, source: str = "VCI") -> Optional[FundamentalData]:
     """
     Quick function to get fundamental data from TCBS/VCI
 
@@ -228,7 +218,7 @@ if __name__ == "__main__":
     for symbol in test_symbols:
         print(f"\n📊 Testing {symbol}...")
 
-        data = get_tcbs_fundamental_data(symbol, source='VCI')
+        data = get_tcbs_fundamental_data(symbol, source="VCI")
 
         if data and data.is_valid():
             print(f"✅ {symbol} Fundamental Data:")

@@ -855,8 +855,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if update and update.effective_message:
             await update.effective_message.reply_text(
-                "❌ Đã xảy ra lỗi khi xử lý yêu cầu của bạn.\n"
-                "Vui lòng thử lại sau."
+                "❌ Đã xảy ra lỗi khi xử lý yêu cầu của bạn.\n" "Vui lòng thử lại sau."
             )
     except Exception:
         # If we can't even send the error message, just log it
@@ -958,6 +957,7 @@ def start_bot_listener():
             else:
                 print(f"❌ Lỗi Telegram Bot ({error_name}): {error_msg}")
                 import traceback
+
                 traceback.print_exc()
 
             time.sleep(backoff)
