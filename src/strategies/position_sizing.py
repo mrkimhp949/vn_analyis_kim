@@ -447,7 +447,7 @@ class EnhancedPositionSizer:
             if regime == "BULL":
                 regime_mult = 1.1
             elif regime == "BEAR":
-                regime_mult = 0.5
+                regime_mult = 0.7  # BALANCED: Changed from 0.5 to 0.7 (less restrictive)
             elif regime == "HIGH_VOLATILITY":
                 regime_mult = 0.6
             else:
