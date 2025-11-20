@@ -20,6 +20,12 @@ class TickerLoader:
     - Cache tự động expire vào 00:00 mỗi ngày
     - Lý do: Volume và price thay đổi mỗi ngày giao dịch
     - Đảm bảo validation luôn dựa trên data mới nhất
+
+    Volume Validation (Hybrid Approach):
+    - Today volume >= 50% of min_volume (đảm bảo thanh khoản TỨC THÌ)
+    - Average 30-day volume >= 100% of min_volume (đảm bảo thanh khoản DÀI HẠN)
+    - Tránh bỏ lỡ cơ hội (ticker có volume đột biến hôm nay)
+    - Tránh vào lệnh không thoát được (ticker "chết" với volume thấp)
     """
 
     def __init__(self, csv_file="List.csv", cache_file="ticker_validation_cache.json"):
@@ -101,7 +107,22 @@ class TickerLoader:
 
     def validate_ticker(self, symbol: str, min_volume: int = 100_000) -> bool:
         """
-        Validate một ticker
+        Validate một ticker với HYBRID volume check
+
+        Kiểm tra CẢ 2 điều kiện:
+        1. Today volume >= 50% min_volume (50k default)
+           → Đảm bảo có thanh khoản TỨC THÌ để vào/ra lệnh
+        2. Average 30-day volume >= 100% min_volume (100k default)
+           → Đảm bảo thanh khoản NHẤT QUÁN, không phải ticker "chết"
+
+        Lợi ích:
+        - Không bỏ lỡ ticker có volume đột biến (breakout, news tích cực)
+        - Không vào lệnh ticker không thanh khoản (khó thoát)
+        - Linh hoạt với các ngày volume thấp tạm thời
+
+        Args:
+            symbol: Mã ticker
+            min_volume: Volume tối thiểu (default: 100,000)
 
         Returns:
             True nếu valid, False nếu invalid
@@ -143,20 +164,48 @@ class TickerLoader:
                 self._save_cache()
                 return False
 
-            # Check volume
-            avg_volume = df["volume"].mean()
-            if avg_volume < min_volume:
+            # HYBRID VOLUME CHECK: Check both today and average volume
+            # This ensures both immediate and long-term liquidity
+
+            # 1. Today's volume (most recent bar)
+            today_volume = float(df["volume"].iloc[-1])
+
+            # 2. Average volume over lookback period
+            avg_volume = float(df["volume"].mean())
+
+            # Validation criteria:
+            # - Today volume >= 50% of min_volume (ensures immediate liquidity)
+            # - Average volume >= 100% of min_volume (ensures consistent liquidity)
+            min_today_volume = min_volume * 0.5
+            min_avg_volume = min_volume
+
+            # Check today volume
+            if today_volume < min_today_volume:
                 self.validation_cache["invalid"][symbol] = {
-                    "reason": f"Low volume ({avg_volume:,.0f})",
+                    "reason": f"Low today volume ({today_volume:,.0f} < {min_today_volume:,.0f})",
                     "date": datetime.now().isoformat(),
+                    "today_volume": today_volume,
+                    "avg_volume": avg_volume,
                 }
                 self._save_cache()
                 return False
 
-            # Valid - cache it
+            # Check average volume
+            if avg_volume < min_avg_volume:
+                self.validation_cache["invalid"][symbol] = {
+                    "reason": f"Low avg volume ({avg_volume:,.0f} < {min_avg_volume:,.0f})",
+                    "date": datetime.now().isoformat(),
+                    "today_volume": today_volume,
+                    "avg_volume": avg_volume,
+                }
+                self._save_cache()
+                return False
+
+            # Valid - cache it with both metrics
             self.validation_cache["validated"][symbol] = {
                 "date": datetime.now().isoformat(),
-                "avg_volume": float(avg_volume),
+                "today_volume": today_volume,
+                "avg_volume": avg_volume,
             }
             self._save_cache()
             return True
