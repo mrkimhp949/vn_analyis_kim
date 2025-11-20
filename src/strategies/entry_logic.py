@@ -1792,6 +1792,7 @@ class ImprovedEntryLogic:
         """Return no signal with detailed reason"""
         # Build detailed warning message
         warnings = [reason]  # Start with the main reason
+        warning_msg = reason  # Initialize with base reason
 
         # Add telemetry details if available
         if telemetry:
@@ -1807,8 +1808,7 @@ class ImprovedEntryLogic:
             if "base_confidence" in telemetry:
                 details.append(f"Base confidence: {telemetry['base_confidence']:.1f}%")
 
-            warning_msg = f"{reason} ({'; '.join(details)})" if details else reason
-
+            # Update warning_msg with details if available
             if details:
                 warning_msg = f"{reason} ({'; '.join(details)})"
 
