@@ -104,7 +104,9 @@ class SimpleBacktester:
             # Check if we have a position
             if position is not None:
                 # Check exit conditions (simple: stop loss or take profit)
-                pnl_pct = ((current_price - position["entry_price"]) / position["entry_price"]) * 100
+                pnl_pct = (
+                    (current_price - position["entry_price"]) / position["entry_price"]
+                ) * 100
 
                 exit_reason = None
                 if current_price <= position["stop_loss"]:

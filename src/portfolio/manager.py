@@ -409,7 +409,9 @@ class PortfolioManager:
                     logger.debug(f"  ✅ {symbol}: {latest:,.0f} VNĐ (fresh from API)")
                 else:
                     updated[symbol] = pos["avg_price"]
-                    logger.warning(f"  ⚠️ {symbol}: No data, using avg price {pos['avg_price']:,.0f}")
+                    logger.warning(
+                        f"  ⚠️ {symbol}: No data, using avg price {pos['avg_price']:,.0f}"
+                    )
             except Exception as e:
                 # Keep existing price on failure
                 updated[symbol] = pos["avg_price"]
