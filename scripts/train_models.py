@@ -4,17 +4,23 @@ Unified ML Model Training Script
 Train RF + XGBoost ensemble with enhanced features (28+)
 
 Usage:
-    python scripts/train_models.py [--symbols SYMBOLS] [--lookback DAYS]
+    python scripts/train_models.py [OPTIONS]
 
 Examples:
-    # Train with default symbols (VN30)
+    # Train with quality tickers (default, 200 mã chất lượng cao)
     python scripts/train_models.py
 
     # Train with specific symbols
-    python scripts/train_models.py --symbols VNM,FPT,VCB
+    python scripts/train_models.py --symbols VNM,FPT,VCB,HPG
+
+    # Train with custom ticker file
+    python scripts/train_models.py --ticker-file my_tickers.txt
 
     # Train with more historical data
     python scripts/train_models.py --lookback 1000
+
+    # Train with fewer symbols (faster testing)
+    python scripts/train_models.py --max-symbols 50
 """
 
 import argparse
@@ -182,25 +188,38 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Train with default VN30 symbols
+  # Train with quality tickers (default, ~200 mã chất lượng cao)
   python scripts/train_models.py
 
   # Train with specific symbols
   python scripts/train_models.py --symbols VNM,FPT,VCB,HPG
 
+  # Train with custom ticker file
+  python scripts/train_models.py --ticker-file my_tickers.txt
+
   # Train with more historical data
   python scripts/train_models.py --lookback 1000
 
-  # Train with fewer symbols (faster)
-  python scripts/train_models.py --max-symbols 20
-        """,
+  # Train with fewer symbols (faster testing)
+  python scripts/train_models.py --max-symbols 50
+
+  # Generate quality tickers first (run once)
+  python scripts/filter_quality_tickers.py
+        """
     )
 
     parser.add_argument(
         "--symbols",
         type=str,
         default=None,
-        help="Comma-separated list of symbols (default: VN30 from config)",
+        help="Comma-separated list of symbols (default: quality_tickers.txt or VN30)"
+    )
+
+    parser.add_argument(
+        "--ticker-file",
+        type=str,
+        default="quality_tickers.txt",
+        help="File containing ticker symbols (one per line, default: quality_tickers.txt)"
     )
 
     parser.add_argument(
@@ -208,7 +227,10 @@ Examples:
     )
 
     parser.add_argument(
-        "--max-symbols", type=int, default=50, help="Maximum number of symbols to use (default: 50)"
+        "--max-symbols",
+        type=int,
+        default=200,
+        help="Maximum number of symbols to use (default: 200)"
     )
 
     parser.add_argument(
@@ -221,15 +243,56 @@ Examples:
     return parser.parse_args()
 
 
+def load_symbols_from_file(filepath: str) -> list:
+    """
+    Load ticker symbols from file (one per line)
+
+    Args:
+        filepath: Path to ticker file
+
+    Returns:
+        List of ticker symbols
+    """
+    symbols = []
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                ticker = line.strip().upper()
+                if ticker and not ticker.startswith('#'):  # Skip comments
+                    symbols.append(ticker)
+
+        logger.info(f"✅ Loaded {len(symbols)} symbols from {filepath}")
+        return symbols
+
+    except FileNotFoundError:
+        logger.warning(f"⚠️ File {filepath} not found")
+        return []
+    except Exception as e:
+        logger.error(f"❌ Error reading {filepath}: {e}")
+        return []
+
+
 def main():
     """Main training pipeline"""
     args = parse_args()
 
-    # Determine symbols
+    # Determine symbols (priority: --symbols > --ticker-file > VN30)
     if args.symbols:
+        # Option 1: Command line symbols
         symbols = [s.strip().upper() for s in args.symbols.split(",")]
+        logger.info(f"📊 Using symbols from command line: {len(symbols)} symbols")
+    elif args.ticker_file and Path(args.ticker_file).exists():
+        # Option 2: Load from ticker file
+        symbols = load_symbols_from_file(args.ticker_file)
+        if not symbols:
+            logger.warning("⚠️ No symbols loaded from file, falling back to VN30")
+            symbols = TICKERS[:30]
+        else:
+            logger.info(f"📊 Using symbols from {args.ticker_file}: {len(symbols)} symbols")
     else:
-        symbols = TICKERS[:30]  # Default: First 30 from config
+        # Option 3: Default VN30
+        symbols = TICKERS[:30]
+        logger.info(f"📊 Using default VN30 symbols: {len(symbols)} symbols")
 
     logger.info("\n" + "=" * 70)
     logger.info("🚀 ML MODEL TRAINING PIPELINE")
