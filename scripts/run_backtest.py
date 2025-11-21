@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from improved_position_sizing import ConservativePositionSizer
+from src.strategies.position_sizing import EnhancedPositionSizer
 from src.data.loader import load_data
 from src.ml.features.technical import add_ml_features
 from src.ml.signals.generator import MLSignalGenerator
@@ -71,7 +71,7 @@ class Backtester:
         # lazy init ML generator may load models inside its constructor
         self.ml_generator = MLSignalGenerator()
         # Position sizer thận trọng
-        self.position_sizer = ConservativePositionSizer(
+        self.position_sizer = EnhancedPositionSizer(
             total_capital=self.initial_capital,
             max_risk_per_trade=0.02,
             max_position_size=0.10,
@@ -266,7 +266,7 @@ class Backtester:
                     stop_loss_price = max(0, execution_price - 2.0 * atr_for_stop)
                     take_profit_price = execution_price + 3.0 * atr_for_stop
 
-                    # Sizing an toàn bằng ConservativePositionSizer
+                    # Sizing an toàn bằng EnhancedPositionSizer
                     sized = self.position_sizer.calculate_position_size(
                         symbol=symbol,
                         entry_price=execution_price,
