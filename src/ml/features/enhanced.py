@@ -166,8 +166,9 @@ def add_enhanced_features(
                 # Merge back
                 df = df.merge(merged[["time", "rs", "rs_momentum"]], on="time", how="left")
 
-                df["rs"].fillna(1.0, inplace=True)
-                df["rs_momentum"].fillna(0.0, inplace=True)
+                # Fill NaN (pandas 3.0 compatible - avoid chained assignment)
+                df["rs"] = df["rs"].fillna(1.0)
+                df["rs_momentum"] = df["rs_momentum"].fillna(0.0)
             else:
                 df["rs"] = 1.0
                 df["rs_momentum"] = 0.0
