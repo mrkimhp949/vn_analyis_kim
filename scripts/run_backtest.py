@@ -213,7 +213,7 @@ class Backtester:
 
             # ML Analysis
             try:
-                result = ml_generator.analyze(current_data)
+                result = ml_generator.analyze(current_data, symbol=symbol)
                 signal = result.get("signal", "HOLD")
                 confidence = result.get("confidence", 0)
                 price = current_row["close"]

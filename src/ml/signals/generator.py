@@ -51,8 +51,14 @@ class MLSignalGenerator:
         self._confidence_history = []  # Track (predicted_conf, actual_result) pairs
         self._max_history = 100  # Keep last 100 predictions
 
-    def analyze(self, df, index_df=None):
-        """Phân tích và tạo tín hiệu từ ML + Technical Analysis"""
+    def analyze(self, df, index_df=None, symbol=None):
+        """Phân tích và tạo tín hiệu từ ML + Technical Analysis
+
+        Args:
+            df: DataFrame with OHLCV data
+            index_df: Optional index (VNINDEX) DataFrame
+            symbol: Optional symbol name (for logging)
+        """
         try:
             # Validate input data
             if df is None or df.empty:
@@ -145,6 +151,7 @@ class MLSignalGenerator:
                     "ema_trend": (
                         "UP" if latest.get("ema20", 0) > latest.get("ema50", 0) else "DOWN"
                     ),
+                    "symbol": symbol,  # Add symbol for logging/tracking
                 }
 
                 # Add timing analysis
