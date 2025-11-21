@@ -4,7 +4,14 @@ Backtesting Engine - Kiểm tra hiệu suất chiến lược
 
 import concurrent.futures
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import matplotlib
 import matplotlib.pyplot as plt
