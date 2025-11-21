@@ -93,7 +93,7 @@ class ProxyMarketRegimeAnalyzer:
                     "regime": "SIDEWAYS",
                     "confidence": 30,
                     "tradeable": False,
-                    "message": "No analyzer available - using cautious default"
+                    "message": "No analyzer available - using cautious default",
                 }
         except Exception:
             logging.error("Lỗi khi phân tích trạng thái thị trường", exc_info=True)
@@ -102,7 +102,7 @@ class ProxyMarketRegimeAnalyzer:
                 "regime": "SIDEWAYS",
                 "confidence": 20,
                 "tradeable": False,
-                "message": "Error in regime detection - using very cautious default"
+                "message": "Error in regime detection - using very cautious default",
             }
 
 

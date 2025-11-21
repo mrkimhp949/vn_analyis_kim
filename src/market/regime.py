@@ -405,7 +405,7 @@ class MarketRegimeAnalyzer:
             "confidence": 30,  # Low confidence
             "details": {
                 "reason": "Insufficient data or detection error",
-                "warning": "Using default cautious regime"
+                "warning": "Using default cautious regime",
             },
             "message": "⚠️ Không đủ dữ liệu - sử dụng chế độ thận trọng (SIDEWAYS)",
         }

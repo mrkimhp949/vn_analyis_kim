@@ -33,10 +33,7 @@ from src.data.loader import load_data
 from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
 from src.ml.models.predictor import MLPredictor
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -196,35 +193,29 @@ Examples:
 
   # Train with fewer symbols (faster)
   python scripts/train_models.py --max-symbols 20
-        """
+        """,
     )
 
     parser.add_argument(
         "--symbols",
         type=str,
         default=None,
-        help="Comma-separated list of symbols (default: VN30 from config)"
+        help="Comma-separated list of symbols (default: VN30 from config)",
     )
 
     parser.add_argument(
-        "--lookback",
-        type=int,
-        default=500,
-        help="Number of days of historical data (default: 500)"
+        "--lookback", type=int, default=500, help="Number of days of historical data (default: 500)"
     )
 
     parser.add_argument(
-        "--max-symbols",
-        type=int,
-        default=50,
-        help="Maximum number of symbols to use (default: 50)"
+        "--max-symbols", type=int, default=50, help="Maximum number of symbols to use (default: 50)"
     )
 
     parser.add_argument(
         "--test-size",
         type=float,
         default=0.2,
-        help="Test set size as fraction (default: 0.2 = 20%%)"
+        help="Test set size as fraction (default: 0.2 = 20%%)",
     )
 
     return parser.parse_args()
@@ -252,9 +243,7 @@ def main():
     try:
         # Load data
         df = load_training_data(
-            symbols=symbols,
-            lookback=args.lookback,
-            max_symbols=args.max_symbols
+            symbols=symbols, lookback=args.lookback, max_symbols=args.max_symbols
         )
 
         # Train models
