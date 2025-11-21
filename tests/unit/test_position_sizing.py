@@ -1,17 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Unit tests for ConservativePositionSizer
+Unit tests for EnhancedPositionSizer (formerly ConservativePositionSizer)
 """
 import pytest
-from src.strategies.position_sizing import (
-    EnhancedPositionSizer as ConservativePositionSizer,
-)
+from src.strategies.position_sizing import EnhancedPositionSizer
 
 
-class TestConservativePositionSizer:
+class TestEnhancedPositionSizer:
     @pytest.fixture
     def sizer(self):
-        return ConservativePositionSizer(
+        return EnhancedPositionSizer(
             total_capital=100_000_000,
             max_risk_per_trade=0.02,
             max_position_size=0.10,
