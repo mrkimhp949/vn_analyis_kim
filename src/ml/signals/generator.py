@@ -587,8 +587,8 @@ class MLSignalGenerator:
             print("   - Chuẩn bị dữ liệu cho training...")
             feature_cols = get_feature_columns()
 
-            # Loại bỏ các hàng không có đủ dữ liệu
-            df.dropna(subset=feature_cols + ["target"], inplace=True)
+            # Loại bỏ các hàng không có đủ dữ liệu (pandas 3.0 compatible)
+            df = df.dropna(subset=feature_cols + ["target"])
 
             if df.empty:
                 print("❌ Không còn dữ liệu sau khi loại bỏ NaN. Dừng training.")
