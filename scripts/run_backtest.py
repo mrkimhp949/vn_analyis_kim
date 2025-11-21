@@ -872,36 +872,118 @@ class Backtester:
             traceback.print_exc()
 
 
+def load_test_symbols(mode: str = "vn30") -> list:
+    """
+    Load symbols for backtesting
+
+    Args:
+        mode: 'quick' (5 mã), 'vn30' (24 mã), 'quality' (100 mã), 'full' (200 mã)
+
+    Returns:
+        List of symbols
+    """
+    if mode == "quick":
+        # Quick test với 5 mã blue chips
+        return ["VNM", "FPT", "VCB", "HPG", "VIC"]
+
+    elif mode == "vn30":
+        # VN30 index components (24 mã có trong quality_tickers)
+        return [
+            "ACB", "BID", "CTG", "FPT", "GAS", "HPG", "MBB",
+            "MSN", "MWG", "NVL", "PLX", "SAB", "SSI", "STB", "TCB",
+            "VCB", "VIB", "VIC", "VJC", "VNM", "VPB"
+        ]
+
+    elif mode == "quality":
+        # Load từ quality_tickers.txt (limit 100 mã cho nhanh)
+        try:
+            with open("quality_tickers.txt", 'r', encoding='utf-8') as f:
+                symbols = [line.strip().upper() for line in f if line.strip()]
+                return symbols[:100]  # Top 100 mã quality
+        except FileNotFoundError:
+            print("⚠️ quality_tickers.txt not found, falling back to VN30")
+            return load_test_symbols("vn30")
+
+    elif mode == "full":
+        # Full 200 quality tickers
+        try:
+            with open("quality_tickers.txt", 'r', encoding='utf-8') as f:
+                symbols = [line.strip().upper() for line in f if line.strip()]
+                return symbols
+        except FileNotFoundError:
+            print("⚠️ quality_tickers.txt not found, falling back to VN30")
+            return load_test_symbols("vn30")
+
+    else:
+        raise ValueError(f"Invalid mode: {mode}. Use 'quick', 'vn30', 'quality', or 'full'")
+
+
 def main():
     """Main function để chạy backtest"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run backtest on ML trading signals")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="quality",
+        choices=["quick", "vn30", "quality", "full"],
+        help="Test mode: quick (5 mã), vn30 (~24 mã), quality (100 mã), full (200 mã). Default: quality"
+    )
+    parser.add_argument(
+        "--lookback",
+        type=int,
+        default=500,
+        help="Number of days for backtest (default: 500)"
+    )
+    parser.add_argument(
+        "--confidence",
+        type=int,
+        default=60,
+        help="Minimum confidence threshold (default: 60%%)"
+    )
+    parser.add_argument(
+        "--capital",
+        type=float,
+        default=100_000_000,
+        help="Initial capital in VND (default: 100,000,000)"
+    )
+
+    args = parser.parse_args()
+
     print("\n" + "=" * 70)
     print("🚀 BACKTESTING ENGINE")
     print("=" * 70)
     print()
 
+    # Load test symbols based on mode
+    test_symbols = load_test_symbols(args.mode)
+
+    print(f"📊 Configuration:")
+    print(f"   Mode: {args.mode.upper()}")
+    print(f"   Symbols: {len(test_symbols)} mã")
+    if len(test_symbols) <= 10:
+        print(f"   List: {', '.join(test_symbols)}")
+    else:
+        print(f"   Sample: {', '.join(test_symbols[:5])}... (+{len(test_symbols)-5} more)")
+    print(f"   Capital: {args.capital:,.0f} VND")
+    print(f"   Lookback: {args.lookback} days")
+    print(f"   Confidence threshold: {args.confidence}%")
+    print()
+
     # Khởi tạo backtester
     backtester = Backtester(
-        initial_capital=100_000_000,  # 100 triệu
+        initial_capital=args.capital,
         commission=0.0015,  # 0.15%
         slippage=0.001,  # 0.1%
     )
-
-    # Test symbols (mặc định)
-    test_symbols = ["VNM", "FPT", "VCB", "HPG", "VIC"]
-
-    print(f"📊 Running backtest for {len(test_symbols)} symbols:")
-    print(f"   {', '.join(test_symbols)}")
-    print(f"   Capital: 100,000,000 VND")
-    print(f"   Lookback: 500 days")
-    print(f"   Confidence threshold: 60%")
-    print()
 
     # Chạy backtest
     try:
         results = backtester.run_multiple_backtest(
             symbols=test_symbols,
-            lookback=500,
-            confidence_threshold=60,
+            lookback=args.lookback,
+            confidence_threshold=args.confidence,
         )
 
         print("\n✅ Backtest completed successfully!")
