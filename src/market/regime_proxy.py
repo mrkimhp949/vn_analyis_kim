@@ -87,11 +87,23 @@ class ProxyMarketRegimeAnalyzer:
                 self.cache.set(cache_key, regime, timeout=3600)  # Cache 1 giờ
                 return regime
             else:
-                # Fallback nếu không có analyzer
-                return {"regime": "UNKNOWN", "confidence": 0, "tradeable": False}
+                # Fallback nếu không có analyzer - trả về SIDEWAYS thận trọng
+                logging.warning("⚠️ No analyzer available, using default cautious regime")
+                return {
+                    "regime": "SIDEWAYS",
+                    "confidence": 30,
+                    "tradeable": False,
+                    "message": "No analyzer available - using cautious default"
+                }
         except Exception:
             logging.error("Lỗi khi phân tích trạng thái thị trường", exc_info=True)
-            return {"regime": "ERROR", "confidence": 0, "tradeable": False}
+            # Trả về SIDEWAYS thay vì ERROR
+            return {
+                "regime": "SIDEWAYS",
+                "confidence": 20,
+                "tradeable": False,
+                "message": "Error in regime detection - using very cautious default"
+            }
 
 
 class SimpleCache:

@@ -381,13 +381,21 @@ class MarketRegimeAnalyzer:
                 )
 
     def _default_regime(self) -> Dict:
-        """Default response khi không có dữ liệu"""
+        """
+        Default response khi không có dữ liệu
+
+        Trả về SIDEWAYS với confidence thấp thay vì UNKNOWN
+        để consistent với regime_detector.py và tránh confusion
+        """
         return {
-            "regime": "UNKNOWN",
+            "regime": "SIDEWAYS",
             "tradeable": False,
-            "confidence": 0,
-            "details": {},
-            "message": "⚠️ Không thể xác định tình trạng thị trường",
+            "confidence": 30,  # Low confidence
+            "details": {
+                "reason": "Insufficient data or detection error",
+                "warning": "Using default cautious regime"
+            },
+            "message": "⚠️ Không đủ dữ liệu - sử dụng chế độ thận trọng (SIDEWAYS)",
         }
 
     def get_position_multiplier(self) -> float:

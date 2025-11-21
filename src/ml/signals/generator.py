@@ -409,46 +409,61 @@ class MLSignalGenerator:
         try:
             from src.market.regime_detector import detect_regime
 
-            # Get VN-Index data for regime detection
+            # Get VN-Index data for regime detection (need 200+ bars)
             vnindex_df = None
             try:
-                vnindex_df = load_data("VNINDEX", lookback=100, is_index=True)
-            except Exception:
-                pass
+                vnindex_df = load_data("VNINDEX", lookback=250, is_index=True)
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"Could not load VNINDEX: {e}")
 
-            if vnindex_df is not None and not vnindex_df.empty:
+            # Check if we have enough data for regime detection
+            if vnindex_df is not None and not vnindex_df.empty and len(vnindex_df) >= 200:
                 regime_obj = detect_regime(vnindex_df)
                 regime = regime_obj.regime
+                conf = regime_obj.confidence
 
-                # Adjust thresholds based on regime
-                if regime == "BULL":
-                    # Bull market - lower threshold for more opportunities
-                    buy_threshold = 0.75
-                    sell_threshold = -0.95  # Harder to sell
-                    reasons.append(f"🐂 Bull ({regime_obj.confidence:.0f}%)")
-                elif regime == "BEAR":
-                    # Bear market - higher threshold for safety
-                    buy_threshold = 0.95  # Very selective
-                    sell_threshold = -0.75  # Easier to sell
-                    reasons.append(f"🐻 Bear ({regime_obj.confidence:.0f}%)")
-                elif regime == "SIDEWAYS":
-                    # Sideways - moderate threshold
-                    buy_threshold = 0.85
-                    sell_threshold = -0.85
-                    reasons.append(f"📊 Sideways ({regime_obj.confidence:.0f}%)")
-                elif regime == "HIGH_VOLATILITY":
-                    # High volatility - much higher threshold
-                    buy_threshold = 1.0  # Very conservative
-                    sell_threshold = -0.70
-                    reasons.append(f"⚡ High Vol ({regime_obj.confidence:.0f}%)")
+                # Only adjust thresholds if confidence is sufficient (≥40%)
+                if conf >= 40:
+                    # Adjust thresholds based on regime
+                    if regime == "BULL":
+                        # Bull market - lower threshold for more opportunities
+                        buy_threshold = 0.75
+                        sell_threshold = -0.95  # Harder to sell
+                        reasons.append(f"🐂 Bull ({conf:.0f}%)")
+                    elif regime == "BEAR":
+                        # Bear market - higher threshold for safety
+                        buy_threshold = 0.95  # Very selective
+                        sell_threshold = -0.75  # Easier to sell
+                        reasons.append(f"🐻 Bear ({conf:.0f}%)")
+                    elif regime == "SIDEWAYS":
+                        # Sideways - moderate threshold (default)
+                        buy_threshold = 0.85
+                        sell_threshold = -0.85
+                        reasons.append(f"📊 Sideways ({conf:.0f}%)")
+                    elif regime == "HIGH_VOLATILITY":
+                        # High volatility - much higher threshold
+                        buy_threshold = 1.0  # Very conservative
+                        sell_threshold = -0.70
+                        reasons.append(f"⚡ High Vol ({conf:.0f}%)")
 
+                    logging.getLogger(__name__).debug(
+                        f"Dynamic threshold: BUY={buy_threshold:.2f}, "
+                        f"SELL={sell_threshold:.2f} (regime={regime}, conf={conf:.0f}%)"
+                    )
+                else:
+                    # Low confidence - use default thresholds
+                    logging.getLogger(__name__).debug(
+                        f"Regime confidence too low ({conf:.0f}%), using default thresholds"
+                    )
+            else:
+                # Not enough data - use default thresholds
+                data_len = len(vnindex_df) if vnindex_df is not None else 0
                 logging.getLogger(__name__).debug(
-                    f"Dynamic threshold: BUY={buy_threshold:.2f}, "
-                    f"SELL={sell_threshold:.2f} (regime={regime})"
+                    f"Insufficient VNINDEX data ({data_len} bars, need 200+), using default thresholds"
                 )
         except Exception as e:
-            logging.getLogger(__name__).debug(f"Could not detect market regime: {e}")
-            # Use default thresholds
+            logging.getLogger(__name__).debug(f"Regime detection error: {e}")
+            # Use default thresholds (no action needed)
 
         # Decision with dynamic thresholds
         if combined_signal >= buy_threshold:
