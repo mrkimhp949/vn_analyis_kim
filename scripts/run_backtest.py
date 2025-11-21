@@ -870,3 +870,50 @@ class Backtester:
             import traceback
 
             traceback.print_exc()
+
+
+def main():
+    """Main function để chạy backtest"""
+    print("\n" + "=" * 70)
+    print("🚀 BACKTESTING ENGINE")
+    print("=" * 70)
+    print()
+
+    # Khởi tạo backtester
+    backtester = Backtester(
+        initial_capital=100_000_000,  # 100 triệu
+        commission=0.0015,  # 0.15%
+        slippage=0.001,  # 0.1%
+    )
+
+    # Test symbols (mặc định)
+    test_symbols = ["VNM", "FPT", "VCB", "HPG", "VIC"]
+
+    print(f"📊 Running backtest for {len(test_symbols)} symbols:")
+    print(f"   {', '.join(test_symbols)}")
+    print(f"   Capital: 100,000,000 VND")
+    print(f"   Lookback: 500 days")
+    print(f"   Confidence threshold: 60%")
+    print()
+
+    # Chạy backtest
+    try:
+        results = backtester.run_multiple_backtest(
+            symbols=test_symbols,
+            lookback=500,
+            confidence_threshold=60,
+        )
+
+        print("\n✅ Backtest completed successfully!")
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Backtest failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
