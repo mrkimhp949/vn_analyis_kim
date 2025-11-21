@@ -278,7 +278,9 @@ class SignalQualityScorer:
         is_tradeable = total_score >= self.min_tradeable_score
 
         if not is_tradeable:
-            warnings.append(f"❌ Signal below tradeable threshold ({total_score:.0f} < {self.min_tradeable_score:.0f})")
+            warnings.append(
+                f"❌ Signal below tradeable threshold ({total_score:.0f} < {self.min_tradeable_score:.0f})"
+            )
             recommendations.append("Skip this signal and wait for better opportunity")
 
         return QualityScore(

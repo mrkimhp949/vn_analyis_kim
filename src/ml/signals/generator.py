@@ -396,7 +396,7 @@ class MLSignalGenerator:
         # Confidence (0-100)
         # Higher weight for ML and volume confirmation
         base_confidence = abs(combined_signal) * 25 + abs(ml_score - 0.5) * 100
-        volume_boost = max(0, (volume_ratio - 1.0) * 10) if 'volume_ratio' in locals() else 0
+        volume_boost = max(0, (volume_ratio - 1.0) * 10) if "volume_ratio" in locals() else 0
         confidence = min(base_confidence + volume_boost, 100)
 
         # =================================================================

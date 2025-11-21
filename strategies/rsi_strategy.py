@@ -82,7 +82,9 @@ class RsiStrategy(BaseStrategy):
                 # Initialize confidence and reasons
                 base_confidence = 1 - (latest_rsi / self.config["buy_threshold"])
                 confidence_adjustments = []
-                reasons = [f"RSI({self.config['rsi_period']}) is {latest_rsi:.2f} < {self.config['buy_threshold']}"]
+                reasons = [
+                    f"RSI({self.config['rsi_period']}) is {latest_rsi:.2f} < {self.config['buy_threshold']}"
+                ]
 
                 pass_filters = True
 
