@@ -217,7 +217,7 @@ class Backtester:
 
             # Hiển thị progress mỗi 10%
             if (i - 50) % max(1, total_days // 10) == 0:
-                (i - 50) / total_days * 100
+                progress = (i - 50) / total_days * 100
                 print(f"  📊 Đang xử lý: {progress:.1f}%")
 
             # ML Analysis
