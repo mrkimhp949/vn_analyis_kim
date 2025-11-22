@@ -14,6 +14,7 @@ from src.data.database import get_db
 from src.config.trading_config import get_config
 
 from src.monitoring.performance import get_performance_monitor
+from src.monitoring.signal_performance import get_signal_performance_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class PortfolioManager:
         self.db = get_db()
         self.monitor = get_performance_monitor()
         self.config = get_config()
+        self.signal_tracker = get_signal_performance_tracker()
 
         # Thread safety
         self._lock = RLock()  # Reentrant lock for nested calls
@@ -284,6 +286,16 @@ class PortfolioManager:
             exit_date=datetime.now().isoformat(),
         )
 
+        # Track signal performance (ML vs Technical)
+        metadata = pos.get("metadata", {})
+        is_ml_signal = metadata.get("signal_source") == "ml"
+        self.signal_tracker.track_trade(
+            is_ml_signal=is_ml_signal,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            shares=shares_to_sell,
+        )
+
         # CRITICAL: Wrap in database transaction for atomicity
         # Both save_trade and save_position succeed together or fail together
         with self.db.transaction() as conn:
@@ -383,6 +395,16 @@ class PortfolioManager:
             shares=shares,
             entry_date=entry_date,
             exit_date=datetime.now().isoformat(),
+        )
+
+        # Track signal performance (ML vs Technical)
+        metadata = pos.get("metadata", {})
+        is_ml_signal = metadata.get("signal_source") == "ml"
+        self.signal_tracker.track_trade(
+            is_ml_signal=is_ml_signal,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            shares=shares,
         )
 
         # CRITICAL: Wrap in database transaction for atomicity

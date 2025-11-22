@@ -28,6 +28,7 @@ from src.data.ticker_loader import get_ticker_loader
 # Import các thành phần cần thiết từ project
 # (Giả định các import này vẫn hoạt động sau khi tách file)
 from src.config.legacy_config import MAX_SCAN_UNIVERSE, MIN_VOLUME
+from src.monitoring.signal_performance import get_signal_performance_tracker
 
 # Get LOOKBACK safely with fallback
 try:
@@ -98,6 +99,7 @@ class TradingOrchestrator:
         self.ml_monitor = get_ml_model_monitor()
         self.strategy_manager = strategy_manager or get_strategy_manager()
         self.circuit_breaker = circuit_breaker or get_circuit_breaker()
+        self.signal_tracker = get_signal_performance_tracker()
 
         # New injected services (optional)
         self.risk_service = risk_service
@@ -115,6 +117,13 @@ class TradingOrchestrator:
         self._ml_success_count = 0
         self._ml_failures_by_error = {}  # {error_type: count}
         self._ml_failures_by_symbol = {}  # {symbol: count}
+
+        # ML CIRCUIT BREAKER: Auto-disable ML when failure rate too high
+        self._ml_enabled = True  # Can be disabled by circuit breaker
+        self._ml_circuit_breaker_threshold = 0.30  # Disable at 30% failure rate
+        self._ml_circuit_breaker_min_samples = 20  # Need 20 attempts before activating
+        self._ml_recovery_threshold = 0.10  # Re-enable at 10% failure rate
+        self._ml_circuit_breaker_active = False
 
     def _setup_strategies(self, market_regime: Dict):
         """Lấy và gán các chiến lược từ StrategyManager và điều chỉnh theo thị trường."""
@@ -397,8 +406,7 @@ class TradingOrchestrator:
 
             # ML analysis với enhanced error handling
             ml_signal = None
-            use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
-            if use_ml:
+            if self._should_use_ml():
                 try:
                     ml_signal = self.ml_generator.analyze(
                         df, index_df=self.vnindex_df, symbol=symbol
@@ -424,6 +432,10 @@ class TradingOrchestrator:
 
                     # Track ML failure for monitoring
                     self._track_ml_failure(symbol, error_details)
+
+                    # Check circuit breaker after tracking failure
+                    self._check_ml_circuit_breaker()
+
                     # Tiếp tục với ml_signal = None
 
             exit_decision = self.exit_strategy.check_exit(
@@ -628,8 +640,7 @@ class TradingOrchestrator:
 
             # Phân tích ML với enhanced error handling
             ml_signal = None
-            use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
-            if use_ml:
+            if self._should_use_ml():
                 try:
                     ml_signal = self.ml_generator.analyze(
                         df, index_df=self.vnindex_df, symbol=symbol
@@ -657,6 +668,10 @@ class TradingOrchestrator:
 
                     # Track ML failure for monitoring
                     self._track_ml_failure(symbol, error_details)
+
+                    # Check circuit breaker after tracking failure
+                    self._check_ml_circuit_breaker()
+
                     # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
 
             # 1. Entry Logic with validation
@@ -678,6 +693,10 @@ class TradingOrchestrator:
             if not entry_signal or not entry_signal.should_enter:
                 warnings = getattr(entry_signal, "warnings", ["Không rõ lý do"])
                 return {"symbol": symbol, "warnings": warnings, "is_watchlist": False}
+
+            # Track signal generation (ML vs Technical)
+            is_ml_signal = getattr(entry_signal, "telemetry", {}).get("signal_source") == "ml"
+            self.signal_tracker.track_signal(is_ml_signal=is_ml_signal)
 
             # 2. News Analysis (nếu có tín hiệu)
             news_sentiment = {"score": 0.5, "comment": "Neutral"}
@@ -744,56 +763,62 @@ class TradingOrchestrator:
                     return {"signal": True, "skipped_buy": True}
 
                 # Normal flow: Execute buy for new positions
-                # CRITICAL: Use atomic can_add_position() to prevent race conditions
+                # CRITICAL FIX: Use atomic context manager to prevent race conditions
                 if position_size_info and position_size_info.shares > 0:
-                    # ATOMIC CHECK-AND-RESERVE: Prevents race condition where two tasks
-                    # both check and both add the same symbol
                     total_capital = config.trading.total_capital
-                    can_add, reason = self.portfolio_lock.can_add_position(
+
+                    # ATOMIC POSITION ADD: Automatically handles reserve → confirm/cancel
+                    with self.portfolio_lock.atomic_position_add(
                         symbol=symbol,
                         position_value=position_size_info.value,
                         total_capital=total_capital,
                         current_positions=active_positions,
-                    )
+                    ) as (can_add, reason):
+                        if not can_add:
+                            logging.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
+                            return None
 
-                    if not can_add:
-                        logging.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
-                        return None
+                        # Thực hiện paper trade (BUY)
+                        take_profit = (
+                            entry_signal.take_profit_targets[0]
+                            if entry_signal.take_profit_targets
+                            else None
+                        )
 
-                    # Thực hiện paper trade (BUY)
-                    take_profit = (
-                        entry_signal.take_profit_targets[0]
-                        if entry_signal.take_profit_targets
-                        else None
-                    )
-                    # ENHANCEMENT: Pass limit order info if applicable
-                    success, message, trade = self.paper_account.execute_buy(
-                        symbol=symbol,
-                        shares=position_size_info.shares,
-                        price=entry_signal.entry_price,
-                        signal_confidence=entry_signal.confidence,
-                        signal_reason=", ".join(entry_signal.reasons),
-                        stop_loss=entry_signal.stop_loss,
-                        take_profit=take_profit,
-                        is_limit_order=getattr(entry_signal, "is_limit_order", False),
-                        limit_price=getattr(entry_signal, "limit_price", None),
-                    )
+                        # Prepare metadata with signal source for performance tracking
+                        trade_metadata = {
+                            "signal_source": "ml" if is_ml_signal else "technical",
+                            "confidence": entry_signal.confidence,
+                            "signal_reason": ", ".join(entry_signal.reasons),
+                        }
 
-                    if not success:
-                        logging.error(f"❌ Paper trade failed for {symbol}: {message}")
-                        # Cancel pending if trade failed
-                        self.portfolio_lock.cancel_position(symbol)
-                        return None
+                        # ENHANCEMENT: Pass limit order info if applicable
+                        success, message, trade = self.paper_account.execute_buy(
+                            symbol=symbol,
+                            shares=position_size_info.shares,
+                            price=entry_signal.entry_price,
+                            signal_confidence=entry_signal.confidence,
+                            signal_reason=", ".join(entry_signal.reasons),
+                            stop_loss=entry_signal.stop_loss,
+                            take_profit=take_profit,
+                            is_limit_order=getattr(entry_signal, "is_limit_order", False),
+                            limit_price=getattr(entry_signal, "limit_price", None),
+                            metadata=trade_metadata,
+                        )
 
-                    # Confirm pending position after successful trade
-                    self.portfolio_lock.confirm_position(symbol)
-                    logging.info(f"✅ Paper trade successful: {message}")
+                        if not success:
+                            logging.error(f"❌ Paper trade failed for {symbol}: {message}")
+                            # Raise exception to auto-cancel reservation via context manager
+                            raise Exception(f"Paper trade failed: {message}")
 
-                    # Gửi thông báo Telegram
-                    await self.send_buy_signal_notification(
-                        symbol, entry_signal, position_size_info, news_sentiment
-                    )
-                    return {"signal": True}
+                        # Success - context manager will auto-confirm
+                        logging.info(f"✅ Paper trade successful: {message}")
+
+                        # Gửi thông báo Telegram
+                        await self.send_buy_signal_notification(
+                            symbol, entry_signal, position_size_info, news_sentiment
+                        )
+                        return {"signal": True}
 
             # 5. Watchlist Logic
             # ... (logic để thêm vào watchlist nếu không phải tín hiệu mua)
@@ -942,3 +967,81 @@ class TradingOrchestrator:
         """Calculate ML failure rate for monitoring"""
         total = self._ml_failure_count + self._ml_success_count
         return self._ml_failure_count / total if total > 0 else 0.0
+
+    def _check_ml_circuit_breaker(self):
+        """
+        Check and update ML circuit breaker status.
+
+        Logic:
+        1. If failure rate > threshold AND min_samples met → DISABLE ML
+        2. If failure rate < recovery threshold AND circuit active → RE-ENABLE ML
+        3. Send alerts on status change
+        """
+        total_attempts = self._ml_failure_count + self._ml_success_count
+
+        # Need minimum samples before activating circuit breaker
+        if total_attempts < self._ml_circuit_breaker_min_samples:
+            return
+
+        failure_rate = self._get_ml_failure_rate()
+
+        # Check if should TRIP circuit breaker (disable ML)
+        if not self._ml_circuit_breaker_active and failure_rate >= self._ml_circuit_breaker_threshold:
+            self._ml_circuit_breaker_active = True
+            self._ml_enabled = False
+
+            alert_msg = (
+                f"🚨 ML CIRCUIT BREAKER ACTIVATED 🚨\n\n"
+                f"Failure rate: {failure_rate:.1%} (threshold: {self._ml_circuit_breaker_threshold:.1%})\n"
+                f"Total failures: {self._ml_failure_count}/{total_attempts}\n\n"
+                f"🔧 Switching to TECHNICAL ANALYSIS only\n"
+                f"ML will auto-recover when failure rate drops below {self._ml_recovery_threshold:.1%}"
+            )
+
+            logging.critical(alert_msg)
+
+            # Send alert via Telegram if available
+            if self.bot and self.chat_id:
+                import asyncio
+
+                try:
+                    asyncio.create_task(self.bot.send_message(self.chat_id, alert_msg, parse_mode="Markdown"))
+                except Exception as e:
+                    logging.error(f"Failed to send ML circuit breaker alert: {e}")
+
+        # Check if should RECOVER (re-enable ML)
+        elif self._ml_circuit_breaker_active and failure_rate <= self._ml_recovery_threshold:
+            self._ml_circuit_breaker_active = False
+            self._ml_enabled = True
+
+            recovery_msg = (
+                f"✅ ML CIRCUIT BREAKER RECOVERED\n\n"
+                f"Failure rate improved: {failure_rate:.1%} (recovery threshold: {self._ml_recovery_threshold:.1%})\n"
+                f"Total failures: {self._ml_failure_count}/{total_attempts}\n\n"
+                f"🤖 ML analysis RE-ENABLED"
+            )
+
+            logging.info(recovery_msg)
+
+            # Send recovery alert
+            if self.bot and self.chat_id:
+                import asyncio
+
+                try:
+                    asyncio.create_task(self.bot.send_message(self.chat_id, recovery_msg, parse_mode="Markdown"))
+                except Exception as e:
+                    logging.error(f"Failed to send ML recovery alert: {e}")
+
+    def _should_use_ml(self) -> bool:
+        """
+        Determine if ML analysis should be used.
+
+        Returns False if:
+        1. ML circuit breaker is active (too many failures)
+        2. USE_ML_ANALYSIS env var is false
+        """
+        if not self._ml_enabled:
+            return False
+
+        use_ml_env = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
+        return use_ml_env

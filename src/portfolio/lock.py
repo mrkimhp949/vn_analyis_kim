@@ -4,6 +4,7 @@ Portfolio Lock - Prevent race conditions
 """
 
 import threading
+from contextlib import contextmanager
 from typing import Tuple
 
 
@@ -103,6 +104,47 @@ class PortfolioLock:
         """Clear tất cả pending positions (cleanup)"""
         with self._lock:
             self._pending_positions.clear()
+
+    @contextmanager
+    def atomic_position_add(
+        self,
+        symbol: str,
+        position_value: float,
+        total_capital: float,
+        current_positions: dict,
+    ):
+        """
+        Context manager for atomic position add operation.
+
+        Ensures that reservation and execution are atomic:
+        - Reserves position on entry
+        - Confirms on successful exit
+        - Cancels on exception
+
+        Usage:
+            with lock.atomic_position_add(symbol, value, capital, positions) as can_add:
+                if not can_add:
+                    return
+                # Execute buy
+                success = paper_account.execute_buy(...)
+                if not success:
+                    raise Exception("Buy failed")
+                # Auto-confirms on success, auto-cancels on exception
+        """
+        can_add, reason = self.can_add_position(symbol, position_value, total_capital, current_positions)
+
+        if not can_add:
+            yield (False, reason)
+            return
+
+        try:
+            yield (True, "OK")
+            # If we reach here, operation succeeded
+            self.confirm_position(symbol)
+        except Exception:
+            # Operation failed, cancel reservation
+            self.cancel_position(symbol)
+            raise
 
 
 # Global instance
