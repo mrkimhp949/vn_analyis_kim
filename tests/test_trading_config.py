@@ -82,6 +82,7 @@ class TestTradingConfig:
             min_position_size=0.01,
             max_position_size=0.02,
             max_positions=1,
+            max_positions_per_sector=1,  # Must be <= max_positions
             max_portfolio_risk=0.01,
             max_sector_exposure=0.02,  # Must be >= max_position_size
             stop_loss_percent=-2.0,  # Need to keep within portfolio risk
@@ -94,6 +95,7 @@ class TestTradingConfig:
             min_risk_reward=10.0,
             max_position_size=1.0,  # 100% in one position
             max_positions=1,  # Can only have 1 position if size is 100%
+            max_positions_per_sector=1,  # Must be <= max_positions
             max_portfolio_risk=1.0,
             max_sector_exposure=1.0,
             stop_loss_percent=-100.0,  # Extreme but mathematically valid
