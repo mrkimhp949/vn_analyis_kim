@@ -86,10 +86,12 @@ try:
 except ImportError:
     print("❌ Lỗi import logging_config")
 
-try:
-    from news_analyzer import update_news_cache
-except ImportError:
-    update_news_cache = None
+# News analyzer module not implemented yet
+# TODO: Implement news_analyzer module or import from correct location
+# try:
+#     from src.news.analyzer import update_news_cache
+# except ImportError:
+update_news_cache = None
 
 try:
     from src.config.legacy_config import TICKERS
@@ -101,11 +103,17 @@ tz = pytz.timezone("Asia/Ho_Chi_Minh")
 
 def _run_weekly_model_retraining():
     """Trigger model retraining pipeline."""
-    try:
-        from ml_pipeline.train_pipeline import run_pipeline
-    except ImportError:
-        print("❌ Không thể import train_pipeline")
-        return
+    # NOTE: ml_pipeline/train_pipeline.py does not exist
+    # TODO: Create train_pipeline.py or use alternative training method
+    print("⚠️ Model retraining module chưa được triển khai")
+    return
+
+    # Disabled until train_pipeline.py is implemented
+    # try:
+    #     from ml_pipeline.train_pipeline import run_pipeline
+    # except ImportError:
+    #     print("❌ Không thể import train_pipeline")
+    #     return
 
     try:
         tickers = TICKERS[:40] if TICKERS else []
