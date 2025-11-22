@@ -21,6 +21,16 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
+# CRITICAL FIX: Environment check for security
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
+ALLOWED_ENVIRONMENTS = ["dev", "development", "staging", "production"]
+
+if ENVIRONMENT not in ALLOWED_ENVIRONMENTS:
+    logger.warning(
+        f"⚠️ Unknown ENVIRONMENT: {ENVIRONMENT}. Defaulting to 'production' for safety."
+    )
+    ENVIRONMENT = "production"
+
 # Load API keys from environment
 VALID_API_KEYS = set()
 api_keys_str = os.getenv("API_KEYS", "")
@@ -33,6 +43,21 @@ ip_whitelist_str = os.getenv("IP_WHITELIST", "")
 if ip_whitelist_str:
     IP_WHITELIST = set(ip.strip() for ip in ip_whitelist_str.split(",") if ip.strip())
 
+# CRITICAL: Log security configuration
+if ENVIRONMENT in ["dev", "development"]:
+    if not VALID_API_KEYS:
+        logger.warning(
+            "🔓 DEVELOPMENT MODE: API key validation DISABLED. "
+            "This is UNSAFE for production!"
+        )
+else:
+    if not VALID_API_KEYS:
+        logger.error(
+            "🚨 CRITICAL SECURITY ERROR: No API keys configured in "
+            f"{ENVIRONMENT.upper()} environment! "
+            "Set API_KEYS environment variable or switch to ENVIRONMENT=dev"
+        )
+
 
 def generate_api_key() -> str:
     """Generate a secure API key"""
@@ -42,6 +67,9 @@ def generate_api_key() -> str:
 async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> str:
     """
     Verify API key from request header
+
+    CRITICAL FIX: Only allow development mode if ENVIRONMENT=dev.
+    In production/staging, API keys are REQUIRED.
 
     Args:
         api_key: API key from header
@@ -53,17 +81,37 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
         HTTPException: If API key is invalid or missing
     """
     if not VALID_API_KEYS:
-        # If no API keys configured, allow all (development mode)
-        logger.warning("⚠️ No API keys configured - running in development mode")
-        return "dev_mode"
+        # CRITICAL FIX: Only allow development mode in dev/development environment
+        if ENVIRONMENT in ["dev", "development"]:
+            logger.warning(
+                "🔓 Development mode: No API key validation. "
+                f"ENVIRONMENT={ENVIRONMENT}"
+            )
+            return "dev_mode"
+        else:
+            # CRITICAL: In production/staging, API keys are MANDATORY
+            logger.error(
+                f"🚨 CRITICAL: No API keys configured in {ENVIRONMENT.upper()} environment! "
+                "Server should not have started. Denying all requests."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Server misconfiguration: No API keys in {ENVIRONMENT} mode"
+            )
 
     if not api_key:
         logger.warning("❌ Missing API key in request")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing API key")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Missing API key"
+        )
 
     if api_key not in VALID_API_KEYS:
         logger.warning(f"❌ Invalid API key: {api_key[:10]}...")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API key"
+        )
 
     return api_key
 

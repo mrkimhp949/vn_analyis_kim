@@ -64,6 +64,8 @@ class PortfolioManager:
         """
         Add new position or average up an existing one (thread-safe).
         Tự động kiểm tra và xử lý mua mới hoặc trung bình giá.
+
+        CRITICAL: stop_loss is REQUIRED for new positions. If None, will use default -7%.
         """
         from src.config.exceptions import PortfolioError
 
@@ -76,6 +78,28 @@ class PortfolioManager:
             raise PortfolioError(
                 "Entry price must be a positive number",
                 context={"entry_price": entry_price},
+            )
+
+        # CRITICAL FIX: Ensure stop_loss is NEVER None
+        # If stop_loss not provided, calculate default -7% below entry
+        if stop_loss is None or stop_loss <= 0 or stop_loss >= entry_price:
+            default_stop_loss = entry_price * 0.93  # -7% default
+            logger.warning(
+                f"⚠️ Stop loss missing/invalid for {symbol}. "
+                f"Using default -7%: {default_stop_loss:,.0f} VND"
+            )
+            stop_loss = default_stop_loss
+
+        # Validate stop_loss is below entry_price
+        if stop_loss >= entry_price:
+            raise PortfolioError(
+                f"Stop loss ({stop_loss:,.0f}) must be below entry price ({entry_price:,.0f})",
+                context={
+                    "symbol": symbol,
+                    "stop_loss": stop_loss,
+                    "entry_price": entry_price,
+                    "suggestion": f"Use stop_loss < {entry_price:,.0f}"
+                }
             )
 
         # Thread-safe transaction

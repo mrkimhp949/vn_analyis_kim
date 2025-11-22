@@ -1,0 +1,24 @@
+{
+  "VNM": {
+    "symbol": "VNM",
+    "consecutive_losses": 4,
+    "total_trades": 4,
+    "total_wins": 0,
+    "total_losses": 4,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-11-22",
+    "blocked": true,
+    "blocked_reason": "🚫 Blocked: 4 consecutive losses"
+  },
+  "HPG": {
+    "symbol": "HPG",
+    "consecutive_losses": 4,
+    "total_trades": 5,
+    "total_wins": 1,
+    "total_losses": 4,
+    "win_rate": 0.2,
+    "last_trade_date": "2025-11-22",
+    "blocked": true,
+    "blocked_reason": "🚫 Blocked: Win rate 20.0% < 30.0% (1/5 trades)"
+  }
+}
