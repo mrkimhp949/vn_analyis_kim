@@ -638,61 +638,27 @@ class TradingOrchestrator:
 
             # 3. Position Sizing
             if entry_signal.should_enter:
-                # ENHANCED: Check if symbol already has a position
-                # If yes, skip buying but still generate signal for notification
+                # Get current positions (read once)
                 current_positions = self.portfolio_manager.get_positions()
 
-                # Double-check: Filter out any positions with invalid shares
+                # Filter out positions with invalid shares
                 active_positions = {
                     sym: pos for sym, pos in current_positions.items() if pos.get("shares", 0) > 0
                 }
 
-                # ENHANCED: Check if symbol already has position OR is pending
-                # This prevents buying if:
-                # 1. Position exists with shares > 0
-                # 2. Position is pending (being processed, partial exit, etc.)
-                symbol_has_position = symbol in active_positions or self.portfolio_lock.is_pending(
-                    symbol
-                )
-
-                if symbol_has_position:
-                    is_pending = self.portfolio_lock.is_pending(symbol)
-                    status = "pending" if is_pending else "active"
+                # Check if symbol already has an active position
+                if symbol in active_positions:
                     logging.info(
-                        f"ℹ️ [{symbol}] Đã có position {status} trong portfolio, "
+                        f"ℹ️ [{symbol}] Đã có position active trong portfolio, "
                         f"vẫn gửi notification nhưng không mua thêm."
                     )
+                    # Skip to notification section below (symbol_has_position will be True)
 
-                active_count = len(active_positions)
-
-                # Check max positions limit from config
+                # Get config for capital calculation
                 from src.config.trading_config import get_config
 
                 config = get_config(validate=False)
                 max_positions = config.trading.max_positions
-
-                # Skip buying if max positions reached (unless already has position)
-                if not symbol_has_position and active_count >= max_positions:
-                    logging.warning(
-                        f"⚠️ Bỏ qua tín hiệu {symbol} do đã đạt giới hạn số vị thế "
-                        f"(Active: {active_count}/{max_positions})"
-                    )
-                    if active_count > 0:
-                        symbols_list = list(active_positions.keys())[:10]
-                        logging.debug(f"   Các vị thế hiện tại: {', '.join(symbols_list)}")
-                    return None
-
-                # Log if close to limit
-                if not symbol_has_position and active_count >= max_positions * 0.8:
-                    logging.info(
-                        f"📊 Portfolio gần đạt limit: {active_count}/{max_positions} "
-                        f"(còn {max_positions - active_count} slots)"
-                    )
-
-                # Check portfolio lock (pending positions)
-                if self.portfolio_lock.is_pending(symbol):
-                    logging.debug(f"Bỏ qua {symbol} - đang pending")
-                    return None
 
                 # Get take_profit from entry signal (use first target if available)
                 take_profit_price = (
@@ -714,26 +680,36 @@ class TradingOrchestrator:
                 )
 
                 # 4. Paper Trade & Notification
-                # ENHANCED: If symbol already has position, skip buying but still send notification
-                if symbol_has_position:
+                # If symbol already has position, skip buying but still send notification
+                if symbol in active_positions:
                     # Đã có position - chỉ gửi notification, không mua thêm
                     logging.info(
                         f"📢 [{symbol}] Gửi notification tín hiệu mua "
                         f"(đã có position, không mua thêm)"
                     )
 
-                    # Gửi thông báo Telegram (có thể tạo position_size_info giả để hiển thị)
+                    # Gửi thông báo Telegram
                     await self.send_buy_signal_notification(
                         symbol, entry_signal, position_size_info, news_sentiment
                     )
                     return {"signal": True, "skipped_buy": True}
 
                 # Normal flow: Execute buy for new positions
-                # ENHANCED: position_size_info is EnhancedPositionSize object, not dict
+                # CRITICAL: Use atomic can_add_position() to prevent race conditions
                 if position_size_info and position_size_info.shares > 0:
-                    # Đánh dấu mã này đang chờ xử lý để tránh quét lại
-                    # Pass position value for exposure tracking
-                    self.portfolio_lock.add_pending(symbol, position_size_info.value)
+                    # ATOMIC CHECK-AND-RESERVE: Prevents race condition where two tasks
+                    # both check and both add the same symbol
+                    total_capital = config.trading.total_capital
+                    can_add, reason = self.portfolio_lock.can_add_position(
+                        symbol=symbol,
+                        position_value=position_size_info.value,
+                        total_capital=total_capital,
+                        current_positions=active_positions,
+                    )
+
+                    if not can_add:
+                        logging.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
+                        return None
 
                     # Thực hiện paper trade (BUY)
                     take_profit = (
