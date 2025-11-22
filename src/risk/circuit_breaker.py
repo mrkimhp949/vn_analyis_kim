@@ -146,7 +146,9 @@ class CircuitBreaker:
 
             # Validate input parameters
             if not isinstance(portfolio_pnl_pct, (int, float)):
-                raise ValueError(f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}")
+                raise ValueError(
+                    f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}"
+                )
             if not isinstance(vnindex_change_pct, (int, float)):
                 raise ValueError(
                     f"vnindex_change_pct phải là số, nhận được: {type(vnindex_change_pct)}"

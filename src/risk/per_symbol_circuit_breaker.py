@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SymbolStats:
     """Stats per symbol"""
+
     symbol: str
     consecutive_losses: int
     total_trades: int
@@ -149,14 +150,14 @@ class PerSymbolCircuitBreaker:
                 stats.consecutive_losses += 1
 
             # Calculate win rate
-            stats.win_rate = stats.total_wins / stats.total_trades if stats.total_trades > 0 else 0.0
+            stats.win_rate = (
+                stats.total_wins / stats.total_trades if stats.total_trades > 0 else 0.0
+            )
 
             # Check 1: Consecutive losses
             if stats.consecutive_losses >= self.max_consecutive_losses:
                 stats.blocked = True
-                stats.blocked_reason = (
-                    f"🚫 Blocked: {stats.consecutive_losses} consecutive losses"
-                )
+                stats.blocked_reason = f"🚫 Blocked: {stats.consecutive_losses} consecutive losses"
                 logger.warning(
                     f"⚠️ Symbol {symbol} BLOCKED: {stats.consecutive_losses} consecutive losses"
                 )
@@ -171,9 +172,7 @@ class PerSymbolCircuitBreaker:
                     f"🚫 Blocked: Win rate {stats.win_rate:.1%} < {self.min_win_rate:.1%} "
                     f"({stats.total_wins}/{stats.total_trades} trades)"
                 )
-                logger.warning(
-                    f"⚠️ Symbol {symbol} BLOCKED: Low win rate {stats.win_rate:.1%}"
-                )
+                logger.warning(f"⚠️ Symbol {symbol} BLOCKED: Low win rate {stats.win_rate:.1%}")
 
             self._save_stats()
 

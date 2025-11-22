@@ -26,9 +26,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 ALLOWED_ENVIRONMENTS = ["dev", "development", "staging", "production"]
 
 if ENVIRONMENT not in ALLOWED_ENVIRONMENTS:
-    logger.warning(
-        f"⚠️ Unknown ENVIRONMENT: {ENVIRONMENT}. Defaulting to 'production' for safety."
-    )
+    logger.warning(f"⚠️ Unknown ENVIRONMENT: {ENVIRONMENT}. Defaulting to 'production' for safety.")
     ENVIRONMENT = "production"
 
 # Load API keys from environment
@@ -47,8 +45,7 @@ if ip_whitelist_str:
 if ENVIRONMENT in ["dev", "development"]:
     if not VALID_API_KEYS:
         logger.warning(
-            "🔓 DEVELOPMENT MODE: API key validation DISABLED. "
-            "This is UNSAFE for production!"
+            "🔓 DEVELOPMENT MODE: API key validation DISABLED. " "This is UNSAFE for production!"
         )
 else:
     if not VALID_API_KEYS:
@@ -84,8 +81,7 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
         # CRITICAL FIX: Only allow development mode in dev/development environment
         if ENVIRONMENT in ["dev", "development"]:
             logger.warning(
-                "🔓 Development mode: No API key validation. "
-                f"ENVIRONMENT={ENVIRONMENT}"
+                "🔓 Development mode: No API key validation. " f"ENVIRONMENT={ENVIRONMENT}"
             )
             return "dev_mode"
         else:
@@ -96,22 +92,16 @@ async def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> s
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Server misconfiguration: No API keys in {ENVIRONMENT} mode"
+                detail=f"Server misconfiguration: No API keys in {ENVIRONMENT} mode",
             )
 
     if not api_key:
         logger.warning("❌ Missing API key in request")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Missing API key"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing API key")
 
     if api_key not in VALID_API_KEYS:
         logger.warning(f"❌ Invalid API key: {api_key[:10]}...")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid API key"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
 
     return api_key
 

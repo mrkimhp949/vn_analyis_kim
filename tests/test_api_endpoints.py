@@ -25,6 +25,7 @@ class TestAPIEndpoints:
         # Reload auth module to pick up new environment
         import importlib
         from src.api import auth
+
         importlib.reload(auth)
 
         with TestClient(app) as client:
@@ -192,6 +193,7 @@ class TestAPIErrorHandling:
         # Reload auth module to pick up new environment
         import importlib
         from src.api import auth
+
         importlib.reload(auth)
 
         with TestClient(app) as client:

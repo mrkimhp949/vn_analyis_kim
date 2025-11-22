@@ -98,8 +98,8 @@ class PortfolioManager:
                     "symbol": symbol,
                     "stop_loss": stop_loss,
                     "entry_price": entry_price,
-                    "suggestion": f"Use stop_loss < {entry_price:,.0f}"
-                }
+                    "suggestion": f"Use stop_loss < {entry_price:,.0f}",
+                },
             )
 
         # Thread-safe transaction
