@@ -66,7 +66,7 @@ class PortfolioRiskMonitor:
         total_capital: float,
         max_total_exposure: float = 0.60,  # 60%
         max_portfolio_risk: float = 0.20,  # 20%
-        max_position_size: float = 0.15,  # 15%
+        max_position_size: float = 0.10,  # 10% (FIXED: was 0.15 which exceeded 100% with 10 positions)
         max_sector_exposure: float = 0.40,  # 40%
         alert_thresholds: Optional[Dict[str, float]] = None,
     ):

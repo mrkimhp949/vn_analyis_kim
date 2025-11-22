@@ -44,7 +44,7 @@ class EnhancedPositionSizer:
         self,
         total_capital: float = 100_000_000,
         max_risk_per_trade: float = 0.02,  # 2% max risk
-        max_position_size: float = 0.15,  # 15% max position
+        max_position_size: float = 0.10,  # 10% max position (FIXED: was 0.15 which exceeded 100% with 10 positions)
         min_position_size: float = 0.05,  # 5% min position
         max_total_exposure: float = 0.60,  # 60% max exposure
         max_portfolio_risk: float = 0.20,  # 20% max portfolio risk
