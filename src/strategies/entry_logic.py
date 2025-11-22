@@ -958,15 +958,30 @@ class ImprovedEntryLogic:
 
         # ENHANCEMENT: Check if price is bouncing FROM support
         # This is a stronger signal than just being near support
+        # CRITICAL FIX: Improved detection with volume confirmation and sustained upward movement
         bouncing_from_support = False
-        if near_support and len(df) >= 3:
+        if near_support and len(df) >= 5:
             # Check if price touched/near support recently and is now moving up
-            recent_low = safe_rolling_operation(df, "low", 3, "min", 0)
-            prev_close = df["close"].iloc[-2] if len(df) >= 2 else current_price
-            # Price was near support in last 3 days and now moving up
+            recent_low = safe_rolling_operation(df, "low", 5, "min", 0)
+
+            # Calculate 3-bar average for sustained movement check
+            prev_3_avg = df["close"].iloc[-4:-1].mean() if len(df) >= 4 else current_price
+
+            # Price was near support in last 5 days
             if abs(recent_low - support) / support < 0.02:  # Within 2% of support
-                if current_price > prev_close:  # Price moving up
-                    bouncing_from_support = True
+                # Check for sustained upward movement (1% above 3-bar average)
+                if current_price > prev_3_avg * 1.01:
+                    # Volume confirmation: current volume > 1.2x recent average
+                    current_volume = safe_get_latest(df, "volume", 0)
+                    avg_volume_5 = safe_rolling_operation(df, "volume", 5, "mean", 1)
+
+                    if avg_volume_5 > 0 and current_volume > avg_volume_5 * 1.2:
+                        bouncing_from_support = True
+                        logger.debug(
+                            f"✅ Support bounce detected: price {current_price:.0f} > "
+                            f"3-bar avg {prev_3_avg:.0f} (+{((current_price/prev_3_avg - 1)*100):.1f}%), "
+                            f"volume {current_volume/avg_volume_5:.1f}x"
+                        )
 
         # Too close to resistance = trong vòng 2%
         too_close = distance_to_resistance <= 2
@@ -1417,12 +1432,31 @@ class ImprovedEntryLogic:
             symbols_key = tuple(sorted(existing_symbols))  # Create hashable key
 
             # OPTIMIZATION: Check cache validity
+            # CRITICAL FIX: Invalidate cache on date change to prevent stale data
+            import time
+            from datetime import datetime
+
             current_time = time.time()
+
+            # Check if cache is from the same date
+            cache_date_valid = True
+            if self._correlation_cache_time is not None:
+                cache_date = datetime.fromtimestamp(self._correlation_cache_time).date()
+                current_date = datetime.now().date()
+                cache_date_valid = (cache_date == current_date)
+
+                if not cache_date_valid:
+                    logger.debug(
+                        f"🗓️ Correlation cache invalidated: date changed "
+                        f"from {cache_date} to {current_date}"
+                    )
+
             cache_valid = (
                 self._correlation_cache is not None
                 and self._correlation_cache_time is not None
                 and self._correlation_cache_symbols == symbols_key
                 and (current_time - self._correlation_cache_time) < self._correlation_cache_ttl
+                and cache_date_valid  # NEW: Invalidate on date change
             )
 
             if cache_valid:

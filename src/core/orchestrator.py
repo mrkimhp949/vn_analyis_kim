@@ -434,7 +434,7 @@ class TradingOrchestrator:
                     self._track_ml_failure(symbol, error_details)
 
                     # Check circuit breaker after tracking failure
-                    self._check_ml_circuit_breaker()
+                    await self._check_ml_circuit_breaker()
 
                     # Tiếp tục với ml_signal = None
 
@@ -670,7 +670,7 @@ class TradingOrchestrator:
                     self._track_ml_failure(symbol, error_details)
 
                     # Check circuit breaker after tracking failure
-                    self._check_ml_circuit_breaker()
+                    await self._check_ml_circuit_breaker()
 
                     # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
 
@@ -968,9 +968,11 @@ class TradingOrchestrator:
         total = self._ml_failure_count + self._ml_success_count
         return self._ml_failure_count / total if total > 0 else 0.0
 
-    def _check_ml_circuit_breaker(self):
+    async def _check_ml_circuit_breaker(self):
         """
         Check and update ML circuit breaker status.
+
+        CRITICAL FIX: Made async to properly await Telegram notifications.
 
         Logic:
         1. If failure rate > threshold AND min_samples met → DISABLE ML
@@ -1000,14 +1002,22 @@ class TradingOrchestrator:
 
             logging.critical(alert_msg)
 
+            # CRITICAL FIX: Await notification instead of fire-and-forget
             # Send alert via Telegram if available
             if self.bot and self.chat_id:
-                import asyncio
-
                 try:
-                    asyncio.create_task(self.bot.send_message(self.chat_id, alert_msg, parse_mode="Markdown"))
+                    await self.bot.send_message(self.chat_id, alert_msg, parse_mode="Markdown")
+                    logging.info("✅ ML circuit breaker alert sent to Telegram")
                 except Exception as e:
                     logging.error(f"Failed to send ML circuit breaker alert: {e}")
+                    # Write to file as fallback
+                    try:
+                        with open("ml_circuit_breaker_alerts.log", "a", encoding="utf-8") as f:
+                            from datetime import datetime
+
+                            f.write(f"{datetime.now().isoformat()} - {alert_msg}\n")
+                    except Exception:
+                        pass
 
         # Check if should RECOVER (re-enable ML)
         elif self._ml_circuit_breaker_active and failure_rate <= self._ml_recovery_threshold:
@@ -1023,12 +1033,12 @@ class TradingOrchestrator:
 
             logging.info(recovery_msg)
 
+            # CRITICAL FIX: Await notification instead of fire-and-forget
             # Send recovery alert
             if self.bot and self.chat_id:
-                import asyncio
-
                 try:
-                    asyncio.create_task(self.bot.send_message(self.chat_id, recovery_msg, parse_mode="Markdown"))
+                    await self.bot.send_message(self.chat_id, recovery_msg, parse_mode="Markdown")
+                    logging.info("✅ ML recovery alert sent to Telegram")
                 except Exception as e:
                     logging.error(f"Failed to send ML recovery alert: {e}")
 
