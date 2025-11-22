@@ -1,6 +1,12 @@
 {
   "expected_features": 28,
-  "saved_at": "2025-11-16T00:59:46.317643",
+  "saved_at": "2025-11-21T22:04:03.630345",
+  "has_xgboost": true,
+  "has_rf": true,
+  "ensemble_weights": {
+    "rf": 0.5,
+    "xgb": 0.5
+  },
   "feature_names": [
     "sma20",
     "ema20",
@@ -20,15 +26,16 @@
     "volume_ratio",
     "volume_surge",
     "volatility_20",
-    "relative_strength",
-    "rsi_lag_1",
-    "macd_diff_lag_1",
-    "volume_ratio_lag_1",
-    "rsi_lag_2",
-    "macd_diff_lag_2",
-    "volume_ratio_lag_2",
-    "rsi_lag_3",
-    "macd_diff_lag_3",
-    "volume_ratio_lag_3"
-  ]
+    "roc_10",
+    "stoch_k",
+    "obv_signal",
+    "price_vs_vwap",
+    "hv_ratio",
+    "close_position",
+    "rs",
+    "rs_momentum",
+    "price_vs_sma20",
+    "adx"
+  ],
+  "has_feature_importance": true
 }

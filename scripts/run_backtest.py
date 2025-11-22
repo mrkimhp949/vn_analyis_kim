@@ -123,6 +123,7 @@ class Backtester:
         except Exception as e:
             print(f"❌ Lỗi load data {symbol}: {e}")
             import traceback
+
             traceback.print_exc()
             return {
                 "symbol": symbol,
@@ -167,8 +168,8 @@ class Backtester:
                 "portfolio_values": pd.DataFrame(),
             }
 
-        min_date = df['time'].min()
-        max_date = df['time'].max()
+        min_date = df["time"].min()
+        max_date = df["time"].max()
         print(f"📅 Từ {min_date.strftime('%Y-%m-%d')} đến {max_date.strftime('%Y-%m-%d')}")
         print(f"📈 Tổng số ngày: {len(df)}")
 
@@ -723,6 +724,7 @@ class Backtester:
             except Exception as e:
                 print(f"❌ Lỗi backtest {symbol}: {e}")
                 import traceback
+
                 traceback.print_exc()
 
         # Summary
@@ -900,15 +902,33 @@ def load_test_symbols(mode: str = "vn30") -> list:
     elif mode == "vn30":
         # VN30 index components (24 mã có trong quality_tickers)
         return [
-            "ACB", "BID", "CTG", "FPT", "GAS", "HPG", "MBB",
-            "MSN", "MWG", "NVL", "PLX", "SAB", "SSI", "STB", "TCB",
-            "VCB", "VIB", "VIC", "VJC", "VNM", "VPB"
+            "ACB",
+            "BID",
+            "CTG",
+            "FPT",
+            "GAS",
+            "HPG",
+            "MBB",
+            "MSN",
+            "MWG",
+            "NVL",
+            "PLX",
+            "SAB",
+            "SSI",
+            "STB",
+            "TCB",
+            "VCB",
+            "VIB",
+            "VIC",
+            "VJC",
+            "VNM",
+            "VPB",
         ]
 
     elif mode == "quality":
         # Load từ quality_tickers.txt (limit 100 mã cho nhanh)
         try:
-            with open("quality_tickers.txt", 'r', encoding='utf-8') as f:
+            with open("quality_tickers.txt", "r", encoding="utf-8") as f:
                 symbols = [line.strip().upper() for line in f if line.strip()]
                 return symbols[:100]  # Top 100 mã quality
         except FileNotFoundError:
@@ -918,7 +938,7 @@ def load_test_symbols(mode: str = "vn30") -> list:
     elif mode == "full":
         # Full 200 quality tickers
         try:
-            with open("quality_tickers.txt", 'r', encoding='utf-8') as f:
+            with open("quality_tickers.txt", "r", encoding="utf-8") as f:
                 symbols = [line.strip().upper() for line in f if line.strip()]
                 return symbols
         except FileNotFoundError:
@@ -939,25 +959,19 @@ def main():
         type=str,
         default="quality",
         choices=["quick", "vn30", "quality", "full"],
-        help="Test mode: quick (5 mã), vn30 (~24 mã), quality (100 mã), full (200 mã). Default: quality"
+        help="Test mode: quick (5 mã), vn30 (~24 mã), quality (100 mã), full (200 mã). Default: quality",
     )
     parser.add_argument(
-        "--lookback",
-        type=int,
-        default=500,
-        help="Number of days for backtest (default: 500)"
+        "--lookback", type=int, default=500, help="Number of days for backtest (default: 500)"
     )
     parser.add_argument(
-        "--confidence",
-        type=int,
-        default=60,
-        help="Minimum confidence threshold (default: 60%%)"
+        "--confidence", type=int, default=60, help="Minimum confidence threshold (default: 60%%)"
     )
     parser.add_argument(
         "--capital",
         type=float,
         default=100_000_000,
-        help="Initial capital in VND (default: 100,000,000)"
+        help="Initial capital in VND (default: 100,000,000)",
     )
 
     args = parser.parse_args()
@@ -1003,10 +1017,12 @@ def main():
     except Exception as e:
         print(f"\n❌ Backtest failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

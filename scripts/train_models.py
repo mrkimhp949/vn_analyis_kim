@@ -205,21 +205,21 @@ Examples:
 
   # Generate quality tickers first (run once)
   python scripts/filter_quality_tickers.py
-        """
+        """,
     )
 
     parser.add_argument(
         "--symbols",
         type=str,
         default=None,
-        help="Comma-separated list of symbols (default: quality_tickers.txt or VN30)"
+        help="Comma-separated list of symbols (default: quality_tickers.txt or VN30)",
     )
 
     parser.add_argument(
         "--ticker-file",
         type=str,
         default="quality_tickers.txt",
-        help="File containing ticker symbols (one per line, default: quality_tickers.txt)"
+        help="File containing ticker symbols (one per line, default: quality_tickers.txt)",
     )
 
     parser.add_argument(
@@ -230,7 +230,7 @@ Examples:
         "--max-symbols",
         type=int,
         default=200,
-        help="Maximum number of symbols to use (default: 200)"
+        help="Maximum number of symbols to use (default: 200)",
     )
 
     parser.add_argument(
@@ -255,10 +255,10 @@ def load_symbols_from_file(filepath: str) -> list:
     """
     symbols = []
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             for line in f:
                 ticker = line.strip().upper()
-                if ticker and not ticker.startswith('#'):  # Skip comments
+                if ticker and not ticker.startswith("#"):  # Skip comments
                     symbols.append(ticker)
 
         logger.info(f"✅ Loaded {len(symbols)} symbols from {filepath}")

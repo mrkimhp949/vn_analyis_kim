@@ -23,57 +23,197 @@ logger = logging.getLogger(__name__)
 
 # VN30 Index components (30 blue chips - cập nhật 2024)
 VN30_TICKERS = [
-    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB",
-    "HPG", "KDH", "MBB", "MSN", "MWG", "NVL", "PDR", "PLX", "POW",
-    "SAB", "SSB", "SSI", "STB", "TCB", "TPB", "VCB", "VHM", "VIB",
-    "VIC", "VJC", "VNM", "VPB", "VRE"
+    "ACB",
+    "BCM",
+    "BID",
+    "BVH",
+    "CTG",
+    "FPT",
+    "GAS",
+    "GVR",
+    "HDB",
+    "HPG",
+    "KDH",
+    "MBB",
+    "MSN",
+    "MWG",
+    "NVL",
+    "PDR",
+    "PLX",
+    "POW",
+    "SAB",
+    "SSB",
+    "SSI",
+    "STB",
+    "TCB",
+    "TPB",
+    "VCB",
+    "VHM",
+    "VIB",
+    "VIC",
+    "VJC",
+    "VNM",
+    "VPB",
+    "VRE",
 ]
 
 # Top VN100 stocks (large caps ngoài VN30)
 VN100_ADDITIONAL = [
     # Ngân hàng
-    "EIB", "LPB", "MSB", "OCB", "SHB", "VAB", "VIB", "BVB", "PGB",
-
+    "EIB",
+    "LPB",
+    "MSB",
+    "OCB",
+    "SHB",
+    "VAB",
+    "VIB",
+    "BVB",
+    "PGB",
     # Bất động sản
-    "DIG", "DXG", "HDC", "HDG", "HQC", "LDG", "NLG", "PDN", "SZC",
-    "BCG", "CEO", "DXS", "IJC", "KBC", "NBB", "NTL", "PPC", "SCR",
-
+    "DIG",
+    "DXG",
+    "HDC",
+    "HDG",
+    "HQC",
+    "LDG",
+    "NLG",
+    "PDN",
+    "SZC",
+    "BCG",
+    "CEO",
+    "DXS",
+    "IJC",
+    "KBC",
+    "NBB",
+    "NTL",
+    "PPC",
+    "SCR",
     # Công nghiệp
-    "DGC", "DPM", "GEX", "GMD", "HNG", "HSG", "NT2", "PVD", "PVS",
-    "PVT", "QCG", "TLG", "VCS", "VGC", "VHC", "VNE", "VSC",
-
+    "DGC",
+    "DPM",
+    "GEX",
+    "GMD",
+    "HNG",
+    "HSG",
+    "NT2",
+    "PVD",
+    "PVS",
+    "PVT",
+    "QCG",
+    "TLG",
+    "VCS",
+    "VGC",
+    "VHC",
+    "VNE",
+    "VSC",
     # Tiêu dùng
-    "ANV", "ASM", "BBC", "BHN", "BMI", "CII", "DCM", "DGW", "DPR",
-    "DRC", "FRT", "GIL", "HNG", "HT1", "KDC", "MCH", "MCP", "PAN",
-    "SAM", "SBT", "TNA", "VHG", "VTO",
-
+    "ANV",
+    "ASM",
+    "BBC",
+    "BHN",
+    "BMI",
+    "CII",
+    "DCM",
+    "DGW",
+    "DPR",
+    "DRC",
+    "FRT",
+    "GIL",
+    "HNG",
+    "HT1",
+    "KDC",
+    "MCH",
+    "MCP",
+    "PAN",
+    "SAM",
+    "SBT",
+    "TNA",
+    "VHG",
+    "VTO",
     # Thép, vật liệu
-    "DTL", "HT1", "NKG", "POM", "SMC", "TLH", "VGS", "VIS",
-
+    "DTL",
+    "HT1",
+    "NKG",
+    "POM",
+    "SMC",
+    "TLH",
+    "VGS",
+    "VIS",
     # Dầu khí
-    "BSR", "OIL", "PVB", "PVC", "PVG", "PVP", "PVX",
-
+    "BSR",
+    "OIL",
+    "PVB",
+    "PVC",
+    "PVG",
+    "PVP",
+    "PVX",
     # Điện
-    "PC1", "POW", "PPC", "REE", "SBA", "VSH",
-
+    "PC1",
+    "POW",
+    "PPC",
+    "REE",
+    "SBA",
+    "VSH",
     # Chứng khoán
-    "AGR", "APS", "BSI", "CTS", "FTS", "HCM", "IVS", "MBS",
-    "ORS", "SHS", "VCI", "VDS", "VIX", "VND",
+    "AGR",
+    "APS",
+    "BSI",
+    "CTS",
+    "FTS",
+    "HCM",
+    "IVS",
+    "MBS",
+    "ORS",
+    "SHS",
+    "VCI",
+    "VDS",
+    "VIX",
+    "VND",
 ]
 
 # Top HNX stocks (chọn lọc)
 TOP_HNX = [
     # Ngân hàng HNX
-    "ACB", "SHB", "VCS", "PVB",
-
+    "ACB",
+    "SHB",
+    "VCS",
+    "PVB",
     # Large caps HNX
-    "CEO", "HUT", "LAS", "NBC", "NTP", "PLC", "PVS", "PVI",
-    "SHS", "TNG", "TS4", "VC3", "VCG", "VGC",
-
+    "CEO",
+    "HUT",
+    "LAS",
+    "NBC",
+    "NTP",
+    "PLC",
+    "PVS",
+    "PVI",
+    "SHS",
+    "TNG",
+    "TS4",
+    "VC3",
+    "VCG",
+    "VGC",
     # Mid caps HNX quality
-    "AMV", "CEO", "DBC", "DTD", "HHC", "KLF", "L10", "MBS",
-    "NDN", "NRC", "PVI", "PVL", "SHB", "SHS", "THD", "TIG",
-    "VCS", "VGC", "VNR", "VRC",
+    "AMV",
+    "CEO",
+    "DBC",
+    "DTD",
+    "HHC",
+    "KLF",
+    "L10",
+    "MBS",
+    "NDN",
+    "NRC",
+    "PVI",
+    "PVL",
+    "SHB",
+    "SHS",
+    "THD",
+    "TIG",
+    "VCS",
+    "VGC",
+    "VNR",
+    "VRC",
 ]
 
 
@@ -87,7 +227,7 @@ def load_all_tickers(csv_path: Path) -> dict:
     tickers = {}
 
     try:
-        with open(csv_path, 'r', encoding='utf-8') as f:
+        with open(csv_path, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
             for row in reader:
                 if len(row) >= 3:
@@ -95,10 +235,7 @@ def load_all_tickers(csv_path: Path) -> dict:
                     name = row[1].strip()
                     exchange = row[2].strip()
 
-                    tickers[ticker] = {
-                        "name": name,
-                        "exchange": exchange
-                    }
+                    tickers[ticker] = {"name": name, "exchange": exchange}
 
         logger.info(f"✅ Loaded {len(tickers)} tickers from {csv_path}")
         return tickers
@@ -161,7 +298,8 @@ def filter_quality_tickers(all_tickers: dict) -> list:
     if current_count < target_count:
         logger.info(f"\n📊 Filling with HSX stocks to reach {target_count}...")
         hsx_tickers = [
-            ticker for ticker, info in all_tickers.items()
+            ticker
+            for ticker, info in all_tickers.items()
             if info["exchange"] == "HSX" and ticker not in quality
         ]
 
@@ -178,7 +316,7 @@ def filter_quality_tickers(all_tickers: dict) -> list:
 def save_quality_tickers(tickers: list, output_path: Path):
     """Save quality tickers to file"""
     try:
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             for ticker in tickers:
                 f.write(f"{ticker}\n")
 
@@ -255,7 +393,9 @@ def main():
     logger.info("\n✅ SUCCESS!")
     logger.info(f"\n📝 Next steps:")
     logger.info(f"   1. Review quality_tickers.txt")
-    logger.info(f"   2. Train models: python scripts/train_models.py --ticker-file quality_tickers.txt")
+    logger.info(
+        f"   2. Train models: python scripts/train_models.py --ticker-file quality_tickers.txt"
+    )
     logger.info(f"   3. Backtest: Use quality tickers for scanning")
 
     return 0
@@ -263,4 +403,5 @@ def main():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

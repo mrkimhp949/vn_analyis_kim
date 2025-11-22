@@ -638,7 +638,9 @@ class TradingOrchestrator:
                 # This prevents buying if:
                 # 1. Position exists with shares > 0
                 # 2. Position is pending (being processed, partial exit, etc.)
-                symbol_has_position = symbol in active_positions or self.portfolio_lock.is_pending(symbol)
+                symbol_has_position = symbol in active_positions or self.portfolio_lock.is_pending(
+                    symbol
+                )
 
                 if symbol_has_position:
                     is_pending = self.portfolio_lock.is_pending(symbol)
