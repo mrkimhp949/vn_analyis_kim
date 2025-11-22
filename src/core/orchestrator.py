@@ -400,7 +400,9 @@ class TradingOrchestrator:
             use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
             if use_ml:
                 try:
-                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df, symbol=symbol)
+                    ml_signal = self.ml_generator.analyze(
+                        df, index_df=self.vnindex_df, symbol=symbol
+                    )
                     # Track successful ML analysis
                     if ml_signal is not None:
                         self._ml_success_count += 1
@@ -479,8 +481,7 @@ class TradingOrchestrator:
                 # 3. Any edge cases where position is closed but exit_type != "FULL"
                 updated_positions = self.portfolio_manager.get_positions()
                 position_still_exists = (
-                    symbol in updated_positions
-                    and updated_positions[symbol].get("shares", 0) > 0
+                    symbol in updated_positions and updated_positions[symbol].get("shares", 0) > 0
                 )
 
                 if not position_still_exists:
@@ -630,7 +631,9 @@ class TradingOrchestrator:
             use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
             if use_ml:
                 try:
-                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df, symbol=symbol)
+                    ml_signal = self.ml_generator.analyze(
+                        df, index_df=self.vnindex_df, symbol=symbol
+                    )
                     # Track successful ML analysis
                     if ml_signal is not None:
                         self._ml_success_count += 1
