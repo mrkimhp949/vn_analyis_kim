@@ -197,6 +197,30 @@ class PortfolioManager:
         total_value = (current_shares * current_avg_price) + (shares_to_add * price_to_add)
         new_avg_price = total_value / total_shares
 
+        # CRITICAL FIX: Recalculate stop loss and take profit based on new average price
+        # Use default -7% stop loss and 15% take profit from config
+        old_stop_loss = existing_pos.get("stop_loss")
+        old_take_profit = existing_pos.get("take_profit")
+
+        # Calculate new stop loss: -7% below new avg price (or use existing if better)
+        default_stop_pct = 0.93  # -7%
+        new_stop_loss = new_avg_price * default_stop_pct
+
+        # Keep the higher (less restrictive) of old or new stop loss to avoid tightening stops too much
+        if old_stop_loss and old_stop_loss > new_stop_loss:
+            final_stop_loss = old_stop_loss
+            logger.info(f"🔒 {symbol}: Keeping existing stop loss {old_stop_loss:,.0f} (higher than new {new_stop_loss:,.0f})")
+        else:
+            final_stop_loss = new_stop_loss
+            logger.info(f"📊 {symbol}: Updated stop loss to {final_stop_loss:,.0f} based on new avg price {new_avg_price:,.0f}")
+
+        # Calculate new take profit: 15% above new avg price
+        default_tp_pct = 1.15  # +15%
+        new_take_profit = new_avg_price * default_tp_pct
+
+        # Use new take profit (always update to reflect new avg price)
+        final_take_profit = new_take_profit
+
         # CRITICAL: Wrap in database transaction for atomicity
         trade_date = datetime.now().isoformat()
         with self.db.transaction() as conn:
@@ -214,7 +238,6 @@ class PortfolioManager:
             )
 
             # Update the position with new values
-            # Note: Stop loss and take profit might need re-evaluation, but for now we keep them
             updated_metadata = existing_pos.get("metadata", {})
             if metadata:
                 updated_metadata.update(metadata)
@@ -225,8 +248,8 @@ class PortfolioManager:
                 avg_price=new_avg_price,
                 entry_date=existing_pos["entry_date"],  # Keep original entry date
                 entry_value=total_value,  # Update total cost basis
-                stop_loss=existing_pos.get("stop_loss"),  # Should be re-evaluated
-                take_profit=existing_pos.get("take_profit"),  # Should be re-evaluated
+                stop_loss=final_stop_loss,  # UPDATED: Recalculated based on new avg price
+                take_profit=final_take_profit,  # UPDATED: Recalculated based on new avg price
                 metadata=updated_metadata,
                 conn=conn,
             )

@@ -37,7 +37,7 @@ class CircuitBreaker:
         max_trades_per_day: int = 10,
         max_loss_per_day_pct: float = 0.05,  # 5% vốn
         max_consecutive_losses: int = 5,
-        vnindex_drop_threshold: float = -2.5,  # Ngưỡng VNINDEX giảm để ngắt (%)
+        vnindex_drop_threshold: float = -3.5,  # Ngưỡng VNINDEX giảm để ngắt (%) - Adjusted from -2.5% to reduce false triggers
         total_capital: float = 100_000_000,
         stats_file: str = "circuit_breaker_stats.json",
         max_portfolio_heat: float = 0.70,  # ENHANCEMENT: Max portfolio exposure

@@ -82,6 +82,7 @@ class ImprovedEntryLogic:
         support_distance_percent: float = 3.0,
         require_trend_alignment: bool = True,
         require_volume_confirmation: bool = True,
+        regime_aware_filtering: bool = True,  # NEW: Relax filters in BULL/SIDEWAYS markets
         portfolio_manager=None,
         performance_monitor=None,
         min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
@@ -95,6 +96,7 @@ class ImprovedEntryLogic:
             support_distance_percent: Khoảng cách tối đa đến support (%)
             require_trend_alignment: Yêu cầu phải theo trend
             require_volume_confirmation: Yêu cầu volume confirm
+            regime_aware_filtering: NEW - Relax certain filters in BULL/SIDEWAYS (reduces false negatives)
             portfolio_manager: Portfolio manager for context-aware decisions
         """
         self.min_confidence = min_confidence
@@ -103,6 +105,7 @@ class ImprovedEntryLogic:
         self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
         self.require_volume_confirmation = require_volume_confirmation
+        self.regime_aware_filtering = regime_aware_filtering
         self.portfolio_manager = portfolio_manager
         self.performance_monitor = performance_monitor or get_performance_monitor()
         self.min_liquidity_value = min_liquidity_value
@@ -330,6 +333,7 @@ class ImprovedEntryLogic:
 
         # FILTER 4: VOLUME CONFIRMATION
         # ENHANCEMENT: Pass market_regime for dynamic threshold adjustment
+        # NEW: Relax volume requirement in BULL/SIDEWAYS if regime_aware_filtering enabled
         volume_check = self._check_volume_confirmation(df, market_regime)
         if not volume_check["confirmed"]:
             volume_note = volume_check["reason"]
@@ -340,7 +344,17 @@ class ImprovedEntryLogic:
                     "note": volume_note,
                 }
             )
-            if self.require_volume_confirmation:
+
+            # Regime-aware filtering: Relax volume in BULL/SIDEWAYS
+            regime_name = market_regime.get("regime", "SIDEWAYS") if market_regime else "SIDEWAYS"
+            should_block_volume = self.require_volume_confirmation
+
+            if self.regime_aware_filtering and regime_name in ["BULL", "SIDEWAYS"]:
+                # In BULL/SIDEWAYS: Volume becomes optional (warning only)
+                should_block_volume = False
+                logger.debug(f"📊 Relaxing volume filter in {regime_name} market (regime-aware)")
+
+            if should_block_volume:
                 return (False, [], [], [], adjustment_breakdown)
             else:
                 warning_msg = f"⚠️ Volume: {volume_note}"
