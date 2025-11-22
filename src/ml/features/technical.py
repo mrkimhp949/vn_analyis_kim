@@ -3,7 +3,16 @@
 from typing import Optional
 
 import pandas as pd
-import ta
+
+# Make ta library optional since ML can be disabled
+try:
+    import ta
+
+    TA_AVAILABLE = True
+except ImportError:
+    TA_AVAILABLE = False
+    ta = None
+
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
 

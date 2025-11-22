@@ -4,12 +4,48 @@ import time
 
 from src.core.bot_runner import run_bot_with_context
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import NetworkError as TgNetworkError
+from telegram.error import NetworkError as TgNetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from src.config.legacy_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
+
+
+# Retry helper for handling timeouts
+async def safe_reply(message, text, max_retries=3, **kwargs):
+    """
+    Safely send a reply with retry logic for timeout errors
+
+    Args:
+        message: Telegram message object
+        text: Text to send
+        max_retries: Maximum number of retry attempts (default: 3)
+        **kwargs: Additional arguments for reply_text
+
+    Returns:
+        Sent message or None if all retries failed
+    """
+    for attempt in range(max_retries):
+        try:
+            return await message.reply_text(text, **kwargs)
+        except TimedOut:
+            if attempt < max_retries - 1:
+                wait_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
+                logger.warning(
+                    f"Timeout sending message (attempt {attempt + 1}/{max_retries}). "
+                    f"Retrying in {wait_time}s..."
+                )
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(f"Failed to send message after {max_retries} attempts")
+                raise
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
+            raise
+
+    return None
+
 
 try:
     from news_analyzer import format_news_brief, get_hot_news
@@ -42,7 +78,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
+    await safe_reply(
+        update.message,
         "🤖 Bot sẵn sàng!\n\n"
         "📋 Các lệnh:\n"
         "/run - Lấy tín hiệu giao dịch\n"
@@ -874,7 +911,18 @@ async def run_bot_async():
             "Get your token from https://t.me/Botfather"
         )
 
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    # Build app with increased timeouts to handle slow networks
+    from telegram.request import HTTPXRequest
+
+    request = HTTPXRequest(
+        connection_pool_size=8,
+        connect_timeout=10.0,  # Connection timeout: 10s
+        read_timeout=30.0,  # Read timeout: 30s (increased from default 20s)
+        write_timeout=30.0,  # Write timeout: 30s
+        pool_timeout=10.0,  # Pool timeout: 10s
+    )
+
+    app = Application.builder().token(TELEGRAM_TOKEN).request(request).build()
 
     # Set bot instance cho notifications
     try:
