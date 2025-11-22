@@ -96,6 +96,7 @@ class TestTradingConfig:
             max_position_size=1.0,  # 100% in one position
             max_positions=1,  # Can only have 1 position if size is 100%
             max_positions_per_sector=1,  # Must be <= max_positions
+            max_cash_allocation=1.0,  # Allow 100% allocation for this edge case
             max_portfolio_risk=1.0,
             max_sector_exposure=1.0,
             stop_loss_percent=-100.0,  # Extreme but mathematically valid
