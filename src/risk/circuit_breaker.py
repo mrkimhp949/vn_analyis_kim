@@ -60,6 +60,9 @@ class CircuitBreaker:
         self.tripped = False
         self.tripped_reason = ""
 
+        # OPTIMIZATION: Cache last volatility to avoid redundant recalculations
+        self._last_volatility = None
+
     def _load_stats(self) -> Dict:
         """Load stats từ file"""
         if os.path.exists(self.stats_file):
@@ -107,6 +110,8 @@ class CircuitBreaker:
             # Reset trạng thái ngắt mạch mỗi ngày mới
             self.tripped = False
             self.tripped_reason = ""
+            # OPTIMIZATION: Reset volatility cache for fresh calculation
+            self._last_volatility = None
             self._save_stats()
 
     def check_and_update(
@@ -204,6 +209,12 @@ class CircuitBreaker:
         Args:
             market_volatility: Market volatility ratio (e.g., 0.02 = 2%)
         """
+        # OPTIMIZATION: Skip recalculation if volatility hasn't changed
+        if self._last_volatility is not None and abs(market_volatility - self._last_volatility) < 0.0001:
+            return  # No change, skip recalculation
+
+        self._last_volatility = market_volatility
+
         if market_volatility == 0.0:
             # No volatility data - use base thresholds
             self.max_loss_per_day_pct = self.base_max_loss_per_day_pct
