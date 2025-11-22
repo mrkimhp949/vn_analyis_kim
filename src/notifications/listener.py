@@ -31,7 +31,7 @@ async def safe_reply(message, text, max_retries=3, **kwargs):
             return await message.reply_text(text, **kwargs)
         except TimedOut:
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                wait_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
                 logger.warning(
                     f"Timeout sending message (attempt {attempt + 1}/{max_retries}). "
                     f"Retrying in {wait_time}s..."
@@ -45,6 +45,7 @@ async def safe_reply(message, text, max_retries=3, **kwargs):
             raise
 
     return None
+
 
 try:
     from news_analyzer import format_news_brief, get_hot_news
@@ -915,10 +916,10 @@ async def run_bot_async():
 
     request = HTTPXRequest(
         connection_pool_size=8,
-        connect_timeout=10.0,   # Connection timeout: 10s
-        read_timeout=30.0,      # Read timeout: 30s (increased from default 20s)
-        write_timeout=30.0,     # Write timeout: 30s
-        pool_timeout=10.0,      # Pool timeout: 10s
+        connect_timeout=10.0,  # Connection timeout: 10s
+        read_timeout=30.0,  # Read timeout: 30s (increased from default 20s)
+        write_timeout=30.0,  # Write timeout: 30s
+        pool_timeout=10.0,  # Pool timeout: 10s
     )
 
     app = Application.builder().token(TELEGRAM_TOKEN).request(request).build()

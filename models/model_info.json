@@ -1,6 +1,6 @@
 {
   "expected_features": 28,
-  "saved_at": "2025-11-21T22:04:03.630345",
+  "saved_at": "2025-11-22T14:01:56.866372",
   "has_xgboost": true,
   "has_rf": true,
   "ensemble_weights": {

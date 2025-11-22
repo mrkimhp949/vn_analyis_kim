@@ -7,6 +7,7 @@ import pandas as pd
 # Make ta library optional since ML can be disabled
 try:
     import ta
+
     TA_AVAILABLE = True
 except ImportError:
     TA_AVAILABLE = False
