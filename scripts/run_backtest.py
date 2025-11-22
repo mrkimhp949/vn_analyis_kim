@@ -456,7 +456,7 @@ class Backtester:
             else 0
         )
         calmar_ratio = (annual_return / (max_drawdown / 100)) if max_drawdown > 0 else 0
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float("in")
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float("inf")
 
         # Average confidence
         avg_confidence = trades_df["confidence"].mean() if len(trades_df) > 0 else 0
