@@ -634,12 +634,17 @@ class TradingOrchestrator:
                     sym: pos for sym, pos in current_positions.items() if pos.get("shares", 0) > 0
                 }
 
-                # ENHANCED: Check if symbol already has position
-                symbol_has_position = symbol in active_positions
+                # ENHANCED: Check if symbol already has position OR is pending
+                # This prevents buying if:
+                # 1. Position exists with shares > 0
+                # 2. Position is pending (being processed, partial exit, etc.)
+                symbol_has_position = symbol in active_positions or self.portfolio_lock.is_pending(symbol)
 
                 if symbol_has_position:
+                    is_pending = self.portfolio_lock.is_pending(symbol)
+                    status = "pending" if is_pending else "active"
                     logging.info(
-                        f"ℹ️ [{symbol}] Đã có position trong portfolio, "
+                        f"ℹ️ [{symbol}] Đã có position {status} trong portfolio, "
                         f"vẫn gửi notification nhưng không mua thêm."
                     )
 
