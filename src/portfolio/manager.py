@@ -111,31 +111,41 @@ class PortfolioManager:
         take_profit: Optional[float],
         metadata: Optional[Dict],
     ):
-        """Helper function to create a completely new position."""
+        """
+        Helper function to create a completely new position.
+
+        ENHANCEMENT: Uses database transaction for atomicity.
+        Both save_position and save_trade succeed together or fail together.
+        """
         entry_date = datetime.now().isoformat()
         entry_value = shares * entry_price
 
-        self.db.save_position(
-            symbol=symbol,
-            shares=shares,
-            avg_price=entry_price,
-            entry_date=entry_date,
-            entry_value=entry_value,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            metadata=metadata,
-        )
+        # CRITICAL: Wrap in database transaction for atomicity
+        # If save_trade fails, save_position will be rolled back
+        with self.db.transaction() as conn:
+            self.db.save_position(
+                symbol=symbol,
+                shares=shares,
+                avg_price=entry_price,
+                entry_date=entry_date,
+                entry_value=entry_value,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                metadata=metadata,
+                conn=conn,
+            )
 
-        self.db.save_trade(
-            symbol=symbol,
-            action="BUY_NEW",
-            shares=shares,
-            price=entry_price,
-            total_value=entry_value,
-            trade_date=entry_date,
-            reason="New entry signal",
-            metadata=metadata,
-        )
+            self.db.save_trade(
+                symbol=symbol,
+                action="BUY_NEW",
+                shares=shares,
+                price=entry_price,
+                total_value=entry_value,
+                trade_date=entry_date,
+                reason="New entry signal",
+                metadata=metadata,
+                conn=conn,
+            )
 
         print(f"✅ Added new position: {symbol} - {shares} shares @ {entry_price:,.0f}")
 
@@ -147,7 +157,12 @@ class PortfolioManager:
         price_to_add: float,
         metadata: Optional[Dict],
     ):
-        """Helper function to average up an existing position."""
+        """
+        Helper function to average up an existing position.
+
+        ENHANCEMENT: Uses database transaction for atomicity.
+        Both save_trade and save_position succeed together or fail together.
+        """
         current_shares = existing_pos["shares"]
         current_avg_price = existing_pos["avg_price"]
 
@@ -156,38 +171,43 @@ class PortfolioManager:
         total_value = (current_shares * current_avg_price) + (shares_to_add * price_to_add)
         new_avg_price = total_value / total_shares
 
-        # Log the additional buy
+        # CRITICAL: Wrap in database transaction for atomicity
         trade_date = datetime.now().isoformat()
-        self.db.save_trade(
-            symbol=symbol,
-            action="BUY_ADD",
-            shares=shares_to_add,
-            price=price_to_add,
-            total_value=shares_to_add * price_to_add,
-            trade_date=trade_date,
-            reason="Averaging up",
-            metadata=metadata,
-        )
+        with self.db.transaction() as conn:
+            # Log the additional buy
+            self.db.save_trade(
+                symbol=symbol,
+                action="BUY_ADD",
+                shares=shares_to_add,
+                price=price_to_add,
+                total_value=shares_to_add * price_to_add,
+                trade_date=trade_date,
+                reason="Averaging up",
+                metadata=metadata,
+                conn=conn,
+            )
 
-        # Update the position with new values
-        # Note: Stop loss and take profit might need re-evaluation, but for now we keep them
-        updated_metadata = existing_pos.get("metadata", {})
-        if metadata:
-            updated_metadata.update(metadata)
+            # Update the position with new values
+            # Note: Stop loss and take profit might need re-evaluation, but for now we keep them
+            updated_metadata = existing_pos.get("metadata", {})
+            if metadata:
+                updated_metadata.update(metadata)
 
-        self.db.save_position(
-            symbol=symbol,
-            shares=total_shares,
-            avg_price=new_avg_price,
-            entry_date=existing_pos["entry_date"],  # Keep original entry date
-            entry_value=total_value,  # Update total cost basis
-            stop_loss=existing_pos.get("stop_loss"),  # Should be re-evaluated
-            take_profit=existing_pos.get("take_profit"),  # Should be re-evaluated
-            metadata=updated_metadata,
-        )
+            self.db.save_position(
+                symbol=symbol,
+                shares=total_shares,
+                avg_price=new_avg_price,
+                entry_date=existing_pos["entry_date"],  # Keep original entry date
+                entry_value=total_value,  # Update total cost basis
+                stop_loss=existing_pos.get("stop_loss"),  # Should be re-evaluated
+                take_profit=existing_pos.get("take_profit"),  # Should be re-evaluated
+                metadata=updated_metadata,
+                conn=conn,
+            )
 
         print(
-            f"✅ Averaged up: {symbol}. Added {shares_to_add} shares. New avg price: {new_avg_price:,.0f}"
+            f"✅ Averaged up: {symbol}. Added {shares_to_add} shares. "
+            f"New avg price: {new_avg_price:,.0f}"
         )
 
     def reduce_position(
@@ -240,35 +260,41 @@ class PortfolioManager:
             exit_date=datetime.now().isoformat(),
         )
 
-        # Log the partial sell trade
-        self.db.save_trade(
-            symbol=symbol,
-            action="SELL_PARTIAL",
-            shares=shares_to_sell,
-            price=exit_price,
-            total_value=exit_value,
-            trade_date=datetime.now().isoformat(),
-            reason=reason,
-            metadata={"pnl": pnl, "pnl_percent": pnl_percent},
-        )
+        # CRITICAL: Wrap in database transaction for atomicity
+        # Both save_trade and save_position succeed together or fail together
+        with self.db.transaction() as conn:
+            # Log the partial sell trade
+            self.db.save_trade(
+                symbol=symbol,
+                action="SELL_PARTIAL",
+                shares=shares_to_sell,
+                price=exit_price,
+                total_value=exit_value,
+                trade_date=datetime.now().isoformat(),
+                reason=reason,
+                metadata={"pnl": pnl, "pnl_percent": pnl_percent},
+                conn=conn,
+            )
 
-        # Update the existing position
-        remaining_shares = current_shares - shares_to_sell
-        remaining_value = remaining_shares * entry_price
+            # Update the existing position
+            remaining_shares = current_shares - shares_to_sell
+            remaining_value = remaining_shares * entry_price
 
-        self.db.save_position(
-            symbol=symbol,
-            shares=remaining_shares,
-            avg_price=entry_price,
-            entry_date=pos["entry_date"],
-            entry_value=remaining_value,  # Update entry value
-            stop_loss=pos.get("stop_loss"),
-            take_profit=pos.get("take_profit"),
-            metadata=pos.get("metadata", {}),
-        )
+            self.db.save_position(
+                symbol=symbol,
+                shares=remaining_shares,
+                avg_price=entry_price,
+                entry_date=pos["entry_date"],
+                entry_value=remaining_value,  # Update entry value
+                stop_loss=pos.get("stop_loss"),
+                take_profit=pos.get("take_profit"),
+                metadata=pos.get("metadata", {}),
+                conn=conn,
+            )
 
         print(
-            f"✅ Reduced position: {symbol} - Sold {shares_to_sell} shares. Remaining: {remaining_shares}"
+            f"✅ Reduced position: {symbol} - Sold {shares_to_sell} shares. "
+            f"Remaining: {remaining_shares}"
         )
 
     def handle_exit(self, symbol: str, exit_price: float, exit_type: str, reason: str):
@@ -335,20 +361,24 @@ class PortfolioManager:
             exit_date=datetime.now().isoformat(),
         )
 
-        # Log trade
-        self.db.save_trade(
-            symbol=symbol,
-            action="SELL_FULL",
-            shares=shares,
-            price=exit_price,
-            total_value=exit_value,
-            trade_date=datetime.now().isoformat(),
-            reason=reason,
-            metadata={"pnl": pnl, "pnl_percent": pnl_percent},
-        )
+        # CRITICAL: Wrap in database transaction for atomicity
+        # Both save_trade and delete_position succeed together or fail together
+        with self.db.transaction() as conn:
+            # Log trade
+            self.db.save_trade(
+                symbol=symbol,
+                action="SELL_FULL",
+                shares=shares,
+                price=exit_price,
+                total_value=exit_value,
+                trade_date=datetime.now().isoformat(),
+                reason=reason,
+                metadata={"pnl": pnl, "pnl_percent": pnl_percent},
+                conn=conn,
+            )
 
-        # Delete position
-        self.db.delete_position(symbol)
+            # Delete position
+            self.db.delete_position(symbol, conn=conn)
 
         print("✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
 
@@ -528,8 +558,6 @@ class PortfolioManager:
             position_weight = position_value / total_value
 
             # Check if position is too large or too small
-            deviation = abs(position_weight - target_position_size)
-
             if position_weight > target_position_size * 1.5:
                 # Overweight - suggest reducing
                 target_value = total_value * target_position_size
@@ -543,7 +571,10 @@ class PortfolioManager:
                         "current_weight": position_weight,
                         "target_weight": target_position_size,
                         "shares_to_sell": shares_to_sell,
-                        "reason": f"Overweight: {position_weight:.1%} vs target {target_position_size:.1%}",
+                        "reason": (
+                            f"Overweight: {position_weight:.1%} "
+                            f"vs target {target_position_size:.1%}"
+                        ),
                     }
                 )
                 needs_rebalancing = True
@@ -561,7 +592,10 @@ class PortfolioManager:
                         "current_weight": position_weight,
                         "target_weight": target_position_size,
                         "shares_to_buy": shares_to_buy,
-                        "reason": f"Underweight: {position_weight:.1%} vs target {target_position_size:.1%}",
+                        "reason": (
+                            f"Underweight: {position_weight:.1%} "
+                            f"vs target {target_position_size:.1%}"
+                        ),
                     }
                 )
                 needs_rebalancing = True
