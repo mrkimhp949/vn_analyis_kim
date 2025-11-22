@@ -697,7 +697,7 @@ class Backtester:
 
             # Kiểm tra file
             if os.path.exists(filename):
-                os.path.getsize(filename)
+                file_size = os.path.getsize(filename)
                 print(f"✅ Biểu đồ đã lưu: {filename} ({file_size} bytes)")
             else:
                 print(f"❌ Không tìm thấy file sau khi lưu!")
@@ -856,7 +856,7 @@ class Backtester:
                 )
 
             if os.path.exists(excel_filename):
-                os.path.getsize(excel_filename)
+                file_size = os.path.getsize(excel_filename)
                 print(f"✅ Đã xuất Excel: {excel_filename} ({file_size:,} bytes)")
 
             # Cũng export CSV đơn giản - SỬA LỖI ENCODING
