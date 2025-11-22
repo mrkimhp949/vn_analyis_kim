@@ -17,8 +17,16 @@ class TestAPIEndpoints:
     """Test FastAPI endpoints"""
 
     @pytest.fixture(autouse=True)
-    def setup(self):
-        """Setup test client"""
+    def setup(self, monkeypatch):
+        """Setup test client with development environment"""
+        # CRITICAL FIX: Set ENVIRONMENT=dev for tests to bypass API key requirement
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+
+        # Reload auth module to pick up new environment
+        import importlib
+        from src.api import auth
+        importlib.reload(auth)
+
         with TestClient(app) as client:
             self.client = client
             yield
@@ -176,8 +184,16 @@ class TestAPIErrorHandling:
     """Test API error handling"""
 
     @pytest.fixture(autouse=True)
-    def setup(self):
-        """Setup test client"""
+    def setup(self, monkeypatch):
+        """Setup test client with development environment"""
+        # CRITICAL FIX: Set ENVIRONMENT=dev for tests to bypass API key requirement
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+
+        # Reload auth module to pick up new environment
+        import importlib
+        from src.api import auth
+        importlib.reload(auth)
+
         with TestClient(app) as client:
             self.client = client
             yield
