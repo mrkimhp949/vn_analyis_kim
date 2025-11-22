@@ -49,7 +49,8 @@ def test_ml_error_handling_code_exists():
     assert "try:" in orchestrator_code
     assert "ml_signal = self.ml_generator.analyze" in orchestrator_code
     assert "except Exception" in orchestrator_code
-    assert "Lỗi ML analysis" in orchestrator_code
+    # Check for error logging (updated error message)
+    assert ("ML analysis failed" in orchestrator_code or "Lỗi ML analysis" in orchestrator_code)
 
     # Test services có try-catch
     with open("src/services/entry_service.py", "r", encoding="utf-8") as f:

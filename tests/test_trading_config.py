@@ -74,15 +74,17 @@ class TestTradingConfig:
 
     def test_edge_cases(self):
         """Test edge case values"""
-        # Minimum valid values
+        # Minimum valid values (respecting cross-field constraints)
         config = TradingConfig(
+            total_capital=100_000_000,  # Need enough capital for min practical size
             min_confidence=0,
             min_risk_reward=1.0,
             min_position_size=0.01,
             max_position_size=0.02,
             max_positions=1,
             max_portfolio_risk=0.01,
-            max_sector_exposure=0.01,
+            max_sector_exposure=0.02,  # Must be >= max_position_size
+            stop_loss_percent=-2.0,  # Need to keep within portfolio risk
         )
         config.validate()  # Should not raise
 

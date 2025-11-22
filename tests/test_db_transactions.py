@@ -88,19 +88,10 @@ def test_transaction_rollback_on_error(db):
                 conn=conn,
             )
 
-            # Force an error by passing invalid data to save_trade
+            # Force an error by raising an exception explicitly
             # This will cause the entire transaction to roll back
-            db.save_trade(
-                symbol="FPT",
-                action="INVALID_ACTION_THAT_IS_TOO_LONG_FOR_DB" * 10,  # Exceeds limits
-                shares=100,
-                price=100000,
-                total_value=10000000,
-                trade_date="2025-11-22",
-                reason="Test rollback",
-                conn=conn,
-            )
-    except Exception:
+            raise ValueError("Simulated error to test rollback")
+    except ValueError:
         # Expected to fail
         pass
 
