@@ -88,14 +88,15 @@ class TestTradingConfig:
         )
         config.validate()  # Should not raise
 
-        # Maximum valid values
+        # Maximum valid values (respecting cross-field constraints)
         config = TradingConfig(
             min_confidence=100,
             min_risk_reward=10.0,
-            max_position_size=1.0,
-            max_positions=100,
+            max_position_size=1.0,  # 100% in one position
+            max_positions=1,  # Can only have 1 position if size is 100%
             max_portfolio_risk=1.0,
             max_sector_exposure=1.0,
+            stop_loss_percent=-100.0,  # Extreme but mathematically valid
         )
         config.validate()  # Should not raise
 
