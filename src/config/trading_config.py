@@ -119,7 +119,7 @@ class TradingConfig:
             trailing_stop_percent=float(os.getenv("TRAILING_STOP_PERCENT", 3.0)),
             trailing_activation_percent=float(os.getenv("TRAILING_ACTIVATION_PERCENT", 8.0)),
             total_capital=float(os.getenv("TOTAL_CAPITAL", 100_000_000)),
-            max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.15)),
+            max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.10)),
             min_position_size=float(os.getenv("MIN_POSITION_SIZE", 0.05)),
             max_positions=int(os.getenv("MAX_POSITIONS", 10)),
             max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.20)),
