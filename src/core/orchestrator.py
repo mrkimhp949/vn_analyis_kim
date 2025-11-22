@@ -446,8 +446,21 @@ class TradingOrchestrator:
             )
             if success:
                 logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
-                if exit_decision.exit_type == "FULL":
+
+                # CRITICAL: Clear tracking if position no longer exists or shares = 0
+                # This handles:
+                # 1. FULL exits (obvious)
+                # 2. Multiple partial exits that reduce shares to 0 (memory leak fix)
+                # 3. Any edge cases where position is closed but exit_type != "FULL"
+                updated_positions = self.portfolio_manager.get_positions()
+                position_still_exists = (
+                    symbol in updated_positions
+                    and updated_positions[symbol].get("shares", 0) > 0
+                )
+
+                if not position_still_exists:
                     self.exit_strategy.clear_position_tracking(symbol)
+                    logging.debug(f"🧹 Cleared tracking for {symbol} (position fully closed)")
 
                 # GHI NHẬN PNL NGAY LẬP TỨC sau khi thoát lệnh
                 current_pnl = self.portfolio_manager.get_daily_pnl_pct()
