@@ -110,6 +110,12 @@ class TradingOrchestrator:
         self.position_sizer: Optional[Any] = None
         self.exit_strategy: Optional[Any] = None
 
+        # ENHANCEMENT: ML failure tracking for monitoring and debugging
+        self._ml_failure_count = 0
+        self._ml_success_count = 0
+        self._ml_failures_by_error = {}  # {error_type: count}
+        self._ml_failures_by_symbol = {}  # {symbol: count}
+
     def _setup_strategies(self, market_regime: Dict):
         """Lấy và gán các chiến lược từ StrategyManager và điều chỉnh theo thị trường."""
         # Lấy các đối tượng chiến lược gốc
@@ -389,14 +395,33 @@ class TradingOrchestrator:
             except Exception:
                 logging.debug(f"Không thể cập nhật last_price cho {symbol}")
 
-            # ML analysis với error handling
+            # ML analysis với enhanced error handling
             ml_signal = None
             use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
             if use_ml:
                 try:
-                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
+                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df, symbol=symbol)
+                    # Track successful ML analysis
+                    if ml_signal is not None:
+                        self._ml_success_count += 1
                 except Exception as e:
-                    logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
+                    # ENHANCEMENT: Detailed error logging with diagnostic info
+                    import traceback
+
+                    error_details = {
+                        "symbol": symbol,
+                        "error_type": type(e).__name__,
+                        "error_msg": str(e),
+                        "context": "exit_check",
+                    }
+                    logging.error(
+                        f"❌ ML analysis failed (exit check) for {symbol}: "
+                        f"{type(e).__name__}: {str(e)}"
+                    )
+                    logging.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
+
+                    # Track ML failure for monitoring
+                    self._track_ml_failure(symbol, error_details)
                     # Tiếp tục với ml_signal = None
 
             exit_decision = self.exit_strategy.check_exit(
@@ -600,15 +625,36 @@ class TradingOrchestrator:
                     "is_watchlist": False,
                 }
 
-            # Phân tích ML với error handling
+            # Phân tích ML với enhanced error handling
             ml_signal = None
             use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
             if use_ml:
                 try:
-                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
+                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df, symbol=symbol)
+                    # Track successful ML analysis
+                    if ml_signal is not None:
+                        self._ml_success_count += 1
                 except Exception as e:
-                    logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
-                    # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý
+                    # ENHANCEMENT: Detailed error logging with diagnostic info
+                    import traceback
+
+                    error_details = {
+                        "symbol": symbol,
+                        "error_type": type(e).__name__,
+                        "error_msg": str(e),
+                        "df_shape": df.shape if df is not None else None,
+                        "df_columns": list(df.columns) if df is not None else None,
+                    }
+                    logging.error(
+                        f"❌ ML analysis failed for {symbol}: {type(e).__name__}: {str(e)}\n"
+                        f"   Details: df_shape={error_details['df_shape']}, "
+                        f"df_columns={len(error_details['df_columns']) if error_details['df_columns'] else 0}"
+                    )
+                    logging.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
+
+                    # Track ML failure for monitoring
+                    self._track_ml_failure(symbol, error_details)
+                    # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
 
             # 1. Entry Logic with validation
             if not self.entry_logic:
@@ -852,3 +898,44 @@ class TradingOrchestrator:
         except Exception:
             logging.error("Lỗi gửi báo cáo tóm tắt", exc_info=True)
             await self.bot.send_message(self.chat_id, "Lỗi khi tạo báo cáo")
+
+    def _track_ml_failure(self, symbol: str, error_details: dict):
+        """
+        Track ML analysis failures for monitoring and debugging
+
+        Args:
+            symbol: Stock symbol that failed
+            error_details: Dict with error information
+        """
+        self._ml_failure_count += 1
+
+        # Track by error type
+        error_type = error_details.get("error_type", "Unknown")
+        self._ml_failures_by_error[error_type] = self._ml_failures_by_error.get(error_type, 0) + 1
+
+        # Track by symbol
+        self._ml_failures_by_symbol[symbol] = self._ml_failures_by_symbol.get(symbol, 0) + 1
+
+        # Log summary periodically (every 10 failures)
+        if self._ml_failure_count % 10 == 0:
+            failure_rate = self._get_ml_failure_rate()
+            top_errors = sorted(
+                self._ml_failures_by_error.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+            top_symbols = sorted(
+                self._ml_failures_by_symbol.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+
+            logging.warning(
+                f"📊 ML Failure Summary:\n"
+                f"   Total failures: {self._ml_failure_count}\n"
+                f"   Total successes: {self._ml_success_count}\n"
+                f"   Failure rate: {failure_rate:.1%}\n"
+                f"   Top errors: {', '.join(f'{err}({cnt})' for err, cnt in top_errors)}\n"
+                f"   Top failing symbols: {', '.join(f'{sym}({cnt})' for sym, cnt in top_symbols)}"
+            )
+
+    def _get_ml_failure_rate(self) -> float:
+        """Calculate ML failure rate for monitoring"""
+        total = self._ml_failure_count + self._ml_success_count
+        return self._ml_failure_count / total if total > 0 else 0.0
