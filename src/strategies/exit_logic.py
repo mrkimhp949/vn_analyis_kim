@@ -376,14 +376,18 @@ class ImprovedExitStrategy:
     ) -> float:
         """
         Ensure stop loss is a valid float. Fallback to config/default percent if missing.
+
+        CRITICAL FIX: Stop loss should NEVER be None after portfolio manager validation.
+        This is a safety fallback only.
         """
         if isinstance(stop_loss, (int, float)) and stop_loss > 0:
             return float(stop_loss)
 
+        # CRITICAL: This should NEVER happen after portfolio manager fix
         fallback = self._calculate_default_stop_loss(entry_price)
-        logger.warning(
-            f"[{symbol}] Stop loss missing/invalid ({stop_loss}). "
-            f"Using fallback {fallback:,.2f} ({self.default_stop_loss_pct:+.1f}%)"
+        logger.error(
+            f"[{symbol}] 🚨 CRITICAL: Stop loss missing/invalid ({stop_loss}). "
+            f"This should NEVER happen! Using fallback {fallback:,.2f} ({self.default_stop_loss_pct:+.1f}%)"
         )
         return fallback
 

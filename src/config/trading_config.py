@@ -77,14 +77,34 @@ class TradingConfig:
 
     # Position sizing
     total_capital: float = 100_000_000  # 100M VND
-    max_position_size: float = 0.15  # 15% of portfolio
+    max_position_size: float = 0.10  # 10% of portfolio (FIXED: was 0.15 which exceeded 100%)
     min_position_size: float = 0.05  # 5% of portfolio
-    max_positions: int = 10
+    max_positions: int = 10  # 10 positions * 10% = 100% max
 
     # Risk management
     max_portfolio_risk: float = 0.20  # 20% max risk
     max_sector_exposure: float = 0.40  # 40% max per sector
     max_loss_per_day_pct: float = 5.0  # Max loss per day (%) for circuit breaker
+
+    # CRITICAL FIX: Magic numbers moved to config for easier tuning
+    # Market regime adjustments
+    bull_market_penalty_scale: float = 0.7  # Scale penalties down in bull market
+    bear_market_penalty_scale: float = 1.2  # Scale penalties up in bear market
+    high_volatility_penalty_scale: float = 1.3  # Scale penalties up in high volatility
+
+    # Profit protection
+    profit_protection_pct_low: float = 0.50  # Protect 50% of profit (3-5% range)
+    profit_protection_pct_high: float = 0.60  # Protect 60% of profit (5-8% range)
+
+    # Circuit breaker volatility adjustment
+    circuit_breaker_volatility_tighten_factor: float = 0.75  # Tighten 25% in high vol
+
+    # Technical-only signals
+    min_technical_only_confidence: float = 40.0  # Lower threshold for technical signals
+
+    # Per-symbol circuit breaker
+    per_symbol_max_consecutive_losses: int = 3  # Block symbol after N consecutive losses
+    per_symbol_min_win_rate: float = 0.30  # Block if win rate < 30% after 5 trades
 
     @classmethod
     def from_env(cls):
@@ -105,6 +125,20 @@ class TradingConfig:
             max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.20)),
             max_sector_exposure=float(os.getenv("MAX_SECTOR_EXPOSURE", 0.40)),
             max_loss_per_day_pct=float(os.getenv("MAX_LOSS_PER_DAY_PCT", 5.0)),
+            # Magic numbers
+            bull_market_penalty_scale=float(os.getenv("BULL_MARKET_PENALTY_SCALE", 0.7)),
+            bear_market_penalty_scale=float(os.getenv("BEAR_MARKET_PENALTY_SCALE", 1.2)),
+            high_volatility_penalty_scale=float(os.getenv("HIGH_VOLATILITY_PENALTY_SCALE", 1.3)),
+            profit_protection_pct_low=float(os.getenv("PROFIT_PROTECTION_PCT_LOW", 0.50)),
+            profit_protection_pct_high=float(os.getenv("PROFIT_PROTECTION_PCT_HIGH", 0.60)),
+            circuit_breaker_volatility_tighten_factor=float(
+                os.getenv("CIRCUIT_BREAKER_VOLATILITY_TIGHTEN_FACTOR", 0.75)
+            ),
+            min_technical_only_confidence=float(os.getenv("MIN_TECHNICAL_ONLY_CONFIDENCE", 40.0)),
+            per_symbol_max_consecutive_losses=int(
+                os.getenv("PER_SYMBOL_MAX_CONSECUTIVE_LOSSES", 3)
+            ),
+            per_symbol_min_win_rate=float(os.getenv("PER_SYMBOL_MIN_WIN_RATE", 0.30)),
         )
 
     def validate(self):
