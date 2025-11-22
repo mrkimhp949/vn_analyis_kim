@@ -15,6 +15,24 @@ except ImportError:
     ml_monitor = None
     use_monitoring = False
 
+# Timing Analyzer
+try:
+    from src.ml.signals.timing import add_timing_to_signal
+
+    use_timing = True
+except ImportError:
+    use_timing = False
+    logging.getLogger(__name__).warning("Timing module not available")
+
+# Quality Scorer
+try:
+    from src.ml.signals.quality_scorer import add_quality_score
+
+    use_quality_scorer = True
+except ImportError:
+    use_quality_scorer = False
+    logging.getLogger(__name__).warning("Quality scorer not available")
+
 
 class MLSignalGenerator:
     def __init__(self):
@@ -33,8 +51,14 @@ class MLSignalGenerator:
         self._confidence_history = []  # Track (predicted_conf, actual_result) pairs
         self._max_history = 100  # Keep last 100 predictions
 
-    def analyze(self, df, index_df=None):
-        """Phân tích và tạo tín hiệu từ ML + Technical Analysis"""
+    def analyze(self, df, index_df=None, symbol=None):
+        """Phân tích và tạo tín hiệu từ ML + Technical Analysis
+
+        Args:
+            df: DataFrame with OHLCV data
+            index_df: Optional index (VNINDEX) DataFrame
+            symbol: Optional symbol name (for logging)
+        """
         try:
             # Validate input data
             if df is None or df.empty:
@@ -114,8 +138,9 @@ class MLSignalGenerator:
                     except Exception:
                         print("⚠️ Lỗi calibrate confidence from monitor")
 
-                return {
+                result = {
                     "signal": signal,
+                    "action": signal,  # For timing analyzer
                     "confidence": int(calibrated_confidence),
                     "raw_confidence": confidence,
                     "ml_score": ml_score,
@@ -126,7 +151,24 @@ class MLSignalGenerator:
                     "ema_trend": (
                         "UP" if latest.get("ema20", 0) > latest.get("ema50", 0) else "DOWN"
                     ),
+                    "symbol": symbol,  # Add symbol for logging/tracking
                 }
+
+                # Add timing analysis
+                if use_timing:
+                    try:
+                        result = add_timing_to_signal(result)
+                    except Exception as e:
+                        logging.getLogger(__name__).debug(f"Timing analysis failed: {e}")
+
+                # Add quality score
+                if use_quality_scorer:
+                    try:
+                        result = add_quality_score(result)
+                    except Exception as e:
+                        logging.getLogger(__name__).debug(f"Quality scoring failed: {e}")
+
+                return result
             else:
                 missing_features = set(feature_cols) - set(available_features)
                 print(
@@ -275,10 +317,11 @@ class MLSignalGenerator:
 
     def _make_decision(self, ml_score, tech_score, latest):
         """
-        Decision Engine: Kết hợp ML + Technical
+        Decision Engine: Kết hợp ML + Technical + Volume
 
         ML Score: 0-1 (xác suất giá tăng)
         Tech Score: dict với trend, momentum, volatility
+        Latest: Latest bar data with volume
         """
         reasons = []
 
@@ -316,19 +359,124 @@ class MLSignalGenerator:
         except Exception:
             print("⚠️ Lỗi tính tech signal")
 
+        # VOLUME CONFIRMATION (NEW!)
+        volume_signal = 0
+        try:
+            volume_ratio = latest.get("volume_ratio", 1.0)
+            current_volume = latest.get("volume", 0)
+            volume_sma20 = latest.get("volume_sma20", current_volume)
+
+            # Calculate actual volume ratio if not available
+            if volume_ratio == 1.0 and volume_sma20 > 0:
+                volume_ratio = current_volume / volume_sma20
+
+            # Volume confirmation logic
+            if volume_ratio >= 1.5:
+                volume_signal = 0.6  # Strong volume surge
+                reasons.append(f"Volume Surge ({volume_ratio:.1f}x)")
+            elif volume_ratio >= 1.2:
+                volume_signal = 0.3  # Good volume
+                reasons.append(f"High Volume ({volume_ratio:.1f}x)")
+            elif volume_ratio < 0.8:
+                volume_signal = -0.2  # Low volume warning
+                reasons.append(f"Low Volume ({volume_ratio:.1f}x)")
+            else:
+                volume_signal = 0.0  # Normal volume
+                reasons.append(f"Normal Volume ({volume_ratio:.1f}x)")
+
+            # OBV signal if available
+            obv_signal = latest.get("obv_signal", 0)
+            if obv_signal == 1:
+                volume_signal += 0.2
+                reasons.append("OBV+")
+            elif obv_signal == 0:
+                volume_signal -= 0.1
+
+        except Exception as e:
+            print(f"⚠️ Lỗi tính volume signal: {e}")
+            volume_signal = 0
+
         # Combined Signal
-        # Trọng số ML cao hơn
-        combined_signal = (ml_signal * 1.5) + (tech_signal * 0.5)
+        # ML (45%) + Technical (30%) + Volume (25%)
+        combined_signal = (ml_signal * 1.35) + (tech_signal * 0.45) + (volume_signal * 0.75)
 
         # Confidence (0-100)
-        confidence = min(abs(combined_signal) * 25 + abs(ml_score - 0.5) * 100, 100)
+        # Higher weight for ML and volume confirmation
+        base_confidence = abs(combined_signal) * 25 + abs(ml_score - 0.5) * 100
+        volume_boost = max(0, (volume_ratio - 1.0) * 10) if "volume_ratio" in locals() else 0
+        confidence = min(base_confidence + volume_boost, 100)
 
-        # Decision
-        # BALANCED: Lowered BUY threshold from 1.0 to 0.85 for more opportunities
-        if combined_signal >= 0.85:
+        # =================================================================
+        # DYNAMIC THRESHOLD BASED ON MARKET REGIME
+        # =================================================================
+        buy_threshold = 0.85  # Default (BALANCED)
+        sell_threshold = -0.85  # Default
+
+        # Try to detect market regime for dynamic threshold adjustment
+        try:
+            from src.market.regime_detector import detect_regime
+
+            # Get VN-Index data for regime detection (need 200+ bars)
+            vnindex_df = None
+            try:
+                vnindex_df = load_data("VNINDEX", lookback=250, is_index=True)
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"Could not load VNINDEX: {e}")
+
+            # Check if we have enough data for regime detection
+            if vnindex_df is not None and not vnindex_df.empty and len(vnindex_df) >= 200:
+                regime_obj = detect_regime(vnindex_df)
+                regime = regime_obj.regime
+                conf = regime_obj.confidence
+
+                # Only adjust thresholds if confidence is sufficient (≥40%)
+                if conf >= 40:
+                    # Adjust thresholds based on regime
+                    if regime == "BULL":
+                        # Bull market - lower threshold for more opportunities
+                        buy_threshold = 0.75
+                        sell_threshold = -0.95  # Harder to sell
+                        reasons.append(f"🐂 Bull ({conf:.0f}%)")
+                    elif regime == "BEAR":
+                        # Bear market - higher threshold for safety
+                        buy_threshold = 0.95  # Very selective
+                        sell_threshold = -0.75  # Easier to sell
+                        reasons.append(f"🐻 Bear ({conf:.0f}%)")
+                    elif regime == "SIDEWAYS":
+                        # Sideways - moderate threshold (default)
+                        buy_threshold = 0.85
+                        sell_threshold = -0.85
+                        reasons.append(f"📊 Sideways ({conf:.0f}%)")
+                    elif regime == "HIGH_VOLATILITY":
+                        # High volatility - much higher threshold
+                        buy_threshold = 1.0  # Very conservative
+                        sell_threshold = -0.70
+                        reasons.append(f"⚡ High Vol ({conf:.0f}%)")
+
+                    logging.getLogger(__name__).debug(
+                        f"Dynamic threshold: BUY={buy_threshold:.2f}, "
+                        f"SELL={sell_threshold:.2f} (regime={regime}, conf={conf:.0f}%)"
+                    )
+                else:
+                    # Low confidence - use default thresholds
+                    logging.getLogger(__name__).debug(
+                        f"Regime confidence too low ({conf:.0f}%), using default thresholds"
+                    )
+            else:
+                # Not enough data - use default thresholds
+                data_len = len(vnindex_df) if vnindex_df is not None else 0
+                logging.getLogger(__name__).debug(
+                    f"Insufficient VNINDEX data ({data_len} bars, need 200+), using default thresholds"
+                )
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Regime detection error: {e}")
+            # Use default thresholds (no action needed)
+
+        # Decision with dynamic thresholds
+        if combined_signal >= buy_threshold:
             signal = "BUY"
             reasons.insert(0, f"ML({ml_score:.2f})")
-        elif combined_signal <= -0.85:
+        elif combined_signal <= sell_threshold:
             signal = "SELL"
             reasons.insert(0, f"ML({ml_score:.2f})")
         else:
@@ -446,8 +594,8 @@ class MLSignalGenerator:
             print("   - Chuẩn bị dữ liệu cho training...")
             feature_cols = get_feature_columns()
 
-            # Loại bỏ các hàng không có đủ dữ liệu
-            df.dropna(subset=feature_cols + ["target"], inplace=True)
+            # Loại bỏ các hàng không có đủ dữ liệu (pandas 3.0 compatible)
+            df = df.dropna(subset=feature_cols + ["target"])
 
             if df.empty:
                 print("❌ Không còn dữ liệu sau khi loại bỏ NaN. Dừng training.")

@@ -179,6 +179,99 @@ class TradingConfig:
                 },
             )
 
+        # CRITICAL: Cross-field validation
+        self._validate_cross_field_consistency()
+
+    def _validate_cross_field_consistency(self):
+        """
+        Validate cross-field relationships and logical consistency
+
+        Critical checks:
+        - max_position_size * max_positions <= 1.0 (can't allocate >100%)
+        - max_sector_exposure compatible with max_positions
+        - stop_loss_percent compatible with max_portfolio_risk
+        """
+        # Check 1: Total potential exposure
+        # If all positions are at max size, total exposure can't exceed 100%
+        max_potential_exposure = self.max_position_size * self.max_positions
+
+        if max_potential_exposure > 1.0:
+            raise ConfigurationError(
+                f"Impossible configuration: max_position_size ({self.max_position_size:.1%}) "
+                f"* max_positions ({self.max_positions}) = {max_potential_exposure:.1%} > 100%\n"
+                f"Cannot allocate more than 100% of capital!",
+                context={
+                    "config": "trading",
+                    "max_position_size": self.max_position_size,
+                    "max_positions": self.max_positions,
+                    "max_potential_exposure": max_potential_exposure,
+                    "suggestion": f"Reduce max_position_size to <= {1.0 / self.max_positions:.2f} "
+                    f"or max_positions to <= {int(1.0 / self.max_position_size)}",
+                },
+            )
+
+        # Check 2: Sector exposure must accommodate multiple positions
+        # If max_sector_exposure < max_position_size, impossible to fill even one position
+        if self.max_sector_exposure < self.max_position_size:
+            raise ConfigurationError(
+                f"Inconsistent configuration: max_sector_exposure ({self.max_sector_exposure:.1%}) "
+                f"< max_position_size ({self.max_position_size:.1%})\n"
+                f"Cannot create a position larger than sector limit!",
+                context={
+                    "config": "trading",
+                    "max_sector_exposure": self.max_sector_exposure,
+                    "max_position_size": self.max_position_size,
+                    "suggestion": f"Increase max_sector_exposure to >= {self.max_position_size:.2f}",
+                },
+            )
+
+        # Check 3: Portfolio risk must be achievable
+        # If all positions hit stop loss, total loss = max_positions * stop_loss_percent * max_position_size
+        # This should not exceed max_portfolio_risk
+        max_loss_per_position = abs(self.stop_loss_percent) / 100.0  # Convert % to decimal
+        max_portfolio_loss = self.max_positions * max_loss_per_position * self.max_position_size
+
+        if max_portfolio_loss > self.max_portfolio_risk:
+            raise ConfigurationError(
+                f"Risk configuration unsafe: if all {self.max_positions} positions hit "
+                f"{self.stop_loss_percent}% stop loss, total loss = {max_portfolio_loss:.1%} "
+                f"exceeds max_portfolio_risk ({self.max_portfolio_risk:.1%})",
+                context={
+                    "config": "trading",
+                    "max_positions": self.max_positions,
+                    "stop_loss_percent": self.stop_loss_percent,
+                    "max_position_size": self.max_position_size,
+                    "max_portfolio_loss": max_portfolio_loss,
+                    "max_portfolio_risk": self.max_portfolio_risk,
+                    "suggestion": f"Reduce max_positions to <= {int(self.max_portfolio_risk / (max_loss_per_position * self.max_position_size))} "
+                    f"or increase max_portfolio_risk to >= {max_portfolio_loss:.2f}",
+                },
+            )
+
+        # Check 4: Min position size must be practical
+        # With total capital and max positions, min position size must be achievable
+        min_capital_per_position = self.total_capital * self.min_position_size
+        max_capital_per_position = self.total_capital * self.max_position_size
+
+        # Each position needs at least 1 lot (100 shares) * reasonable price (e.g., 10,000 VND)
+        min_practical_capital = 100 * 10_000  # 1M VND minimum
+
+        if min_capital_per_position < min_practical_capital:
+            raise ConfigurationError(
+                f"min_position_size too small: {self.min_position_size:.1%} of "
+                f"{self.total_capital:,.0f} VND = {min_capital_per_position:,.0f} VND "
+                f"< {min_practical_capital:,.0f} VND (minimum 1 lot at 10k/share)",
+                context={
+                    "config": "trading",
+                    "min_position_size": self.min_position_size,
+                    "total_capital": self.total_capital,
+                    "min_capital_per_position": min_capital_per_position,
+                    "min_practical_capital": min_practical_capital,
+                    "suggestion": f"Increase min_position_size to >= {min_practical_capital / self.total_capital:.4f} "
+                    f"or increase total_capital",
+                },
+            )
+
 
 @dataclass
 class APIConfig:

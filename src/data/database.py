@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -59,18 +60,65 @@ class TradingDB:
         """Public property to access connection for backward compatibility"""
         return self._get_connection()
 
-    def execute_write(self, query: str, params: tuple = None):
-        """Execute a write query"""
+    @contextmanager
+    def transaction(self):
+        """
+        ENHANCEMENT: Database transaction context manager for atomic multi-operation sequences.
+
+        Usage:
+            with db.transaction():
+                db.save_position(...)
+                db.save_trade(...)
+            # Both operations committed together, or both rolled back on error
+
+        Benefits:
+        - Ensures atomicity: All operations succeed or all fail
+        - Prevents inconsistent state (e.g., position saved but trade not logged)
+        - Proper rollback on any exception
+        """
         conn = self._get_connection()
-        cursor = conn.cursor()
+
+        # Disable auto-commit by starting a transaction
+        # SQLite default is auto-commit, we need to explicitly BEGIN
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            yield conn
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logging.getLogger(__name__).error(
+                f"Database transaction rolled back due to error: {type(e).__name__}: {str(e)}"
+            )
+            raise
+
+    def execute_write(self, query: str, params: tuple = None, conn=None):
+        """
+        Execute a write query
+
+        Args:
+            query: SQL query to execute
+            params: Query parameters
+            conn: Optional connection (if inside a transaction). If provided,
+                  commit/rollback is skipped (managed by transaction context)
+        """
+        # Use provided connection (from transaction) or get default
+        use_conn = conn if conn is not None else self._get_connection()
+        cursor = use_conn.cursor()
+        in_transaction = conn is not None
+
         try:
             if params:
                 cursor.execute(query, params)
             else:
                 cursor.execute(query)
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
+
+            # Only commit if NOT in a managed transaction
+            if not in_transaction:
+                use_conn.commit()
+        except Exception:
+            # Only rollback if NOT in a managed transaction
+            if not in_transaction:
+                use_conn.rollback()
             raise
         finally:
             cursor.close()
@@ -224,11 +272,18 @@ class TradingDB:
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         metadata: Optional[Dict] = None,
+        conn=None,
     ):
-        """Save or update a position via the write queue."""
+        """
+        Save or update a position.
+
+        Args:
+            conn: Optional connection (if inside a transaction)
+        """
         query = """
             INSERT OR REPLACE INTO positions
-            (symbol, shares, avg_price, entry_date, entry_value, stop_loss, take_profit, metadata, updated_at)
+            (symbol, shares, avg_price, entry_date, entry_value,
+             stop_loss, take_profit, metadata, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """
         params = (
@@ -241,13 +296,19 @@ class TradingDB:
             take_profit,
             json.dumps(metadata) if metadata else None,
         )
-        self.execute_write(query, params)
+        self.execute_write(query, params, conn=conn)
 
-    def delete_position(self, symbol: str):
-        """Delete a position via the write queue."""
+    def delete_position(self, symbol: str, conn=None):
+        """
+        Delete a position.
+
+        Args:
+            symbol: Stock symbol to delete
+            conn: Optional connection (if inside a transaction)
+        """
         query = "DELETE FROM positions WHERE symbol = ?"
         params = (symbol,)
-        self.execute_write(query, params)
+        self.execute_write(query, params, conn=conn)
 
     def clear_all_positions(self) -> int:
         """
@@ -259,14 +320,9 @@ class TradingDB:
         query = "DELETE FROM positions"
         self.execute_write(query)
 
-        # Get count before deletion (approximate)
-        # Note: SQLite doesn't return rowcount for DELETE, so we check after
-        remaining = self.execute_read("SELECT COUNT(*) as count FROM positions")
-        if remaining and len(remaining) > 0:
-            count = dict(remaining[0]) if hasattr(remaining[0], "keys") else remaining[0][0]
-            return 0  # All deleted
-
-        return 1  # At least some were deleted
+        # Note: SQLite doesn't return rowcount for DELETE
+        # We return 1 to indicate operation was executed
+        return 1
 
     # ===== PORTFOLIO HISTORY =====
 
@@ -348,8 +404,14 @@ class TradingDB:
         trade_date: str,
         reason: Optional[str] = None,
         metadata: Optional[Dict] = None,
+        conn=None,
     ):
-        """Save a trade via the write queue."""
+        """
+        Save a trade.
+
+        Args:
+            conn: Optional connection (if inside a transaction)
+        """
         query = """
             INSERT INTO trades
             (symbol, action, shares, price, total_value, trade_date, reason, metadata)
@@ -365,7 +427,7 @@ class TradingDB:
             reason,
             json.dumps(metadata) if metadata else None,
         )
-        self.execute_write(query, params)
+        self.execute_write(query, params, conn=conn)
 
     def get_trades(self, symbol: Optional[str] = None, limit: int = 100) -> List[Dict]:
         """Get trade history using the read connection."""

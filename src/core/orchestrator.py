@@ -110,6 +110,12 @@ class TradingOrchestrator:
         self.position_sizer: Optional[Any] = None
         self.exit_strategy: Optional[Any] = None
 
+        # ENHANCEMENT: ML failure tracking for monitoring and debugging
+        self._ml_failure_count = 0
+        self._ml_success_count = 0
+        self._ml_failures_by_error = {}  # {error_type: count}
+        self._ml_failures_by_symbol = {}  # {symbol: count}
+
     def _setup_strategies(self, market_regime: Dict):
         """Lấy và gán các chiến lược từ StrategyManager và điều chỉnh theo thị trường."""
         # Lấy các đối tượng chiến lược gốc
@@ -389,14 +395,35 @@ class TradingOrchestrator:
             except Exception:
                 logging.debug(f"Không thể cập nhật last_price cho {symbol}")
 
-            # ML analysis với error handling
+            # ML analysis với enhanced error handling
             ml_signal = None
             use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
             if use_ml:
                 try:
-                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
+                    ml_signal = self.ml_generator.analyze(
+                        df, index_df=self.vnindex_df, symbol=symbol
+                    )
+                    # Track successful ML analysis
+                    if ml_signal is not None:
+                        self._ml_success_count += 1
                 except Exception as e:
-                    logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
+                    # ENHANCEMENT: Detailed error logging with diagnostic info
+                    import traceback
+
+                    error_details = {
+                        "symbol": symbol,
+                        "error_type": type(e).__name__,
+                        "error_msg": str(e),
+                        "context": "exit_check",
+                    }
+                    logging.error(
+                        f"❌ ML analysis failed (exit check) for {symbol}: "
+                        f"{type(e).__name__}: {str(e)}"
+                    )
+                    logging.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
+
+                    # Track ML failure for monitoring
+                    self._track_ml_failure(symbol, error_details)
                     # Tiếp tục với ml_signal = None
 
             exit_decision = self.exit_strategy.check_exit(
@@ -446,8 +473,20 @@ class TradingOrchestrator:
             )
             if success:
                 logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
-                if exit_decision.exit_type == "FULL":
+
+                # CRITICAL: Clear tracking if position no longer exists or shares = 0
+                # This handles:
+                # 1. FULL exits (obvious)
+                # 2. Multiple partial exits that reduce shares to 0 (memory leak fix)
+                # 3. Any edge cases where position is closed but exit_type != "FULL"
+                updated_positions = self.portfolio_manager.get_positions()
+                position_still_exists = (
+                    symbol in updated_positions and updated_positions[symbol].get("shares", 0) > 0
+                )
+
+                if not position_still_exists:
                     self.exit_strategy.clear_position_tracking(symbol)
+                    logging.debug(f"🧹 Cleared tracking for {symbol} (position fully closed)")
 
                 # GHI NHẬN PNL NGAY LẬP TỨC sau khi thoát lệnh
                 current_pnl = self.portfolio_manager.get_daily_pnl_pct()
@@ -587,15 +626,38 @@ class TradingOrchestrator:
                     "is_watchlist": False,
                 }
 
-            # Phân tích ML với error handling
+            # Phân tích ML với enhanced error handling
             ml_signal = None
             use_ml = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
             if use_ml:
                 try:
-                    ml_signal = self.ml_generator.analyze(df, index_df=self.vnindex_df)
+                    ml_signal = self.ml_generator.analyze(
+                        df, index_df=self.vnindex_df, symbol=symbol
+                    )
+                    # Track successful ML analysis
+                    if ml_signal is not None:
+                        self._ml_success_count += 1
                 except Exception as e:
-                    logging.error(f"Lỗi ML analysis cho {symbol}: {type(e).__name__}: {str(e)}")
-                    # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý
+                    # ENHANCEMENT: Detailed error logging with diagnostic info
+                    import traceback
+
+                    error_details = {
+                        "symbol": symbol,
+                        "error_type": type(e).__name__,
+                        "error_msg": str(e),
+                        "df_shape": df.shape if df is not None else None,
+                        "df_columns": list(df.columns) if df is not None else None,
+                    }
+                    logging.error(
+                        f"❌ ML analysis failed for {symbol}: {type(e).__name__}: {str(e)}\n"
+                        f"   Details: df_shape={error_details['df_shape']}, "
+                        f"df_columns={len(error_details['df_columns']) if error_details['df_columns'] else 0}"
+                    )
+                    logging.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
+
+                    # Track ML failure for monitoring
+                    self._track_ml_failure(symbol, error_details)
+                    # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
 
             # 1. Entry Logic with validation
             if not self.entry_logic:
@@ -625,54 +687,27 @@ class TradingOrchestrator:
 
             # 3. Position Sizing
             if entry_signal.should_enter:
-                # ENHANCED: Check if symbol already has a position
-                # If yes, skip buying but still generate signal for notification
+                # Get current positions (read once)
                 current_positions = self.portfolio_manager.get_positions()
 
-                # Double-check: Filter out any positions with invalid shares
+                # Filter out positions with invalid shares
                 active_positions = {
                     sym: pos for sym, pos in current_positions.items() if pos.get("shares", 0) > 0
                 }
 
-                # ENHANCED: Check if symbol already has position
-                symbol_has_position = symbol in active_positions
-
-                if symbol_has_position:
+                # Check if symbol already has an active position
+                if symbol in active_positions:
                     logging.info(
-                        f"ℹ️ [{symbol}] Đã có position trong portfolio, "
+                        f"ℹ️ [{symbol}] Đã có position active trong portfolio, "
                         f"vẫn gửi notification nhưng không mua thêm."
                     )
+                    # Skip to notification section below (symbol_has_position will be True)
 
-                active_count = len(active_positions)
-
-                # Check max positions limit from config
+                # Get config for capital calculation
                 from src.config.trading_config import get_config
 
                 config = get_config(validate=False)
                 max_positions = config.trading.max_positions
-
-                # Skip buying if max positions reached (unless already has position)
-                if not symbol_has_position and active_count >= max_positions:
-                    logging.warning(
-                        f"⚠️ Bỏ qua tín hiệu {symbol} do đã đạt giới hạn số vị thế "
-                        f"(Active: {active_count}/{max_positions})"
-                    )
-                    if active_count > 0:
-                        symbols_list = list(active_positions.keys())[:10]
-                        logging.debug(f"   Các vị thế hiện tại: {', '.join(symbols_list)}")
-                    return None
-
-                # Log if close to limit
-                if not symbol_has_position and active_count >= max_positions * 0.8:
-                    logging.info(
-                        f"📊 Portfolio gần đạt limit: {active_count}/{max_positions} "
-                        f"(còn {max_positions - active_count} slots)"
-                    )
-
-                # Check portfolio lock (pending positions)
-                if self.portfolio_lock.is_pending(symbol):
-                    logging.debug(f"Bỏ qua {symbol} - đang pending")
-                    return None
 
                 # Get take_profit from entry signal (use first target if available)
                 take_profit_price = (
@@ -694,26 +729,36 @@ class TradingOrchestrator:
                 )
 
                 # 4. Paper Trade & Notification
-                # ENHANCED: If symbol already has position, skip buying but still send notification
-                if symbol_has_position:
+                # If symbol already has position, skip buying but still send notification
+                if symbol in active_positions:
                     # Đã có position - chỉ gửi notification, không mua thêm
                     logging.info(
                         f"📢 [{symbol}] Gửi notification tín hiệu mua "
                         f"(đã có position, không mua thêm)"
                     )
 
-                    # Gửi thông báo Telegram (có thể tạo position_size_info giả để hiển thị)
+                    # Gửi thông báo Telegram
                     await self.send_buy_signal_notification(
                         symbol, entry_signal, position_size_info, news_sentiment
                     )
                     return {"signal": True, "skipped_buy": True}
 
                 # Normal flow: Execute buy for new positions
-                # ENHANCED: position_size_info is EnhancedPositionSize object, not dict
+                # CRITICAL: Use atomic can_add_position() to prevent race conditions
                 if position_size_info and position_size_info.shares > 0:
-                    # Đánh dấu mã này đang chờ xử lý để tránh quét lại
-                    # Pass position value for exposure tracking
-                    self.portfolio_lock.add_pending(symbol, position_size_info.value)
+                    # ATOMIC CHECK-AND-RESERVE: Prevents race condition where two tasks
+                    # both check and both add the same symbol
+                    total_capital = config.trading.total_capital
+                    can_add, reason = self.portfolio_lock.can_add_position(
+                        symbol=symbol,
+                        position_value=position_size_info.value,
+                        total_capital=total_capital,
+                        current_positions=active_positions,
+                    )
+
+                    if not can_add:
+                        logging.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
+                        return None
 
                     # Thực hiện paper trade (BUY)
                     take_profit = (
@@ -856,3 +901,44 @@ class TradingOrchestrator:
         except Exception:
             logging.error("Lỗi gửi báo cáo tóm tắt", exc_info=True)
             await self.bot.send_message(self.chat_id, "Lỗi khi tạo báo cáo")
+
+    def _track_ml_failure(self, symbol: str, error_details: dict):
+        """
+        Track ML analysis failures for monitoring and debugging
+
+        Args:
+            symbol: Stock symbol that failed
+            error_details: Dict with error information
+        """
+        self._ml_failure_count += 1
+
+        # Track by error type
+        error_type = error_details.get("error_type", "Unknown")
+        self._ml_failures_by_error[error_type] = self._ml_failures_by_error.get(error_type, 0) + 1
+
+        # Track by symbol
+        self._ml_failures_by_symbol[symbol] = self._ml_failures_by_symbol.get(symbol, 0) + 1
+
+        # Log summary periodically (every 10 failures)
+        if self._ml_failure_count % 10 == 0:
+            failure_rate = self._get_ml_failure_rate()
+            top_errors = sorted(
+                self._ml_failures_by_error.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+            top_symbols = sorted(
+                self._ml_failures_by_symbol.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+
+            logging.warning(
+                f"📊 ML Failure Summary:\n"
+                f"   Total failures: {self._ml_failure_count}\n"
+                f"   Total successes: {self._ml_success_count}\n"
+                f"   Failure rate: {failure_rate:.1%}\n"
+                f"   Top errors: {', '.join(f'{err}({cnt})' for err, cnt in top_errors)}\n"
+                f"   Top failing symbols: {', '.join(f'{sym}({cnt})' for sym, cnt in top_symbols)}"
+            )
+
+    def _get_ml_failure_rate(self) -> float:
+        """Calculate ML failure rate for monitoring"""
+        total = self._ml_failure_count + self._ml_success_count
+        return self._ml_failure_count / total if total > 0 else 0.0
