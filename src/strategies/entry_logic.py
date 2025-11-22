@@ -110,15 +110,24 @@ class ImprovedEntryLogic:
         self.use_tiered_liquidity = use_tiered_liquidity
         self._current_symbol = None
 
-        # Tiered liquidity thresholds (small/mid/large caps)
+        # Tiered liquidity thresholds from config (replaces hardcoded values)
+        from src.config.strategy_config import get_strategy_config
+
+        strategy_config = get_strategy_config()
         self.liquidity_tiers = {
-            "large": {"min_value": 5_000_000_000, "min_volume": 150_000},  # 5B VND
-            "mid": {"min_value": 2_000_000_000, "min_volume": 80_000},  # 2B VND
-            "small": {"min_value": 1_000_000_000, "min_volume": 50_000},  # 1B VND
+            "large": strategy_config.entry.liquidity_tiers.large_cap,
+            "mid": strategy_config.entry.liquidity_tiers.mid_cap,
+            "small": strategy_config.entry.liquidity_tiers.small_cap,
         }
 
         # CRITICAL FIX: Track ML vs Technical-only signals
         self._is_technical_only = False  # Flag to track signal source
+
+        # OPTIMIZATION: Correlation matrix cache to prevent redundant calculations
+        self._correlation_cache = None
+        self._correlation_cache_time = None
+        self._correlation_cache_symbols = None
+        self._correlation_cache_ttl = 300  # 5 minutes TTL
 
     def _validate_initial_signal(
         self, df: pd.DataFrame, ml_signal: Optional[Dict]
@@ -151,8 +160,9 @@ class ImprovedEntryLogic:
             # Use technical indicators to generate a fallback signal
             base_confidence = self._calculate_technical_confidence(df)
 
-            # Only proceed if technical confidence is reasonable
-            if base_confidence < 40:  # Lower threshold for technical-only signals
+            # IMPROVED: Raise threshold to 50% for technical-only signals
+            # Technical analysis should meet same minimum standards as ML
+            if base_confidence < 50:  # Raised from 40% to 50%
                 return (False, f"Technical confidence thấp ({base_confidence}%)", 0, 0)
 
             # Determine signal type from technical analysis
@@ -1372,7 +1382,12 @@ class ImprovedEntryLogic:
 
     def _check_portfolio_correlation(self, df: pd.DataFrame, symbol: Optional[str]) -> Dict:
         """
-        NEW: Kiểm tra correlation với portfolio hiện tại
+        OPTIMIZED: Kiểm tra correlation với portfolio hiện tại (with caching)
+
+        Cache strategy:
+        - Cache correlation matrix for 5 minutes
+        - Invalidate when portfolio symbols change
+        - Reduces redundant calculations during parallel scanning
 
         Returns:
             Dict with correlation analysis
@@ -1386,6 +1401,7 @@ class ImprovedEntryLogic:
 
         try:
             from src.risk.metrics import calculate_portfolio_correlation_risk
+            import time
 
             # Lấy danh sách positions hiện tại
             positions = self.portfolio_manager.get_positions()
@@ -1396,15 +1412,36 @@ class ImprovedEntryLogic:
                     "max_correlation": 0.0,
                 }
 
-            # Tính correlation với portfolio
             existing_symbols = list(positions.keys())
             all_symbols = existing_symbols + [symbol]
+            symbols_key = tuple(sorted(existing_symbols))  # Create hashable key
 
-            correlation_metrics = calculate_portfolio_correlation_risk(
-                all_symbols,
-                lookback=60,
-                max_avg_correlation=0.70,
+            # OPTIMIZATION: Check cache validity
+            current_time = time.time()
+            cache_valid = (
+                self._correlation_cache is not None
+                and self._correlation_cache_time is not None
+                and self._correlation_cache_symbols == symbols_key
+                and (current_time - self._correlation_cache_time) < self._correlation_cache_ttl
             )
+
+            if cache_valid:
+                # Use cached correlation matrix
+                correlation_metrics = self._correlation_cache
+                logger.debug(f"✅ Using cached correlation matrix (age: {current_time - self._correlation_cache_time:.0f}s)")
+            else:
+                # Calculate fresh correlation matrix
+                correlation_metrics = calculate_portfolio_correlation_risk(
+                    all_symbols,
+                    lookback=60,
+                    max_avg_correlation=0.70,
+                )
+
+                # Update cache
+                self._correlation_cache = correlation_metrics
+                self._correlation_cache_time = current_time
+                self._correlation_cache_symbols = symbols_key
+                logger.debug("🔄 Calculated and cached new correlation matrix")
 
             max_correlation = correlation_metrics.get("max_correlation", 0.0)
             avg_correlation = correlation_metrics.get("avg_correlation", 0.0)

@@ -68,6 +68,9 @@ class ImprovedExitStrategy:
         max_holding_days: int = 20,  # Tối đa 20 ngày
         time_decay_threshold: float = 0.02,  # Nếu <2% lời sau 20 ngày → thoát
         default_stop_loss_pct: float = -7.0,
+        # SIMPLIFIED PROFIT PROTECTION: Single threshold replaces complex 3-5-8% logic
+        profit_protection_activation: float = 0.05,  # Activate at 5% profit
+        profit_protection_percent: float = 0.50,  # Protect 50% of max profit
     ):
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
@@ -76,6 +79,10 @@ class ImprovedExitStrategy:
         self.max_holding_days = max_holding_days
         self.time_decay_threshold = time_decay_threshold
         self.default_stop_loss_pct = default_stop_loss_pct
+
+        # SIMPLIFIED: Profit protection config
+        self.profit_protection_activation = profit_protection_activation
+        self.profit_protection_percent = profit_protection_percent
 
         # Tracking
         self.position_highs = {}  # {symbol: highest_price_since_entry}
@@ -116,7 +123,8 @@ class ImprovedExitStrategy:
             partial_exits = []
 
         # Ensure stop loss is valid even if missing from stored position
-        stop_loss = self._ensure_stop_loss(symbol, entry_price, stop_loss)
+        # Pass df for ATR-based calculation if needed
+        stop_loss = self._ensure_stop_loss(symbol, entry_price, stop_loss, df)
 
         # Calculate P&L
         pnl_percent = ((current_price - entry_price) / entry_price) * 100
@@ -372,26 +380,81 @@ class ImprovedExitStrategy:
         return {"should_exit": False}
 
     def _ensure_stop_loss(
-        self, symbol: str, entry_price: float, stop_loss: Optional[float]
+        self, symbol: str, entry_price: float, stop_loss: Optional[float], df: pd.DataFrame = None
     ) -> float:
         """
-        Ensure stop loss is a valid float. Fallback to config/default percent if missing.
+        Ensure stop loss is a valid float. Fallback to ATR-based calculation if missing.
 
         CRITICAL FIX: Stop loss should NEVER be None after portfolio manager validation.
         This is a safety fallback only.
+
+        Priority:
+        1. Use provided stop_loss if valid
+        2. Calculate from ATR if df available
+        3. Use default percentage as last resort
         """
         if isinstance(stop_loss, (int, float)) and stop_loss > 0:
             return float(stop_loss)
 
         # CRITICAL: This should NEVER happen after portfolio manager fix
-        fallback = self._calculate_default_stop_loss(entry_price)
+        fallback = self._calculate_atr_based_stop_loss(entry_price, df)
         logger.error(
             f"[{symbol}] 🚨 CRITICAL: Stop loss missing/invalid ({stop_loss}). "
-            f"This should NEVER happen! Using fallback {fallback:,.2f} ({self.default_stop_loss_pct:+.1f}%)"
+            f"Using ATR-based fallback {fallback:,.2f} (-{((entry_price - fallback) / entry_price * 100):.1f}%)"
         )
         return fallback
 
-    def _calculate_default_stop_loss(self, entry_price: float) -> float:
+    def _calculate_atr_based_stop_loss(self, entry_price: float, df: pd.DataFrame = None) -> float:
+        """
+        Calculate stop loss using ATR (Average True Range) for dynamic risk management.
+
+        Logic:
+        1. If df available and has ATR: Use entry_price - (ATR * 2.0)
+        2. If df available but no ATR: Calculate ATR from high/low/close
+        3. If no df: Fallback to default percentage (-7%)
+
+        Returns:
+            Stop loss price (always below entry_price)
+        """
+        if df is not None and not df.empty:
+            try:
+                # Try to get ATR from dataframe
+                if "atr" in df.columns:
+                    atr = safe_get_latest(df, "atr", 0)
+                    if atr > 0:
+                        stop_loss = entry_price - (atr * 2.0)
+                        # Ensure stop loss is reasonable (3% to 10% below entry)
+                        min_sl = entry_price * 0.90  # Max 10% risk
+                        max_sl = entry_price * 0.97  # Min 3% risk
+                        stop_loss = max(min(stop_loss, max_sl), min_sl)
+                        logger.info(
+                            f"✅ Calculated ATR-based stop loss: {stop_loss:,.2f} "
+                            f"(ATR: {atr:.2f}, Risk: {((entry_price - stop_loss) / entry_price * 100):.1f}%)"
+                        )
+                        return float(stop_loss)
+
+                # Calculate ATR manually if not in dataframe
+                if len(df) >= 14 and all(col in df.columns for col in ["high", "low", "close"]):
+                    from src.utils.indicators import IndicatorUtils
+
+                    atr = IndicatorUtils.get_atr(df)
+                    if atr > 0:
+                        stop_loss = entry_price - (atr * 2.0)
+                        min_sl = entry_price * 0.90
+                        max_sl = entry_price * 0.97
+                        stop_loss = max(min(stop_loss, max_sl), min_sl)
+                        logger.info(
+                            f"✅ Calculated manual ATR-based stop loss: {stop_loss:,.2f} "
+                            f"(ATR: {atr:.2f}, Risk: {((entry_price - stop_loss) / entry_price * 100):.1f}%)"
+                        )
+                        return float(stop_loss)
+            except Exception as e:
+                logger.warning(f"⚠️ Error calculating ATR-based stop loss: {e}, using percentage fallback")
+
+        # Last resort: Use default percentage
+        return self._calculate_percentage_stop_loss(entry_price)
+
+    def _calculate_percentage_stop_loss(self, entry_price: float) -> float:
         """
         Calculate fallback stop loss using configured default percentage.
         """
@@ -414,38 +477,35 @@ class ImprovedExitStrategy:
         pnl_amount: float,
     ) -> Dict:
         """
-        NEW: Protect profit in the 3-8% profit range.
+        SIMPLIFIED: Protect profit before trailing stop activates.
 
-        This prevents giving back all profits before trailing stop activates at 8%.
+        Logic (simplified from previous 3-tier system):
+        - Activates when profit >= activation threshold (default 5%)
+        - Protects a percentage of maximum profit achieved (default 50%)
+        - Simpler than previous 3%→50%, 5%→60%, 8%→trailing logic
+        - Exits if price drops below protection level
 
-        Logic:
-        - If profit is between 3-8%:
-          - Calculate a dynamic stop based on profit level
-          - 3-5% profit: Protect 50% of profit
-          - 5-8% profit: Protect 60% of profit
-        - Uses highest price to track maximum profit achieved
+        Configurable via:
+        - profit_protection_activation: When to activate (default 5%)
+        - profit_protection_percent: How much of max profit to protect (default 50%)
 
         Returns:
             Dict with should_exit flag and decision
         """
-        # Only activate in 3-8% profit range (before trailing stop)
-        if pnl_percent < 3.0 or pnl_percent >= self.trailing_activation * 100:
+        # Only activate if profit >= activation threshold AND below trailing activation
+        activation_threshold = self.profit_protection_activation * 100
+        trailing_threshold = self.trailing_activation * 100
+
+        if pnl_percent < activation_threshold or pnl_percent >= trailing_threshold:
             return {"should_exit": False}
 
         # Calculate maximum profit achieved
         max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
 
-        # Dynamic protection based on profit level
-        if 3.0 <= pnl_percent < 5.0:
-            # Protect 50% of maximum profit
-            protection_pct = 0.50
-            stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_pct)
-        elif 5.0 <= pnl_percent < self.trailing_activation * 100:
-            # Protect 60% of maximum profit
-            protection_pct = 0.60
-            stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_pct)
-        else:
-            return {"should_exit": False}
+        # SIMPLIFIED: Single protection percentage instead of tiered approach
+        stop_price = entry_price * (
+            1 + (max_profit_pct / 100) * self.profit_protection_percent
+        )
 
         # Check if current price dropped below protection level
         if current_price <= stop_price:
