@@ -29,7 +29,7 @@ matplotlib.use("Agg")  # Sử dụng backend không cần GUI
 try:
     from tqdm import tqdm
 except ImportError:
-    print("⚠️ Tqdm not installed, using simple progress indicator")
+    print(f"⚠️ Tqdm not installed, using simple progress indicator")
 
     class tqdm:
         def __init__(self, iterable=None, total=None, desc=None):
@@ -110,18 +110,18 @@ class Backtester:
         # Tạo thư mục backtest_results
         os.makedirs("backtest_results", exist_ok=True)
 
-        print("\n{'='*60}")
-        print("📊 BACKTESTING: {symbol}")
-        print("💡 Confidence Threshold: {confidence_threshold}%")
-        print("{'='*60}")
+        print(f"\n{'='*60}")
+        print(f"📊 BACKTESTING: {symbol}")
+        print(f"💡 Confidence Threshold: {confidence_threshold}%")
+        print(f"{'='*60}")
 
         # Load data - SỬA: thêm try-catch
         try:
             df = load_data(symbol, lookback=lookback)
             if df.empty:
-                raise ValueError("Không có dữ liệu cho {symbol}")
+                raise ValueError(f"Không có dữ liệu cho {symbol}")
         except Exception:
-            print("❌ Lỗi load data {symbol}")
+            print(f"❌ Lỗi load data {symbol}")
             return {
                 "symbol": symbol,
                 "initial_capital": self.initial_capital,
@@ -146,7 +146,7 @@ class Backtester:
             df = df[df["time"] <= end_date]
 
         if df.empty:
-            print("❌ Không có dữ liệu sau filter cho {symbol}")
+            print(f"❌ Không có dữ liệu sau filter cho {symbol}")
             return {
                 "symbol": symbol,
                 "initial_capital": self.initial_capital,
@@ -165,8 +165,8 @@ class Backtester:
                 "portfolio_values": pd.DataFrame(),
             }
 
-        print("📅 Từ {df['time'].min().date()} đến {df['time'].max().date()}")
-        print("📈 Tổng số ngày: {len(df)}")
+        print(f"📅 Từ {df['time'].min().date()} đến {df['time'].max().date()}")
+        print(f"📈 Tổng số ngày: {len(df)}")
 
         # Initialize ML (use lazy-initialized self.ml_generator)
         ml_generator = self.ml_generator
@@ -181,7 +181,7 @@ class Backtester:
         # Simulate trading với progress indicator
         total_days = len(df) - 50
         if total_days <= 0:
-            print("❌ Không đủ dữ liệu để backtest (cần >50 ngày)")
+            print(f"❌ Không đủ dữ liệu để backtest (cần >50 ngày)")
             return {
                 "symbol": symbol,
                 "initial_capital": self.initial_capital,
@@ -200,7 +200,7 @@ class Backtester:
                 "portfolio_values": pd.DataFrame(),
             }
 
-        print("⏳ Đang mô phỏng {total_days} ngày giao dịch...")
+        print(f"⏳ Đang mô phỏng {total_days} ngày giao dịch...")
 
         for i in range(50, len(df)):  # Skip first 50 days for indicators
             current_data = df.iloc[: i + 1].copy()
@@ -209,7 +209,7 @@ class Backtester:
             # Hiển thị progress mỗi 10%
             if (i - 50) % max(1, total_days // 10) == 0:
                 (i - 50) / total_days * 100
-                print("  📊 Đang xử lý: {progress:.1f}%")
+                print(f"  📊 Đang xử lý: {progress:.1f}%")
 
             # ML Analysis
             try:
@@ -345,7 +345,7 @@ class Backtester:
                 )
 
             except Exception:
-                print("⚠️ Lỗi ngày {current_row['time'].date()}")
+                print(f"⚠️ Lỗi ngày {current_row['time'].date()}")
 
         # Close any open position
         if position > 0:
@@ -480,7 +480,7 @@ class Backtester:
         self, symbols, lookback=500, confidence_threshold=45, max_workers=3  # BALANCED
     ):
         """Chạy backtest song song cho nhiều cổ phiếu"""
-        print("🚀 Chạy backtest song song {len(symbols)} mã (workers: {max_workers})")
+        print(f"🚀 Chạy backtest song song {len(symbols)} mã (workers: {max_workers})")
 
         def run_single(symbol):
             try:
@@ -488,7 +488,7 @@ class Backtester:
                     symbol, lookback=lookback, confidence_threshold=confidence_threshold
                 )
             except Exception:
-                print("❌ Lỗi {symbol}")
+                print(f"❌ Lỗi {symbol}")
                 return None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -525,46 +525,46 @@ class Backtester:
 
     def _print_results(self, results):
         """In kết quả backtest"""
-        print("\n📈 KẾT QUẢ BACKTEST")
-        print("{'='*60}")
-        print("💰 Vốn ban đầu:        {results['initial_capital']:>15,} VNĐ")
-        print("💵 Vốn cuối:           {results['final_capital']:>15,.0f} VNĐ")
-        print("📊 Lợi nhuận:          {results['total_return']:>14.2f} %")
-        print("🎯 Buy & Hold:         {results['buy_hold_return']:>14.2f} %")
-        print("🔄 Tổng giao dịch:     {results['total_trades']:>15}")
-        print("✅ Thắng:              {results['winning_trades']:>15}")
-        print("❌ Thua:               {results['losing_trades']:>15}")
-        print("🎲 Tỷ lệ thắng:        {results['win_rate']:>14.2f} %")
-        print("📉 Max Drawdown:       {results['max_drawdown']:>14.2f} %")
-        print("📈 Sharpe Ratio:       {results['sharpe_ratio']:>14.2f}")
-        print("📈 Sortino Ratio:      {results['sortino_ratio']:>14.2f}")
-        print("📈 Calmar Ratio:       {results['calmar_ratio']:>14.2f}")
-        print("💹 Profit Factor:      {results['profit_factor']:>14.2f}")
-        print("⚠️ Chuỗi thua tối đa:  {results['max_consecutive_losses']:>15}")
-        print("{'='*60}\n")
+        print(f"\n📈 KẾT QUẢ BACKTEST")
+        print(f"{'='*60}")
+        print(f"💰 Vốn ban đầu:        {results['initial_capital']:>15,} VNĐ")
+        print(f"💵 Vốn cuối:           {results['final_capital']:>15,.0f} VNĐ")
+        print(f"📊 Lợi nhuận:          {results['total_return']:>14.2f} %")
+        print(f"🎯 Buy & Hold:         {results['buy_hold_return']:>14.2f} %")
+        print(f"🔄 Tổng giao dịch:     {results['total_trades']:>15}")
+        print(f"✅ Thắng:              {results['winning_trades']:>15}")
+        print(f"❌ Thua:               {results['losing_trades']:>15}")
+        print(f"🎲 Tỷ lệ thắng:        {results['win_rate']:>14.2f} %")
+        print(f"📉 Max Drawdown:       {results['max_drawdown']:>14.2f} %")
+        print(f"📈 Sharpe Ratio:       {results['sharpe_ratio']:>14.2f}")
+        print(f"📈 Sortino Ratio:      {results['sortino_ratio']:>14.2f}")
+        print(f"📈 Calmar Ratio:       {results['calmar_ratio']:>14.2f}")
+        print(f"💹 Profit Factor:      {results['profit_factor']:>14.2f}")
+        print(f"⚠️ Chuỗi thua tối đa:  {results['max_consecutive_losses']:>15}")
+        print(f"{'='*60}\n")
 
         # Performance vs Buy&Hold
         outperformance = results["total_return"] - results["buy_hold_return"]
         if outperformance > 0:
-            print("🚀 Chiến lược VƯỢT QUÁ Buy&Hold: +{outperformance:.2f}%")
+            print(f"🚀 Chiến lược VƯỢT QUÁ Buy&Hold: +{outperformance:.2f}%")
         else:
-            print("📉 Chiến lược KÉMHƠN Buy&Hold: {outperformance:.2f}%")
+            print(f"📉 Chiến lược KÉMHƠN Buy&Hold: {outperformance:.2f}%")
 
     def plot_results(self, results):
         """Vẽ biểu đồ kết quả"""
         # Tạo thư mục backtest_results nếu chưa có
         try:
             os.makedirs("backtest_results", exist_ok=True)
-            print("📁 Thư mục backtest_results: {os.path.abspath('backtest_results')}")
+            print(f"📁 Thư mục backtest_results: {os.path.abspath('backtest_results')}")
         except Exception:
-            print("❌ Lỗi tạo thư mục")
+            print(f"❌ Lỗi tạo thư mục")
             return
 
         portfolio_df = results["portfolio_values"]
         trades_df = results["trades"]
 
         if portfolio_df.empty:
-            print("❌ Không có dữ liệu portfolio để vẽ biểu đồ")
+            print(f"❌ Không có dữ liệu portfolio để vẽ biểu đồ")
             return
 
         fig, axes = plt.subplots(2, 1, figsize=(14, 10))
@@ -682,20 +682,20 @@ class Backtester:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f'backtest_results/{results["symbol"]}_{timestamp}.png'
 
-            print("💾 Đang lưu biểu đồ vào: {filename}")
+            print(f"💾 Đang lưu biểu đồ vào: {filename}")
             plt.savefig(filename, dpi=300, bbox_inches="tight")
 
             # Kiểm tra file
             if os.path.exists(filename):
                 os.path.getsize(filename)
-                print("✅ Biểu đồ đã lưu: {filename} ({file_size} bytes)")
+                print(f"✅ Biểu đồ đã lưu: {filename} ({file_size} bytes)")
             else:
-                print("❌ Không tìm thấy file sau khi lưu!")
+                print(f"❌ Không tìm thấy file sau khi lưu!")
 
             plt.show()
 
         except Exception:
-            print("❌ Lỗi khi lưu biểu đồ")
+            print(f"❌ Lỗi khi lưu biểu đồ")
             import traceback
 
             traceback.print_exc()
@@ -712,7 +712,7 @@ class Backtester:
                 )
                 all_results.append(result)
             except Exception:
-                print("❌ Lỗi backtest {symbol}")
+                print(f"❌ Lỗi backtest {symbol}")
 
         # Summary
         self._print_summary(all_results)
@@ -722,12 +722,12 @@ class Backtester:
     # Trong method _print_summary, sửa phần export CSV:
     def _print_summary(self, all_results):
         """Tổng kết backtest nhiều cổ phiếu"""
-        print("\n{'='*60}")
-        print("📊 TỔNG KẾT BACKTEST")
-        print("{'='*60}")
+        print(f"\n{'='*60}")
+        print(f"📊 TỔNG KẾT BACKTEST")
+        print(f"{'='*60}")
 
         if not all_results:
-            print("❌ Không có kết quả nào để tổng kết")
+            print(f"❌ Không có kết quả nào để tổng kết")
             return
 
         summary_df = pd.DataFrame(
@@ -749,7 +749,7 @@ class Backtester:
         )
 
         print(summary_df.to_string(index=False))
-        print("{'='*60}\n")
+        print(f"{'='*60}\n")
 
         # Tự động lưu summary với Excel
         try:
@@ -844,7 +844,7 @@ class Backtester:
 
             if os.path.exists(excel_filename):
                 os.path.getsize(excel_filename)
-                print("✅ Đã xuất Excel: {excel_filename} ({file_size:,} bytes)")
+                print(f"✅ Đã xuất Excel: {excel_filename} ({file_size:,} bytes)")
 
             # Cũng export CSV đơn giản - SỬA LỖI ENCODING
             csv_filename = f"backtest_results/summary_{timestamp}.csv"
@@ -853,20 +853,20 @@ class Backtester:
             except UnicodeEncodeError:
                 # Fallback cho Windows
                 detailed_summary.to_csv(csv_filename, index=False, encoding="cp1252")
-            print("✅ Đã xuất CSV: {csv_filename}\n")
+            print(f"✅ Đã xuất CSV: {csv_filename}\n")
 
         except ImportError:
             # Fallback nếu không có openpyxl
-            print("⚠️ Cài đặt openpyxl để xuất Excel đẹp: pip install openpyxl")
+            print(f"⚠️ Cài đặt openpyxl để xuất Excel đẹp: pip install openpyxl")
             csv_filename = f"backtest_results/summary_{timestamp}.csv"
             try:
                 detailed_summary.to_csv(csv_filename, index=False, encoding="utf-8-sig")
             except UnicodeEncodeError:
                 detailed_summary.to_csv(csv_filename, index=False, encoding="cp1252")
-            print("✅ Đã xuất CSV: {csv_filename}\n")
+            print(f"✅ Đã xuất CSV: {csv_filename}\n")
 
         except Exception:
-            print("❌ Lỗi khi xuất file\n")
+            print(f"❌ Lỗi khi xuất file\n")
             import traceback
 
             traceback.print_exc()
@@ -901,7 +901,7 @@ def load_test_symbols(mode: str = "vn30") -> list:
                 symbols = [line.strip().upper() for line in f if line.strip()]
                 return symbols[:100]  # Top 100 mã quality
         except FileNotFoundError:
-            print("⚠️ quality_tickers.txt not found, falling back to VN30")
+            print(f"⚠️ quality_tickers.txt not found, falling back to VN30")
             return load_test_symbols("vn30")
 
     elif mode == "full":
@@ -911,7 +911,7 @@ def load_test_symbols(mode: str = "vn30") -> list:
                 symbols = [line.strip().upper() for line in f if line.strip()]
                 return symbols
         except FileNotFoundError:
-            print("⚠️ quality_tickers.txt not found, falling back to VN30")
+            print(f"⚠️ quality_tickers.txt not found, falling back to VN30")
             return load_test_symbols("vn30")
 
     else:
@@ -951,9 +951,9 @@ def main():
 
     args = parser.parse_args()
 
-    print("\n" + "=" * 70)
-    print("🚀 BACKTESTING ENGINE")
-    print("=" * 70)
+    print(f"\n" + "=" * 70)
+    print(f"🚀 BACKTESTING ENGINE")
+    print(f"=" * 70)
     print()
 
     # Load test symbols based on mode
@@ -986,7 +986,7 @@ def main():
             confidence_threshold=args.confidence,
         )
 
-        print("\n✅ Backtest completed successfully!")
+        print(f"\n✅ Backtest completed successfully!")
         return 0
 
     except Exception as e:
