@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Backtesting Engine - Kiểm tra hiệu suất chiến lược
 """
@@ -1015,10 +1016,21 @@ def main():
         return 0
 
     except Exception as e:
-        print(f"\n❌ Backtest failed: {e}")
+        print(f"\n[ERROR] Backtest failed: {e}")
         import traceback
+        import sys
 
-        traceback.print_exc()
+        # Try to print traceback with encoding error handling
+        try:
+            traceback.print_exc()
+        except UnicodeDecodeError:
+            # Fallback: print exception info without full traceback
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error details: {str(e)}")
+            # Print simplified traceback
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            if exc_tb:
+                print(f"Error occurred in: {exc_tb.tb_frame.f_code.co_filename}:{exc_tb.tb_lineno}")
         return 1
 
 
