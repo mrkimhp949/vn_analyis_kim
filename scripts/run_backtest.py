@@ -120,8 +120,10 @@ class Backtester:
             df = load_data(symbol, lookback=lookback)
             if df.empty:
                 raise ValueError(f"Không có dữ liệu cho {symbol}")
-        except Exception:
-            print(f"❌ Lỗi load data {symbol}")
+        except Exception as e:
+            print(f"❌ Lỗi load data {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 "symbol": symbol,
                 "initial_capital": self.initial_capital,
@@ -165,8 +167,15 @@ class Backtester:
                 "portfolio_values": pd.DataFrame(),
             }
 
-        print(f"📅 Từ {df['time'].min().date()} đến {df['time'].max().date()}")
+        min_date = df['time'].min()
+        max_date = df['time'].max()
+        print(f"📅 Từ {min_date.strftime('%Y-%m-%d')} đến {max_date.strftime('%Y-%m-%d')}")
         print(f"📈 Tổng số ngày: {len(df)}")
+
+        # Debug: Kiểm tra data quality
+        if len(df) < 100:
+            print(f"⚠️ CẢNH BÁO: Data quá ít ({len(df)} ngày), cần ít nhất 100 ngày!")
+            print(f"   Nguyên nhân có thể: Data source, cache bị lỗi, hoặc lookback quá ngắn")
 
         # Initialize ML (use lazy-initialized self.ml_generator)
         ml_generator = self.ml_generator
@@ -711,8 +720,10 @@ class Backtester:
                     symbol, lookback=lookback, confidence_threshold=confidence_threshold
                 )
                 all_results.append(result)
-            except Exception:
-                print(f"❌ Lỗi backtest {symbol}")
+            except Exception as e:
+                print(f"❌ Lỗi backtest {symbol}: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Summary
         self._print_summary(all_results)
