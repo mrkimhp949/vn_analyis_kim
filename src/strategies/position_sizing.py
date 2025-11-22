@@ -4,6 +4,7 @@ Cải thiện từ improved_position_sizing.py
 """
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -51,6 +52,7 @@ class EnhancedPositionSizer:
         use_kelly: bool = True,
         kelly_fraction: float = 0.5,
         correlation_cache_ttl: int = 3600,  # Cache correlations for 1 hour
+        correlation_cache_maxsize: int = 500,  # ENHANCEMENT: Configurable cache size
     ):  # Half-Kelly
         self.total_capital = total_capital
         self.max_risk_per_trade = max_risk_per_trade
@@ -62,14 +64,16 @@ class EnhancedPositionSizer:
         self.use_kelly = use_kelly
         self.kelly_fraction = kelly_fraction
         self.correlation_cache_ttl = correlation_cache_ttl
+        self.correlation_cache_maxsize = correlation_cache_maxsize
 
         # Tracking
         self.current_positions = {}  # {symbol: position_data}
         self.trade_history = []  # Track trades for win rate calculation
         self.sector_exposure = {}  # Track sector exposure
 
-        # ENHANCEMENT: Correlation cache for performance
-        self._correlation_cache = {}  # {(symbol1, symbol2): (correlation, timestamp)}
+        # ENHANCEMENT: LRU cache for correlation performance
+        # OrderedDict maintains insertion order and allows efficient move_to_end()
+        self._correlation_cache = OrderedDict()  # {(symbol1, symbol2): (correlation, timestamp)}
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -472,7 +476,7 @@ class EnhancedPositionSizer:
         # Create cache key (order-independent)
         cache_key = tuple(sorted([symbol1, symbol2]))
 
-        # Check cache first
+        # Check cache first (LRU behavior)
         if cache_key in self._correlation_cache:
             corr, timestamp = self._correlation_cache[cache_key]
             age = time.time() - timestamp
@@ -480,6 +484,8 @@ class EnhancedPositionSizer:
             # Use cached value if still valid
             if age < self.correlation_cache_ttl:
                 self._cache_hits += 1
+                # LRU: Move to end to mark as recently used
+                self._correlation_cache.move_to_end(cache_key)
                 logger.debug(
                     f"📦 Cache HIT for {symbol1}-{symbol2} correlation "
                     f"(age: {age:.0f}s, hits: {self._cache_hits})"
@@ -532,9 +538,9 @@ class EnhancedPositionSizer:
             # Store in cache
             self._correlation_cache[cache_key] = (corr, time.time())
 
-            # Limit cache size (keep last 100 entries)
-            if len(self._correlation_cache) > 100:
-                self._prune_cache()
+            # LRU: Limit cache size (evict least recently used)
+            if len(self._correlation_cache) > self.correlation_cache_maxsize:
+                self._prune_cache_lru()
 
             return corr
 
@@ -550,13 +556,18 @@ class EnhancedPositionSizer:
         total = self._cache_hits + self._cache_misses
         return self._cache_hits / total if total > 0 else 0.0
 
-    def _prune_cache(self):
+    def _prune_cache_lru(self):
         """
-        Remove oldest 20% of cache entries to prevent unbounded growth
+        LRU cache eviction with TTL-based expiration
 
-        Cache management strategy:
-        - Remove entries older than TTL first
-        - Then remove oldest 20% if still over limit
+        Strategy:
+        1. Remove expired entries (TTL-based) first
+        2. If still over limit, remove LRU entries from beginning of OrderedDict
+
+        Benefits over old approach:
+        - Removes least recently USED (not just oldest by creation time)
+        - Configurable max size (not hard-coded 100)
+        - More efficient with OrderedDict
         """
         if not self._correlation_cache:
             return
@@ -566,35 +577,36 @@ class EnhancedPositionSizer:
         current_time = time.time()
         initial_size = len(self._correlation_cache)
 
-        # First pass: Remove expired entries
+        # Pass 1: Remove expired entries (TTL-based)
+        # Iterate over copy to safely delete during iteration
         expired_keys = [
             key
-            for key, (_, timestamp) in self._correlation_cache.items()
+            for key, (_, timestamp) in list(self._correlation_cache.items())
             if current_time - timestamp > self.correlation_cache_ttl
         ]
+
         for key in expired_keys:
             del self._correlation_cache[key]
 
-        if expired_keys:
+        expired_count = len(expired_keys)
+        if expired_count > 0:
             logger.debug(
-                f"🗑️ Removed {len(expired_keys)} expired cache entries "
-                f"({initial_size} → {len(self._correlation_cache)})"
+                f"🗑️ Removed {expired_count} expired cache entries (TTL > {self.correlation_cache_ttl}s)"
             )
 
-        # Second pass: If still over limit, remove oldest 20%
-        if len(self._correlation_cache) > 100:
-            sorted_items = sorted(
-                self._correlation_cache.items(),
-                key=lambda x: x[1][1],  # Sort by timestamp
-                reverse=True,
-            )
+        # Pass 2: If still over limit, evict LRU entries
+        # OrderedDict: items at beginning = least recently used
+        if len(self._correlation_cache) > self.correlation_cache_maxsize:
+            # Calculate how many to remove
+            num_to_remove = len(self._correlation_cache) - self.correlation_cache_maxsize
 
-            keep_count = int(len(sorted_items) * 0.8)
-            self._correlation_cache = dict(sorted_items[:keep_count])
+            # Remove from beginning (LRU)
+            for _ in range(num_to_remove):
+                self._correlation_cache.popitem(last=False)  # FIFO: remove first (LRU)
 
             logger.info(
-                f"🧹 Pruned correlation cache: {initial_size} → {len(self._correlation_cache)} entries "
-                f"(hit rate: {self._get_cache_hit_rate():.1%})"
+                f"🧹 LRU eviction: {initial_size} → {len(self._correlation_cache)} entries "
+                f"(removed {num_to_remove} LRU, hit rate: {self._get_cache_hit_rate():.1%})"
             )
 
     def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:

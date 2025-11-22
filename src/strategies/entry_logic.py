@@ -117,6 +117,9 @@ class ImprovedEntryLogic:
             "small": {"min_value": 1_000_000_000, "min_volume": 50_000},  # 1B VND
         }
 
+        # CRITICAL FIX: Track ML vs Technical-only signals
+        self._is_technical_only = False  # Flag to track signal source
+
     def _validate_initial_signal(
         self, df: pd.DataFrame, ml_signal: Optional[Dict]
     ) -> tuple[bool, str, float, float]:
@@ -139,8 +142,12 @@ class ImprovedEntryLogic:
         close_price = safe_get_latest(df, "close", 0)
 
         # ENHANCEMENT: Fallback to technical analysis if ML signal is None
+        # CRITICAL: Track whether signal is ML-based or technical-only
         if ml_signal is None:
-            logger.debug("ML signal is None - using technical analysis fallback")
+            logger.warning(
+                "⚠️ ML signal is None - using technical analysis fallback. "
+                "This will be tracked separately for performance analysis."
+            )
             # Use technical indicators to generate a fallback signal
             base_confidence = self._calculate_technical_confidence(df)
 
@@ -153,7 +160,14 @@ class ImprovedEntryLogic:
             if signal_type != "BUY":
                 return (False, f"Technical signal = {signal_type}", 0, 0)
 
+            # Mark this as technical-only signal for tracking
+            # This will be added to metadata in analyze_entry()
+            self._is_technical_only = True
+
             return (True, signal_type, base_confidence, close_price)
+        else:
+            # ML signal available - mark as ML-based
+            self._is_technical_only = False
 
         signal_type = ml_signal.get("signal", "HOLD")
         base_confidence = ml_signal.get("confidence", 0)
@@ -714,6 +728,9 @@ class ImprovedEntryLogic:
                 "min_confidence_threshold": self.min_confidence,
                 "performance_feedback": perf_msg,
                 "market_regime": market_regime,
+                # CRITICAL FIX: Track signal source for performance analysis
+                "signal_source": "technical_only" if self._is_technical_only else "ml",
+                "is_technical_only": self._is_technical_only,
             }
 
             if adjusted_confidence < self.min_confidence:
@@ -778,7 +795,7 @@ class ImprovedEntryLogic:
             )
 
             # Step 6: Build entry signal
-            return EntrySignal(
+            entry_signal = EntrySignal(
                 should_enter=True,
                 signal_type="BUY",
                 confidence=int(adjusted_confidence),
@@ -795,8 +812,24 @@ class ImprovedEntryLogic:
                 entry_type=optimized_entry.get("entry_type", "MARKET"),
                 telemetry=telemetry,
             )
+
+            # CRITICAL FIX: Log signal source for tracking
+            if self._is_technical_only:
+                logger.info(
+                    f"📊 [{symbol}] Technical-only signal generated "
+                    f"(confidence: {adjusted_confidence}%). "
+                    "Will track performance separately."
+                )
+            else:
+                logger.debug(
+                    f"🤖 [{symbol}] ML-based signal generated "
+                    f"(confidence: {adjusted_confidence}%)"
+                )
+
+            return entry_signal
         finally:
             self._current_symbol = None
+            self._is_technical_only = False  # Reset flag
 
     # ========================================================================
     # HELPER METHODS - FILTERS

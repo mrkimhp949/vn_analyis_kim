@@ -47,9 +47,12 @@ class MarketRegimeAnalyzer:
         self.end_date = config.data.end_date
         self.start_date = config.data.start_date
 
-    def analyze_market_regime(self) -> Dict:
+    def analyze_market_regime(self, vnindex_df: Optional[pd.DataFrame] = None) -> Dict:
         """
         Phân tích tình trạng thị trường VNINDEX
+
+        Args:
+            vnindex_df: Optional pre-loaded VNINDEX data to avoid re-loading
 
         Returns:
             dict: {
@@ -60,17 +63,26 @@ class MarketRegimeAnalyzer:
             }
         """
         try:
-            # Load VNINDEX data
-            vnindex = load_data(
-                symbol="VNINDEX",
-                start_date=self.start_date,
-                end_date=self.end_date,
-                resolution="1D",
-                data_type="index",
-            )
+            # Use pre-loaded data if available, otherwise load fresh
+            if vnindex_df is not None and not vnindex_df.empty:
+                vnindex = vnindex_df
+                logger.debug("Using pre-loaded VNINDEX data for regime analysis")
+            else:
+                # Load VNINDEX data with lookback (more reliable than start_date/end_date)
+                logger.debug("Loading VNINDEX data for regime analysis...")
+                vnindex = load_data(
+                    symbol="VNINDEX",
+                    lookback=250,  # ~1 year of data
+                    is_index=True,
+                    resolution="1D",
+                    data_type="index",
+                    use_cache=True,
+                )
 
             if vnindex.empty or len(vnindex) < 50:
-                logger.warning(f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex)}")
+                logger.warning(
+                    f"Không đủ dữ liệu VNINDEX: cần ít nhất 50, có {len(vnindex) if not vnindex.empty else 0}"
+                )
                 return self._default_regime()
 
             # Tính các chỉ số
@@ -381,13 +393,21 @@ class MarketRegimeAnalyzer:
                 )
 
     def _default_regime(self) -> Dict:
-        """Default response khi không có dữ liệu"""
+        """
+        Default response khi không có dữ liệu
+
+        Trả về SIDEWAYS với confidence thấp thay vì UNKNOWN
+        để consistent với regime_detector.py và tránh confusion
+        """
         return {
-            "regime": "UNKNOWN",
+            "regime": "SIDEWAYS",
             "tradeable": False,
-            "confidence": 0,
-            "details": {},
-            "message": "⚠️ Không thể xác định tình trạng thị trường",
+            "confidence": 30,  # Low confidence
+            "details": {
+                "reason": "Insufficient data or detection error",
+                "warning": "Using default cautious regime",
+            },
+            "message": "⚠️ Không đủ dữ liệu - sử dụng chế độ thận trọng (SIDEWAYS)",
         }
 
     def get_position_multiplier(self) -> float:

@@ -7,29 +7,48 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
+# Try to import XGBoost
+try:
+    import xgboost as xgb
+
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    xgb = None
+
 logger = logging.getLogger(__name__)
 
 
 class MLPredictor:
     def __init__(self):
         self.rf_model = None
+        self.xgb_model = None  # NEW: XGBoost model
         self.scaler = StandardScaler()
         self.models_dir = "models"
         self.ml_enabled = True  # NEW: Flag to track if ML is usable
         self.using_dummy_models = False  # NEW: Flag to track dummy models
         self.feature_importance = None  # NEW: Feature importance scores
         self.selected_features = None  # NEW: Selected feature indices
+
+        # Ensemble weights (can be tuned)
+        self.ensemble_weights = {
+            "rf": 0.5,  # Random Forest 50%
+            "xgb": 0.5,  # XGBoost 50%
+        }
+
         self.ensure_models_dir()
         # Đồng bộ số features mong đợi với features.get_feature_columns()
         try:
-            from src.ml.features.technical import (
-                get_feature_columns,
-            )  # tránh import vòng bằng cách import khi cần
+            # Try enhanced features first
+            try:
+                from src.ml.features.enhanced import get_feature_columns
+            except ImportError:
+                from src.ml.features.technical import get_feature_columns
 
             self.expected_features = len(get_feature_columns())
         except Exception:
             # Fallback an toàn nếu không import được
-            self.expected_features = 18
+            self.expected_features = 28  # Default to enhanced features count
 
     def ensure_models_dir(self):
         try:
@@ -63,19 +82,34 @@ class MLPredictor:
         """Lưu models"""
         self.ensure_models_dir()
         try:
+            # Save Random Forest
             if self.rf_model:
                 joblib.dump(self.rf_model, os.path.join(self.models_dir, "random_forest.pkl"))
+
+            # Save XGBoost
+            if self.xgb_model:
+                xgb_path = os.path.join(self.models_dir, "xgboost.pkl")
+                joblib.dump(self.xgb_model, xgb_path)
+                logger.info(f"✅ XGBoost model saved to {xgb_path}")
+
+            # Save scaler
             joblib.dump(self.scaler, os.path.join(self.models_dir, "scaler.pkl"))
 
             # Lưu model metadata với feature list
             metadata = {
                 "expected_features": self.expected_features,
                 "saved_at": pd.Timestamp.now().isoformat(),
+                "has_xgboost": self.xgb_model is not None,
+                "has_rf": self.rf_model is not None,
+                "ensemble_weights": self.ensemble_weights,
             }
 
             # Save feature names if available
             try:
-                from src.ml.features.technical import get_feature_columns
+                try:
+                    from src.ml.features.enhanced import get_feature_columns
+                except ImportError:
+                    from src.ml.features.technical import get_feature_columns
 
                 metadata["feature_names"] = get_feature_columns()
             except Exception:
@@ -130,6 +164,107 @@ class MLPredictor:
 
         self.save_models()
         logger.info("✅ Random Forest trained & saved!")
+
+    def train_xgboost(self, X_train, y_train):
+        """
+        Train XGBoost với params tối ưu
+
+        XGBoost thường outperform Random Forest cho time series data
+        """
+        if not XGBOOST_AVAILABLE:
+            logger.warning("⚠️ XGBoost not installed. Skipping XGBoost training.")
+            logger.info("💡 Install with: pip install xgboost")
+            return
+
+        logger.info("🚀 Training XGBoost with optimized parameters...")
+
+        if X_train.shape[1] != self.expected_features:
+            from src.config.exceptions import ModelPredictionError
+
+            raise ModelPredictionError(
+                "Feature count mismatch during training",
+                context={
+                    "got": X_train.shape[1],
+                    "expected": self.expected_features,
+                    "message": "Ensure all features are generated before training.",
+                },
+            )
+
+        # Calculate scale_pos_weight for imbalanced dataset
+        negative_count = (y_train == 0).sum()
+        positive_count = (y_train == 1).sum()
+        scale_pos_weight = negative_count / positive_count if positive_count > 0 else 1.0
+
+        logger.info(
+            f"   Dataset: {negative_count} negative, {positive_count} positive "
+            f"(scale_pos_weight: {scale_pos_weight:.2f})"
+        )
+
+        self.xgb_model = xgb.XGBClassifier(
+            n_estimators=200,  # Number of trees
+            max_depth=6,  # Depth of trees
+            learning_rate=0.05,  # Learning rate (eta)
+            subsample=0.8,  # Subsample ratio of training data
+            colsample_bytree=0.8,  # Subsample ratio of features
+            scale_pos_weight=scale_pos_weight,  # Handle imbalance
+            objective="binary:logistic",
+            eval_metric="logloss",
+            random_state=42,
+            n_jobs=-1,
+            # Early stopping params
+            early_stopping_rounds=20,
+        )
+
+        # Train with validation set for early stopping
+        eval_set = [(X_train, y_train)]
+
+        self.xgb_model.fit(
+            X_train,
+            y_train,
+            eval_set=eval_set,
+            verbose=False,  # Set to True to see training progress
+        )
+
+        logger.info(f"✅ XGBoost trained with {self.xgb_model.n_estimators} trees")
+
+        # Analyze feature importance
+        self._analyze_xgb_feature_importance()
+
+        self.save_models()
+        logger.info("✅ XGBoost trained & saved!")
+
+    def _analyze_xgb_feature_importance(self):
+        """Analyze and log XGBoost feature importance"""
+        if self.xgb_model is None:
+            return
+
+        try:
+            try:
+                from src.ml.features.enhanced import get_feature_columns
+            except ImportError:
+                from src.ml.features.technical import get_feature_columns
+
+            feature_names = get_feature_columns()
+
+            # Get feature importance from XGBoost (gain-based)
+            importances = self.xgb_model.feature_importances_
+
+            # Create DataFrame
+            importance_df = pd.DataFrame(
+                {"feature": feature_names, "xgb_importance": importances}
+            ).sort_values("xgb_importance", ascending=False)
+
+            logger.info("\n" + "=" * 70)
+            logger.info("📊 XGBOOST FEATURE IMPORTANCE (Top 10)")
+            logger.info("=" * 70)
+
+            for idx, row in importance_df.head(10).iterrows():
+                logger.info(f"  {idx+1:2d}. {row['feature']:25s} {row['xgb_importance']:6.4f}")
+
+            logger.info("=" * 70 + "\n")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Could not analyze XGBoost feature importance: {e}")
 
     def evaluate(self, X_test, y_test):
         """Đánh giá model trên test set."""
@@ -275,9 +410,9 @@ class MLPredictor:
 
     def predict(self, X):
         """
-        Prediction với feature validation
+        Ensemble Prediction với feature validation
 
-        NEW: Checks if ML is enabled before predicting
+        NEW: Ensemble RF + XGBoost predictions with weighted average
         """
         # NEW: Check if ML is enabled
         if not self.ml_enabled:
@@ -312,16 +447,54 @@ class MLPredictor:
             logger.error("⚠️ Lỗi scaling")
             X_scaled = X_arr
 
+        predictions = []
+        weights = []
+
         # RF prediction
         if self.rf_model is not None:
             try:
                 rf_pred = self.rf_model.predict_proba(X_scaled)[:, 1]
-                return rf_pred
-            except Exception:
-                logger.error("⚠️ RF predict error")
-                raise ValueError("Model prediction failed")
+                predictions.append(rf_pred)
+                weights.append(self.ensemble_weights["rf"])
+                logger.debug(f"RF prediction: {rf_pred[0]:.3f}")
+            except Exception as e:
+                logger.error(f"⚠️ RF predict error: {e}")
+
+        # XGBoost prediction
+        if self.xgb_model is not None:
+            try:
+                xgb_pred = self.xgb_model.predict_proba(X_scaled)[:, 1]
+                predictions.append(xgb_pred)
+                weights.append(self.ensemble_weights["xgb"])
+                logger.debug(f"XGBoost prediction: {xgb_pred[0]:.3f}")
+            except Exception as e:
+                logger.error(f"⚠️ XGBoost predict error: {e}")
+
+        if not predictions:
+            raise ValueError("No models available for prediction")
+
+        # Ensemble: Weighted average
+        if len(predictions) == 1:
+            # Only one model available
+            ensemble_pred = predictions[0]
+            logger.debug("Using single model prediction")
         else:
-            raise ValueError("RF model not initialized")
+            # Multiple models - ensemble
+            # Normalize weights
+            total_weight = sum(weights)
+            normalized_weights = [w / total_weight for w in weights]
+
+            # Weighted average
+            ensemble_pred = np.zeros_like(predictions[0])
+            for pred, weight in zip(predictions, normalized_weights):
+                ensemble_pred += pred * weight
+
+            logger.debug(
+                f"Ensemble prediction: {ensemble_pred[0]:.3f} "
+                f"(RF: {predictions[0][0]:.3f}, XGB: {predictions[1][0] if len(predictions) > 1 else 0:.3f})"
+            )
+
+        return ensemble_pred
 
     def load_models(self):
         """Load pre-trained models và scaler"""
@@ -363,6 +536,21 @@ class MLPredictor:
                 self.rf_model = joblib.load(rf_path)
                 self.scaler = joblib.load(scaler_path)
 
+                # Load XGBoost if available
+                xgb_path = os.path.join(self.models_dir, "xgboost.pkl")
+                if os.path.exists(xgb_path) and XGBOOST_AVAILABLE:
+                    try:
+                        self.xgb_model = joblib.load(xgb_path)
+                        logger.info("✅ Loaded XGBoost model")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not load XGBoost model: {e}")
+                        self.xgb_model = None
+                elif os.path.exists(xgb_path) and not XGBOOST_AVAILABLE:
+                    logger.warning(
+                        "⚠️ XGBoost model exists but XGBoost not installed. "
+                        "Install with: pip install xgboost"
+                    )
+
                 # NEW: Load feature importance if available
                 importance_path = os.path.join(self.models_dir, "feature_importance.csv")
                 if os.path.exists(importance_path):
@@ -372,8 +560,15 @@ class MLPredictor:
                     except Exception as e:
                         logger.warning(f"⚠️ Could not load feature importance: {e}")
 
+                models_summary = []
+                if self.rf_model:
+                    models_summary.append("RF")
+                if self.xgb_model:
+                    models_summary.append("XGBoost")
+
                 logger.info(
-                    f"✅ Loaded trained models (expecting {self.expected_features} features)"
+                    f"✅ Loaded trained models: {', '.join(models_summary)} "
+                    f"(expecting {self.expected_features} features)"
                 )
                 models_loaded = True
                 self.ml_enabled = True

@@ -7,6 +7,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
+from threading import RLock
 from typing import Dict, Tuple
 
 
@@ -60,6 +61,12 @@ class CircuitBreaker:
         self.tripped = False
         self.tripped_reason = ""
 
+        # OPTIMIZATION: Cache last volatility to avoid redundant recalculations
+        self._last_volatility = None
+
+        # CRITICAL FIX: Thread safety
+        self._lock = RLock()  # Reentrant lock for nested calls
+
     def _load_stats(self) -> Dict:
         """Load stats từ file"""
         if os.path.exists(self.stats_file):
@@ -107,6 +114,8 @@ class CircuitBreaker:
             # Reset trạng thái ngắt mạch mỗi ngày mới
             self.tripped = False
             self.tripped_reason = ""
+            # OPTIMIZATION: Reset volatility cache for fresh calculation
+            self._last_volatility = None
             self._save_stats()
 
     def check_and_update(
@@ -119,6 +128,8 @@ class CircuitBreaker:
         """
         ENHANCED: Kiểm tra các điều kiện ngắt mạch với volatility adjustments
 
+        CRITICAL FIX: Thread-safe with RLock to prevent race conditions.
+
         Args:
             portfolio_pnl_pct (float): P&L hiện tại của portfolio trong ngày (dạng float, vd: -0.01 cho -1%).
             vnindex_change_pct (float): % thay đổi của VNINDEX trong ngày.
@@ -128,69 +139,73 @@ class CircuitBreaker:
         Returns:
             bool: True nếu ngắt mạch được kích hoạt, False nếu không.
         """
-        if self.tripped:
-            return True  # Nếu đã ngắt thì không cần check lại
+        # CRITICAL FIX: Thread-safe check
+        with self._lock:
+            if self.tripped:
+                return True  # Nếu đã ngắt thì không cần check lại
 
-        # Validate input parameters
-        if not isinstance(portfolio_pnl_pct, (int, float)):
-            raise ValueError(f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}")
-        if not isinstance(vnindex_change_pct, (int, float)):
-            raise ValueError(
-                f"vnindex_change_pct phải là số, nhận được: {type(vnindex_change_pct)}"
-            )
+            # Validate input parameters
+            if not isinstance(portfolio_pnl_pct, (int, float)):
+                raise ValueError(
+                    f"portfolio_pnl_pct phải là số, nhận được: {type(portfolio_pnl_pct)}"
+                )
+            if not isinstance(vnindex_change_pct, (int, float)):
+                raise ValueError(
+                    f"vnindex_change_pct phải là số, nhận được: {type(vnindex_change_pct)}"
+                )
 
-        # ENHANCEMENT: Adjust thresholds based on volatility
-        self._adjust_thresholds_for_volatility(market_volatility)
+            # ENHANCEMENT: Adjust thresholds based on volatility
+            self._adjust_thresholds_for_volatility(market_volatility)
 
-        # Check 1: Max loss per day
-        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
-            self.tripped = True
-            self.tripped_reason = (
-                f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
-                f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
-            )
-            self._save_stats()
-            return True
+            # Check 1: Max loss per day
+            if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
+                    f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+                )
+                self._save_stats()
+                return True
 
-        # Check 2: VNINDEX giảm sâu
-        if vnindex_change_pct < self.vnindex_drop_threshold:
-            self.tripped = True
-            self.tripped_reason = (
-                f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) "
-                f"vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
-            )
-            self._save_stats()
-            return True
+            # Check 2: VNINDEX giảm sâu
+            if vnindex_change_pct < self.vnindex_drop_threshold:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"VNINDEX giảm sâu ({vnindex_change_pct:.2%}) "
+                    f"vượt ngưỡng ({self.vnindex_drop_threshold:.2%})."
+                )
+                self._save_stats()
+                return True
 
-        # Check 3: Max trades per day
-        if self.stats["today"]["trades_count"] >= self.max_trades_per_day:
-            self.tripped = True
-            self.tripped_reason = (
-                f"Số lệnh trong ngày ({self.stats['today']['trades_count']}) đạt giới hạn."
-            )
-            self._save_stats()
-            return True
+            # Check 3: Max trades per day
+            if self.stats["today"]["trades_count"] >= self.max_trades_per_day:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"Số lệnh trong ngày ({self.stats['today']['trades_count']}) đạt giới hạn."
+                )
+                self._save_stats()
+                return True
 
-        # Check 4: Consecutive losses
-        if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
-            self.tripped = True
-            self.tripped_reason = (
-                f"Số lệnh thua liên tiếp ({self.stats['consecutive_losses']}) đạt giới hạn."
-            )
-            self._save_stats()
-            return True
+            # Check 4: Consecutive losses
+            if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"Số lệnh thua liên tiếp ({self.stats['consecutive_losses']}) đạt giới hạn."
+                )
+                self._save_stats()
+                return True
 
-        # ENHANCEMENT: Check 5: Portfolio heat (overexposure)
-        if portfolio_heat > self.max_portfolio_heat:
-            self.tripped = True
-            self.tripped_reason = (
-                f"Portfolio heat quá cao ({portfolio_heat:.1%}) "
-                f"vượt ngưỡng ({self.max_portfolio_heat:.1%})."
-            )
-            self._save_stats()
-            return True
+            # ENHANCEMENT: Check 5: Portfolio heat (overexposure)
+            if portfolio_heat > self.max_portfolio_heat:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"Portfolio heat quá cao ({portfolio_heat:.1%}) "
+                    f"vượt ngưỡng ({self.max_portfolio_heat:.1%})."
+                )
+                self._save_stats()
+                return True
 
-        return False
+            return False
 
     def _adjust_thresholds_for_volatility(self, market_volatility: float):
         """
@@ -204,6 +219,15 @@ class CircuitBreaker:
         Args:
             market_volatility: Market volatility ratio (e.g., 0.02 = 2%)
         """
+        # OPTIMIZATION: Skip recalculation if volatility hasn't changed
+        if (
+            self._last_volatility is not None
+            and abs(market_volatility - self._last_volatility) < 0.0001
+        ):
+            return  # No change, skip recalculation
+
+        self._last_volatility = market_volatility
+
         if market_volatility == 0.0:
             # No volatility data - use base thresholds
             self.max_loss_per_day_pct = self.base_max_loss_per_day_pct
@@ -280,31 +304,34 @@ class CircuitBreaker:
         """
         Record một trade
 
+        CRITICAL FIX: Thread-safe with RLock.
+
         Args:
             pnl: Profit/Loss (positive = profit, negative = loss)
         """
-        self._check_new_day()
+        with self._lock:
+            self._check_new_day()
 
-        today_stats = self.stats["today"]
+            today_stats = self.stats["today"]
 
-        # Update counts
-        today_stats["trades_count"] += 1
-        today_stats["last_updated"] = datetime.now().isoformat()
+            # Update counts
+            today_stats["trades_count"] += 1
+            today_stats["last_updated"] = datetime.now().isoformat()
 
-        # Update P&L
-        if pnl > 0:
-            today_stats["total_profit"] += pnl
-            self.stats["consecutive_losses"] = 0  # Reset
-        else:
-            today_stats["total_loss"] += abs(pnl)
-            self.stats["consecutive_losses"] += 1
+            # Update P&L
+            if pnl > 0:
+                today_stats["total_profit"] += pnl
+                self.stats["consecutive_losses"] = 0  # Reset
+            else:
+                today_stats["total_loss"] += abs(pnl)
+                self.stats["consecutive_losses"] += 1
 
-        today_stats["net_pnl"] = today_stats["total_profit"] - today_stats["total_loss"]
+            today_stats["net_pnl"] = today_stats["total_profit"] - today_stats["total_loss"]
 
-        # Update last trade date
-        self.stats["last_trade_date"] = date.today().isoformat()
+            # Update last trade date
+            self.stats["last_trade_date"] = date.today().isoformat()
 
-        self._save_stats()
+            self._save_stats()
 
     def record_pnl(self, portfolio_pnl_pct: float):
         """
