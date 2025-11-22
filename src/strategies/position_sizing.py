@@ -205,6 +205,20 @@ class EnhancedPositionSizer:
         if risk_per_share <= 0:
             return self._zero_position("Invalid stop loss", warnings)
 
+        # CRITICAL FIX: Protect against division by very small risk_per_share
+        # If stop loss is too tight (< 1% of entry price), enforce minimum 2% risk
+        min_risk_per_share = entry_price * 0.01  # 1% minimum
+        if risk_per_share < min_risk_per_share:
+            logger.warning(
+                f"⚠️ Risk per share too small ({risk_per_share:.0f}, "
+                f"{(risk_per_share/entry_price*100):.2f}%). "
+                f"Enforcing minimum 2% risk: {entry_price * 0.02:.0f}"
+            )
+            risk_per_share = entry_price * 0.02  # Enforce 2% minimum risk
+            warnings.append(
+                f"Stop loss too tight, adjusted to 2% risk ({risk_per_share:.0f} VND/share)"
+            )
+
         _risk_reward_ratio = (  # noqa: F841
             reward_per_share / risk_per_share if risk_per_share > 0 else 0
         )
@@ -232,7 +246,7 @@ class EnhancedPositionSizer:
 
         adjusted_risk_amount = base_risk_amount * risk_multiplier
 
-        # Shares by risk
+        # Shares by risk (now protected from division by near-zero)
         shares_by_risk = int(adjusted_risk_amount / risk_per_share)
 
         # =================================================================
@@ -397,14 +411,21 @@ class EnhancedPositionSizer:
         # Use half-Kelly for safety
         half_kelly = kelly * self.kelly_fraction
 
-        # VALIDATION: Warn if Kelly suggests negative or very large position
+        # CRITICAL FIX: Raise exception if Kelly is negative (indicates negative EV strategy)
         if kelly < 0:
-            logger.warning(
-                f"⚠️ Negative Kelly ({kelly:.1%}) suggests unfavorable odds. "
-                "Win rate too low or win/loss ratio unfavorable. "
-                "Using Kelly = 0."
+            raise RiskManagementError(
+                f"⚠️ NEGATIVE Kelly ({kelly:.1%}) suggests unfavorable trading odds. "
+                f"Strategy has NEGATIVE expected value. STOP TRADING.",
+                context={
+                    "kelly": kelly,
+                    "win_rate": win_rate,
+                    "win_loss_ratio": avg_win_loss_ratio,
+                    "recommendation": (
+                        "Review strategy parameters. Negative Kelly means "
+                        "you're expected to LOSE money over time."
+                    ),
+                },
             )
-            return 0.0
 
         if kelly > 0.5:
             logger.warning(

@@ -35,21 +35,38 @@ except ImportError:
 
 
 class MLSignalGenerator:
-    def __init__(self):
+    def __init__(self, telegram_bot=None):
+        """
+        Initialize ML Signal Generator
+
+        Args:
+            telegram_bot: Optional Telegram bot instance for failure alerts
+        """
         self.predictor = MLPredictor()
+        self.telegram_bot = telegram_bot
+
         # Load models safely - fallback to technical-only if model loading fails
         try:
             self.predictor.load_models()
             self.model_version = "default"
             self.model_loaded = True
-        except Exception:
-            print("⚠️ ML model load failed")
+        except Exception as e:
+            logger.error(f"⚠️ ML model load failed: {e}")
             # Keep predictor but mark as not loaded — we'll fallback to technical analysis
             self.model_loaded = False
+            self._send_ml_failure_alert(
+                "ML Model Load Failure",
+                f"Failed to load ML models on startup: {str(e)}\n"
+                "System will use technical analysis only.",
+            )
 
         # ENHANCEMENT: Confidence calibration based on historical accuracy
         self._confidence_history = []  # Track (predicted_conf, actual_result) pairs
         self._max_history = 100  # Keep last 100 predictions
+
+        # Track ML failures for alerting
+        self._ml_failure_count = 0
+        self._ml_failure_threshold = 5  # Alert after 5 consecutive failures
 
     def analyze(self, df, index_df=None, symbol=None):
         """Phân tích và tạo tín hiệu từ ML + Technical Analysis
@@ -109,12 +126,28 @@ class MLSignalGenerator:
                     try:
                         ml_scores = self.predictor.predict(X)
                         ml_score = ml_scores[-1] if len(ml_scores) > 0 else 0.5
-                    except Exception:
-                        print("⚠️ ML prediction failed")
+                        # Reset failure count on success
+                        self._ml_failure_count = 0
+                    except Exception as e:
+                        logger.error(f"⚠️ ML prediction failed for {symbol}: {e}")
                         ml_score = 0.5
+
+                        # CRITICAL FIX: Track failures and alert
+                        self._ml_failure_count += 1
+                        if self._ml_failure_count >= self._ml_failure_threshold:
+                            self._send_ml_failure_alert(
+                                "ML Prediction Failures",
+                                f"🚨 ML prediction has failed {self._ml_failure_count} times\n"
+                                f"Symbol: {symbol}\n"
+                                f"Latest error: {str(e)}\n\n"
+                                "System is falling back to technical analysis only.\n"
+                                "Please check ML models and logs.",
+                            )
+                            # Reset counter after alerting to avoid spam
+                            self._ml_failure_count = 0
                 else:
                     # Model not available — use neutral ML score and rely on technical ensemble
-                    print("⚠️ ML model not available, using neutral ML score")
+                    logger.warning(f"⚠️ ML model not available for {symbol}, using neutral ML score")
                     ml_score = 0.5
 
                 # Technical Analysis Score
@@ -573,6 +606,42 @@ class MLSignalGenerator:
                 f"📊 ML Signal accuracy (last {len(self._confidence_history)} predictions): "
                 f"{overall_accuracy:.1%}"
             )
+
+    def _send_ml_failure_alert(self, title: str, message: str):
+        """
+        Send ML failure alert via Telegram
+
+        Args:
+            title: Alert title
+            message: Alert message
+        """
+        if self.telegram_bot is None:
+            logger.warning("Telegram bot not configured, cannot send ML failure alert")
+            return
+
+        try:
+            # Try to send alert asynchronously if bot supports it
+            import asyncio
+
+            alert_text = f"🚨 **{title}**\n\n{message}"
+
+            # Check if we're in an event loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Create task if loop is running
+                    asyncio.create_task(self.telegram_bot.send_message(alert_text))
+                else:
+                    # Run synchronously if no event loop
+                    loop.run_until_complete(self.telegram_bot.send_message(alert_text))
+            except RuntimeError:
+                # No event loop - try synchronous send
+                logger.warning("No event loop available for Telegram alert, alert logged only")
+
+            logger.info(f"📤 Sent ML failure alert: {title}")
+
+        except Exception as e:
+            logger.error(f"Failed to send Telegram alert: {e}")
 
     def train_models(self, df):
         """Train models với historical data, sử dụng các feature mới và class_weight."""

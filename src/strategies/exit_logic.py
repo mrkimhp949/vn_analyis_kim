@@ -130,7 +130,25 @@ class ImprovedExitStrategy:
         pnl_percent = ((current_price - entry_price) / entry_price) * 100
         pnl_amount = current_price - entry_price  # Per share
 
-        days_held = (datetime.now() - entry_date).days
+        # CRITICAL FIX: Use trading days instead of calendar days
+        # to account for weekends and holidays
+        try:
+            import pandas as pd
+            from pandas.tseries.offsets import BDay
+
+            # Count business days (trading days) between entry and now
+            trading_days_held = len(pd.date_range(entry_date, datetime.now(), freq=BDay()))
+
+            # Use trading days for time decay logic
+            days_held = trading_days_held
+            logger.debug(
+                f"📅 {symbol} held for {trading_days_held} trading days "
+                f"(calendar: {(datetime.now() - entry_date).days} days)"
+            )
+        except Exception as e:
+            # Fallback to calendar days if business day calculation fails
+            logger.warning(f"Failed to calculate trading days: {e}, using calendar days")
+            days_held = (datetime.now() - entry_date).days
 
         # Update highest price
         if symbol not in self.position_highs:
@@ -519,7 +537,7 @@ class ImprovedExitStrategy:
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
-                    message=f"💰 PROFIT PROTECTION: Bảo vệ {protection_pct*100:.0f}% lợi nhuận | "
+                    message=f"💰 PROFIT PROTECTION: Bảo vệ {self.profit_protection_percent*100:.0f}% lợi nhuận | "
                     f"Max profit: {max_profit_pct:.1f}% → Current: {pnl_percent:.1f}% "
                     f"(Gave back {profit_given_back:.1f}%)",
                     urgency=4,

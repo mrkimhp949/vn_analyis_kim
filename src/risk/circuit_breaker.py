@@ -338,23 +338,26 @@ class CircuitBreaker:
         Ghi nhận PnL hiện tại của portfolio ngay lập tức.
         Được gọi sau khi thoát lệnh để cập nhật trạng thái circuit breaker.
 
+        CRITICAL FIX: Thread-safe with RLock to prevent race conditions.
+
         Args:
             portfolio_pnl_pct (float): P&L hiện tại của portfolio (dạng float, vd: -0.01 cho -1%)
         """
-        self._check_new_day()
+        with self._lock:
+            self._check_new_day()
 
-        # Lưu PnL vào stats để tracking
-        self.stats["today"]["last_updated"] = datetime.now().isoformat()
+            # Lưu PnL vào stats để tracking
+            self.stats["today"]["last_updated"] = datetime.now().isoformat()
 
-        # Kiểm tra ngay xem có cần kích hoạt circuit breaker không
-        if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
-            self.tripped = True
-            self.tripped_reason = (
-                f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
-                f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
-            )
+            # Kiểm tra ngay xem có cần kích hoạt circuit breaker không
+            if portfolio_pnl_pct < 0 and abs(portfolio_pnl_pct) >= self.max_loss_per_day_pct:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"Lỗ trong ngày ({portfolio_pnl_pct:.2%}) "
+                    f"vượt ngưỡng cho phép ({self.max_loss_per_day_pct:.2%})."
+                )
 
-        self._save_stats()
+            self._save_stats()
 
     def get_daily_stats(self) -> DailyStats:
         """Lấy stats của ngày hôm nay"""
