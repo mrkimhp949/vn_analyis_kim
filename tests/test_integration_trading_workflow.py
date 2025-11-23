@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import pytest
+
 # Note: add_ml_features requires 'ta' library which may not be installed
 # We'll manually add required indicators instead
 from src.strategies.entry_logic import ImprovedEntryLogic
@@ -212,7 +213,9 @@ def trading_components():
 # =============================================================================
 
 
-def test_full_workflow_bull_market_entry_to_exit(bull_market_data, trading_components, mock_bull_regime):
+def test_full_workflow_bull_market_entry_to_exit(
+    bull_market_data, trading_components, mock_bull_regime
+):
     """Test complete workflow in bull market: entry → monitoring → exit"""
     entry_logic = trading_components["entry_logic"]
     exit_strategy = trading_components["exit_strategy"]
@@ -245,7 +248,11 @@ def test_full_workflow_bull_market_entry_to_exit(bull_market_data, trading_compo
 
     # STEP 4: Calculate position size
     # Use TP2 (middle target) for position sizing calculations
-    take_profit = entry_signal.take_profit_targets[1] if len(entry_signal.take_profit_targets) > 1 else entry_signal.take_profit_targets[0]
+    take_profit = (
+        entry_signal.take_profit_targets[1]
+        if len(entry_signal.take_profit_targets) > 1
+        else entry_signal.take_profit_targets[0]
+    )
 
     position = position_sizer.calculate_position_size(
         symbol="VNM",
@@ -524,9 +531,7 @@ def test_full_workflow_price_limit_near_ceiling(bull_market_data, trading_compon
     reference_price = 100_000
     current_price = 106_500
 
-    is_safe, warning = vn_validator.check_price_floor_ceiling(
-        current_price, reference_price, "VNM"
-    )
+    is_safe, warning = vn_validator.check_price_floor_ceiling(current_price, reference_price, "VNM")
 
     assert is_safe is False
     assert "CEILING" in warning
@@ -766,7 +771,9 @@ def test_workflow_sector_exposure_limit_reached(trading_components):
 # =============================================================================
 
 
-def test_realistic_scenario_successful_trade(bull_market_data, trading_components, mock_bull_regime):
+def test_realistic_scenario_successful_trade(
+    bull_market_data, trading_components, mock_bull_regime
+):
     """Realistic scenario: successful trade with partial exits"""
     entry_logic = trading_components["entry_logic"]
     exit_strategy = trading_components["exit_strategy"]
@@ -888,7 +895,9 @@ def test_realistic_scenario_stop_loss_protection(bull_market_data, trading_compo
     assert loss_at_stop > loss_without_stop  # Less negative (better)
 
 
-def test_realistic_scenario_kelly_sizing_vs_fixed(bull_market_data, trading_components, mock_bull_regime):
+def test_realistic_scenario_kelly_sizing_vs_fixed(
+    bull_market_data, trading_components, mock_bull_regime
+):
     """Compare Kelly-based sizing vs fixed sizing"""
     position_sizer = trading_components["position_sizer"]
 

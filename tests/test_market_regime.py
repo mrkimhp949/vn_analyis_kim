@@ -37,13 +37,16 @@ def sample_vnindex_data():
     open_price = close - np.random.normal(0, 3, n)
     volume = np.random.uniform(1_000_000, 2_000_000, n)
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     return df
 
@@ -66,13 +69,16 @@ def bull_market_data():
     open_price = close - np.random.normal(0, 2, n)
     volume = np.random.uniform(2_000_000, 3_000_000, n)
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     return df
 
@@ -95,13 +101,16 @@ def bear_market_data():
     open_price = close - np.random.normal(0, 3, n)
     volume = np.random.uniform(2_500_000, 4_000_000, n)  # Higher volume on panic
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     return df
 
@@ -123,13 +132,16 @@ def high_volatility_data():
     open_price = close - np.random.normal(0, 15, n)
     volume = np.random.uniform(1_500_000, 2_500_000, n)
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     return df
 
@@ -151,13 +163,16 @@ def sideways_market_data():
     open_price = close - np.random.normal(0, 3, n)
     volume = np.random.uniform(1_000_000, 2_000_000, n)
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     return df
 
@@ -170,9 +185,7 @@ def sideways_market_data():
 def test_market_regime_analyzer_init():
     """Test MarketRegimeAnalyzer initialization"""
     analyzer = MarketRegimeAnalyzer(
-        bear_threshold=-0.05,
-        high_volatility_threshold=0.04,
-        trend_period=30
+        bear_threshold=-0.05, high_volatility_threshold=0.04, trend_period=30
     )
 
     assert analyzer.bear_threshold == -0.05
@@ -210,9 +223,7 @@ def test_calculate_weekly_change_insufficient_data():
     analyzer = MarketRegimeAnalyzer()
 
     # Only 3 days of data (need 6)
-    df = pd.DataFrame({
-        "close": [100, 101, 102]
-    })
+    df = pd.DataFrame({"close": [100, 101, 102]})
 
     weekly_change = analyzer._calculate_weekly_change(df)
 
@@ -321,7 +332,7 @@ def test_determine_regime_bull():
         weekly_change=2.0,  # Positive
         trend_direction="UP",
         trend_strength=60,  # Strong
-        volatility=0.015  # Normal
+        volatility=0.015,  # Normal
     )
 
     assert regime == "BULL"
@@ -335,7 +346,7 @@ def test_determine_regime_bear_by_weekly_change():
         weekly_change=-4.0,  # Below -3% threshold
         trend_direction="DOWN",
         trend_strength=50,
-        volatility=0.02
+        volatility=0.02,
     )
 
     assert regime == "BEAR"
@@ -349,7 +360,7 @@ def test_determine_regime_bear_by_trend():
         weekly_change=-1.0,  # Not too bad
         trend_direction="DOWN",
         trend_strength=60,  # Strong downtrend
-        volatility=0.02
+        volatility=0.02,
     )
 
     assert regime == "BEAR"
@@ -363,7 +374,7 @@ def test_determine_regime_high_volatility():
         weekly_change=1.0,
         trend_direction="UP",
         trend_strength=50,
-        volatility=0.04  # Above 3% threshold
+        volatility=0.04,  # Above 3% threshold
     )
 
     assert regime == "HIGH_VOLATILITY"
@@ -377,7 +388,7 @@ def test_determine_regime_sideways():
         weekly_change=0.5,  # Minimal change
         trend_direction="SIDEWAYS",
         trend_strength=30,
-        volatility=0.02
+        volatility=0.02,
     )
 
     assert regime == "SIDEWAYS"
@@ -392,11 +403,7 @@ def test_is_tradeable_bull():
     """Test tradeable decision for bull market"""
     analyzer = MarketRegimeAnalyzer()
 
-    is_tradeable = analyzer._is_tradeable(
-        regime="BULL",
-        volatility=0.02,
-        weekly_change=2.0
-    )
+    is_tradeable = analyzer._is_tradeable(regime="BULL", volatility=0.02, weekly_change=2.0)
 
     assert is_tradeable is True
 
@@ -405,11 +412,7 @@ def test_is_tradeable_sideways():
     """Test tradeable decision for sideways market"""
     analyzer = MarketRegimeAnalyzer()
 
-    is_tradeable = analyzer._is_tradeable(
-        regime="SIDEWAYS",
-        volatility=0.02,
-        weekly_change=0.5
-    )
+    is_tradeable = analyzer._is_tradeable(regime="SIDEWAYS", volatility=0.02, weekly_change=0.5)
 
     assert is_tradeable is True
 
@@ -418,11 +421,7 @@ def test_is_not_tradeable_bear():
     """Test tradeable decision for bear market (should be False)"""
     analyzer = MarketRegimeAnalyzer()
 
-    is_tradeable = analyzer._is_tradeable(
-        regime="BEAR",
-        volatility=0.02,
-        weekly_change=-3.0
-    )
+    is_tradeable = analyzer._is_tradeable(regime="BEAR", volatility=0.02, weekly_change=-3.0)
 
     assert is_tradeable is False
 
@@ -432,9 +431,7 @@ def test_is_not_tradeable_high_volatility():
     analyzer = MarketRegimeAnalyzer()
 
     is_tradeable = analyzer._is_tradeable(
-        regime="HIGH_VOLATILITY",
-        volatility=0.05,
-        weekly_change=1.0
+        regime="HIGH_VOLATILITY", volatility=0.05, weekly_change=1.0
     )
 
     assert is_tradeable is False
@@ -445,9 +442,7 @@ def test_is_not_tradeable_sharp_decline():
     analyzer = MarketRegimeAnalyzer()
 
     is_tradeable = analyzer._is_tradeable(
-        regime="SIDEWAYS",
-        volatility=0.02,
-        weekly_change=-6.0  # -6% decline
+        regime="SIDEWAYS", volatility=0.02, weekly_change=-6.0  # -6% decline
     )
 
     assert is_tradeable is False
@@ -462,11 +457,7 @@ def test_calculate_confidence_bull():
     """Test confidence calculation for bull market"""
     analyzer = MarketRegimeAnalyzer()
 
-    confidence = analyzer._calculate_confidence(
-        regime="BULL",
-        trend_strength=60,
-        volatility=0.02
-    )
+    confidence = analyzer._calculate_confidence(regime="BULL", trend_strength=60, volatility=0.02)
 
     assert isinstance(confidence, int)
     assert 0 <= confidence <= 100
@@ -477,11 +468,7 @@ def test_calculate_confidence_bear():
     """Test confidence calculation for bear market"""
     analyzer = MarketRegimeAnalyzer()
 
-    confidence = analyzer._calculate_confidence(
-        regime="BEAR",
-        trend_strength=50,
-        volatility=0.02
-    )
+    confidence = analyzer._calculate_confidence(regime="BEAR", trend_strength=50, volatility=0.02)
 
     assert 0 <= confidence <= 100
     assert confidence <= 30  # Bear should have low confidence
@@ -492,9 +479,7 @@ def test_calculate_confidence_sideways():
     analyzer = MarketRegimeAnalyzer()
 
     confidence = analyzer._calculate_confidence(
-        regime="SIDEWAYS",
-        trend_strength=30,
-        volatility=0.02
+        regime="SIDEWAYS", trend_strength=30, volatility=0.02
     )
 
     assert 0 <= confidence <= 100
@@ -506,9 +491,7 @@ def test_calculate_confidence_high_volatility_penalty():
     analyzer = MarketRegimeAnalyzer()
 
     confidence = analyzer._calculate_confidence(
-        regime="BULL",
-        trend_strength=60,
-        volatility=0.03  # High volatility
+        regime="BULL", trend_strength=60, volatility=0.03  # High volatility
     )
 
     # Should have penalty applied
@@ -521,9 +504,7 @@ def test_calculate_confidence_bounds():
 
     # Test with extreme values
     confidence = analyzer._calculate_confidence(
-        regime="BULL",
-        trend_strength=100,
-        volatility=0.001  # Very low
+        regime="BULL", trend_strength=100, volatility=0.001  # Very low
     )
 
     assert 0 <= confidence <= 100
@@ -534,7 +515,7 @@ def test_calculate_confidence_bounds():
 # ============================================================================
 
 
-@patch('src.market.regime.load_data')
+@patch("src.market.regime.load_data")
 def test_analyze_market_regime_bull(mock_load_data, bull_market_data):
     """Test full market regime analysis for bull market"""
     mock_load_data.return_value = bull_market_data
@@ -554,7 +535,7 @@ def test_analyze_market_regime_bull(mock_load_data, bull_market_data):
     assert result["confidence"] >= 50
 
 
-@patch('src.market.regime.load_data')
+@patch("src.market.regime.load_data")
 def test_analyze_market_regime_bear(mock_load_data, bear_market_data):
     """Test full market regime analysis for bear market"""
     mock_load_data.return_value = bear_market_data
@@ -567,7 +548,7 @@ def test_analyze_market_regime_bear(mock_load_data, bear_market_data):
     assert result["confidence"] <= 30
 
 
-@patch('src.market.regime.load_data')
+@patch("src.market.regime.load_data")
 def test_analyze_market_regime_with_preloaded_data(mock_load_data, bull_market_data):
     """Test analysis with pre-loaded VNINDEX data"""
     # Should NOT call load_data when df is provided
@@ -581,7 +562,7 @@ def test_analyze_market_regime_with_preloaded_data(mock_load_data, bull_market_d
     assert "regime" in result
 
 
-@patch('src.market.regime.load_data')
+@patch("src.market.regime.load_data")
 def test_analyze_market_regime_empty_data(mock_load_data):
     """Test analysis with empty data (should return default regime)"""
     mock_load_data.return_value = pd.DataFrame()
@@ -596,15 +577,17 @@ def test_analyze_market_regime_empty_data(mock_load_data):
     assert "Insufficient data" in result["details"]["reason"]
 
 
-@patch('src.market.regime.load_data')
+@patch("src.market.regime.load_data")
 def test_analyze_market_regime_insufficient_data(mock_load_data):
     """Test analysis with insufficient data (< 50 rows)"""
-    small_df = pd.DataFrame({
-        "close": [1200, 1210, 1205],
-        "high": [1215, 1220, 1210],
-        "low": [1195, 1205, 1200],
-        "open": [1200, 1208, 1207],
-    })
+    small_df = pd.DataFrame(
+        {
+            "close": [1200, 1210, 1205],
+            "high": [1215, 1220, 1210],
+            "low": [1195, 1205, 1200],
+            "open": [1200, 1208, 1207],
+        }
+    )
     mock_load_data.return_value = small_df
 
     analyzer = MarketRegimeAnalyzer()
@@ -614,7 +597,7 @@ def test_analyze_market_regime_insufficient_data(mock_load_data):
     assert result["tradeable"] is False
 
 
-@patch('src.market.regime.load_data')
+@patch("src.market.regime.load_data")
 def test_analyze_market_regime_exception_handling(mock_load_data):
     """Test that exceptions are handled gracefully"""
     mock_load_data.side_effect = Exception("Data loading error")
@@ -719,7 +702,7 @@ def test_generate_message_sideways_tradeable():
 # ============================================================================
 
 
-@patch.object(MarketRegimeAnalyzer, 'analyze_market_regime')
+@patch.object(MarketRegimeAnalyzer, "analyze_market_regime")
 def test_get_position_multiplier_strong_bull(mock_analyze):
     """Test position multiplier for strong bull market"""
     mock_analyze.return_value = {
@@ -734,7 +717,7 @@ def test_get_position_multiplier_strong_bull(mock_analyze):
     assert multiplier == 1.2  # Strong bull → increase position
 
 
-@patch.object(MarketRegimeAnalyzer, 'analyze_market_regime')
+@patch.object(MarketRegimeAnalyzer, "analyze_market_regime")
 def test_get_position_multiplier_weak_bull(mock_analyze):
     """Test position multiplier for weak bull market"""
     mock_analyze.return_value = {
@@ -749,7 +732,7 @@ def test_get_position_multiplier_weak_bull(mock_analyze):
     assert multiplier == 1.0  # Normal position
 
 
-@patch.object(MarketRegimeAnalyzer, 'analyze_market_regime')
+@patch.object(MarketRegimeAnalyzer, "analyze_market_regime")
 def test_get_position_multiplier_sideways(mock_analyze):
     """Test position multiplier for sideways market"""
     mock_analyze.return_value = {
@@ -764,7 +747,7 @@ def test_get_position_multiplier_sideways(mock_analyze):
     assert multiplier == 0.7  # Reduced position
 
 
-@patch.object(MarketRegimeAnalyzer, 'analyze_market_regime')
+@patch.object(MarketRegimeAnalyzer, "analyze_market_regime")
 def test_get_position_multiplier_not_tradeable(mock_analyze):
     """Test position multiplier for non-tradeable market"""
     mock_analyze.return_value = {
@@ -784,7 +767,7 @@ def test_get_position_multiplier_not_tradeable(mock_analyze):
 # ============================================================================
 
 
-@patch.object(MarketRegimeAnalyzer, 'analyze_market_regime')
+@patch.object(MarketRegimeAnalyzer, "analyze_market_regime")
 def test_check_market_before_trading_tradeable(mock_analyze):
     """Test check_market_before_trading helper for tradeable market"""
     mock_analyze.return_value = {
@@ -799,7 +782,7 @@ def test_check_market_before_trading_tradeable(mock_analyze):
     assert "Market is good" in message
 
 
-@patch.object(MarketRegimeAnalyzer, 'analyze_market_regime')
+@patch.object(MarketRegimeAnalyzer, "analyze_market_regime")
 def test_check_market_before_trading_not_tradeable(mock_analyze):
     """Test check_market_before_trading helper for non-tradeable market"""
     mock_analyze.return_value = {
@@ -814,7 +797,7 @@ def test_check_market_before_trading_not_tradeable(mock_analyze):
     assert "Don't trade" in message
 
 
-@patch.object(MarketRegimeAnalyzer, 'get_position_multiplier')
+@patch.object(MarketRegimeAnalyzer, "get_position_multiplier")
 def test_get_market_position_adjustment(mock_get_multiplier):
     """Test get_market_position_adjustment helper"""
     mock_get_multiplier.return_value = 1.2
@@ -835,9 +818,11 @@ def test_detect_regime_hmm_insufficient_data():
     analyzer = MarketRegimeAnalyzer()
 
     # Small dataframe
-    small_df = pd.DataFrame({
-        "close": [1200, 1210, 1205],
-    })
+    small_df = pd.DataFrame(
+        {
+            "close": [1200, 1210, 1205],
+        }
+    )
 
     result = analyzer._detect_regime_hmm(small_df)
 
@@ -845,14 +830,16 @@ def test_detect_regime_hmm_insufficient_data():
     assert result is None
 
 
-@patch('src.market.regime.HMM_AVAILABLE', False)
+@patch("src.market.regime.HMM_AVAILABLE", False)
 def test_detect_regime_hmm_not_available():
     """Test HMM detection when hmmlearn not available"""
     analyzer = MarketRegimeAnalyzer()
 
-    df = pd.DataFrame({
-        "close": np.random.randn(100) + 1200,
-    })
+    df = pd.DataFrame(
+        {
+            "close": np.random.randn(100) + 1200,
+        }
+    )
 
     result = analyzer._detect_regime_hmm(df)
 
@@ -861,18 +848,20 @@ def test_detect_regime_hmm_not_available():
 
 
 @pytest.mark.skip(reason="hmmlearn not installed - GaussianHMM not available")
-@patch('src.market.regime.HMM_AVAILABLE', True)
-@patch('src.market.regime.GaussianHMM')
+@patch("src.market.regime.HMM_AVAILABLE", True)
+@patch("src.market.regime.GaussianHMM")
 def test_detect_regime_hmm_success(mock_hmm_class, bull_market_data):
     """Test successful HMM regime detection"""
     # Mock HMM model
     mock_hmm = MagicMock()
     mock_hmm.predict.return_value = np.array([0, 0, 1, 1, 2, 2, 2])
-    mock_hmm.predict_proba.return_value = np.array([
-        [0.8, 0.15, 0.05],
-        [0.1, 0.8, 0.1],
-        [0.05, 0.1, 0.85],
-    ])
+    mock_hmm.predict_proba.return_value = np.array(
+        [
+            [0.8, 0.15, 0.05],
+            [0.1, 0.8, 0.1],
+            [0.05, 0.1, 0.85],
+        ]
+    )
     mock_hmm.means_ = np.array([[-0.02], [0.001], [0.03]])
     mock_hmm.covars_ = np.array([0.001, 0.0005, 0.002])
 
@@ -890,8 +879,8 @@ def test_detect_regime_hmm_success(mock_hmm_class, bull_market_data):
 
 
 @pytest.mark.skip(reason="hmmlearn not installed - GaussianHMM not available")
-@patch('src.market.regime.HMM_AVAILABLE', True)
-@patch('src.market.regime.GaussianHMM')
+@patch("src.market.regime.HMM_AVAILABLE", True)
+@patch("src.market.regime.GaussianHMM")
 def test_detect_regime_hmm_exception_handling(mock_hmm_class, bull_market_data):
     """Test HMM exception handling"""
     # Make HMM raise exception
@@ -988,11 +977,13 @@ def test_full_workflow_high_volatility(high_volatility_data):
 
 def test_edge_case_all_nan_close():
     """Test handling of all NaN close prices"""
-    df = pd.DataFrame({
-        "close": [np.nan] * 100,
-        "high": [1210] * 100,
-        "low": [1190] * 100,
-    })
+    df = pd.DataFrame(
+        {
+            "close": [np.nan] * 100,
+            "high": [1210] * 100,
+            "low": [1190] * 100,
+        }
+    )
 
     analyzer = MarketRegimeAnalyzer()
     result = analyzer.analyze_market_regime(vnindex_df=df)
@@ -1004,12 +995,14 @@ def test_edge_case_all_nan_close():
 
 def test_edge_case_single_price():
     """Test with single price repeated (no movement)"""
-    df = pd.DataFrame({
-        "close": [1200] * 100,
-        "high": [1200] * 100,
-        "low": [1200] * 100,
-        "open": [1200] * 100,
-    })
+    df = pd.DataFrame(
+        {
+            "close": [1200] * 100,
+            "high": [1200] * 100,
+            "low": [1200] * 100,
+            "open": [1200] * 100,
+        }
+    )
 
     analyzer = MarketRegimeAnalyzer()
 
@@ -1032,7 +1025,7 @@ def test_edge_case_extreme_volatility():
         weekly_change=5.0,
         trend_direction="UP",
         trend_strength=80,
-        volatility=0.10  # 10% volatility!
+        volatility=0.10,  # 10% volatility!
     )
 
     # Should override to HIGH_VOLATILITY

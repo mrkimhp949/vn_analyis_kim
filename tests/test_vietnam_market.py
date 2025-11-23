@@ -430,18 +430,14 @@ def test_position_size_vs_volume_custom_limit():
 
 def test_liquidity_sufficient(validator, liquid_stock_data):
     """Test liquidity check with sufficient liquidity"""
-    is_liquid, warning = validator.check_liquidity_requirements(
-        liquid_stock_data, symbol="VNM"
-    )
+    is_liquid, warning = validator.check_liquidity_requirements(liquid_stock_data, symbol="VNM")
     assert is_liquid is True
     assert warning is None
 
 
 def test_liquidity_insufficient(validator, illiquid_stock_data):
     """Test liquidity check with insufficient liquidity"""
-    is_liquid, warning = validator.check_liquidity_requirements(
-        illiquid_stock_data, symbol="VNM"
-    )
+    is_liquid, warning = validator.check_liquidity_requirements(illiquid_stock_data, symbol="VNM")
     assert is_liquid is False
     assert "Insufficient liquidity" in warning
     assert "2.00B VND" in warning
@@ -558,9 +554,7 @@ def test_validate_position_vs_volume_convenience(mock_get_validator):
 
     is_safe, warning = validate_position_vs_volume(10_000, 500_000, "VNM")
     assert is_safe is True
-    mock_validator.validate_position_size_vs_volume.assert_called_once_with(
-        10_000, 500_000, "VNM"
-    )
+    mock_validator.validate_position_size_vs_volume.assert_called_once_with(10_000, 500_000, "VNM")
 
 
 @patch("src.utils.vietnam_market.get_vietnam_market_validator")

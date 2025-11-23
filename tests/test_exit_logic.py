@@ -46,13 +46,16 @@ def sample_stock_data():
     open_price = close - np.random.normal(0, 30, n)
     volume = np.random.uniform(200_000, 250_000, n)
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     # Add ATR
     high_low = df["high"] - df["low"]
@@ -319,7 +322,9 @@ def test_check_take_profit_levels_skip_taken(sample_stock_data):
     )
 
     # Should not exit for TP1 again
-    assert result["should_exit"] is False or result["decision"].exit_reason != ExitReason.TAKE_PROFIT_1
+    assert (
+        result["should_exit"] is False or result["decision"].exit_reason != ExitReason.TAKE_PROFIT_1
+    )
 
 
 # ============================================================================
@@ -352,7 +357,7 @@ def test_trailing_stop_activated_not_hit(sample_stock_data):
     strategy = ImprovedExitStrategy(
         trailing_stop_activation=0.08,
         trailing_stop_distance=0.05,
-        use_dynamic_trailing=False  # Use fixed %
+        use_dynamic_trailing=False,  # Use fixed %
     )
 
     entry_price = 10000
@@ -377,7 +382,7 @@ def test_trailing_stop_hit(sample_stock_data):
     strategy = ImprovedExitStrategy(
         trailing_stop_activation=0.08,
         trailing_stop_distance=0.05,  # 5% from peak
-        use_dynamic_trailing=False
+        use_dynamic_trailing=False,
     )
 
     entry_price = 10000
@@ -403,7 +408,7 @@ def test_trailing_stop_atr_based(sample_stock_data):
     strategy = ImprovedExitStrategy(
         trailing_stop_activation=0.08,
         trailing_stop_atr_multiplier=2.0,
-        use_dynamic_trailing=True  # Use ATR
+        use_dynamic_trailing=True,  # Use ATR
     )
 
     # Ensure ATR exists
@@ -471,7 +476,6 @@ def test_profit_protection_activated_safe(sample_stock_data):
     assert result["should_exit"] is False
 
 
-
 def test_check_exit_time_decay_triggered(sample_stock_data):
     """Test time decay exit (held too long with minimal profit)"""
     strategy = ImprovedExitStrategy(
@@ -481,15 +485,17 @@ def test_check_exit_time_decay_triggered(sample_stock_data):
 
     entry_price = 10000
     current_price = 10100  # +1% (below 3% threshold)
-    entry_date = datetime.now() - timedelta(days=25)  # Held 25 calendar days (~17 trading days > 15)
+    entry_date = datetime.now() - timedelta(
+        days=25
+    )  # Held 25 calendar days (~17 trading days > 15)
 
     # Create simple bullish data to avoid triggering reversal patterns
     df = sample_stock_data.copy()
     # Make last few candles bullish (close near high) to avoid shooting star pattern
-    df.loc[df.index[-3:], 'open'] = [10050, 10075, 10095]
-    df.loc[df.index[-3:], 'high'] = [10105, 10110, 10110]
-    df.loc[df.index[-3:], 'low'] = [10040, 10070, 10090]
-    df.loc[df.index[-3:], 'close'] = [10100, 10105, 10100]
+    df.loc[df.index[-3:], "open"] = [10050, 10075, 10095]
+    df.loc[df.index[-3:], "high"] = [10105, 10110, 10110]
+    df.loc[df.index[-3:], "low"] = [10040, 10070, 10090]
+    df.loc[df.index[-3:], "close"] = [10100, 10105, 10100]
 
     decision = strategy.check_exit(
         symbol="TEST",
@@ -735,7 +741,9 @@ def test_check_reversal_pattern_bearish_engulfing(sample_stock_data):
     sample_stock_data.iloc[-2, sample_stock_data.columns.get_loc("open")] = 10000
     sample_stock_data.iloc[-2, sample_stock_data.columns.get_loc("close")] = 10200  # Bullish
     sample_stock_data.iloc[-1, sample_stock_data.columns.get_loc("open")] = 10300
-    sample_stock_data.iloc[-1, sample_stock_data.columns.get_loc("close")] = 9900  # Bearish engulfing
+    sample_stock_data.iloc[-1, sample_stock_data.columns.get_loc("close")] = (
+        9900  # Bearish engulfing
+    )
 
     result = strategy._check_reversal_pattern(
         sample_stock_data,
@@ -1091,10 +1099,10 @@ def test_full_workflow_hold(sample_stock_data):
     # Create simple bullish data to avoid triggering reversal patterns
     df = sample_stock_data.copy()
     # Make last few candles bullish (close near high) to avoid shooting star pattern
-    df.loc[df.index[-3:], 'open'] = [10150, 10175, 10195]
-    df.loc[df.index[-3:], 'high'] = [10205, 10210, 10210]
-    df.loc[df.index[-3:], 'low'] = [10140, 10170, 10190]
-    df.loc[df.index[-3:], 'close'] = [10200, 10205, 10200]
+    df.loc[df.index[-3:], "open"] = [10150, 10175, 10195]
+    df.loc[df.index[-3:], "high"] = [10205, 10210, 10210]
+    df.loc[df.index[-3:], "low"] = [10140, 10170, 10190]
+    df.loc[df.index[-3:], "close"] = [10200, 10205, 10200]
 
     decision = strategy.check_exit(
         symbol="TEST",

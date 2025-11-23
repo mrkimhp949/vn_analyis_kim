@@ -45,13 +45,16 @@ def sample_stock_data():
     open_price = close - np.random.normal(0, 30, n)
     volume = np.random.uniform(200_000, 250_000, n)  # Sufficient for VN liquidity
 
-    df = pd.DataFrame({
-        "open": open_price,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": volume,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        },
+        index=dates,
+    )
 
     # Add required technical indicators
     df["ema20"] = df["close"].ewm(span=20).mean()
@@ -226,9 +229,7 @@ def test_validate_initial_signal_sell(sample_stock_data, sell_ml_signal):
     """Test validation with SELL signal (should reject for BUY logic)"""
     logic = ImprovedEntryLogic()
 
-    is_valid, reason, _, _ = logic._validate_initial_signal(
-        sample_stock_data, sell_ml_signal
-    )
+    is_valid, reason, _, _ = logic._validate_initial_signal(sample_stock_data, sell_ml_signal)
 
     assert is_valid is False
     assert "SELL" in reason
@@ -254,12 +255,14 @@ def test_validate_initial_signal_none_ml_fallback(sample_stock_data):
 def test_validate_initial_signal_insufficient_data():
     """Test validation with insufficient data"""
     # Only 20 rows (need 50)
-    small_df = pd.DataFrame({
-        "close": np.random.randn(20) + 10000,
-        "high": np.random.randn(20) + 10010,
-        "low": np.random.randn(20) + 9990,
-        "volume": [100000] * 20,
-    })
+    small_df = pd.DataFrame(
+        {
+            "close": np.random.randn(20) + 10000,
+            "high": np.random.randn(20) + 10010,
+            "low": np.random.randn(20) + 9990,
+            "volume": [100000] * 20,
+        }
+    )
 
     logic = ImprovedEntryLogic()
     ml_signal = {"signal": "BUY", "confidence": 80}
@@ -280,10 +283,7 @@ def test_filter_market_regime_tradeable(sample_stock_data, bull_market_regime):
     logic = ImprovedEntryLogic()
 
     passed, reasons, warnings, adjustments, breakdown = logic._run_all_filters(
-        sample_stock_data,
-        "BUY",
-        10500,
-        bull_market_regime
+        sample_stock_data, "BUY", 10500, bull_market_regime
     )
 
     # Should not block on market regime
@@ -296,16 +296,12 @@ def test_filter_market_regime_not_tradeable(sample_stock_data, bear_market_regim
     logic = ImprovedEntryLogic()
 
     passed, reasons, warnings, adjustments, breakdown = logic._run_all_filters(
-        sample_stock_data,
-        "BUY",
-        10500,
-        bear_market_regime
+        sample_stock_data, "BUY", 10500, bear_market_regime
     )
 
     # Should block
     assert passed is False
     assert any(b["filter"] == "market_regime" for b in breakdown)
-
 
 
 def test_check_trend_alignment_uptrend(sample_stock_data):
@@ -363,20 +359,14 @@ def test_check_volume_confirmation_low_volume(sample_stock_data):
 
 def test_check_volume_confirmation_regime_relaxed(sample_stock_data, bull_market_regime):
     """Test volume confirmation relaxed in bull market"""
-    logic = ImprovedEntryLogic(
-        regime_aware_filtering=True,
-        require_volume_confirmation=True
-    )
+    logic = ImprovedEntryLogic(regime_aware_filtering=True, require_volume_confirmation=True)
 
     # Low volume
     sample_stock_data.loc[sample_stock_data.index[-1], "volume"] = 50_000
 
     # In BULL market with regime_aware=True, should relax volume requirement
     passed, reasons, warnings, adjustments, breakdown = logic._run_all_filters(
-        sample_stock_data,
-        "BUY",
-        10500,
-        bull_market_regime
+        sample_stock_data, "BUY", 10500, bull_market_regime
     )
 
     # Should not block (may warn)
@@ -409,10 +399,12 @@ def test_check_liquidity_tiered():
     logic = ImprovedEntryLogic(use_tiered_liquidity=True)
 
     # Create data with different daily values
-    df_small = pd.DataFrame({
-        "close": [1000] * 50,
-        "volume": [100_000] * 50,  # 100M VND daily value
-    })
+    df_small = pd.DataFrame(
+        {
+            "close": [1000] * 50,
+            "volume": [100_000] * 50,  # 100M VND daily value
+        }
+    )
 
     result = logic._check_liquidity(df_small, 1000)
 
@@ -471,13 +463,7 @@ def test_add_adjustment():
     adjustments = []
     breakdown = []
 
-    logic._add_adjustment(
-        adjustments,
-        breakdown,
-        "test_filter",
-        +10,
-        "Test note"
-    )
+    logic._add_adjustment(adjustments, breakdown, "test_filter", +10, "Test note")
 
     assert len(adjustments) == 1
     assert adjustments[0] == 10
@@ -493,10 +479,7 @@ def test_adjustment_scaling_bull_market(sample_stock_data, bull_market_regime):
 
     # In bull market, penalties should be scaled down (0.7x)
     passed, reasons, warnings, adjustments, breakdown = logic._run_all_filters(
-        sample_stock_data,
-        "BUY",
-        10500,
-        bull_market_regime
+        sample_stock_data, "BUY", 10500, bull_market_regime
     )
 
     # Check that bull market regime is recognized
@@ -510,10 +493,7 @@ def test_adjustment_scaling_bear_market(sample_stock_data, bear_market_regime):
 
     # Bear market should block immediately
     passed, reasons, warnings, adjustments, breakdown = logic._run_all_filters(
-        sample_stock_data,
-        "BUY",
-        10500,
-        bear_market_regime
+        sample_stock_data, "BUY", 10500, bear_market_regime
     )
 
     assert passed is False  # Should not pass in bear market
@@ -524,8 +504,10 @@ def test_adjustment_scaling_bear_market(sample_stock_data, bear_market_regime):
 # ============================================================================
 
 
-@patch('src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity')
-def test_analyze_entry_valid_signal(mock_vn_liquidity, sample_stock_data, bull_ml_signal, bull_market_regime):
+@patch("src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity")
+def test_analyze_entry_valid_signal(
+    mock_vn_liquidity, sample_stock_data, bull_ml_signal, bull_market_regime
+):
     """Test full analyze_entry with valid signal"""
     # Mock Vietnam liquidity to pass
     mock_vn_liquidity.return_value = {"sufficient": True, "reason": "OK"}
@@ -537,51 +519,43 @@ def test_analyze_entry_valid_signal(mock_vn_liquidity, sample_stock_data, bull_m
     )
 
     result = logic.analyze_entry(
-        sample_stock_data,
-        bull_ml_signal,
-        market_regime=bull_market_regime,
-        symbol="TEST"
+        sample_stock_data, bull_ml_signal, market_regime=bull_market_regime, symbol="TEST"
     )
 
     assert isinstance(result, EntrySignal)
     assert result.signal_type in ["BUY", "HOLD"]
 
 
-@patch('src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity')
+@patch("src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity")
 def test_analyze_entry_weak_signal(mock_vn_liquidity, sample_stock_data, weak_ml_signal):
     """Test analyze_entry with weak signal (should reject)"""
     mock_vn_liquidity.return_value = {"sufficient": True, "reason": "OK"}
 
     logic = ImprovedEntryLogic(min_confidence=60)
 
-    result = logic.analyze_entry(
-        sample_stock_data,
-        weak_ml_signal,
-        symbol="TEST"
-    )
+    result = logic.analyze_entry(sample_stock_data, weak_ml_signal, symbol="TEST")
 
     assert result.should_enter is False
     assert result.confidence == 0
 
 
-@patch('src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity')
-def test_analyze_entry_bear_market(mock_vn_liquidity, sample_stock_data, bull_ml_signal, bear_market_regime):
+@patch("src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity")
+def test_analyze_entry_bear_market(
+    mock_vn_liquidity, sample_stock_data, bull_ml_signal, bear_market_regime
+):
     """Test analyze_entry in bear market (should reject)"""
     mock_vn_liquidity.return_value = {"sufficient": True, "reason": "OK"}
 
     logic = ImprovedEntryLogic()
 
     result = logic.analyze_entry(
-        sample_stock_data,
-        bull_ml_signal,
-        market_regime=bear_market_regime,
-        symbol="TEST"
+        sample_stock_data, bull_ml_signal, market_regime=bear_market_regime, symbol="TEST"
     )
 
     assert result.should_enter is False
 
 
-@patch('src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity')
+@patch("src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity")
 def test_analyze_entry_with_portfolio_manager(mock_vn_liquidity, sample_stock_data, bull_ml_signal):
     """Test analyze_entry with portfolio manager"""
     mock_vn_liquidity.return_value = {"sufficient": True, "reason": "OK"}
@@ -595,11 +569,7 @@ def test_analyze_entry_with_portfolio_manager(mock_vn_liquidity, sample_stock_da
         require_volume_confirmation=False,
     )
 
-    result = logic.analyze_entry(
-        sample_stock_data,
-        bull_ml_signal,
-        symbol="TEST"
-    )
+    result = logic.analyze_entry(sample_stock_data, bull_ml_signal, symbol="TEST")
 
     # Should call portfolio manager
     # mock_portfolio.calculate_correlation may be called
@@ -751,8 +721,10 @@ def test_format_signal_message_no_entry():
 # ============================================================================
 
 
-@patch('src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity')
-def test_full_workflow_strong_signal(mock_vn_liquidity, sample_stock_data, bull_ml_signal, bull_market_regime):
+@patch("src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity")
+def test_full_workflow_strong_signal(
+    mock_vn_liquidity, sample_stock_data, bull_ml_signal, bull_market_regime
+):
     """Test complete workflow with strong signal"""
     mock_vn_liquidity.return_value = {"sufficient": True, "reason": "OK"}
 
@@ -768,10 +740,7 @@ def test_full_workflow_strong_signal(mock_vn_liquidity, sample_stock_data, bull_
     sample_stock_data["rsi"] = 50
 
     result = logic.analyze_entry(
-        sample_stock_data,
-        bull_ml_signal,
-        market_regime=bull_market_regime,
-        symbol="VNM"
+        sample_stock_data, bull_ml_signal, market_regime=bull_market_regime, symbol="VNM"
     )
 
     # Should produce valid entry signal
@@ -779,8 +748,10 @@ def test_full_workflow_strong_signal(mock_vn_liquidity, sample_stock_data, bull_
     assert result.confidence >= 0
 
 
-@patch('src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity')
-def test_full_workflow_rejected_by_filters(mock_vn_liquidity, sample_stock_data, bull_ml_signal, bear_market_regime):
+@patch("src.strategies.entry_logic.ImprovedEntryLogic._check_vietnam_market_liquidity")
+def test_full_workflow_rejected_by_filters(
+    mock_vn_liquidity, sample_stock_data, bull_ml_signal, bear_market_regime
+):
     """Test complete workflow rejected by filters"""
     mock_vn_liquidity.return_value = {"sufficient": True, "reason": "OK"}
 
@@ -790,7 +761,7 @@ def test_full_workflow_rejected_by_filters(mock_vn_liquidity, sample_stock_data,
         sample_stock_data,
         bull_ml_signal,
         market_regime=bear_market_regime,  # Bear market should block
-        symbol="VNM"
+        symbol="VNM",
     )
 
     # Should be rejected
