@@ -114,20 +114,20 @@ def _run_weekly_model_retraining():
     # except ImportError:
     #     print("❌ Không thể import train_pipeline")
     #     return
-
-    try:
-        tickers = TICKERS[:40] if TICKERS else []
-        if not tickers:
-            print("⚠️ Không có danh sách tickers để retrain, bỏ qua.")
-            return
-        print("🔄 Đang retrain ensemble & volatility models...")
-        report = run_pipeline(tickers=tickers, lookback=250, refresh=True)
-        print(
-            "✅ Retrain hoàn tất. Accuracy:",
-            report.get("ensemble", {}).get("accuracy", {}).get("mean"),
-        )
-    except Exception:
-        print("❌ Lỗi retrain models")
+    #
+    # try:
+    #     tickers = TICKERS[:40] if TICKERS else []
+    #     if not tickers:
+    #         print("⚠️ Không có danh sách tickers để retrain, bỏ qua.")
+    #         return
+    #     print("🔄 Đang retrain ensemble & volatility models...")
+    #     report = run_pipeline(tickers=tickers, lookback=250, refresh=True)
+    #     print(
+    #         "✅ Retrain hoàn tất. Accuracy:",
+    #         report.get("ensemble", {}).get("accuracy", {}).get("mean"),
+    #     )
+    # except Exception:
+    #     print("❌ Lỗi retrain models")
 
 
 # ═══════════════════════════════════════════════════════════
