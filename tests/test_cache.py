@@ -449,11 +449,20 @@ def test_get_cache_shared_state():
 # ============================================================================
 
 
+@pytest.fixture(autouse=True)
+def clear_cache_for_decorator_tests():
+    """Clear cache before each decorator test"""
+    cache = get_cache()
+    cache.clear_all()
+    yield
+    cache.clear_all()
+
+
 def test_cached_decorator_basic():
     """Test @cached decorator basic functionality"""
     call_count = [0]
 
-    @cached(ttl=3600, key_prefix="test")
+    @cached(ttl=3600, key_prefix="test_basic")
     def expensive_function(x, y):
         call_count[0] += 1
         return x + y
@@ -470,7 +479,7 @@ def test_cached_decorator_different_args():
     """Test @cached decorator with different arguments"""
     call_count = [0]
 
-    @cached(ttl=3600, key_prefix="test")
+    @cached(ttl=3600, key_prefix="test_diff")
     def expensive_function(x, y):
         call_count[0] += 1
         return x + y
@@ -487,7 +496,7 @@ def test_cached_decorator_with_kwargs():
     """Test @cached decorator with keyword arguments"""
     call_count = [0]
 
-    @cached(ttl=3600, key_prefix="test")
+    @cached(ttl=3600, key_prefix="test_kwargs")
     def expensive_function(x, y=10):
         call_count[0] += 1
         return x + y

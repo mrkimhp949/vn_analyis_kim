@@ -146,7 +146,9 @@ class MonteCarloSimulator:
             # Kelly = W - (1-W)/R where W=win_rate, R=avg_win/avg_loss
             R = abs(self.avg_win_pct / self.avg_loss_pct)
             kelly_full = self.win_rate - ((1 - self.win_rate) / R)
-            self.kelly_pct = max(0.01, min(kelly_full * self.kelly_fraction, 0.25))  # Clamp to 1-25%
+            self.kelly_pct = max(
+                0.01, min(kelly_full * self.kelly_fraction, 0.25)
+            )  # Clamp to 1-25%
             logger.info(
                 f"📊 Using Kelly Criterion: {self.kelly_pct:.1%} "
                 f"(full Kelly: {kelly_full:.1%}, fraction: {self.kelly_fraction})"
@@ -258,9 +260,7 @@ class MonteCarloSimulator:
         # Calculate metrics
         total_trades = wins + losses
         win_rate = wins / total_trades if total_trades > 0 else 0
-        profit_factor = (
-            total_win_amount / total_loss_amount if total_loss_amount > 0 else 0
-        )
+        profit_factor = total_win_amount / total_loss_amount if total_loss_amount > 0 else 0
 
         return capital, max_dd, win_rate, profit_factor
 
@@ -391,7 +391,9 @@ class MonteCarloSimulator:
 
         report.append("🔺 EXTREMES:")
         report.append(f"   Best case: {result.best_return_pct:+.2f}% ({result.best_case:,.0f} VND)")
-        report.append(f"   Worst case: {result.worst_return_pct:+.2f}% ({result.worst_case:,.0f} VND)")
+        report.append(
+            f"   Worst case: {result.worst_return_pct:+.2f}% ({result.worst_case:,.0f} VND)"
+        )
         report.append("")
 
         report.append("📉 DRAWDOWN STATISTICS:")

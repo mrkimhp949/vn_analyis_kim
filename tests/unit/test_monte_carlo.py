@@ -6,7 +6,11 @@ Tests the Monte Carlo risk analysis functionality.
 
 import pytest
 import numpy as np
-from src.analytics.monte_carlo import MonteCarloSimulator, MonteCarloResult, run_monte_carlo_analysis
+from src.analytics.monte_carlo import (
+    MonteCarloSimulator,
+    MonteCarloResult,
+    run_monte_carlo_analysis,
+)
 
 
 class TestMonteCarloSimulator:
@@ -84,7 +88,7 @@ class TestMonteCarloSimulator:
         # where W=0.55, R=2.5/1.5=1.67
         # Kelly = 0.55 - 0.45/1.67 = 0.55 - 0.269 = 0.281
         # Half-Kelly = 0.281 * 0.5 = 0.1405
-        expected_kelly = 0.55 - (0.45 / (2.5/1.5))
+        expected_kelly = 0.55 - (0.45 / (2.5 / 1.5))
         expected_half_kelly = expected_kelly * 0.5
 
         assert abs(sim.kelly_pct - expected_half_kelly) < 0.01

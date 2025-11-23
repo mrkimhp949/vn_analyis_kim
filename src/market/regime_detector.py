@@ -257,7 +257,11 @@ class MarketRegimeDetector:
                         f"Trend: {trend:.2f}, but momentum stabilizing ({momentum:.2f}). "
                         f"May be temporary dip, not full bear market. Trade with caution."
                     )
-                    return "SIDEWAYS", confidence, description  # Classify as SIDEWAYS instead of BEAR
+                    return (
+                        "SIDEWAYS",
+                        confidence,
+                        description,
+                    )  # Classify as SIDEWAYS instead of BEAR
 
             confidence = min(abs(composite_score) * 100, 100)
             description = (

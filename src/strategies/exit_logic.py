@@ -322,9 +322,7 @@ class ImprovedExitStrategy:
             # Nếu giữ quá lâu mà lời < threshold → thoát
             if pnl_percent < self.time_decay_threshold * 100:
                 regime_note = (
-                    f" ({market_regime.get('regime', 'UNKNOWN')} market)"
-                    if market_regime
-                    else ""
+                    f" ({market_regime.get('regime', 'UNKNOWN')} market)" if market_regime else ""
                 )
                 return ExitDecision(
                     should_exit=True,

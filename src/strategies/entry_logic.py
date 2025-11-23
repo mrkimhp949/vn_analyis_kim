@@ -688,19 +688,30 @@ class ImprovedEntryLogic:
 
             # Ensure stop loss is below entry (for long positions)
             if stop_loss >= entry_price:
-                return (False, f"Stop loss ({stop_loss:.0f}) must be below entry ({entry_price:.0f})", 0, 0, [], 0)
+                return (
+                    False,
+                    f"Stop loss ({stop_loss:.0f}) must be below entry ({entry_price:.0f})",
+                    0,
+                    0,
+                    [],
+                    0,
+                )
 
             # Enforce minimum stop loss distance (3% of entry price)
             min_stop_distance = entry_price * 0.03  # 3% minimum
             if (entry_price - stop_loss) < min_stop_distance:
                 stop_loss = entry_price - min_stop_distance
-                logger.warning(f"⚠️ Stop loss too tight, adjusted to 3% below entry: {stop_loss:.0f}")
+                logger.warning(
+                    f"⚠️ Stop loss too tight, adjusted to 3% below entry: {stop_loss:.0f}"
+                )
 
             # Enforce maximum stop loss distance (10% of entry price)
             max_stop_distance = entry_price * 0.10  # 10% maximum
             if (entry_price - stop_loss) > max_stop_distance:
                 stop_loss = entry_price - max_stop_distance
-                logger.warning(f"⚠️ Stop loss too wide, adjusted to 10% below entry: {stop_loss:.0f}")
+                logger.warning(
+                    f"⚠️ Stop loss too wide, adjusted to 10% below entry: {stop_loss:.0f}"
+                )
 
         except ValueError as e:
             return (False, f"Stop loss calculation failed: {str(e)}", 0, 0, [], 0)
@@ -1557,9 +1568,7 @@ class ImprovedEntryLogic:
             )
 
             if portfolio_changed:
-                logger.debug(
-                    "📊 Correlation cache invalidated: portfolio composition changed"
-                )
+                logger.debug("📊 Correlation cache invalidated: portfolio composition changed")
 
             cache_valid = (
                 self._correlation_cache is not None

@@ -32,8 +32,7 @@ from src.analytics.monte_carlo import MonteCarloSimulator
 from src.monitoring.signal_performance_tracker import get_signal_tracker
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -216,48 +215,39 @@ Examples:
 
   # Save results
   python scripts/run_monte_carlo_analysis.py --output results.json
-        """
+        """,
     )
 
     parser.add_argument(
         "--source",
         choices=["ml", "technical_only"],
         default="ml",
-        help="Signal source to analyze (default: ml)"
+        help="Signal source to analyze (default: ml)",
     )
 
     parser.add_argument(
         "--simulations",
         type=int,
         default=10000,
-        help="Number of Monte Carlo simulations (default: 10000)"
+        help="Number of Monte Carlo simulations (default: 10000)",
     )
 
     parser.add_argument(
-        "--trades",
-        type=int,
-        default=100,
-        help="Number of trades per simulation (default: 100)"
+        "--trades", type=int, default=100, help="Number of trades per simulation (default: 100)"
     )
 
     parser.add_argument(
         "--capital",
         type=float,
         default=100_000_000,
-        help="Initial capital in VND (default: 100,000,000)"
+        help="Initial capital in VND (default: 100,000,000)",
     )
 
     parser.add_argument(
-        "--use-kelly",
-        action="store_true",
-        help="Use Kelly Criterion for position sizing"
+        "--use-kelly", action="store_true", help="Use Kelly Criterion for position sizing"
     )
 
-    parser.add_argument(
-        "--output",
-        "-o",
-        help="Save results to JSON file"
-    )
+    parser.add_argument("--output", "-o", help="Save results to JSON file")
 
     args = parser.parse_args()
 

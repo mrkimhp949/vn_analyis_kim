@@ -212,9 +212,7 @@ class SignalPerformanceTracker:
         returns = [t["pnl_pct"] for t in trades]
         import numpy as np
 
-        sharpe = (
-            (np.mean(returns) / np.std(returns)) * np.sqrt(252) if np.std(returns) > 0 else 0
-        )
+        sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(252) if np.std(returns) > 0 else 0
 
         # Max drawdown
         cumulative = 0
