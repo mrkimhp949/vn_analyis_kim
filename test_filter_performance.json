@@ -1,0 +1,89 @@
+{
+  "last_updated": "2025-11-23T13:20:59.379330",
+  "filters": {
+    "trend_alignment": {
+      "present": {
+        "wins": 1,
+        "losses": 0,
+        "total_pnl": 5.5,
+        "count": 1
+      },
+      "absent": {
+        "wins": 0,
+        "losses": 1,
+        "total_pnl": -3.2,
+        "count": 1
+      }
+    },
+    "support_resistance": {
+      "present": {
+        "wins": 1,
+        "losses": 0,
+        "total_pnl": 5.5,
+        "count": 1
+      },
+      "absent": {
+        "wins": 0,
+        "losses": 1,
+        "total_pnl": -3.2,
+        "count": 1
+      }
+    },
+    "volume": {
+      "present": {
+        "wins": 1,
+        "losses": 0,
+        "total_pnl": 5.5,
+        "count": 1
+      },
+      "absent": {
+        "wins": 0,
+        "losses": 1,
+        "total_pnl": -3.2,
+        "count": 1
+      }
+    },
+    "rsi": {
+      "present": {
+        "wins": 1,
+        "losses": 0,
+        "total_pnl": 5.5,
+        "count": 1
+      },
+      "absent": {
+        "wins": 0,
+        "losses": 1,
+        "total_pnl": -3.2,
+        "count": 1
+      }
+    },
+    "macd": {
+      "present": {
+        "wins": 0,
+        "losses": 0,
+        "total_pnl": 0.0,
+        "count": 0
+      },
+      "absent": {
+        "wins": 1,
+        "losses": 1,
+        "total_pnl": 2.3,
+        "count": 2
+      }
+    },
+    "market_regime": {
+      "present": {
+        "wins": 0,
+        "losses": 1,
+        "total_pnl": -3.2,
+        "count": 1
+      },
+      "absent": {
+        "wins": 1,
+        "losses": 0,
+        "total_pnl": 5.5,
+        "count": 1
+      }
+    }
+  }
+}
