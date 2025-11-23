@@ -44,13 +44,13 @@ class EnhancedPositionSizer:
         self,
         total_capital: float = 100_000_000,
         max_risk_per_trade: float = 0.02,  # 2% max risk
-        max_position_size: float = 0.10,  # 10% max position (FIXED: was 0.15 which exceeded 100% with 10 positions)
+        max_position_size: float = 0.10,  # 10% max position (safer than 15% to prevent over-concentration)
         min_position_size: float = 0.05,  # 5% min position
-        max_total_exposure: float = 0.60,  # 60% max exposure
+        max_total_exposure: float = 0.60,  # 60% max exposure (leaves 40% cash for opportunities)
         max_portfolio_risk: float = 0.20,  # 20% max portfolio risk
-        max_sector_exposure: float = 0.40,  # 40% max per sector
+        max_sector_exposure: float = 0.40,  # 40% max per sector (prevents sector over-concentration)
         use_kelly: bool = True,
-        kelly_fraction: float = 0.5,
+        kelly_fraction: float = 0.5,  # Half-Kelly for safety (full Kelly too aggressive)
         correlation_cache_ttl: int = 3600,  # Cache correlations for 1 hour
         correlation_cache_maxsize: int = 500,  # ENHANCEMENT: Configurable cache size
     ):  # Half-Kelly
@@ -477,28 +477,31 @@ class EnhancedPositionSizer:
                 # IMPROVEMENT: Variable bear market multiplier based on:
                 # 1. Regime confidence (weak bear = less reduction)
                 # 2. Signal confidence (high confidence = allow larger position)
+                # This prevents over-aggressive position reduction in weak bear markets
+                # while still protecting capital in strong bear markets
 
-                # Base bear multiplier: 0.6 (less aggressive than 0.5)
+                # Base bear multiplier: 0.6 (balanced between protection and opportunity)
                 bear_mult = 0.6
 
                 # Adjust by regime confidence
-                # Weak bear (50-70% conf): Use 0.7x multiplier
-                # Strong bear (>70% conf): Use 0.5x multiplier
+                # Weak bear (50-70% conf): Use 0.7x multiplier (less defensive)
+                # Strong bear (>70% conf): Use 0.5x multiplier (very defensive)
                 if regime_confidence < 70:
-                    bear_mult = 0.7  # Weak bear - be less defensive
+                    bear_mult = 0.7  # Weak bear - be less defensive to capture opportunities
                     logger.info(
                         f"📊 Weak bear market ({regime_confidence:.0f}% conf) - "
                         f"using {bear_mult:.1f}x position multiplier"
                     )
                 else:
-                    bear_mult = 0.5  # Strong bear - be very defensive
+                    bear_mult = 0.5  # Strong bear - be very defensive to preserve capital
                     logger.warning(
                         f"🐻 Strong bear market ({regime_confidence:.0f}% conf) - "
                         f"using {bear_mult:.1f}x position multiplier"
                     )
 
                 # Further adjust by signal confidence
-                # High confidence signals (>80%) get less reduction
+                # High confidence signals (>80%) get less reduction (but capped at 0.8x)
+                # This allows us to take advantage of high-quality opportunities even in bear markets
                 if confidence >= 80:
                     bear_mult = min(bear_mult * 1.2, 0.8)  # Max 0.8x for very high confidence
                     logger.info(
@@ -509,9 +512,9 @@ class EnhancedPositionSizer:
                 regime_mult = bear_mult
 
             elif regime == "HIGH_VOLATILITY":
-                regime_mult = 0.6
+                regime_mult = 0.6  # Reduce size in high volatility to manage risk
             else:
-                regime_mult = 0.8
+                regime_mult = 0.8  # Sideways market - slightly reduce from normal
 
         return max(0.5, min(base * strength_mult * regime_mult, 1.2))
 
