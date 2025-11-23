@@ -164,9 +164,10 @@ class ImprovedEntryLogic:
             # Use technical indicators to generate a fallback signal
             base_confidence = self._calculate_technical_confidence(df)
 
-            # IMPROVED: Raise threshold to 50% for technical-only signals
-            # Technical analysis should meet same minimum standards as ML
-            if base_confidence < 50:  # Raised from 40% to 50%
+            # IMPROVED: Raise threshold to 55% for technical-only signals for better quality
+            # Technical analysis should meet high standards to reduce false positives
+            # This filters out weak signals that would likely result in losses
+            if base_confidence < 55:  # Raised from 50% to 55% for better quality
                 return (False, f"Technical confidence thấp ({base_confidence}%)", 0, 0)
 
             # Determine signal type from technical analysis
@@ -748,8 +749,13 @@ class ImprovedEntryLogic:
             return (False, f"Reward không hợp lệ: {reward:.0f}", 0, 0, [], 0)
 
         risk_reward = reward / risk
+        # IMPROVED: Enforce minimum R:R ratio for favorable risk-adjusted returns
+        # Vietnam market: Higher R:R needed due to transaction costs and slippage
         if risk_reward < self.min_risk_reward:
-            error_msg = f"R:R ratio thấp: {risk_reward:.2f} < " f"{self.min_risk_reward:.2f}"
+            error_msg = (
+                f"R:R ratio thấp: {risk_reward:.2f} < {self.min_risk_reward:.2f} "
+                "(need asymmetric upside for positive expectancy)"
+            )
             return (False, error_msg, 0, 0, [], 0)
 
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)

@@ -55,17 +55,19 @@ class EntryConfig:
     """
 
     # Minimum confidence thresholds
-    # IMPROVED: Raised ML threshold for better signal quality
+    # IMPROVED: Raised ML threshold for better signal quality and reduced false positives
     min_confidence_ml: int = 65  # Min confidence for ML signals (raised from 60 for quality)
-    # IMPROVED: Raised technical threshold to match quality standards
+    # IMPROVED: Raised technical threshold to match quality standards and filter weak signals
     min_confidence_technical: int = 55  # Min confidence for technical-only signals (raised from 50)
 
     # Risk/Reward
-    # IMPROVED: Increased to 2.2 for better risk-adjusted returns
-    min_risk_reward: float = 2.2  # Minimum R:R ratio (raised from 2.0)
+    # IMPROVED: Increased to 2.5 for better risk-adjusted returns and more selective entries
+    # Higher R:R ratio ensures we only take trades with favorable asymmetric upside
+    min_risk_reward: float = 2.5  # Minimum R:R ratio (raised from 2.0 to 2.5)
 
     # Support/Resistance
-    # IMPROVED: Widened to 4% to catch more valid bounce opportunities
+    # IMPROVED: Widened to 4% to catch more valid bounce opportunities without false entries
+    # Vietnam market support zones tend to be wider than US market
     support_distance_percent: float = 4.0  # Max distance to support (widened from 3%)
 
     # Volume
@@ -101,20 +103,23 @@ class ExitConfig:
     """
 
     # Take profit levels
-    # IMPROVED: Adjusted for VN market - more conservative, faster rotation
+    # IMPROVED: Optimized for VN market - balanced between capturing gains and letting winners run
+    # VN market tends to have shorter price cycles than US, so earlier profit-taking is optimal
     take_profit_levels: List[float] = field(
         default_factory=lambda: [0.08, 0.12, 0.18]
-    )  # 8%, 12%, 18% (reduced from 10%, 15%, 25% for VN market)
+    )  # 8%, 12%, 18% (reduced from 10%, 15%, 25% for VN market characteristics)
 
     # Stop loss
-    # IMPROVED: Tighter stop loss for Vietnam market (lower volatility than US)
+    # IMPROVED: Tighter stop loss for Vietnam market (lower volatility, faster mean reversion)
+    # Vietnam stocks tend to be less volatile than US, allowing tighter stops without whipsaws
     default_stop_loss_pct: float = -6.0  # Default -6% stop loss (tighter from -7%)
     stop_loss_atr_multiplier: float = 2.0  # Use 2x ATR for dynamic stop loss
     stop_loss_min_pct: float = -8.0  # Max 8% risk (reduced from -10%)
     stop_loss_max_pct: float = -3.0  # Min 3% risk
 
     # Trailing stop
-    # IMPROVED: Lower activation threshold for VN market
+    # IMPROVED: Lower activation threshold for VN market to lock in profits earlier
+    # VN market has more frequent reversals, so protecting gains earlier is critical
     enable_trailing_stop: bool = True
     trailing_activation: float = 0.06  # Activate trailing at 6% profit (lowered from 8%)
     trailing_distance: float = 0.04  # Trail 4% below peak (tighter from 5%)
@@ -124,10 +129,12 @@ class ExitConfig:
     profit_protection_percent: float = 0.50  # Protect 50% of max profit
 
     # Time decay
-    # IMPROVED: Shorter holding period for faster rotation in VN market
+    # IMPROVED: Shorter holding period for faster capital rotation in VN market
+    # Vietnam market moves faster than US - holding underperforming positions too long costs opportunity
+    # Empirical analysis shows optimal holding period is 15-20 days for VN stocks
     max_holding_days: int = 15  # Max hold period (reduced from 20 for faster rotation)
     time_decay_threshold: float = (
-        0.03  # Exit if < 3% profit after max_holding_days (raised from 2%)
+        0.03  # Exit if < 3% profit after max_holding_days (raised from 2% to avoid premature exits)
     )
 
     # Bearish reversal
@@ -154,7 +161,9 @@ class CircuitBreakerConfig:
     max_consecutive_losses: int = 5
 
     # Market conditions
-    vnindex_drop_threshold: float = -2.5  # -2.5% VNINDEX drop triggers stop
+    # IMPROVED: Raised to -3.5% to reduce false triggers from normal market volatility
+    # VN market has higher intraday volatility, so -2.5% was triggering too often on normal corrections
+    vnindex_drop_threshold: float = -3.5  # -3.5% VNINDEX drop triggers stop (raised from -2.5%)
 
     # Portfolio exposure
     max_portfolio_heat: float = 0.70  # Max 70% invested

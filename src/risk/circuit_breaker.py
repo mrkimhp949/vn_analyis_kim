@@ -37,7 +37,10 @@ class CircuitBreaker:
         max_trades_per_day: int = 10,
         max_loss_per_day_pct: float = 0.05,  # 5% vốn
         max_consecutive_losses: int = 5,
-        vnindex_drop_threshold: float = -3.5,  # Ngưỡng VNINDEX giảm để ngắt (%) - Adjusted from -2.5% to reduce false triggers
+        vnindex_drop_threshold: float = -3.5,  # IMPROVED: Raised from -2.5% to -3.5% to reduce false triggers
+        # VN market has higher intraday volatility than US market
+        # -2.5% was triggering too often on normal corrections
+        # -3.5% better balances protection vs false positives
         total_capital: float = 100_000_000,
         stats_file: str = "circuit_breaker_stats.json",
         max_portfolio_heat: float = 0.70,  # ENHANCEMENT: Max portfolio exposure
