@@ -377,7 +377,7 @@ class ImprovedEntryLogic:
                     "Volume surge",
                 )
 
-        # FILTER 5: LIQUIDITY CHECK (NEW)
+        # FILTER 5: LIQUIDITY CHECK (ENHANCED with Vietnam market requirements)
         liquidity_check = self._check_liquidity(df, current_price)
         if liquidity_check["critical"]:
             adjustment_breakdown.append(
@@ -385,6 +385,24 @@ class ImprovedEntryLogic:
                     "filter": "liquidity",
                     "delta": None,
                     "note": "Critical liquidity",
+                }
+            )
+            return (
+                False,
+                [],
+                [],
+                [],
+                adjustment_breakdown,
+            )
+
+        # FILTER 5a: VIETNAM MARKET LIQUIDITY CHECK (NEW)
+        vn_liquidity_check = self._check_vietnam_market_liquidity(df)
+        if not vn_liquidity_check["sufficient"]:
+            adjustment_breakdown.append(
+                {
+                    "filter": "vietnam_liquidity",
+                    "delta": None,
+                    "note": vn_liquidity_check["reason"],
                 }
             )
             return (
@@ -1907,6 +1925,38 @@ class ImprovedEntryLogic:
             return "SELL"
         else:
             return "HOLD"
+
+    def _check_vietnam_market_liquidity(self, df: pd.DataFrame) -> Dict:
+        """
+        NEW: Check Vietnam market-specific liquidity requirements
+
+        Uses VietnamMarketValidator to check:
+        - Minimum daily trading value (2B VND)
+        - Trading continuity
+
+        Returns:
+            Dict with sufficient flag and reason
+        """
+        try:
+            from src.utils.vietnam_market import check_liquidity
+
+            is_liquid, warning = check_liquidity(df, self._current_symbol)
+
+            if not is_liquid:
+                return {
+                    "sufficient": False,
+                    "reason": warning or "Vietnam market liquidity requirement not met",
+                }
+
+            return {"sufficient": True, "reason": "Vietnam market liquidity OK"}
+
+        except Exception as e:
+            logger.warning(f"Error checking Vietnam market liquidity: {e}")
+            # Don't block on validation errors - return as sufficient with warning
+            return {
+                "sufficient": True,
+                "reason": f"Liquidity check error: {str(e)}",
+            }
 
     def _no_signal(self, reason: str, telemetry: Optional[Dict] = None) -> EntrySignal:
         """Return no signal with detailed reason"""
