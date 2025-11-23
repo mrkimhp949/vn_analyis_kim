@@ -221,6 +221,10 @@ def _download_from_tcbs(
 
             return df
 
+        except DataLoadError:
+            # Re-raise DataLoadError as-is (don't wrap it)
+            raise
+
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries - 1:
                 logger.warning(
@@ -232,10 +236,10 @@ def _download_from_tcbs(
                 f"Network error after {max_retries} retries", context={"symbol": symbol}
             ) from e
 
-        except Exception:
+        except Exception as e:
             raise DataLoadError(
                 "Unexpected error during download", context={"symbol": symbol}
-            ) from e  # noqa: F821
+            ) from e
 
     return pd.DataFrame()  # Return empty df if all retries fail
 

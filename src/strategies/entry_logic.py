@@ -130,7 +130,8 @@ class ImprovedEntryLogic:
         self._correlation_cache = None
         self._correlation_cache_time = None
         self._correlation_cache_symbols = None
-        self._correlation_cache_ttl = 300  # 5 minutes TTL
+        self._correlation_cache_ttl = 300  # 5 minutes TTL (default)
+        self._correlation_cache_portfolio_hash = None  # NEW: Track portfolio composition
 
     def _validate_initial_signal(
         self, df: pd.DataFrame, ml_signal: Optional[Dict]
@@ -334,7 +335,20 @@ class ImprovedEntryLogic:
         # FILTER 4: VOLUME CONFIRMATION
         # ENHANCEMENT: Pass market_regime for dynamic threshold adjustment
         # NEW: Relax volume requirement in BULL/SIDEWAYS if regime_aware_filtering enabled
+        # IMPROVEMENT: Also relax for small caps with low liquidity
         volume_check = self._check_volume_confirmation(df, market_regime)
+
+        # Check if this is a small cap (from Filter 5 results, or check now)
+        is_small_cap = False
+        liquidity_tier = "unknown"
+        if "volume" in df.columns and len(df) >= 5:
+            avg_volume = df["volume"].tail(20).mean()
+            avg_value = avg_volume * current_price
+            # Small cap threshold: < 5B VND daily value
+            if avg_value < 5_000_000_000:
+                is_small_cap = True
+                liquidity_tier = "small/micro"
+
         if not volume_check["confirmed"]:
             volume_note = volume_check["reason"]
             adjustment_breakdown.append(
@@ -354,16 +368,28 @@ class ImprovedEntryLogic:
                 should_block_volume = False
                 logger.debug(f"📊 Relaxing volume filter in {regime_name} market (regime-aware)")
 
+            # IMPROVEMENT: Also relax for small caps
+            if is_small_cap:
+                should_block_volume = False
+                logger.debug(
+                    f"📊 Relaxing volume filter for small cap ({liquidity_tier}) - "
+                    "low liquidity expected"
+                )
+
             if should_block_volume:
                 return (False, [], [], [], adjustment_breakdown)
             else:
                 warning_msg = f"⚠️ Volume: {volume_note}"
+                if is_small_cap:
+                    warning_msg += f" (small cap - {liquidity_tier})"
                 warnings.append(warning_msg)
+                # IMPROVEMENT: Smaller penalty for small caps (-5 instead of -10)
+                penalty = -5 if is_small_cap else -10
                 self._add_adjustment(
                     adjustments,
                     adjustment_breakdown,
                     "volume",
-                    -10,
+                    penalty,
                     volume_note,
                 )
         else:
@@ -654,6 +680,39 @@ class ImprovedEntryLogic:
                 atr_multiplier=2.0,
             )
             logger.debug(f"Stop loss calculated: {stop_loss:.0f} ({sl_reason})")
+
+            # CRITICAL FIX: Validate stop loss is within acceptable range
+            # This ensures stop loss is ALWAYS properly set
+            if stop_loss is None or stop_loss <= 0:
+                return (False, f"Stop loss invalid: {stop_loss}", 0, 0, [], 0)
+
+            # Ensure stop loss is below entry (for long positions)
+            if stop_loss >= entry_price:
+                return (
+                    False,
+                    f"Stop loss ({stop_loss:.0f}) must be below entry ({entry_price:.0f})",
+                    0,
+                    0,
+                    [],
+                    0,
+                )
+
+            # Enforce minimum stop loss distance (3% of entry price)
+            min_stop_distance = entry_price * 0.03  # 3% minimum
+            if (entry_price - stop_loss) < min_stop_distance:
+                stop_loss = entry_price - min_stop_distance
+                logger.warning(
+                    f"⚠️ Stop loss too tight, adjusted to 3% below entry: {stop_loss:.0f}"
+                )
+
+            # Enforce maximum stop loss distance (10% of entry price)
+            max_stop_distance = entry_price * 0.10  # 10% maximum
+            if (entry_price - stop_loss) > max_stop_distance:
+                stop_loss = entry_price - max_stop_distance
+                logger.warning(
+                    f"⚠️ Stop loss too wide, adjusted to 10% below entry: {stop_loss:.0f}"
+                )
+
         except ValueError as e:
             return (False, f"Stop loss calculation failed: {str(e)}", 0, 0, [], 0)
 
@@ -854,6 +913,21 @@ class ImprovedEntryLogic:
                 entry_type=optimized_entry.get("entry_type", "MARKET"),
                 telemetry=telemetry,
             )
+
+            # IMPROVEMENT: Record signal for performance tracking
+            try:
+                from src.monitoring.signal_performance_tracker import get_signal_tracker
+
+                tracker = get_signal_tracker()
+                signal_source = "technical_only" if self._is_technical_only else "ml"
+                tracker.record_signal(
+                    symbol=symbol or "UNKNOWN",
+                    signal_source=signal_source,
+                    confidence=adjusted_confidence,
+                    entry_price=entry_price,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record signal for tracking: {e}")
 
             # CRITICAL FIX: Log signal source for tracking
             if self._is_technical_only:
@@ -1467,8 +1541,12 @@ class ImprovedEntryLogic:
             # CRITICAL FIX: Invalidate cache on date change to prevent stale data
             import time
             from datetime import datetime
+            import hashlib
 
             current_time = time.time()
+
+            # IMPROVEMENT: Calculate portfolio hash to detect composition changes
+            portfolio_hash = hashlib.md5(str(sorted(existing_symbols)).encode()).hexdigest()
 
             # Check if cache is from the same date
             cache_date_valid = True
@@ -1483,12 +1561,22 @@ class ImprovedEntryLogic:
                         f"from {cache_date} to {current_date}"
                     )
 
+            # IMPROVEMENT: Check if portfolio composition changed
+            portfolio_changed = (
+                self._correlation_cache_portfolio_hash is not None
+                and self._correlation_cache_portfolio_hash != portfolio_hash
+            )
+
+            if portfolio_changed:
+                logger.debug("📊 Correlation cache invalidated: portfolio composition changed")
+
             cache_valid = (
                 self._correlation_cache is not None
                 and self._correlation_cache_time is not None
                 and self._correlation_cache_symbols == symbols_key
                 and (current_time - self._correlation_cache_time) < self._correlation_cache_ttl
-                and cache_date_valid  # NEW: Invalidate on date change
+                and cache_date_valid  # Invalidate on date change
+                and not portfolio_changed  # NEW: Invalidate on portfolio change
             )
 
             if cache_valid:
@@ -1509,6 +1597,7 @@ class ImprovedEntryLogic:
                 self._correlation_cache = correlation_metrics
                 self._correlation_cache_time = current_time
                 self._correlation_cache_symbols = symbols_key
+                self._correlation_cache_portfolio_hash = portfolio_hash  # NEW: Store portfolio hash
                 logger.debug("🔄 Calculated and cached new correlation matrix")
 
             max_correlation = correlation_metrics.get("max_correlation", 0.0)

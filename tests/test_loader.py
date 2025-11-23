@@ -223,18 +223,18 @@ def test_load_data_download_exception(mock_download, temp_cache_dir):
 
 
 @patch("src.data.loader._download_from_tcbs")
-def test_load_data_caching_enabled(mock_download, sample_dataframe, temp_cache_dir):
+def test_load_data_caching_enabled(mock_download, large_sample_data, temp_cache_dir):
     """Test that caching works correctly"""
-    mock_download.return_value = sample_dataframe
+    mock_download.return_value = large_sample_data
 
     # First call should download and cache
     result1 = load_data(
-        symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=True
+        symbol="VNM", start_date="2024-01-01", end_date="2024-03-01", use_cache=True
     )
 
     # Second call should use cache
     result2 = load_data(
-        symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=True
+        symbol="VNM", start_date="2024-01-01", end_date="2024-03-01", use_cache=True
     )
 
     # Download should only be called once
@@ -281,14 +281,14 @@ def test_load_data_index_no_cache(mock_download, sample_dataframe, temp_cache_di
 
 
 @patch("src.data.loader._download_from_tcbs")
-def test_load_data_cache_corruption(mock_download, sample_dataframe, temp_cache_dir):
+def test_load_data_cache_corruption(mock_download, large_sample_data, temp_cache_dir):
     """Test handling of corrupted cache file"""
-    mock_download.return_value = sample_dataframe
+    mock_download.return_value = large_sample_data
 
     # Create corrupted cache file
     import hashlib
 
-    cache_key = "VNM_2024-01-01_2024-01-03_1D_stock"
+    cache_key = "VNM_2024-01-01_2024-03-01_1D_stock"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
     cache_file = os.path.join(temp_cache_dir, f"{cache_hash}.pkl")
 
@@ -297,7 +297,7 @@ def test_load_data_cache_corruption(mock_download, sample_dataframe, temp_cache_
         f.write("corrupted data")
 
     # Should handle corruption and refetch
-    result = load_data(symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=True)
+    result = load_data(symbol="VNM", start_date="2024-01-01", end_date="2024-03-01", use_cache=True)
 
     assert not result.empty
     mock_download.assert_called_once()
@@ -535,23 +535,27 @@ def test_download_from_tcbs_data_cleaning(mock_wait, mock_get):
 @patch("src.data.loader._download_from_tcbs")
 def test_load_data_sorting(mock_download, temp_cache_dir):
     """Test that data is sorted by time"""
+    # Create unsorted data with 60 rows
+    dates = pd.date_range(start="2024-01-01", periods=60, freq="D")
+    # Reverse the dates to make them unsorted
     unsorted_df = pd.DataFrame(
         {
-            "time": pd.to_datetime(["2024-01-03", "2024-01-01", "2024-01-02"]),
-            "open": [106.0, 100.0, 103.0],
-            "high": [110.0, 105.0, 108.0],
-            "low": [105.0, 98.0, 102.0],
-            "close": [108.0, 103.0, 106.0],
-            "volume": [1100000, 1000000, 1200000],
+            "time": dates[::-1],  # Reversed order
+            "open": [100.0 + i for i in range(60)],
+            "high": [105.0 + i for i in range(60)],
+            "low": [98.0 + i for i in range(60)],
+            "close": [103.0 + i for i in range(60)],
+            "volume": [1000000 + i * 10000 for i in range(60)],
         }
     )
     mock_download.return_value = unsorted_df
 
     result = load_data(
-        symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=False
+        symbol="VNM", start_date="2024-01-01", end_date="2024-03-01", use_cache=False
     )
 
     # Should be sorted by time
+    assert not result.empty
     assert result["time"].is_monotonic_increasing
 
 

@@ -298,11 +298,32 @@ class ImprovedExitStrategy:
             return breakdown_check["decision"]
 
         # ====================================================================
-        # CHECK 9: TIME DECAY
+        # CHECK 9: TIME DECAY (ADAPTIVE BY MARKET REGIME)
         # ====================================================================
-        if days_held >= self.max_holding_days:
+        # IMPROVEMENT: Adapt holding period based on market regime
+        # BULL: 25 days (hold longer in uptrend)
+        # SIDEWAYS: 20 days (normal)
+        # BEAR: 15 days (exit faster in downtrend)
+        adaptive_max_days = self.max_holding_days  # Default: 30
+
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
+            if regime == "BULL":
+                adaptive_max_days = 25  # Reduced from 30 to 25
+                logger.debug(f"📈 BULL market: Using {adaptive_max_days} day holding limit")
+            elif regime == "SIDEWAYS":
+                adaptive_max_days = 20  # Reduced from 30 to 20
+                logger.debug(f"➡️ SIDEWAYS market: Using {adaptive_max_days} day holding limit")
+            elif regime == "BEAR":
+                adaptive_max_days = 15  # Much shorter in bear
+                logger.debug(f"📉 BEAR market: Using {adaptive_max_days} day holding limit")
+
+        if days_held >= adaptive_max_days:
             # Nếu giữ quá lâu mà lời < threshold → thoát
             if pnl_percent < self.time_decay_threshold * 100:
+                regime_note = (
+                    f" ({market_regime.get('regime', 'UNKNOWN')} market)" if market_regime else ""
+                )
                 return ExitDecision(
                     should_exit=True,
                     exit_reason=ExitReason.TIME_DECAY,
@@ -310,7 +331,7 @@ class ImprovedExitStrategy:
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
-                    message=f"⏰ SIDEWAY QUÁ LÂU ({days_held} ngày): {pnl_percent:+.2f}%",
+                    message=f"⏰ SIDEWAY QUÁ LÂU ({days_held} ngày, limit: {adaptive_max_days}){regime_note}: {pnl_percent:+.2f}%",
                     urgency=2,
                 )
 
