@@ -134,7 +134,9 @@ class MarketRegimeAnalyzer:
                 if regime != "HIGH_VOLATILITY":
                     details["regime_before_volatility_override"] = regime
                 regime = "HIGH_VOLATILITY"
-            elif weekly_change < self.bear_threshold or (trend_direction == "DOWN" and trend_strength > 40):
+            elif weekly_change < self.bear_threshold or (
+                trend_direction == "DOWN" and trend_strength > 40
+            ):
                 # Strong bear signal override
                 if regime != "BEAR":
                     details["regime_before_bear_override"] = regime

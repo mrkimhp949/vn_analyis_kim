@@ -248,12 +248,8 @@ def test_load_data_caching_disabled(mock_download, sample_dataframe, temp_cache_
     mock_download.return_value = sample_dataframe
 
     # Both calls should download
-    load_data(
-        symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=False
-    )
-    load_data(
-        symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=False
-    )
+    load_data(symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=False)
+    load_data(symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=False)
 
     # Download should be called twice
     assert mock_download.call_count == 2
@@ -301,9 +297,7 @@ def test_load_data_cache_corruption(mock_download, sample_dataframe, temp_cache_
         f.write("corrupted data")
 
     # Should handle corruption and refetch
-    result = load_data(
-        symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=True
-    )
+    result = load_data(symbol="VNM", start_date="2024-01-01", end_date="2024-01-03", use_cache=True)
 
     assert not result.empty
     mock_download.assert_called_once()
