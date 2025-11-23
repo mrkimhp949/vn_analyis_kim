@@ -945,7 +945,9 @@ class TestNotificationService:
                 strength=Mock(name="VERY_STRONG"),
                 reasons=["Breakout", "High volume"],
             ),
-            "position_size": Mock(shares=200, value=10_000_000, risk_amount=600_000, risk_percent=0.6),
+            "position_size": Mock(
+                shares=200, value=10_000_000, risk_amount=600_000, risk_percent=0.6
+            ),
         }
 
         await notification_service.send_entry_signal(signal_data)
@@ -969,7 +971,9 @@ class TestNotificationService:
                 strength=Mock(name="STRONG"),
                 reasons=["Test"],
             ),
-            "position_size": Mock(shares=100, value=10_000_000, risk_amount=700_000, risk_percent=0.7),
+            "position_size": Mock(
+                shares=100, value=10_000_000, risk_amount=700_000, risk_percent=0.7
+            ),
         }
 
         # Should not raise exception
