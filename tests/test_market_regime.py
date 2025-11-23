@@ -21,6 +21,7 @@ from src.market.regime import (
 @pytest.fixture
 def sample_vnindex_data():
     """Create sample VNINDEX data for testing"""
+    np.random.seed(40)  # Set seed for reproducibility
     n = 100
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n, freq="D")
 
@@ -50,6 +51,7 @@ def sample_vnindex_data():
 @pytest.fixture
 def bull_market_data():
     """Create strong bull market data"""
+    np.random.seed(42)  # Set seed for reproducibility
     n = 100
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n, freq="D")
 
@@ -78,6 +80,7 @@ def bull_market_data():
 @pytest.fixture
 def bear_market_data():
     """Create bear market data"""
+    np.random.seed(43)  # Set seed for reproducibility
     n = 100
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n, freq="D")
 
@@ -106,6 +109,7 @@ def bear_market_data():
 @pytest.fixture
 def high_volatility_data():
     """Create high volatility market data"""
+    np.random.seed(44)  # Set seed for reproducibility
     n = 100
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n, freq="D")
 
@@ -133,6 +137,7 @@ def high_volatility_data():
 @pytest.fixture
 def sideways_market_data():
     """Create sideways market data"""
+    np.random.seed(45)  # Set seed for reproducibility
     n = 100
     dates = pd.date_range(end=pd.Timestamp.today(), periods=n, freq="D")
 
