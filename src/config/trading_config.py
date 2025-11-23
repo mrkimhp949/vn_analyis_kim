@@ -65,28 +65,38 @@ class TradingConfig:
     watchlist_size: int = 100  # Size of the initial watchlist
 
     # Entry logic
-    min_confidence: int = 40  # Reduced from 45 to allow more signals
-    min_risk_reward: float = 1.8  # Reduced from 2.0 to be less strict
-    support_distance_percent: float = 3.0  # Max distance to support (%) - tighter for better R:R
+    # IMPROVED: Raised thresholds for better signal quality
+    min_confidence: int = 50  # Raised from 40 for better quality signals
+    min_risk_reward: float = 2.2  # Raised from 1.8 for better risk-adjusted returns
+    support_distance_percent: float = (
+        4.0  # Max distance to support (%) - widened from 3% for more opportunities
+    )
 
     # Exit logic
-    stop_loss_percent: float = -7.0
-    take_profit_percent: float = 15.0
-    trailing_stop_percent: float = 3.0
-    trailing_activation_percent: float = 8.0  # Activate trailing stop after 8% gain
+    # IMPROVED: Optimized for VN market volatility
+    stop_loss_percent: float = -6.0  # Tighter from -7% for Vietnam market
+    take_profit_percent: float = 12.0  # More realistic from 15% for VN market
+    trailing_stop_percent: float = 4.0  # Trail 4% below peak (from 3%)
+    trailing_activation_percent: float = (
+        6.0  # Activate trailing stop after 6% gain (lowered from 8%)
+    )
 
     # Position sizing
+    # IMPROVED: Better safety margins and risk management
     total_capital: float = 100_000_000  # 100M VND
-    max_position_size: float = 0.08  # 8% of portfolio (10 positions * 8% = 80% max)
-    min_position_size: float = 0.05  # 5% of portfolio
-    max_positions: int = 10  # 10 positions * 8% = 80% max
-    max_cash_allocation: float = 0.80  # Max 80% invested, keep 20% cash buffer
+    max_position_size: float = 0.07  # 7% of portfolio (reduced from 8% for safety)
+    min_position_size: float = 0.04  # 4% of portfolio (reduced from 5% for flexibility)
+    max_positions: int = 10  # Max 10 positions (10 * 7% = 70% max exposure)
+    max_cash_allocation: float = 0.70  # Max 70% invested, keep 30% cash buffer (increased from 20%)
 
     # Risk management
-    max_portfolio_risk: float = 0.20  # 20% max risk
-    max_sector_exposure: float = 0.40  # 40% max per sector
+    # IMPROVED: More conservative risk limits for Vietnam market
+    max_portfolio_risk: float = 0.15  # 15% max risk (reduced from 20% for safety)
+    max_sector_exposure: float = (
+        0.30  # 30% max per sector (reduced from 40% for better diversification)
+    )
     max_positions_per_sector: int = 3  # Max 3 positions per sector for diversification
-    max_loss_per_day_pct: float = 5.0  # Max loss per day (%) for circuit breaker
+    max_loss_per_day_pct: float = 3.0  # Max loss per day (%) for circuit breaker (reduced from 5%)
 
     # CRITICAL FIX: Magic numbers moved to config for easier tuning
     # Market regime adjustments
@@ -107,6 +117,28 @@ class TradingConfig:
     # Per-symbol circuit breaker
     per_symbol_max_consecutive_losses: int = 3  # Block symbol after N consecutive losses
     per_symbol_min_win_rate: float = 0.30  # Block if win rate < 30% after 5 trades
+
+    # VIETNAM MARKET-SPECIFIC FEATURES (NEW)
+    # Price floor/ceiling limits (±7% daily limit for Vietnam stocks)
+    vn_daily_price_limit_pct: float = 7.0  # Vietnam daily price limit ±7%
+    vn_check_price_limits: bool = True  # Check if price near floor/ceiling before entry
+    vn_avoid_floor_ceiling_pct: float = 2.0  # Avoid entry if within 2% of floor/ceiling
+
+    # T+2 settlement (Vietnam market rule)
+    vn_settlement_days: int = 2  # T+2 settlement for Vietnam
+    vn_reserve_t2_cash: bool = True  # Reserve cash for T+2 settlement obligations
+    vn_t2_cash_buffer_pct: float = 0.10  # 10% extra cash buffer for T+2
+
+    # Liquidity considerations for Vietnam market
+    vn_min_daily_value: float = 2_000_000_000  # 2B VND minimum daily trading value
+    vn_max_position_pct_of_volume: float = 0.05  # Max 5% of daily volume for single position
+    vn_require_continuous_trading: bool = True  # Avoid stocks with trading halts
+
+    # Vietnam market hours and session management
+    vn_trading_session_am_end: str = "11:30"  # Morning session ends
+    vn_trading_session_pm_start: str = "13:00"  # Afternoon session starts
+    vn_avoid_session_boundaries: bool = True  # Avoid trading near session boundaries
+    vn_session_boundary_minutes: int = 5  # Minutes before/after session boundary to avoid
 
     @classmethod
     def from_env(cls):
