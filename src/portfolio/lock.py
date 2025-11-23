@@ -131,7 +131,9 @@ class PortfolioLock:
                     raise Exception("Buy failed")
                 # Auto-confirms on success, auto-cancels on exception
         """
-        can_add, reason = self.can_add_position(symbol, position_value, total_capital, current_positions)
+        can_add, reason = self.can_add_position(
+            symbol, position_value, total_capital, current_positions
+        )
 
         if not can_add:
             yield (False, reason)

@@ -988,7 +988,10 @@ class TradingOrchestrator:
         failure_rate = self._get_ml_failure_rate()
 
         # Check if should TRIP circuit breaker (disable ML)
-        if not self._ml_circuit_breaker_active and failure_rate >= self._ml_circuit_breaker_threshold:
+        if (
+            not self._ml_circuit_breaker_active
+            and failure_rate >= self._ml_circuit_breaker_threshold
+        ):
             self._ml_circuit_breaker_active = True
             self._ml_enabled = False
 

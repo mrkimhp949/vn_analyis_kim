@@ -97,7 +97,9 @@ class ExitConfig:
     """
 
     # Take profit levels
-    take_profit_levels: List[float] = field(default_factory=lambda: [0.10, 0.15, 0.25])  # 10%, 15%, 25%
+    take_profit_levels: List[float] = field(
+        default_factory=lambda: [0.10, 0.15, 0.25]
+    )  # 10%, 15%, 25%
 
     # Stop loss
     default_stop_loss_pct: float = -7.0  # Default -7% stop loss
@@ -257,7 +259,9 @@ if __name__ == "__main__":
     # Test save/load
     config.save_to_file("test_strategy_config.json")
     loaded = StrategyConfig.load_from_file("test_strategy_config.json")
-    print(f"\n✅ Save/Load test passed: {loaded.entry.min_confidence_ml == config.entry.min_confidence_ml}")
+    print(
+        f"\n✅ Save/Load test passed: {loaded.entry.min_confidence_ml == config.entry.min_confidence_ml}"
+    )
 
     # Cleanup
     import os

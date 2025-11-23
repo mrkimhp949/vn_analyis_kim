@@ -209,10 +209,14 @@ class PortfolioManager:
         # Keep the higher (less restrictive) of old or new stop loss to avoid tightening stops too much
         if old_stop_loss and old_stop_loss > new_stop_loss:
             final_stop_loss = old_stop_loss
-            logger.info(f"🔒 {symbol}: Keeping existing stop loss {old_stop_loss:,.0f} (higher than new {new_stop_loss:,.0f})")
+            logger.info(
+                f"🔒 {symbol}: Keeping existing stop loss {old_stop_loss:,.0f} (higher than new {new_stop_loss:,.0f})"
+            )
         else:
             final_stop_loss = new_stop_loss
-            logger.info(f"📊 {symbol}: Updated stop loss to {final_stop_loss:,.0f} based on new avg price {new_avg_price:,.0f}")
+            logger.info(
+                f"📊 {symbol}: Updated stop loss to {final_stop_loss:,.0f} based on new avg price {new_avg_price:,.0f}"
+            )
 
         # Calculate new take profit: 15% above new avg price
         default_tp_pct = 1.15  # +15%

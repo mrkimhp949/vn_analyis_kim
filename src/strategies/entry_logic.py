@@ -1457,7 +1457,7 @@ class ImprovedEntryLogic:
             if self._correlation_cache_time is not None:
                 cache_date = datetime.fromtimestamp(self._correlation_cache_time).date()
                 current_date = datetime.now().date()
-                cache_date_valid = (cache_date == current_date)
+                cache_date_valid = cache_date == current_date
 
                 if not cache_date_valid:
                     logger.debug(
@@ -1476,7 +1476,9 @@ class ImprovedEntryLogic:
             if cache_valid:
                 # Use cached correlation matrix
                 correlation_metrics = self._correlation_cache
-                logger.debug(f"✅ Using cached correlation matrix (age: {current_time - self._correlation_cache_time:.0f}s)")
+                logger.debug(
+                    f"✅ Using cached correlation matrix (age: {current_time - self._correlation_cache_time:.0f}s)"
+                )
             else:
                 # Calculate fresh correlation matrix
                 correlation_metrics = calculate_portfolio_correlation_risk(

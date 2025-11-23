@@ -303,10 +303,13 @@ class TradingConfig:
             )
 
         # Check sector concentration: If max_positions_per_sector too high, limited diversification
-        min_sectors_needed = (self.max_positions + self.max_positions_per_sector - 1) // self.max_positions_per_sector
+        min_sectors_needed = (
+            self.max_positions + self.max_positions_per_sector - 1
+        ) // self.max_positions_per_sector
         if min_sectors_needed < 3:
             # Warning level - not blocking, but logged
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"⚠️ Limited sector diversification: max_positions ({self.max_positions}) "

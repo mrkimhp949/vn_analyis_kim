@@ -472,7 +472,9 @@ class ImprovedExitStrategy:
                         )
                         return float(stop_loss)
             except Exception as e:
-                logger.warning(f"⚠️ Error calculating ATR-based stop loss: {e}, using percentage fallback")
+                logger.warning(
+                    f"⚠️ Error calculating ATR-based stop loss: {e}, using percentage fallback"
+                )
 
         # Last resort: Use default percentage
         return self._calculate_percentage_stop_loss(entry_price)
@@ -526,9 +528,7 @@ class ImprovedExitStrategy:
         max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
 
         # SIMPLIFIED: Single protection percentage instead of tiered approach
-        stop_price = entry_price * (
-            1 + (max_profit_pct / 100) * self.profit_protection_percent
-        )
+        stop_price = entry_price * (1 + (max_profit_pct / 100) * self.profit_protection_percent)
 
         # Check if current price dropped below protection level
         if current_price <= stop_price:

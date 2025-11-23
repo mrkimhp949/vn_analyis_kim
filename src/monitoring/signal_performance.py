@@ -123,13 +123,13 @@ class SignalPerformanceTracker:
             if pnl > 0:
                 perf.winning_trades += 1
                 perf.avg_profit = (
-                    (perf.avg_profit * (perf.winning_trades - 1) + pnl) / perf.winning_trades
-                )
+                    perf.avg_profit * (perf.winning_trades - 1) + pnl
+                ) / perf.winning_trades
             else:
                 perf.losing_trades += 1
                 perf.avg_loss = (
-                    (perf.avg_loss * (perf.losing_trades - 1) + abs(pnl)) / perf.losing_trades
-                )
+                    perf.avg_loss * (perf.losing_trades - 1) + abs(pnl)
+                ) / perf.losing_trades
 
             perf.total_pnl += pnl
             perf.win_rate = (
