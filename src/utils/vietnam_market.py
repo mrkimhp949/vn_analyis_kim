@@ -59,10 +59,7 @@ class VietnamMarketValidator:
             self.session_pm_start = "13:00"
 
     def check_price_floor_ceiling(
-        self,
-        current_price: float,
-        reference_price: float,
-        symbol: str = None
+        self, current_price: float, reference_price: float, symbol: str = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if price is near floor or ceiling limit
@@ -117,8 +114,7 @@ class VietnamMarketValidator:
         return (True, None)
 
     def check_trading_session_timing(
-        self,
-        current_time: Optional[datetime] = None
+        self, current_time: Optional[datetime] = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if current time is safe for trading (avoid session boundaries)
@@ -175,9 +171,7 @@ class VietnamMarketValidator:
         return (True, None)
 
     def calculate_t2_cash_requirement(
-        self,
-        pending_settlements: Dict[str, float],
-        new_trade_value: float = 0
+        self, pending_settlements: Dict[str, float], new_trade_value: float = 0
     ) -> Tuple[float, float]:
         """
         Calculate T+2 cash requirement
@@ -212,10 +206,7 @@ class VietnamMarketValidator:
         return (total_required, buffer)
 
     def validate_position_size_vs_volume(
-        self,
-        position_shares: int,
-        avg_daily_volume: float,
-        symbol: str = None
+        self, position_shares: int, avg_daily_volume: float, symbol: str = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Validate that position size is not too large relative to daily volume
@@ -255,9 +246,7 @@ class VietnamMarketValidator:
         return (True, None)
 
     def check_liquidity_requirements(
-        self,
-        df: pd.DataFrame,
-        symbol: str = None
+        self, df: pd.DataFrame, symbol: str = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if stock meets Vietnam market liquidity requirements
@@ -276,8 +265,8 @@ class VietnamMarketValidator:
 
         # Calculate average daily value (last 20 days)
         df_recent = df.tail(20).copy()
-        df_recent['daily_value'] = df_recent['close'] * df_recent['volume']
-        avg_daily_value = df_recent['daily_value'].mean()
+        df_recent["daily_value"] = df_recent["close"] * df_recent["volume"]
+        avg_daily_value = df_recent["daily_value"].mean()
 
         # Check minimum daily value
         if avg_daily_value < self.min_daily_value:
@@ -300,13 +289,16 @@ def get_vietnam_market_validator() -> VietnamMarketValidator:
     global _validator
     if _validator is None:
         from src.config.trading_config import get_config
+
         config = get_config()
         _validator = VietnamMarketValidator(config.trading)
     return _validator
 
 
 # Convenience functions
-def check_price_limits(current_price: float, reference_price: float, symbol: str = None) -> Tuple[bool, Optional[str]]:
+def check_price_limits(
+    current_price: float, reference_price: float, symbol: str = None
+) -> Tuple[bool, Optional[str]]:
     """Check if price is safe (not near floor/ceiling)"""
     validator = get_vietnam_market_validator()
     return validator.check_price_floor_ceiling(current_price, reference_price, symbol)
@@ -318,13 +310,17 @@ def check_trading_session(current_time: Optional[datetime] = None) -> Tuple[bool
     return validator.check_trading_session_timing(current_time)
 
 
-def calculate_t2_requirement(pending: Dict[str, float], new_trade: float = 0) -> Tuple[float, float]:
+def calculate_t2_requirement(
+    pending: Dict[str, float], new_trade: float = 0
+) -> Tuple[float, float]:
     """Calculate T+2 cash requirement"""
     validator = get_vietnam_market_validator()
     return validator.calculate_t2_cash_requirement(pending, new_trade)
 
 
-def validate_position_vs_volume(shares: int, volume: float, symbol: str = None) -> Tuple[bool, Optional[str]]:
+def validate_position_vs_volume(
+    shares: int, volume: float, symbol: str = None
+) -> Tuple[bool, Optional[str]]:
     """Validate position size vs daily volume"""
     validator = get_vietnam_market_validator()
     return validator.validate_position_size_vs_volume(shares, volume, symbol)

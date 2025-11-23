@@ -126,7 +126,9 @@ class ExitConfig:
     # Time decay
     # IMPROVED: Shorter holding period for faster rotation in VN market
     max_holding_days: int = 15  # Max hold period (reduced from 20 for faster rotation)
-    time_decay_threshold: float = 0.03  # Exit if < 3% profit after max_holding_days (raised from 2%)
+    time_decay_threshold: float = (
+        0.03  # Exit if < 3% profit after max_holding_days (raised from 2%)
+    )
 
     # Bearish reversal
     bearish_volume_multiplier: float = 1.5  # Volume spike on bearish pattern

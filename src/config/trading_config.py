@@ -68,14 +68,18 @@ class TradingConfig:
     # IMPROVED: Raised thresholds for better signal quality
     min_confidence: int = 50  # Raised from 40 for better quality signals
     min_risk_reward: float = 2.2  # Raised from 1.8 for better risk-adjusted returns
-    support_distance_percent: float = 4.0  # Max distance to support (%) - widened from 3% for more opportunities
+    support_distance_percent: float = (
+        4.0  # Max distance to support (%) - widened from 3% for more opportunities
+    )
 
     # Exit logic
     # IMPROVED: Optimized for VN market volatility
     stop_loss_percent: float = -6.0  # Tighter from -7% for Vietnam market
     take_profit_percent: float = 12.0  # More realistic from 15% for VN market
     trailing_stop_percent: float = 4.0  # Trail 4% below peak (from 3%)
-    trailing_activation_percent: float = 6.0  # Activate trailing stop after 6% gain (lowered from 8%)
+    trailing_activation_percent: float = (
+        6.0  # Activate trailing stop after 6% gain (lowered from 8%)
+    )
 
     # Position sizing
     # IMPROVED: Better safety margins and risk management
@@ -88,7 +92,9 @@ class TradingConfig:
     # Risk management
     # IMPROVED: More conservative risk limits for Vietnam market
     max_portfolio_risk: float = 0.15  # 15% max risk (reduced from 20% for safety)
-    max_sector_exposure: float = 0.30  # 30% max per sector (reduced from 40% for better diversification)
+    max_sector_exposure: float = (
+        0.30  # 30% max per sector (reduced from 40% for better diversification)
+    )
     max_positions_per_sector: int = 3  # Max 3 positions per sector for diversification
     max_loss_per_day_pct: float = 3.0  # Max loss per day (%) for circuit breaker (reduced from 5%)
 
