@@ -5,6 +5,9 @@ from src.ml.features.technical import add_ml_features, get_feature_columns
 from src.ml.models.predictor import MLPredictor
 from utils.dataframe_utils import safe_get_latest
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 # ML Model Monitor
 try:
     from src.ml.monitor import get_ml_model_monitor

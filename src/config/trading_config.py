@@ -77,9 +77,9 @@ class TradingConfig:
 
     # Position sizing
     total_capital: float = 100_000_000  # 100M VND
-    max_position_size: float = 0.10  # 10% of portfolio (FIXED: was 0.15 which exceeded 100%)
+    max_position_size: float = 0.08  # 8% of portfolio (10 positions * 8% = 80% max)
     min_position_size: float = 0.05  # 5% of portfolio
-    max_positions: int = 10  # 10 positions * 10% = 100% max
+    max_positions: int = 10  # 10 positions * 8% = 80% max
     max_cash_allocation: float = 0.80  # Max 80% invested, keep 20% cash buffer
 
     # Risk management
@@ -121,7 +121,7 @@ class TradingConfig:
             trailing_stop_percent=float(os.getenv("TRAILING_STOP_PERCENT", 3.0)),
             trailing_activation_percent=float(os.getenv("TRAILING_ACTIVATION_PERCENT", 8.0)),
             total_capital=float(os.getenv("TOTAL_CAPITAL", 100_000_000)),
-            max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.10)),
+            max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.08)),
             min_position_size=float(os.getenv("MIN_POSITION_SIZE", 0.05)),
             max_positions=int(os.getenv("MAX_POSITIONS", 10)),
             max_cash_allocation=float(os.getenv("MAX_CASH_ALLOCATION", 0.80)),
