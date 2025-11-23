@@ -390,9 +390,7 @@ class FilterPerformanceTracker:
                 )
 
         # Weak filters
-        weak_filters = [
-            p for p in performances if p.recommendation in ["WEAK", "CONSIDER_DISABLE"]
-        ]
+        weak_filters = [p for p in performances if p.recommendation in ["WEAK", "CONSIDER_DISABLE"]]
         if weak_filters:
             lines.append(f"\n⚠️ *WEAK FILTERS ({len(weak_filters)}):*")
             for perf in weak_filters:

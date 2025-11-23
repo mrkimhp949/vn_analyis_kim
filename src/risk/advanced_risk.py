@@ -128,9 +128,7 @@ class AdvancedRiskManager:
 
         # Generate warnings based on risk metrics
         if var_1day > self.max_var_percent:
-            warnings.append(
-                f"⚠️ VaR ({var_1day:.1%}) exceeds limit ({self.max_var_percent:.1%})"
-            )
+            warnings.append(f"⚠️ VaR ({var_1day:.1%}) exceeds limit ({self.max_var_percent:.1%})")
             recommendations.append("Reduce position sizes or hedge portfolio")
 
         if current_dd > self.critical_drawdown_percent:
@@ -668,9 +666,7 @@ class AdvancedRiskManager:
 
         # Key Metrics
         lines.append("\n📊 *Risk Metrics:*")
-        lines.append(
-            f"• VaR (1-day, 95%): {risk_metrics.portfolio_var_1day:.2%} of portfolio"
-        )
+        lines.append(f"• VaR (1-day, 95%): {risk_metrics.portfolio_var_1day:.2%} of portfolio")
         lines.append(f"• CVaR (Expected Shortfall): {risk_metrics.portfolio_cvar_1day:.2%}")
         lines.append(f"• Current Drawdown: {risk_metrics.current_drawdown_pct:.2%}")
         lines.append(f"• Max Drawdown: {risk_metrics.max_drawdown_pct:.2%}")
