@@ -128,6 +128,18 @@ class MarketRegimeAnalyzer:
                     details["regime_before_hmm"] = regime
                     regime = hmm_info["regime"]
 
+            # Critical overrides: High volatility and strong bear signals take precedence over HMM
+            # These are risk conditions that should always be respected
+            if volatility > self.high_volatility_threshold:
+                if regime != "HIGH_VOLATILITY":
+                    details["regime_before_volatility_override"] = regime
+                regime = "HIGH_VOLATILITY"
+            elif weekly_change < self.bear_threshold or (trend_direction == "DOWN" and trend_strength > 40):
+                # Strong bear signal override
+                if regime != "BEAR":
+                    details["regime_before_bear_override"] = regime
+                regime = "BEAR"
+
             # Tradeable decision
             tradeable = self._is_tradeable(regime, volatility, weekly_change)
 
