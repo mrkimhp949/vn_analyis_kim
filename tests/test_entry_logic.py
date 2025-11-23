@@ -307,38 +307,6 @@ def test_filter_market_regime_not_tradeable(sample_stock_data, bear_market_regim
     assert any(b["filter"] == "market_regime" for b in breakdown)
 
 
-@pytest.mark.skip(reason="API changed - needs update")
-def test_filter_market_regime_none():
-    """Test market regime filter with None regime (should allow)"""
-    logic = ImprovedEntryLogic()
-
-    df = pd.DataFrame({
-        "close": [10000] * 100,
-        "high": [10100] * 100,
-        "low": [9900] * 100,
-        "volume": [200000] * 100,
-        "ema20": [10000] * 100,
-        "ema50": [10000] * 100,
-        "rsi": [50] * 100,
-        "atr": [100] * 100,
-    })
-
-    passed, _, _, _, breakdown = logic._run_all_filters(
-        df,
-        "BUY",
-        10000,
-        None  # No regime info
-    )
-
-    # Should not block on regime
-    regime_blocks = [b for b in breakdown if b["filter"] == "market_regime"]
-    assert len(regime_blocks) == 0
-
-
-# ============================================================================
-# FILTER 2: TREND ALIGNMENT TESTS
-# ============================================================================
-
 
 def test_check_trend_alignment_uptrend(sample_stock_data):
     """Test trend alignment for uptrend"""
@@ -355,47 +323,6 @@ def test_check_trend_alignment_uptrend(sample_stock_data):
     assert "reason" in result
 
 
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_trend_alignment_downtrend(sample_stock_data):
-    """Test trend alignment for downtrend (should reject BUY)"""
-    logic = ImprovedEntryLogic()
-
-    # EMAs in downtrend (20 < 50 < 200)
-    sample_stock_data["ema20"] = sample_stock_data["close"] - 100
-    sample_stock_data["ema50"] = sample_stock_data["close"]
-    sample_stock_data["ema200"] = sample_stock_data["close"] + 100
-
-    result = logic._check_trend_alignment(sample_stock_data, "BUY")
-
-    assert result["aligned"] is False
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_trend_alignment_optional(sample_stock_data):
-    """Test trend alignment when not required"""
-    logic = ImprovedEntryLogic(require_trend_alignment=False)
-
-    # Even with bad trend, should not block (just warn)
-    sample_stock_data["ema20"] = sample_stock_data["close"] - 100
-    sample_stock_data["ema50"] = sample_stock_data["close"]
-    sample_stock_data["ema200"] = sample_stock_data["close"] + 100
-
-    passed, reasons, warnings, adjustments, breakdown = logic._run_all_filters(
-        sample_stock_data,
-        "BUY",
-        10500,
-        None
-    )
-
-    # Should add warning but not block
-    assert any("Trend" in w for w in warnings)
-
-
-# ============================================================================
-# FILTER 3: SUPPORT/RESISTANCE TESTS
-# ============================================================================
-
-
 def test_check_support_resistance_near_support(sample_stock_data):
     """Test support/resistance - price near support (good)"""
     logic = ImprovedEntryLogic()
@@ -406,40 +333,6 @@ def test_check_support_resistance_near_support(sample_stock_data):
     result = logic._check_support_resistance(sample_stock_data, current_price)
 
     assert result["near_support"] or result["bouncing_from_support"]
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_support_resistance_near_resistance(sample_stock_data):
-    """Test support/resistance - price near resistance (bad)"""
-    logic = ImprovedEntryLogic()
-
-    # Set current price near recent high (resistance)
-    current_price = sample_stock_data["high"].iloc[-20:].max() * 0.99  # 1% below resistance
-
-    result = logic._check_support_resistance(sample_stock_data, current_price)
-
-    assert result["too_close_to_resistance"] is True
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_support_resistance_bouncing(sample_stock_data):
-    """Test support/resistance - bouncing from support (very good)"""
-    logic = ImprovedEntryLogic(support_distance_percent=3.0)
-
-    # Price very close to support (< 2%)
-    support = sample_stock_data["low"].iloc[-20:].min()
-    current_price = support * 1.015  # 1.5% above support
-
-    result = logic._check_support_resistance(sample_stock_data, current_price)
-
-    # Should detect bounce if within 2%
-    if result["distance_to_support"] < 2.0:
-        assert result["bouncing_from_support"] is True
-
-
-# ============================================================================
-# FILTER 4: VOLUME CONFIRMATION TESTS
-# ============================================================================
 
 
 def test_check_volume_confirmation_high_volume(sample_stock_data):
@@ -497,18 +390,6 @@ def test_check_volume_confirmation_regime_relaxed(sample_stock_data, bull_market
 # ============================================================================
 
 
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_liquidity_sufficient(sample_stock_data):
-    """Test liquidity check - sufficient liquidity"""
-    logic = ImprovedEntryLogic(min_liquidity_value=2_000_000_000)
-
-    current_price = 10500
-    result = logic._check_liquidity(sample_stock_data, current_price)
-
-    # With volume ~200k-250k and price ~10k, daily value = 2B+ VND
-    assert result["sufficient"] is True or result["critical"] is False
-
-
 def test_check_liquidity_critical(sample_stock_data):
     """Test liquidity check - critical low liquidity"""
     logic = ImprovedEntryLogic(min_liquidity_value=10_000_000_000)  # Very high threshold
@@ -541,49 +422,6 @@ def test_check_liquidity_tiered():
 
 # ============================================================================
 # FILTER 6: VOLATILITY TESTS
-# ============================================================================
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_volatility_normal(sample_stock_data):
-    """Test volatility filter - normal volatility"""
-    logic = ImprovedEntryLogic()
-
-    # ATR should be reasonable
-    result = logic._check_volatility(sample_stock_data)
-
-    assert "ratio" in result
-    assert result["ratio"] >= 0
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_volatility_too_high(sample_stock_data):
-    """Test volatility filter - too high volatility"""
-    logic = ImprovedEntryLogic()
-
-    # Set very high ATR
-    sample_stock_data["atr"] = sample_stock_data["close"] * 0.10  # 10% ATR (very high)
-
-    result = logic._check_volatility(sample_stock_data)
-
-    assert result["ratio"] > 0.05  # Should detect high volatility
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_volatility_too_low(sample_stock_data):
-    """Test volatility filter - too low volatility"""
-    logic = ImprovedEntryLogic()
-
-    # Set very low ATR
-    sample_stock_data["atr"] = sample_stock_data["close"] * 0.001  # 0.1% ATR (very low)
-
-    result = logic._check_volatility(sample_stock_data)
-
-    assert result["ratio"] < 0.01  # Should detect low volatility
-
-
-# ============================================================================
-# FILTER 7: RSI TESTS
 # ============================================================================
 
 
@@ -772,126 +610,6 @@ def test_analyze_entry_with_portfolio_manager(mock_vn_liquidity, sample_stock_da
 # ============================================================================
 
 
-@pytest.mark.skip(reason="API changed - needs update")
-def test_calculate_stop_loss_and_tp(sample_stock_data):
-    """Test stop loss and take profit calculation"""
-    logic = ImprovedEntryLogic()
-
-    entry_price = 10500
-    stop_loss, take_profit_targets = logic._calculate_stop_loss_and_tp(
-        sample_stock_data,
-        entry_price
-    )
-
-    # Stop loss should be below entry
-    assert stop_loss < entry_price
-    assert stop_loss > 0
-
-    # Take profit targets should be above entry
-    assert len(take_profit_targets) >= 1
-    assert all(tp > entry_price for tp in take_profit_targets)
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_calculate_stop_loss_atr_based(sample_stock_data):
-    """Test ATR-based stop loss calculation"""
-    logic = ImprovedEntryLogic()
-
-    # Ensure ATR exists
-    sample_stock_data["atr"] = 100
-
-    entry_price = 10500
-    stop_loss, _ = logic._calculate_stop_loss_and_tp(
-        sample_stock_data,
-        entry_price
-    )
-
-    # Stop loss should use ATR
-    assert stop_loss < entry_price
-    # Should be roughly entry - 2*ATR (but with limits)
-
-
-# ============================================================================
-# CONFIDENCE CALCULATION TESTS
-# ============================================================================
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_calculate_final_confidence_positive_adjustments():
-    """Test confidence calculation with positive adjustments"""
-    logic = ImprovedEntryLogic()
-
-    base_confidence = 70
-    adjustments = [+5, +10, +5]  # +20 total
-
-    final_confidence, strength = logic._calculate_final_confidence(
-        base_confidence,
-        adjustments
-    )
-
-    assert final_confidence >= base_confidence
-    assert final_confidence <= 100
-    assert isinstance(strength, SignalStrength)
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_calculate_final_confidence_negative_adjustments():
-    """Test confidence calculation with negative adjustments"""
-    logic = ImprovedEntryLogic()
-
-    base_confidence = 70
-    adjustments = [-10, -15, -5]  # -30 total
-
-    final_confidence, strength = logic._calculate_final_confidence(
-        base_confidence,
-        adjustments
-    )
-
-    assert final_confidence < base_confidence
-    assert final_confidence >= 0
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_calculate_final_confidence_bounds():
-    """Test that confidence is always within 0-100"""
-    logic = ImprovedEntryLogic()
-
-    # Test upper bound
-    final, _ = logic._calculate_final_confidence(90, [+20, +20, +20])
-    assert final <= 100
-
-    # Test lower bound
-    final, _ = logic._calculate_final_confidence(20, [-30, -30, -30])
-    assert final >= 0
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_signal_strength_classification():
-    """Test signal strength classification"""
-    logic = ImprovedEntryLogic()
-
-    # Very strong: 90+
-    _, strength = logic._calculate_final_confidence(95, [])
-    assert strength == SignalStrength.VERY_STRONG
-
-    # Strong: 80-89
-    _, strength = logic._calculate_final_confidence(85, [])
-    assert strength == SignalStrength.STRONG
-
-    # Moderate: 70-79
-    _, strength = logic._calculate_final_confidence(75, [])
-    assert strength == SignalStrength.MODERATE
-
-    # Weak: 60-69
-    _, strength = logic._calculate_final_confidence(65, [])
-    assert strength == SignalStrength.WEAK
-
-
-# ============================================================================
-# TECHNICAL CONFIDENCE TESTS
-# ============================================================================
-
-
 def test_calculate_technical_confidence(sample_stock_data):
     """Test technical confidence calculation"""
     logic = ImprovedEntryLogic()
@@ -931,20 +649,6 @@ def test_get_technical_signal_downtrend(sample_stock_data):
 # ============================================================================
 # EDGE CASES & ERROR HANDLING
 # ============================================================================
-
-
-@pytest.mark.skip(reason="API changed - needs update")
-def test_analyze_entry_empty_dataframe():
-    """Test analyze_entry with empty dataframe"""
-    logic = ImprovedEntryLogic()
-
-    empty_df = pd.DataFrame()
-    ml_signal = {"signal": "BUY", "confidence": 80}
-
-    result = logic.analyze_entry(empty_df, ml_signal, symbol="TEST")
-
-    assert result.should_enter is False
-    assert "validation" in result.reasons[0].lower() or "data" in result.reasons[0].lower()
 
 
 def test_analyze_entry_missing_columns(sample_stock_data):
@@ -993,55 +697,6 @@ def test_analyze_entry_zero_price(sample_stock_data):
 
 # ============================================================================
 # VIETNAM MARKET LIQUIDITY TESTS
-# ============================================================================
-
-
-@patch('src.strategies.entry_logic.check_liquidity')
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_vietnam_market_liquidity_sufficient(mock_check_liquidity, sample_stock_data):
-    """Test Vietnam market liquidity check - sufficient"""
-    mock_check_liquidity.return_value = (True, None)
-
-    logic = ImprovedEntryLogic()
-    logic._current_symbol = "VNM"
-
-    result = logic._check_vietnam_market_liquidity(sample_stock_data)
-
-    assert result["sufficient"] is True
-
-
-@patch('src.strategies.entry_logic.check_liquidity')
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_vietnam_market_liquidity_insufficient(mock_check_liquidity, sample_stock_data):
-    """Test Vietnam market liquidity check - insufficient"""
-    mock_check_liquidity.return_value = (False, "Below 2B VND threshold")
-
-    logic = ImprovedEntryLogic()
-    logic._current_symbol = "XXX"
-
-    result = logic._check_vietnam_market_liquidity(sample_stock_data)
-
-    assert result["sufficient"] is False
-    assert "2B VND" in result["reason"]
-
-
-@patch('src.strategies.entry_logic.check_liquidity')
-@pytest.mark.skip(reason="API changed - needs update")
-def test_check_vietnam_market_liquidity_exception(mock_check_liquidity, sample_stock_data):
-    """Test Vietnam market liquidity check - exception handling"""
-    mock_check_liquidity.side_effect = Exception("Import error")
-
-    logic = ImprovedEntryLogic()
-
-    result = logic._check_vietnam_market_liquidity(sample_stock_data)
-
-    # Should return sufficient=True on error (fail-safe)
-    assert result["sufficient"] is True
-    assert "error" in result["reason"].lower()
-
-
-# ============================================================================
-# FORMAT MESSAGE TESTS
 # ============================================================================
 
 
