@@ -80,10 +80,12 @@ class TradingConfig:
     max_position_size: float = 0.10  # 10% of portfolio (FIXED: was 0.15 which exceeded 100%)
     min_position_size: float = 0.05  # 5% of portfolio
     max_positions: int = 10  # 10 positions * 10% = 100% max
+    max_cash_allocation: float = 0.80  # Max 80% invested, keep 20% cash buffer
 
     # Risk management
     max_portfolio_risk: float = 0.20  # 20% max risk
     max_sector_exposure: float = 0.40  # 40% max per sector
+    max_positions_per_sector: int = 3  # Max 3 positions per sector for diversification
     max_loss_per_day_pct: float = 5.0  # Max loss per day (%) for circuit breaker
 
     # CRITICAL FIX: Magic numbers moved to config for easier tuning
@@ -122,8 +124,10 @@ class TradingConfig:
             max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.10)),
             min_position_size=float(os.getenv("MIN_POSITION_SIZE", 0.05)),
             max_positions=int(os.getenv("MAX_POSITIONS", 10)),
+            max_cash_allocation=float(os.getenv("MAX_CASH_ALLOCATION", 0.80)),
             max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.20)),
             max_sector_exposure=float(os.getenv("MAX_SECTOR_EXPOSURE", 0.40)),
+            max_positions_per_sector=int(os.getenv("MAX_POSITIONS_PER_SECTOR", 3)),
             max_loss_per_day_pct=float(os.getenv("MAX_LOSS_PER_DAY_PCT", 5.0)),
             # Magic numbers
             bull_market_penalty_scale=float(os.getenv("BULL_MARKET_PENALTY_SCALE", 0.7)),
@@ -225,22 +229,24 @@ class TradingConfig:
         - max_sector_exposure compatible with max_positions
         - stop_loss_percent compatible with max_portfolio_risk
         """
-        # Check 1: Total potential exposure
-        # If all positions are at max size, total exposure can't exceed 100%
+        # Check 1: Total potential exposure with cash allocation
+        # If all positions are at max size, total exposure can't exceed max_cash_allocation
         max_potential_exposure = self.max_position_size * self.max_positions
 
-        if max_potential_exposure > 1.0:
+        if max_potential_exposure > self.max_cash_allocation:
             raise ConfigurationError(
                 f"Impossible configuration: max_position_size ({self.max_position_size:.1%}) "
-                f"* max_positions ({self.max_positions}) = {max_potential_exposure:.1%} > 100%\n"
-                f"Cannot allocate more than 100% of capital!",
+                f"* max_positions ({self.max_positions}) = {max_potential_exposure:.1%} "
+                f"> max_cash_allocation ({self.max_cash_allocation:.1%})\n"
+                f"Cannot allocate more than {self.max_cash_allocation:.1%} of capital!",
                 context={
                     "config": "trading",
                     "max_position_size": self.max_position_size,
                     "max_positions": self.max_positions,
+                    "max_cash_allocation": self.max_cash_allocation,
                     "max_potential_exposure": max_potential_exposure,
-                    "suggestion": f"Reduce max_position_size to <= {1.0 / self.max_positions:.2f} "
-                    f"or max_positions to <= {int(1.0 / self.max_position_size)}",
+                    "suggestion": f"Reduce max_position_size to <= {self.max_cash_allocation / self.max_positions:.2f} "
+                    f"or max_positions to <= {int(self.max_cash_allocation / self.max_position_size)}",
                 },
             )
 
@@ -282,7 +288,33 @@ class TradingConfig:
                 },
             )
 
-        # Check 4: Min position size must be practical
+        # Check 4: Max positions per sector validation
+        # max_positions_per_sector must be reasonable given max_positions
+        if self.max_positions_per_sector > self.max_positions:
+            raise ConfigurationError(
+                f"max_positions_per_sector ({self.max_positions_per_sector}) "
+                f"> max_positions ({self.max_positions}). This doesn't make sense!",
+                context={
+                    "config": "trading",
+                    "max_positions_per_sector": self.max_positions_per_sector,
+                    "max_positions": self.max_positions,
+                    "suggestion": f"Set max_positions_per_sector <= {self.max_positions}",
+                },
+            )
+
+        # Check sector concentration: If max_positions_per_sector too high, limited diversification
+        min_sectors_needed = (self.max_positions + self.max_positions_per_sector - 1) // self.max_positions_per_sector
+        if min_sectors_needed < 3:
+            # Warning level - not blocking, but logged
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"⚠️ Limited sector diversification: max_positions ({self.max_positions}) "
+                f"/ max_positions_per_sector ({self.max_positions_per_sector}) "
+                f"= only {min_sectors_needed} sectors minimum. Consider reducing max_positions_per_sector."
+            )
+
+        # Check 5: Min position size must be practical
         # With total capital and max positions, min position size must be achievable
         min_capital_per_position = self.total_capital * self.min_position_size
         max_capital_per_position = self.total_capital * self.max_position_size

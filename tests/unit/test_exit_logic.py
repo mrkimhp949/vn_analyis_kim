@@ -117,16 +117,17 @@ class TestImprovedExitStrategy:
         """Test time decay trigger
 
         UPDATED: Now uses trading days instead of calendar days.
-        30 calendar days = ~22 trading days (excluding weekends),
-        which exceeds max_holding_days=20.
+        max_holding_days=30, so we need 30+ trading days.
+        43 calendar days = ~30 trading days (excluding weekends),
+        which exceeds max_holding_days=30.
         """
         decision = exit_strategy.check_exit(
             symbol="VNM",
             entry_price=80000,
-            current_price=80500,  # Only +0.6% after 30 calendar days (~22 trading days)
+            current_price=80500,  # Only +0.6% after 43 calendar days (~30 trading days)
             stop_loss=76000,
             take_profit_targets=[84000, 88000, 92000],
-            entry_date=datetime.now() - timedelta(days=30),  # Changed from 21 to 30
+            entry_date=datetime.now() - timedelta(days=43),  # Updated to trigger 30-day threshold
             df=sample_ohlcv_data,
         )
 

@@ -43,8 +43,8 @@ class MarketRegimeDetector:
 
     def __init__(
         self,
-        bull_threshold: float = 0.6,
-        bear_threshold: float = -0.6,
+        bull_threshold: float = 0.5,  # Reduced from 0.6 for earlier trend detection
+        bear_threshold: float = -0.5,  # Reduced from -0.6 for earlier trend detection
         volatility_threshold: float = 0.7,
         min_confidence: float = 50.0,
     ):
