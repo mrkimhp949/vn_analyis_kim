@@ -159,8 +159,10 @@ class TestMonteCarloSimulator:
 
         # Should have negative expected value
         assert result.expected_return_pct < 0
-        # Should have higher risk than profitable strategy (but may not exceed 20% with small position sizes)
-        assert result.risk_of_20pct_loss > 0  # At least some risk of 20% loss
+        # Should have higher risk than profitable strategy
+        # With 10% position sizing, 20% total loss is unlikely, so check drawdown instead
+        assert result.avg_max_drawdown > 0.05  # Should have significant drawdown
+        assert result.pct_sims_exceed_10pct_dd > 0.1  # At least 10% of sims have >10% drawdown
 
     def test_percentiles_ordered(self):
         """Test that percentiles are in correct order"""
