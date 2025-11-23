@@ -44,9 +44,10 @@ class MarketRegimeDetector:
     def __init__(
         self,
         bull_threshold: float = 0.5,  # Reduced from 0.6 for earlier trend detection
-        bear_threshold: float = -0.5,  # Reduced from -0.6 for earlier trend detection
+        bear_threshold: float = -0.6,  # IMPROVED: Raised from -0.5 to -0.6 to reduce false bear signals
         volatility_threshold: float = 0.7,
         min_confidence: float = 50.0,
+        require_momentum_confirmation: bool = True,  # NEW: Require momentum + trend alignment
     ):
         """
         Args:
@@ -54,11 +55,13 @@ class MarketRegimeDetector:
             bear_threshold: Score below this = BEAR
             volatility_threshold: Volatility above this = HIGH_VOLATILITY
             min_confidence: Minimum confidence to be tradeable
+            require_momentum_confirmation: Require momentum + trend alignment for BEAR classification
         """
         self.bull_threshold = bull_threshold
         self.bear_threshold = bear_threshold
         self.volatility_threshold = volatility_threshold
         self.min_confidence = min_confidence
+        self.require_momentum_confirmation = require_momentum_confirmation
 
     def detect(self, index_df: pd.DataFrame) -> MarketRegime:
         """
@@ -242,6 +245,20 @@ class MarketRegimeDetector:
 
         # BEAR regime
         elif composite_score <= self.bear_threshold:
+            # IMPROVEMENT: Check for momentum divergence before confirming BEAR
+            # If momentum is stabilizing despite negative trend, may not be true bear market
+            if self.require_momentum_confirmation:
+                # Momentum divergence: trend negative but momentum > -0.3 (stabilizing)
+                if momentum > -0.3:
+                    # Potential correction, not full bear market
+                    confidence = 50.0  # Lower confidence
+                    description = (
+                        f"Market correction (score: {composite_score:.2f}). "
+                        f"Trend: {trend:.2f}, but momentum stabilizing ({momentum:.2f}). "
+                        f"May be temporary dip, not full bear market. Trade with caution."
+                    )
+                    return "SIDEWAYS", confidence, description  # Classify as SIDEWAYS instead of BEAR
+
             confidence = min(abs(composite_score) * 100, 100)
             description = (
                 f"Bearish trend (score: {composite_score:.2f}). "

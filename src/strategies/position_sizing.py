@@ -465,14 +465,49 @@ class EnhancedPositionSizer:
             "VERY_WEAK": 0.5,
         }.get(signal_strength, 0.9)
 
-        # Market regime
+        # Market regime with IMPROVED bear market handling
         regime_mult = 1.0
         if market_regime:
             regime = market_regime.get("regime", "SIDEWAYS")
+            regime_confidence = market_regime.get("confidence", 50)
+
             if regime == "BULL":
                 regime_mult = 1.1
             elif regime == "BEAR":
-                regime_mult = 0.5  # CONSERVATIVE: 0.5x in bear market for capital preservation
+                # IMPROVEMENT: Variable bear market multiplier based on:
+                # 1. Regime confidence (weak bear = less reduction)
+                # 2. Signal confidence (high confidence = allow larger position)
+
+                # Base bear multiplier: 0.6 (less aggressive than 0.5)
+                bear_mult = 0.6
+
+                # Adjust by regime confidence
+                # Weak bear (50-70% conf): Use 0.7x multiplier
+                # Strong bear (>70% conf): Use 0.5x multiplier
+                if regime_confidence < 70:
+                    bear_mult = 0.7  # Weak bear - be less defensive
+                    logger.info(
+                        f"📊 Weak bear market ({regime_confidence:.0f}% conf) - "
+                        f"using {bear_mult:.1f}x position multiplier"
+                    )
+                else:
+                    bear_mult = 0.5  # Strong bear - be very defensive
+                    logger.warning(
+                        f"🐻 Strong bear market ({regime_confidence:.0f}% conf) - "
+                        f"using {bear_mult:.1f}x position multiplier"
+                    )
+
+                # Further adjust by signal confidence
+                # High confidence signals (>80%) get less reduction
+                if confidence >= 80:
+                    bear_mult = min(bear_mult * 1.2, 0.8)  # Max 0.8x for very high confidence
+                    logger.info(
+                        f"✨ High confidence signal ({confidence}%) in bear market - "
+                        f"adjusted multiplier to {bear_mult:.2f}x"
+                    )
+
+                regime_mult = bear_mult
+
             elif regime == "HIGH_VOLATILITY":
                 regime_mult = 0.6
             else:
