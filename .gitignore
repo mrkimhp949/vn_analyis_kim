@@ -81,3 +81,8 @@ feature_store/*.parquet
 Thumbs.db
 data/database/trading.db
 metrics_backup.json
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
