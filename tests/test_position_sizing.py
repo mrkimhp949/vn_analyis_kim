@@ -103,15 +103,15 @@ def test_kelly_positive_ev(sizer):
     assert kelly == pytest.approx(0.2, abs=0.01)
 
 
-def test_kelly_negative_ev_raises_error(sizer):
-    """Test Kelly with negative EV raises RiskManagementError"""
+def test_kelly_negative_ev_returns_minimum(sizer):
+    """Test Kelly with negative EV returns minimum 1% (v2.0 - no longer raises exception)"""
     # Win rate 30%, win/loss ratio 1.5
     # Kelly = 0.3 - (0.7 / 1.5) = 0.3 - 0.467 = -0.167 (negative)
-    with pytest.raises(RiskManagementError) as exc_info:
-        sizer._calculate_kelly(win_rate=0.3, avg_win_loss_ratio=1.5)
+    # v2.0: Returns 0.01 (1%) instead of raising exception
+    kelly = sizer._calculate_kelly(win_rate=0.3, avg_win_loss_ratio=1.5)
 
-    assert "NEGATIVE Kelly" in str(exc_info.value)
-    assert "NEGATIVE expected value" in str(exc_info.value)
+    # Should return minimum 1% instead of raising exception
+    assert kelly == 0.01, f"Expected 0.01 (1% minimum), got {kelly}"
 
 
 def test_kelly_zero_win_rate(sizer):

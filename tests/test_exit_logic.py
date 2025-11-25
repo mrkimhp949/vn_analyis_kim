@@ -102,14 +102,15 @@ def sell_ml_signal():
 
 
 def test_exit_strategy_init_default():
-    """Test default initialization"""
+    """Test default initialization (v2.0 - simplified TP levels)"""
     strategy = ImprovedExitStrategy()
 
-    assert strategy.tp_levels == [0.10, 0.15, 0.25]
+    # v2.0: Simplified from 3 to 2 TP levels
+    assert strategy.tp_levels == [0.12, 0.20]  # Changed from [0.10, 0.15, 0.25]
     assert strategy.trailing_activation == 0.08
     assert strategy.trailing_distance == 0.05
-    assert strategy.max_holding_days == 30
-    assert strategy.time_decay_threshold == 0.02
+    assert strategy.max_holding_days == 25  # Reduced from 30
+    assert strategy.time_decay_threshold == 0.03  # Increased from 0.02
     assert strategy.default_stop_loss_pct == -7.0
 
 
@@ -280,13 +281,14 @@ def test_check_take_profit_tp2(sample_stock_data):
     assert decision.exit_type == "PARTIAL_50%"
 
 
-def test_check_take_profit_tp3(sample_stock_data):
-    """Test TP3 trigger (full exit)"""
-    strategy = ImprovedExitStrategy(take_profit_levels=[0.10, 0.15, 0.25])
+def test_check_take_profit_tp2_full_exit(sample_stock_data):
+    """Test TP2 trigger (full exit) - v2.0 simplified to 2 levels"""
+    # v2.0: Only 2 TP levels now (12%, 20%)
+    strategy = ImprovedExitStrategy(take_profit_levels=[0.12, 0.20])
 
     entry_price = 10000
-    current_price = 12600  # +26% (above TP3 25%)
-    tp_targets = [11000, 11500, 12500]
+    current_price = 12100  # +21% (above TP2 20%)
+    tp_targets = [11200, 12000]  # 12%, 20%
     entry_date = datetime.now() - timedelta(days=5)
 
     decision = strategy.check_exit(
@@ -297,11 +299,11 @@ def test_check_take_profit_tp3(sample_stock_data):
         take_profit_targets=tp_targets,
         entry_date=entry_date,
         df=sample_stock_data,
-        partial_exits=[11100, 11600],  # TP1, TP2 already taken
+        partial_exits=[11200],  # TP1 already taken
     )
 
     assert decision.should_exit is True
-    assert decision.exit_reason == ExitReason.TAKE_PROFIT_3
+    assert decision.exit_reason == ExitReason.TAKE_PROFIT_2
     assert decision.exit_type == "FULL"
 
 
@@ -1073,23 +1075,23 @@ def test_full_workflow_stop_loss(sample_stock_data):
 
 
 def test_full_workflow_take_profit(sample_stock_data):
-    """Test complete workflow - take profit exit"""
+    """Test complete workflow - take profit exit (v2.0 - 2 TP levels)"""
     strategy = ImprovedExitStrategy()
 
     decision = strategy.check_exit(
         symbol="TEST",
         entry_price=10000,
-        current_price=12600,  # Hit TP3
+        current_price=12100,  # Hit TP2 (20%)
         stop_loss=9300,
-        take_profit_targets=[11000, 11500, 12500],
+        take_profit_targets=[11200, 12000],  # v2.0: 12%, 20%
         entry_date=datetime.now() - timedelta(days=5),
         df=sample_stock_data,
-        partial_exits=[11000, 11500],
+        partial_exits=[11200],  # TP1 already taken
     )
 
     assert decision.should_exit is True
-    assert decision.exit_reason == ExitReason.TAKE_PROFIT_3
-    assert decision.expected_pnl_percent > 25
+    assert decision.exit_reason == ExitReason.TAKE_PROFIT_2
+    assert decision.expected_pnl_percent > 20
 
 
 def test_full_workflow_hold(sample_stock_data):

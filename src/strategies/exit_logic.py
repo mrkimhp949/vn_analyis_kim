@@ -23,6 +23,7 @@ class ExitReason(Enum):
     TRAILING_STOP = "Trailing Stop"
     TAKE_PROFIT_1 = "Take Profit 1 (Partial 50%)"  # SIMPLIFIED
     TAKE_PROFIT_2 = "Take Profit 2 (Full Exit)"  # SIMPLIFIED
+    TAKE_PROFIT_3 = "Take Profit 3 (Legacy - Full Exit)"  # BACKWARD COMPATIBLE
     ML_SIGNAL_SELL = "ML Signal SELL"
     TIME_DECAY = "Time Decay (Sideway quá lâu)"
     MARKET_CRASH = "Market Crash Protection"
@@ -493,20 +494,23 @@ class ImprovedExitStrategy:
                     ),
                 }
 
-        # TP2 - Partial 50%
+        # TP2 - Full exit if only 2 targets, Partial 50% if 3 targets
         if len(tp_targets) >= 2 and current_price >= tp_targets[1]:
             if len(partial_exits) < 2:
+                # v2.0: If only 2 TP levels, TP2 is FULL exit
+                # If 3 TP levels (legacy), TP2 is PARTIAL_50%
+                is_full_exit = len(tp_targets) == 2
                 return {
                     "should_exit": True,
                     "decision": ExitDecision(
                         should_exit=True,
                         exit_reason=ExitReason.TAKE_PROFIT_2,
-                        exit_type="PARTIAL_50%",
+                        exit_type="FULL" if is_full_exit else "PARTIAL_50%",
                         exit_price=current_price,
                         expected_pnl=pnl_amount,
                         expected_pnl_percent=pnl_percent,
-                        message=f"🎯 TP2 - CHỐT 50% position: {pnl_percent:+.2f}%",
-                        urgency=2,
+                        message=f"🎯 TP2 - {'FULL EXIT' if is_full_exit else 'CHỐT 50% position'}: {pnl_percent:+.2f}%",
+                        urgency=2 if not is_full_exit else 3,
                     ),
                 }
 

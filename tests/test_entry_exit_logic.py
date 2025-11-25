@@ -274,11 +274,11 @@ class TestImprovedExitStrategy:
         )
 
         # May exit on take profit or trailing stop
+        # v2.0: Only 2 TP levels now (TAKE_PROFIT_3 removed)
         if decision.should_exit:
             assert decision.exit_reason in [
                 ExitReason.TAKE_PROFIT_1,
                 ExitReason.TAKE_PROFIT_2,
-                ExitReason.TAKE_PROFIT_3,
                 ExitReason.TRAILING_STOP,
             ]
 
