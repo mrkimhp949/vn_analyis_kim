@@ -21,15 +21,89 @@ class ExitReason(Enum):
 
     STOP_LOSS = "Stop Loss Hit"
     TRAILING_STOP = "Trailing Stop"
-    TAKE_PROFIT_1 = "Take Profit 1 (Partial)"
-    TAKE_PROFIT_2 = "Take Profit 2 (Main)"
-    TAKE_PROFIT_3 = "Take Profit 3 (Moon)"
+    TAKE_PROFIT_1 = "Take Profit 1 (Partial 50%)"  # SIMPLIFIED
+    TAKE_PROFIT_2 = "Take Profit 2 (Full Exit)"  # SIMPLIFIED
     ML_SIGNAL_SELL = "ML Signal SELL"
     TIME_DECAY = "Time Decay (Sideway quá lâu)"
     MARKET_CRASH = "Market Crash Protection"
     EMERGENCY_EXIT = "Emergency Exit (Portfolio protection)"
     REVERSAL_PATTERN = "Bearish Reversal Pattern"
     BREAKDOWN = "Support Breakdown"
+
+
+class PartialExitTracker:
+    """
+    SIMPLIFIED partial exit tracking.
+
+    Replaces complex list-based tracking with simple state machine:
+    - State 0: No partial exits yet
+    - State 1: TP1 hit (50% exited)
+    - State 2: TP2 hit (100% exited) - position closed
+    """
+
+    def __init__(self):
+        self._states = {}  # {symbol: exit_state}
+        self._exit_history = {}  # {symbol: [exit_records]}
+
+    def get_state(self, symbol: str) -> int:
+        """Get current exit state for symbol (0, 1, or 2)"""
+        return self._states.get(symbol, 0)
+
+    def record_partial_exit(self, symbol: str, exit_type: str, price: float, shares: int):
+        """Record a partial exit"""
+        current_state = self.get_state(symbol)
+
+        if exit_type == "PARTIAL_50%":
+            self._states[symbol] = 1
+        elif exit_type == "FULL":
+            self._states[symbol] = 2
+
+        # Record history
+        if symbol not in self._exit_history:
+            self._exit_history[symbol] = []
+
+        self._exit_history[symbol].append(
+            {
+                "type": exit_type,
+                "price": price,
+                "shares": shares,
+                "timestamp": datetime.now().isoformat(),
+                "state_before": current_state,
+                "state_after": self._states[symbol],
+            }
+        )
+
+        logger.info(
+            f"📊 {symbol} partial exit recorded: {exit_type} @ {price:,.0f} "
+            f"(state: {current_state} → {self._states[symbol]})"
+        )
+
+    def has_partial_exit(self, symbol: str) -> bool:
+        """Check if symbol has had any partial exits"""
+        return self.get_state(symbol) >= 1
+
+    def is_fully_exited(self, symbol: str) -> bool:
+        """Check if symbol is fully exited"""
+        return self.get_state(symbol) >= 2
+
+    def clear_position(self, symbol: str):
+        """Clear tracking for a symbol (after full exit)"""
+        if symbol in self._states:
+            del self._states[symbol]
+        # Keep history for analysis
+
+    def get_exit_history(self, symbol: str) -> List[Dict]:
+        """Get exit history for a symbol"""
+        return self._exit_history.get(symbol, [])
+
+    def get_summary(self) -> Dict:
+        """Get summary of all tracked positions"""
+        return {
+            "active_positions": len([s for s, state in self._states.items() if state < 2]),
+            "partial_exits": len([s for s, state in self._states.items() if state == 1]),
+            "full_exits": len([s for s, state in self._states.items() if state == 2]),
+            "total_tracked": len(self._states),
+        }
 
 
 @dataclass
@@ -48,33 +122,41 @@ class ExitDecision:
 
 class ImprovedExitStrategy:
     """
-    Chiến lược thoát lệnh nâng cao
+    Chiến lược thoát lệnh nâng cao v2.0
 
     Tính năng:
-    1. Trailing Stop - Bảo vệ lợi nhuận
-    2. Take Profit bậc thang - Chốt lời từng phần
+    1. Trailing Stop - Bảo vệ lợi nhuận (ATR-based)
+    2. Take Profit SIMPLIFIED - 2 levels thay vì 3 (giảm complexity)
     3. Time-based exit - Thoát nếu sideway quá lâu
     4. Market protection - Thoát khi thị trường đảo chiều
     5. Pattern recognition - Thoát khi xuất hiện pattern đảo chiều
     6. Portfolio protection - Thoát khi portfolio loss quá nhiều
+
+    IMPROVEMENTS v2.0:
+    - Simplified from 3 TP levels to 2 (TP1: partial, TP2: full)
+    - Cleaner partial exit tracking with PartialExitTracker
+    - Transaction costs included in all P&L calculations
+    - Better logging for debugging
     """
 
     def __init__(
         self,
-        take_profit_levels: List[float] = [0.10, 0.15, 0.25],  # 10%, 15%, 25%
+        take_profit_levels: List[float] = [0.12, 0.20],  # SIMPLIFIED: 2 levels (12%, 20%)
         stop_loss_atr_multiplier: float = 2.0,
         trailing_stop_activation: float = 0.08,  # Kích hoạt trailing khi lời 8%
         trailing_stop_distance: float = 0.05,  # Trailing 5% from high (fallback)
         trailing_stop_atr_multiplier: float = 2.0,  # Dynamic: use 2×ATR instead of fixed %
         use_dynamic_trailing: bool = True,  # Use ATR-based trailing stop
-        max_holding_days: int = 30,  # Extended from 20 to 30 trading days
-        time_decay_threshold: float = 0.02,  # Nếu <2% lời sau 30 ngày → thoát
+        max_holding_days: int = 25,  # REDUCED from 30 to 25 for faster rotation
+        time_decay_threshold: float = 0.03,  # INCREASED from 2% to 3%
         default_stop_loss_pct: float = -7.0,
-        # SIMPLIFIED PROFIT PROTECTION: Single threshold replaces complex 3-5-8% logic
+        # SIMPLIFIED PROFIT PROTECTION
         profit_protection_activation: float = 0.05,  # Activate at 5% profit
         profit_protection_percent: float = 0.50,  # Protect 50% of max profit
-        # ENHANCEMENT: Account for transaction costs in Vietnam market
-        include_transaction_costs: bool = True,  # Use realistic P&L including costs
+        # Transaction costs
+        include_transaction_costs: bool = True,
+        # NEW: Simplified partial exit config
+        partial_exit_percent: float = 0.50,  # Exit 50% at TP1 (simpler than 30%)
     ):
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
@@ -91,8 +173,12 @@ class ImprovedExitStrategy:
         self.profit_protection_percent = profit_protection_percent
         self.include_transaction_costs = include_transaction_costs
 
-        # Tracking
+        # NEW: Simplified partial exit
+        self.partial_exit_percent = partial_exit_percent
+
+        # Tracking with improved structure
         self.position_highs = {}  # {symbol: highest_price_since_entry}
+        self.partial_exit_tracker = PartialExitTracker()  # NEW: Cleaner tracking
 
     def check_exit(
         self,

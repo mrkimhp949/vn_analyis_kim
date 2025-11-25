@@ -1,0 +1,305 @@
+# -*- coding: utf-8 -*-
+"""
+Foreign Investor Flow Analysis for Vietnam Stock Market
+
+Analyzes foreign investor net buy/sell patterns to gauge market sentiment.
+Foreign investors are often considered "smart money" in Vietnam market.
+
+Data Sources (to be integrated):
+- HOSE/HNX daily foreign trading reports
+- SSI, VNDirect, TCBS broker APIs
+- Financial data providers (Fireant, CafeF, etc.)
+
+Usage:
+    from src.market.foreign_flow import get_foreign_flow_analyzer
+    
+    analyzer = get_foreign_flow_analyzer()
+    flow = analyzer.analyze()
+    print(f"Foreign flow score: {flow['score']}")
+"""
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ForeignFlowData:
+    """Container for foreign flow analysis results"""
+
+    date: str
+    net_value: float  # Net buy/sell value in VND (positive = net buy)
+    buy_value: float
+    sell_value: float
+    net_volume: int
+    score: float  # -1 (heavy selling) to +1 (heavy buying)
+    trend: str  # BUYING, SELLING, NEUTRAL
+    strength: str  # STRONG, MODERATE, WEAK
+    consecutive_days: int  # Days of same direction
+    vs_average: float  # Ratio vs 20-day average
+
+
+class ForeignFlowAnalyzer:
+    """
+    Analyze foreign investor trading patterns.
+
+    Scoring Logic:
+    - Net buy > 2x average: +1.0 (STRONG BUYING)
+    - Net buy > 1x average: +0.5 (MODERATE BUYING)
+    - Net buy > 0: +0.2 (WEAK BUYING)
+    - Net sell < 0: -0.2 (WEAK SELLING)
+    - Net sell < -1x average: -0.5 (MODERATE SELLING)
+    - Net sell < -2x average: -1.0 (STRONG SELLING)
+
+    Additional factors:
+    - Consecutive days bonus: +0.1 per day (max +0.3)
+    - Volume confirmation: +0.1 if volume > average
+    """
+
+    def __init__(
+        self,
+        lookback_days: int = 20,
+        strong_threshold_multiplier: float = 2.0,
+        moderate_threshold_multiplier: float = 1.0,
+        cache_ttl_seconds: int = 300,  # 5 minutes
+    ):
+        self.lookback_days = lookback_days
+        self.strong_threshold = strong_threshold_multiplier
+        self.moderate_threshold = moderate_threshold_multiplier
+        self.cache_ttl = cache_ttl_seconds
+
+        # Cache
+        self._cache = None
+        self._cache_time = None
+
+        # Historical data storage
+        self._historical_data: List[Dict] = []
+
+    def analyze(self, force_refresh: bool = False) -> ForeignFlowData:
+        """
+        Analyze current foreign flow.
+
+        Args:
+            force_refresh: Bypass cache and fetch fresh data
+
+        Returns:
+            ForeignFlowData with analysis results
+        """
+        # Check cache
+        if not force_refresh and self._is_cache_valid():
+            return self._cache
+
+        try:
+            # Fetch latest data
+            raw_data = self._fetch_foreign_flow_data()
+
+            if raw_data is None or len(raw_data) == 0:
+                return self._default_result("No data available")
+
+            # Calculate metrics
+            result = self._calculate_metrics(raw_data)
+
+            # Update cache
+            self._cache = result
+            self._cache_time = datetime.now()
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Foreign flow analysis failed: {e}", exc_info=True)
+            return self._default_result(f"Error: {str(e)}")
+
+    def _fetch_foreign_flow_data(self) -> Optional[pd.DataFrame]:
+        """
+        Fetch foreign flow data from data source.
+
+        TODO: Integrate with actual data sources:
+        - TCBS API
+        - SSI API
+        - Fireant API
+        - Web scraping from HOSE/HNX
+
+        Returns:
+            DataFrame with columns: date, buy_value, sell_value, net_value
+        """
+        # PLACEHOLDER: Return None until data source is integrated
+        # In production, this would fetch real data
+
+        logger.debug("Foreign flow data fetch - placeholder (no data source configured)")
+
+        # Example of what the data structure would look like:
+        # return pd.DataFrame({
+        #     'date': [...],
+        #     'buy_value': [...],  # VND
+        #     'sell_value': [...],  # VND
+        #     'net_value': [...],  # buy - sell
+        #     'buy_volume': [...],
+        #     'sell_volume': [...],
+        # })
+
+        return None
+
+    def _calculate_metrics(self, data: pd.DataFrame) -> ForeignFlowData:
+        """Calculate foreign flow metrics from raw data"""
+
+        # Latest day
+        latest = data.iloc[-1]
+        net_value = latest.get("net_value", 0)
+        buy_value = latest.get("buy_value", 0)
+        sell_value = latest.get("sell_value", 0)
+
+        # Calculate average
+        avg_net = data["net_value"].abs().mean() if len(data) > 0 else 1
+
+        # Calculate score
+        score = self._calculate_score(net_value, avg_net)
+
+        # Determine trend and strength
+        trend, strength = self._determine_trend_strength(net_value, avg_net)
+
+        # Count consecutive days
+        consecutive = self._count_consecutive_days(data)
+
+        # Ratio vs average
+        vs_average = net_value / avg_net if avg_net > 0 else 0
+
+        return ForeignFlowData(
+            date=latest.get("date", datetime.now().isoformat()),
+            net_value=net_value,
+            buy_value=buy_value,
+            sell_value=sell_value,
+            net_volume=latest.get("net_volume", 0),
+            score=score,
+            trend=trend,
+            strength=strength,
+            consecutive_days=consecutive,
+            vs_average=vs_average,
+        )
+
+    def _calculate_score(self, net_value: float, avg_net: float) -> float:
+        """Calculate score from -1 to +1"""
+        if avg_net == 0:
+            return 0.0
+
+        ratio = net_value / avg_net
+
+        if ratio >= self.strong_threshold:
+            return 1.0
+        elif ratio >= self.moderate_threshold:
+            return 0.5
+        elif ratio > 0:
+            return 0.2
+        elif ratio > -self.moderate_threshold:
+            return -0.2
+        elif ratio > -self.strong_threshold:
+            return -0.5
+        else:
+            return -1.0
+
+    def _determine_trend_strength(self, net_value: float, avg_net: float) -> tuple:
+        """Determine trend direction and strength"""
+        if avg_net == 0:
+            return "NEUTRAL", "WEAK"
+
+        ratio = abs(net_value) / avg_net
+
+        if net_value > 0:
+            trend = "BUYING"
+        elif net_value < 0:
+            trend = "SELLING"
+        else:
+            trend = "NEUTRAL"
+
+        if ratio >= self.strong_threshold:
+            strength = "STRONG"
+        elif ratio >= self.moderate_threshold:
+            strength = "MODERATE"
+        else:
+            strength = "WEAK"
+
+        return trend, strength
+
+    def _count_consecutive_days(self, data: pd.DataFrame) -> int:
+        """Count consecutive days of same direction"""
+        if len(data) < 2:
+            return 1
+
+        # Get direction of latest day
+        latest_direction = 1 if data.iloc[-1]["net_value"] > 0 else -1
+
+        count = 1
+        for i in range(len(data) - 2, -1, -1):
+            day_direction = 1 if data.iloc[i]["net_value"] > 0 else -1
+            if day_direction == latest_direction:
+                count += 1
+            else:
+                break
+
+        return count
+
+    def _is_cache_valid(self) -> bool:
+        """Check if cache is still valid"""
+        if self._cache is None or self._cache_time is None:
+            return False
+
+        age = (datetime.now() - self._cache_time).total_seconds()
+        return age < self.cache_ttl
+
+    def _default_result(self, reason: str) -> ForeignFlowData:
+        """Return default neutral result"""
+        return ForeignFlowData(
+            date=datetime.now().isoformat(),
+            net_value=0,
+            buy_value=0,
+            sell_value=0,
+            net_volume=0,
+            score=0.0,
+            trend="NEUTRAL",
+            strength="WEAK",
+            consecutive_days=0,
+            vs_average=0.0,
+        )
+
+    def add_manual_data(self, date: str, buy_value: float, sell_value: float):
+        """
+        Manually add foreign flow data (for testing or manual input).
+
+        Args:
+            date: Date string (YYYY-MM-DD)
+            buy_value: Foreign buy value in VND
+            sell_value: Foreign sell value in VND
+        """
+        self._historical_data.append(
+            {
+                "date": date,
+                "buy_value": buy_value,
+                "sell_value": sell_value,
+                "net_value": buy_value - sell_value,
+            }
+        )
+
+        # Invalidate cache
+        self._cache = None
+
+        logger.info(
+            f"📊 Added foreign flow data: {date} - "
+            f"Buy: {buy_value/1e9:.1f}B, Sell: {sell_value/1e9:.1f}B, "
+            f"Net: {(buy_value-sell_value)/1e9:+.1f}B VND"
+        )
+
+
+# Singleton instance
+_analyzer_instance: Optional[ForeignFlowAnalyzer] = None
+
+
+def get_foreign_flow_analyzer() -> ForeignFlowAnalyzer:
+    """Get singleton instance of foreign flow analyzer"""
+    global _analyzer_instance
+    if _analyzer_instance is None:
+        _analyzer_instance = ForeignFlowAnalyzer()
+    return _analyzer_instance

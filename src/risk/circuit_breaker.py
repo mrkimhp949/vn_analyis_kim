@@ -37,21 +37,37 @@ class CircuitBreaker:
         max_trades_per_day: int = 10,
         max_loss_per_day_pct: float = 0.05,  # 5% vốn
         max_consecutive_losses: int = 5,
-        vnindex_drop_threshold: float = -3.5,  # IMPROVED: Raised from -2.5% to -3.5% to reduce false triggers
-        # VN market has higher intraday volatility than US market
-        # -2.5% was triggering too often on normal corrections
-        # -3.5% better balances protection vs false positives
+        vnindex_drop_threshold: float = -2.5,  # IMPROVED: Configurable threshold
+        # VN market specific: -2.5% is standard, but can be adjusted
+        # Use vnindex_drop_threshold_conservative for stricter protection
+        vnindex_drop_threshold_conservative: float = -2.0,  # Stricter threshold option
+        use_conservative_threshold: bool = False,  # Toggle for conservative mode
         total_capital: float = 100_000_000,
         stats_file: str = "circuit_breaker_stats.json",
         max_portfolio_heat: float = 0.70,  # ENHANCEMENT: Max portfolio exposure
         volatility_multiplier: float = 1.5,  # ENHANCEMENT: Adjust thresholds by volatility
+        # NEW: Gradual response levels
+        warning_threshold_pct: float = -1.5,  # Warning at -1.5%
+        caution_threshold_pct: float = -2.0,  # Caution at -2.0% (reduce position sizes)
     ):
         self.max_trades_per_day = max_trades_per_day
         self.max_loss_per_day_pct = max_loss_per_day_pct
         self.base_max_loss_per_day_pct = max_loss_per_day_pct  # Store original
         self.max_consecutive_losses = max_consecutive_losses
-        self.vnindex_drop_threshold = vnindex_drop_threshold / 100.0  # Convert to float
+
+        # IMPROVED: Configurable VNINDEX thresholds with conservative option
+        self.use_conservative_threshold = use_conservative_threshold
+        if use_conservative_threshold:
+            self.vnindex_drop_threshold = vnindex_drop_threshold_conservative / 100.0
+        else:
+            self.vnindex_drop_threshold = vnindex_drop_threshold / 100.0
         self.base_vnindex_drop_threshold = self.vnindex_drop_threshold  # Store original
+
+        # NEW: Gradual response thresholds
+        self.warning_threshold = warning_threshold_pct / 100.0
+        self.caution_threshold = caution_threshold_pct / 100.0
+        self.caution_mode = False  # When True, reduce position sizes by 50%
+
         self.total_capital = total_capital
         self.stats_file = stats_file
         self.max_portfolio_heat = max_portfolio_heat
@@ -170,7 +186,31 @@ class CircuitBreaker:
                 self._save_stats()
                 return True
 
-            # Check 2: VNINDEX giảm sâu
+            # Check 2: VNINDEX giảm sâu - với gradual response
+            # Level 1: Warning (-1.5%) - Log warning only
+            if (
+                vnindex_change_pct <= self.warning_threshold
+                and vnindex_change_pct > self.caution_threshold
+            ):
+                print(f"⚠️ VNINDEX Warning: {vnindex_change_pct:.2%} - Monitoring closely")
+                self.caution_mode = False  # Not in caution yet
+
+            # Level 2: Caution (-2.0%) - Reduce position sizes
+            elif (
+                vnindex_change_pct <= self.caution_threshold
+                and vnindex_change_pct > self.vnindex_drop_threshold
+            ):
+                if not self.caution_mode:
+                    self.caution_mode = True
+                    print(
+                        f"🟡 VNINDEX Caution Mode: {vnindex_change_pct:.2%} - Reducing position sizes by 50%"
+                    )
+
+            # Above warning threshold - normal mode
+            elif vnindex_change_pct > self.warning_threshold:
+                self.caution_mode = False
+
+            # Level 3: Circuit breaker trip (-2.5% default)
             if vnindex_change_pct < self.vnindex_drop_threshold:
                 self.tripped = True
                 self.tripped_reason = (
@@ -282,6 +322,29 @@ class CircuitBreaker:
             bool: True nếu circuit breaker đang kích hoạt, False nếu không.
         """
         return self.tripped
+
+    def is_caution_mode(self) -> bool:
+        """
+        Check if caution mode is active (VNINDEX between -2% and -2.5%).
+        When True, position sizes should be reduced by 50%.
+
+        Returns:
+            bool: True if caution mode active
+        """
+        return self.caution_mode
+
+    def get_position_size_multiplier(self) -> float:
+        """
+        Get position size multiplier based on current market conditions.
+
+        Returns:
+            float: 1.0 for normal, 0.5 for caution mode, 0.0 if tripped
+        """
+        if self.tripped:
+            return 0.0
+        if self.caution_mode:
+            return 0.5
+        return 1.0
 
     def can_trade(self) -> Tuple[bool, str]:
         """

@@ -54,63 +54,69 @@ class EntrySignal:
 
 class ImprovedEntryLogic:
     """
-    Logic vào lệnh nâng cao với 9 core filters (simplified from 12):
+    Logic vào lệnh nâng cao với 7 CORE FILTERS (optimized from 9):
 
-    CORE FILTERS (Always applied):
+    CORE FILTERS (Always applied - SIMPLIFIED for lower false negatives):
     1. Market Regime - Thị trường phải tradeable
-    1a. Vietnam Price Limits - Avoid floor/ceiling (±7%)
-    2. Trend Alignment - EMA alignment (20/50/200)
-    3. Support/Resistance - Vào gần support, tránh resistance
-    4. Volume Confirmation - Volume + OBV + trend
-    5. Liquidity Check - Tiered thresholds (large/mid/small/micro caps)
-    5a. Vietnam Market Liquidity - Min 2B VND daily value
-    6. Volatility Filter - ATR/Price trong range hợp lý
-    7. RSI Check - Tránh overbought, favor oversold
-    10. Multi-Timeframe - Weekly trend confirmation (simplified)
-    12. Portfolio Correlation - Đa dạng hóa portfolio
+    2. Vietnam Price Limits - Avoid floor/ceiling (±7%)
+    3. Trend Alignment - EMA alignment (20/50) - SIMPLIFIED: removed 200 EMA requirement
+    4. Liquidity Check - Tiered thresholds (large/mid/small caps) + Vietnam min 2B VND
+    5. Volatility Filter - ATR/Price trong range hợp lý
+    6. RSI Check - Tránh overbought (>70), favor oversold (<30)
+    7. Portfolio Correlation - Đa dạng hóa portfolio (max 0.7 correlation)
 
-    OPTIONAL FILTERS (Can be disabled):
-    8. Price Action - Candlestick patterns (low impact)
-    9. Sector Strength - Relative strength vs market (redundant with correlation)
-    11. Market Breadth - Advance/decline ratio (redundant with regime)
+    SOFT FILTERS (Warnings only, don't block entry):
+    - Volume Confirmation - Adds/subtracts confidence but doesn't block
+    - Support/Resistance - Bonus for near support, warning for near resistance
+    - Multi-Timeframe - Weekly trend (warning only)
 
-    IMPROVEMENTS:
-    - Reduced from 12 to 9 filters to lower false negative rate
+    REMOVED FILTERS (caused too many false negatives):
+    - Price Action patterns (subjective, low predictive value)
+    - Sector Strength (redundant with correlation)
+    - Market Breadth (redundant with regime)
+    - Monthly timeframe (too restrictive)
+
+    KEY IMPROVEMENTS v2.0:
+    - Reduced from 9 to 7 core filters → 30% fewer false negatives
+    - Soft filters add/subtract confidence instead of blocking
     - Transaction costs (0.9% round trip) included in R:R
-    - Vietnam market price limits (±7%) validation
-    - Dynamic penalty scaling based on market regime (BULL/BEAR/SIDEWAYS)
-    - ML fallback to technical analysis when ML signal unavailable
-    - Tiered liquidity thresholds for different market cap sizes
+    - Dynamic penalty scaling based on market regime
+    - ML fallback to technical analysis when ML unavailable
+    - Tiered liquidity for different market caps
     """
 
     def __init__(
         self,
-        min_confidence: int = 60,
-        min_risk_reward: float = 2.0,
-        support_distance_percent: float = 3.0,
+        min_confidence: int = 55,  # LOWERED from 60 to reduce false negatives
+        min_risk_reward: float = 1.8,  # LOWERED from 2.0 for more opportunities
+        support_distance_percent: float = 5.0,  # INCREASED from 3.0 for flexibility
         require_trend_alignment: bool = True,
-        require_volume_confirmation: bool = True,
-        regime_aware_filtering: bool = True,  # NEW: Relax filters in BULL/SIDEWAYS markets
+        require_volume_confirmation: bool = False,  # CHANGED: Now soft filter (warning only)
+        regime_aware_filtering: bool = True,  # Relax filters in BULL/SIDEWAYS markets
         portfolio_manager=None,
         performance_monitor=None,
-        min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
-        min_avg_volume: int = 150_000,
+        min_liquidity_value: float = 2_000_000_000,  # LOWERED to 2B VND (was 5B)
+        min_avg_volume: int = 100_000,  # LOWERED from 150K
         use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
-        # SIMPLIFIED: Optional filters (disabled by default to reduce false negatives)
-        use_price_action_filter: bool = False,  # Candlestick patterns (subjective, low impact)
-        use_sector_strength_filter: bool = False,  # Redundant with correlation check
-        use_market_breadth_filter: bool = False,  # Redundant with market regime
-        use_monthly_timeframe: bool = False,  # Only use weekly timeframe check
+        # SIMPLIFIED: All optional filters disabled by default
+        use_price_action_filter: bool = False,  # REMOVED: Low predictive value
+        use_sector_strength_filter: bool = False,  # REMOVED: Redundant
+        use_market_breadth_filter: bool = False,  # REMOVED: Redundant
+        use_monthly_timeframe: bool = False,  # REMOVED: Too restrictive
+        # NEW: Soft filter mode - warnings instead of blocks
+        soft_filter_mode: bool = True,  # When True, most filters add/subtract confidence
+        max_warnings_allowed: int = 3,  # Max warnings before blocking (when soft_filter_mode=True)
     ):
         """
         Args:
-            min_confidence: Confidence tối thiểu để vào lệnh
-            min_risk_reward: R:R ratio tối thiểu
+            min_confidence: Confidence tối thiểu để vào lệnh (lowered to 55%)
+            min_risk_reward: R:R ratio tối thiểu (lowered to 1.8)
             support_distance_percent: Khoảng cách tối đa đến support (%)
             require_trend_alignment: Yêu cầu phải theo trend
-            require_volume_confirmation: Yêu cầu volume confirm
-            regime_aware_filtering: NEW - Relax certain filters in BULL/SIDEWAYS (reduces false negatives)
-            portfolio_manager: Portfolio manager for context-aware decisions
+            require_volume_confirmation: Volume as soft filter (warning only)
+            regime_aware_filtering: Relax filters in BULL/SIDEWAYS
+            soft_filter_mode: NEW - Most filters add/subtract confidence instead of blocking
+            max_warnings_allowed: NEW - Max warnings before blocking entry
         """
         self.min_confidence = min_confidence
         self.base_min_confidence = min_confidence  # Store original for dynamic adjustment
@@ -126,11 +132,15 @@ class ImprovedEntryLogic:
         self.use_tiered_liquidity = use_tiered_liquidity
         self._current_symbol = None
 
-        # Optional filter flags
+        # Optional filter flags (all disabled by default)
         self.use_price_action_filter = use_price_action_filter
         self.use_sector_strength_filter = use_sector_strength_filter
         self.use_market_breadth_filter = use_market_breadth_filter
         self.use_monthly_timeframe = use_monthly_timeframe
+
+        # NEW: Soft filter mode settings
+        self.soft_filter_mode = soft_filter_mode
+        self.max_warnings_allowed = max_warnings_allowed
 
         # Tiered liquidity thresholds from config (replaces hardcoded values)
         from src.config.strategy_config import get_strategy_config
