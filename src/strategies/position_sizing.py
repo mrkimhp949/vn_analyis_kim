@@ -313,9 +313,30 @@ class EnhancedPositionSizer:
         shares = min(final_shares, max_shares_by_capital, max_shares_by_available)
         shares = max(shares, min_shares) if shares > 0 else 0
 
-        # Round to lot of 100
+        # VIETNAM MARKET: Round to lot size (100 shares minimum)
+        from src.config.constants import VIETNAM_LOT_SIZE
+
         if shares > 0:
-            shares = max((shares // 100) * 100, 100)
+            # Round down to nearest lot
+            shares = (shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
+
+            # Enforce minimum lot size
+            if shares < VIETNAM_LOT_SIZE:
+                logger.warning(
+                    f"⚠️ Position size {shares} < minimum lot size {VIETNAM_LOT_SIZE}. "
+                    f"Adjusting to {VIETNAM_LOT_SIZE} shares (1 lot)."
+                )
+                shares = VIETNAM_LOT_SIZE
+
+            # Validate shares is multiple of lot size
+            if shares % VIETNAM_LOT_SIZE != 0:
+                logger.error(
+                    f"🚨 Invalid lot size: {shares} shares is not multiple of {VIETNAM_LOT_SIZE}. "
+                    "This should not happen after rounding."
+                )
+                shares = (shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
+
+            logger.debug(f"✅ Position size: {shares} shares ({shares // VIETNAM_LOT_SIZE} lots)")
         else:
             return self._zero_position("Position size = 0 after calculations", warnings)
 

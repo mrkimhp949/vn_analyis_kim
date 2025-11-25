@@ -37,9 +37,18 @@ MAX_HOLDING_DAYS = 20  # Maximum holding period in days
 EARLY_STOPPING_ROUNDS = 20  # ML early stopping rounds
 CORRELATION_LOOKBACK_DAYS = 60  # Correlation calculation lookback
 
-# Commission and Slippage
-DEFAULT_COMMISSION_RATE = 0.0015  # 0.15% commission
-DEFAULT_SLIPPAGE = 0.001  # 0.1% slippage
+# Commission and Slippage (Vietnam Market)
+# Vietnam total transaction costs: brokerage (0.15%) + tax (0.10%) + fees (0.10%) = ~0.35%
+DEFAULT_COMMISSION_RATE = 0.0035  # 0.35% total transaction cost (commission + tax + fees)
+DEFAULT_SLIPPAGE = 0.001  # 0.1% average slippage
+TOTAL_TRANSACTION_COST = DEFAULT_COMMISSION_RATE + DEFAULT_SLIPPAGE  # 0.45% total per trade
+ROUND_TRIP_COST = TOTAL_TRANSACTION_COST * 2  # 0.9% round trip (buy + sell)
+
+# Vietnam Market Specific Constants
+VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling)
+VIETNAM_LOT_SIZE = 100  # Minimum trading lot size
+VIETNAM_SETTLEMENT_DAYS = 2  # T+2 settlement
+VIETNAM_TICK_SIZE = 10  # 10 VND minimum tick size for most stocks
 
 # Stop Loss and Take Profit
 DEFAULT_STOP_LOSS_LEVELS = [0.10, 0.15, 0.25]  # 10%, 15%, 25%
@@ -116,6 +125,13 @@ __all__ = [
     # Trading Costs
     "DEFAULT_COMMISSION_RATE",
     "DEFAULT_SLIPPAGE",
+    "TOTAL_TRANSACTION_COST",
+    "ROUND_TRIP_COST",
+    # Vietnam Market
+    "VIETNAM_PRICE_LIMIT_PERCENT",
+    "VIETNAM_LOT_SIZE",
+    "VIETNAM_SETTLEMENT_DAYS",
+    "VIETNAM_TICK_SIZE",
     # Stop Loss/Take Profit
     "DEFAULT_STOP_LOSS_LEVELS",
     "DEFAULT_TRAILING_STOP_ACTIVATION",
