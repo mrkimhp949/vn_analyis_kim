@@ -125,6 +125,53 @@ class TradingOrchestrator:
         self._ml_recovery_threshold = 0.10  # Re-enable at 10% failure rate
         self._ml_circuit_breaker_active = False
 
+        # IMPROVEMENT: Cache VNINDEX data to reduce repeated loads and failures
+        self._cached_vnindex_df = None
+        self._vnindex_cache_timestamp = None
+        self._vnindex_cache_ttl = 3600  # Cache for 1 hour (seconds)
+
+    def _get_cached_vnindex(self) -> Optional[pd.DataFrame]:
+        """
+        Get cached VNINDEX data or load fresh if cache expired
+
+        IMPROVEMENT: Reduces repeated VNINDEX loads that cause ML failures
+
+        Returns:
+            VNINDEX DataFrame or None if load fails
+        """
+        import time
+
+        current_time = time.time()
+
+        # Check if cache is still valid
+        if self._cached_vnindex_df is not None and self._vnindex_cache_timestamp is not None:
+            cache_age = current_time - self._vnindex_cache_timestamp
+            if cache_age < self._vnindex_cache_ttl:
+                logging.debug(f"✅ Using cached VNINDEX (age: {cache_age:.0f}s)")
+                return self._cached_vnindex_df
+
+        # Load fresh VNINDEX
+        try:
+            logging.info("📊 Loading VNINDEX for ML analysis...")
+            index_df = load_data("VNINDEX", lookback=LOOKBACK, is_index=True)
+
+            if index_df is not None and not index_df.empty and len(index_df) >= 50:
+                self._cached_vnindex_df = index_df
+                self._vnindex_cache_timestamp = current_time
+                logging.info(f"✅ VNINDEX loaded successfully ({len(index_df)} rows)")
+                return index_df
+            else:
+                logging.warning("⚠️ VNINDEX data is empty or insufficient")
+                return None
+
+        except Exception as e:
+            logging.error(f"❌ Failed to load VNINDEX: {e}")
+            # Return stale cache if available as fallback
+            if self._cached_vnindex_df is not None:
+                logging.warning("⚠️ Using stale VNINDEX cache as fallback")
+                return self._cached_vnindex_df
+            return None
+
     def _setup_strategies(self, market_regime: Dict):
         """Lấy và gán các chiến lược từ StrategyManager và điều chỉnh theo thị trường."""
         # Lấy các đối tượng chiến lược gốc
@@ -408,8 +455,10 @@ class TradingOrchestrator:
             ml_signal = None
             if self._should_use_ml():
                 try:
+                    # IMPROVEMENT: Use cached VNINDEX to reduce load failures
+                    cached_vnindex = self._get_cached_vnindex()
                     ml_signal = self.ml_generator.analyze(
-                        df, index_df=self.vnindex_df, symbol=symbol
+                        df, index_df=cached_vnindex, symbol=symbol
                     )
                     # Track successful ML analysis
                     if ml_signal is not None:
@@ -642,8 +691,10 @@ class TradingOrchestrator:
             ml_signal = None
             if self._should_use_ml():
                 try:
+                    # IMPROVEMENT: Use cached VNINDEX to reduce load failures
+                    cached_vnindex = self._get_cached_vnindex()
                     ml_signal = self.ml_generator.analyze(
-                        df, index_df=self.vnindex_df, symbol=symbol
+                        df, index_df=cached_vnindex, symbol=symbol
                     )
                     # Track successful ML analysis
                     if ml_signal is not None:

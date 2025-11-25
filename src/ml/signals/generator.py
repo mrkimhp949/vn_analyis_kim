@@ -71,6 +71,13 @@ class MLSignalGenerator:
         self._ml_failure_count = 0
         self._ml_failure_threshold = 5  # Alert after 5 consecutive failures
 
+        # IMPROVEMENT: Detailed failure diagnostics
+        self._failure_reasons = {}  # {reason: count}
+        self._missing_features = {}  # {feature: count}
+        self._failed_symbols = {}  # {symbol: count}
+        self._total_analyses = 0
+        self._successful_analyses = 0
+
     def analyze(self, df, index_df=None, symbol=None):
         """Phân tích và tạo tín hiệu từ ML + Technical Analysis
 
@@ -79,12 +86,17 @@ class MLSignalGenerator:
             index_df: Optional index (VNINDEX) DataFrame
             symbol: Optional symbol name (for logging)
         """
+        # Track analysis attempt
+        self._total_analyses += 1
+
         try:
             # Validate input data
             if df is None or df.empty:
+                self._track_failure("empty_dataframe", symbol=symbol)
                 raise ValueError("Empty or None dataframe")
 
             if len(df) < 50:
+                self._track_failure(f"insufficient_data_{len(df)}_rows", symbol=symbol)
                 raise ValueError(f"Insufficient data: {len(df)} rows, need at least 50")
 
             # Thêm ML features, cố gắng tự nạp VNINDEX nếu thiếu index_df
@@ -204,12 +216,25 @@ class MLSignalGenerator:
                     except Exception as e:
                         logging.getLogger(__name__).debug(f"Quality scoring failed: {e}")
 
+                # Track successful ML analysis
+                self._successful_analyses += 1
+
+                # Print diagnostics periodically (every 100 analyses)
+                if self._total_analyses % 100 == 0:
+                    self.print_diagnostics()
+
                 return result
             else:
                 missing_features = set(feature_cols) - set(available_features)
-                print(
+                logger.warning(
                     f"⚠️ Không đủ features cho ML ({len(available_features)}/{len(feature_cols)}), "
                     f"thiếu: {missing_features}. Dùng technical analysis."
+                )
+                # Track missing features
+                self._track_failure(
+                    f"missing_{len(missing_features)}_features",
+                    symbol=symbol,
+                    features=list(missing_features)
                 )
                 return self._fallback_technical_analysis(df)
 
@@ -609,6 +634,93 @@ class MLSignalGenerator:
                 f"📊 ML Signal accuracy (last {len(self._confidence_history)} predictions): "
                 f"{overall_accuracy:.1%}"
             )
+
+    def _track_failure(self, reason: str, symbol: Optional[str] = None, features: Optional[list] = None):
+        """
+        Track ML analysis failure for diagnostics
+
+        IMPROVEMENT: Better failure tracking for identifying root causes
+
+        Args:
+            reason: Failure reason
+            symbol: Optional symbol that failed
+            features: Optional list of missing features
+        """
+        # Track reason
+        self._failure_reasons[reason] = self._failure_reasons.get(reason, 0) + 1
+
+        # Track symbol
+        if symbol:
+            self._failed_symbols[symbol] = self._failed_symbols.get(symbol, 0) + 1
+
+        # Track missing features
+        if features:
+            for feature in features:
+                self._missing_features[feature] = self._missing_features.get(feature, 0) + 1
+
+    def get_diagnostics(self) -> dict:
+        """
+        Get ML analysis diagnostic statistics
+
+        IMPROVEMENT: Helps identify root causes of ML failures
+
+        Returns:
+            Dict with diagnostic statistics
+        """
+        success_rate = (
+            (self._successful_analyses / self._total_analyses * 100)
+            if self._total_analyses > 0
+            else 0
+        )
+        failure_rate = 100 - success_rate
+
+        # Top failure reasons
+        top_reasons = sorted(self._failure_reasons.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        # Top failed symbols
+        top_symbols = sorted(self._failed_symbols.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        # Top missing features
+        top_features = sorted(self._missing_features.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        return {
+            "total_analyses": self._total_analyses,
+            "successful_analyses": self._successful_analyses,
+            "failed_analyses": self._total_analyses - self._successful_analyses,
+            "success_rate": success_rate,
+            "failure_rate": failure_rate,
+            "top_failure_reasons": top_reasons,
+            "top_failed_symbols": top_symbols,
+            "top_missing_features": top_features,
+        }
+
+    def print_diagnostics(self):
+        """Print ML diagnostic statistics to logger"""
+        stats = self.get_diagnostics()
+
+        logger.info("\n" + "=" * 70)
+        logger.info("📊 ML SIGNAL GENERATOR DIAGNOSTICS")
+        logger.info("=" * 70)
+        logger.info(f"Total analyses: {stats['total_analyses']}")
+        logger.info(f"Successful: {stats['successful_analyses']} ({stats['success_rate']:.1f}%)")
+        logger.info(f"Failed: {stats['failed_analyses']} ({stats['failure_rate']:.1f}%)")
+
+        if stats['top_failure_reasons']:
+            logger.info("\nTop Failure Reasons:")
+            for i, (reason, count) in enumerate(stats['top_failure_reasons'], 1):
+                logger.info(f"  {i}. {reason}: {count}")
+
+        if stats['top_failed_symbols']:
+            logger.info("\nTop Failed Symbols:")
+            for i, (symbol, count) in enumerate(stats['top_failed_symbols'], 1):
+                logger.info(f"  {i}. {symbol}: {count}")
+
+        if stats['top_missing_features']:
+            logger.info("\nTop Missing Features:")
+            for i, (feature, count) in enumerate(stats['top_missing_features'], 1):
+                logger.info(f"  {i}. {feature}: {count}")
+
+        logger.info("=" * 70 + "\n")
 
     def _send_ml_failure_alert(self, title: str, message: str):
         """
