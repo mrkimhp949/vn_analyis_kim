@@ -1,6 +1,7 @@
 from src.data.loader import load_data
 import logging
 import traceback
+from typing import Optional
 from src.ml.features.technical import add_ml_features, get_feature_columns
 from src.ml.models.predictor import MLPredictor
 from utils.dataframe_utils import safe_get_latest
