@@ -39,6 +39,8 @@ class MarketRegimeDetector:
     2. Momentum (ROC)
     3. Volatility (ATR, rolling std)
     4. Breadth (advance/decline if available)
+    5. NEW: Sector Rotation Detection
+    6. NEW: Foreign Investor Flow Analysis
     """
 
     def __init__(
@@ -48,6 +50,8 @@ class MarketRegimeDetector:
         volatility_threshold: float = 0.7,
         min_confidence: float = 50.0,
         require_momentum_confirmation: bool = True,  # NEW: Require momentum + trend alignment
+        enable_sector_rotation: bool = True,  # NEW: Enable sector rotation analysis
+        enable_foreign_flow: bool = True,  # NEW: Enable foreign investor flow analysis
     ):
         """
         Args:
@@ -62,6 +66,13 @@ class MarketRegimeDetector:
         self.volatility_threshold = volatility_threshold
         self.min_confidence = min_confidence
         self.require_momentum_confirmation = require_momentum_confirmation
+        self.enable_sector_rotation = enable_sector_rotation
+        self.enable_foreign_flow = enable_foreign_flow
+
+        # Sector rotation tracking
+        self._sector_performance_cache = {}
+        self._leading_sectors = []
+        self._lagging_sectors = []
 
     def detect(self, index_df: pd.DataFrame) -> MarketRegime:
         """
@@ -190,24 +201,115 @@ class MarketRegimeDetector:
         else:
             components["volume_trend"] = 0
 
+        # 5. SECTOR ROTATION (NEW)
+        if self.enable_sector_rotation:
+            sector_rotation = self._analyze_sector_rotation()
+            components["sector_rotation"] = sector_rotation.get("score", 0)
+            components["leading_sectors"] = sector_rotation.get("leading", [])
+            components["lagging_sectors"] = sector_rotation.get("lagging", [])
+        else:
+            components["sector_rotation"] = 0
+
+        # 6. FOREIGN INVESTOR FLOW (NEW)
+        if self.enable_foreign_flow:
+            foreign_flow = self._analyze_foreign_flow()
+            components["foreign_flow"] = foreign_flow.get("score", 0)
+            components["foreign_net_value"] = foreign_flow.get("net_value", 0)
+        else:
+            components["foreign_flow"] = 0
+
         return components
+
+    def _analyze_sector_rotation(self) -> Dict:
+        """
+        Analyze sector rotation to identify market phase.
+
+        Uses dedicated SectorRotationAnalyzer for comprehensive analysis.
+
+        Returns:
+            Dict with sector rotation analysis
+        """
+        try:
+            from src.market.sector_rotation import get_sector_analyzer
+
+            analyzer = get_sector_analyzer()
+            result = analyzer.analyze()
+
+            # Update internal tracking
+            self._leading_sectors = result.leading_sectors
+            self._lagging_sectors = result.lagging_sectors
+
+            return {
+                "score": result.score,
+                "leading": result.leading_sectors,
+                "lagging": result.lagging_sectors,
+                "phase": result.phase,
+                "confidence": result.confidence,
+                "recommendation": result.recommendation,
+            }
+
+        except ImportError:
+            logger.warning("Sector rotation module not available")
+            return {"score": 0, "leading": [], "lagging": [], "phase": "UNKNOWN"}
+        except Exception as e:
+            logger.warning(f"Sector rotation analysis failed: {e}")
+            return {"score": 0, "leading": [], "lagging": [], "phase": "UNKNOWN"}
+
+    def _analyze_foreign_flow(self) -> Dict:
+        """
+        Analyze foreign investor net buy/sell flow.
+
+        Uses dedicated ForeignFlowAnalyzer for comprehensive analysis.
+
+        Returns:
+            Dict with foreign flow analysis
+        """
+        try:
+            from src.market.foreign_flow import get_foreign_flow_analyzer
+
+            analyzer = get_foreign_flow_analyzer()
+            result = analyzer.analyze()
+
+            return {
+                "score": result.score,
+                "net_value": result.net_value,
+                "trend": result.trend,
+                "strength": result.strength,
+                "consecutive_days": result.consecutive_days,
+                "vs_average": result.vs_average,
+            }
+
+        except ImportError:
+            logger.warning("Foreign flow module not available")
+            return {"score": 0, "net_value": 0, "trend": "UNKNOWN", "strength": "UNKNOWN"}
+        except Exception as e:
+            logger.warning(f"Foreign flow analysis failed: {e}")
+            return {"score": 0, "net_value": 0, "trend": "UNKNOWN", "strength": "UNKNOWN"}
 
     def _calculate_composite_score(self, components: Dict[str, float]) -> float:
         """
         Calculate composite regime score
 
-        Weights:
-        - Trend: 40%
-        - Momentum: 30%
-        - Volume: 20%
+        Weights (IMPROVED with sector rotation and foreign flow):
+        - Trend: 35% (reduced from 40%)
+        - Momentum: 25% (reduced from 30%)
+        - Volume: 15% (reduced from 20%)
         - Volatility: 10% (negative impact)
+        - Sector Rotation: 7.5% (NEW)
+        - Foreign Flow: 7.5% (NEW)
         """
         score = 0.0
 
-        score += components["trend"] * 0.40
-        score += components["momentum"] * 0.30
-        score += components["volume_trend"] * 0.20
+        score += components["trend"] * 0.35
+        score += components["momentum"] * 0.25
+        score += components["volume_trend"] * 0.15
         score -= components["volatility"] * 0.10  # High volatility reduces score
+
+        # NEW: Add sector rotation and foreign flow
+        if self.enable_sector_rotation:
+            score += components.get("sector_rotation", 0) * 0.075
+        if self.enable_foreign_flow:
+            score += components.get("foreign_flow", 0) * 0.075
 
         return score
 

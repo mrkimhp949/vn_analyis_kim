@@ -143,14 +143,15 @@ def sideways_market_regime():
 
 
 def test_entry_logic_init_default():
-    """Test default initialization"""
+    """Test default initialization (v2.0 - updated defaults for fewer false negatives)"""
     logic = ImprovedEntryLogic()
 
-    assert logic.min_confidence == 60
-    assert logic.min_risk_reward == 2.0
-    assert logic.support_distance_percent == 3.0
+    # v2.0: Lowered thresholds to reduce false negatives
+    assert logic.min_confidence == 55  # Lowered from 60
+    assert logic.min_risk_reward == 1.8  # Lowered from 2.0
+    assert logic.support_distance_percent == 5.0  # Increased from 3.0
     assert logic.require_trend_alignment is True
-    assert logic.require_volume_confirmation is True
+    assert logic.require_volume_confirmation is False  # Changed to soft filter
 
 
 def test_entry_logic_init_custom():

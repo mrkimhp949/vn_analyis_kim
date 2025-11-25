@@ -83,61 +83,58 @@ class TestEnhancedRiskManager:
         factor = risk_manager._calculate_confidence_factor(30)
         assert factor == 0.3
 
+    @patch("src.data.vnindex_cache.get_cached_vnindex")
     @patch("utils.dataframe_utils.safe_get_latest")
-    @patch("src.data.loader.load_data")
-    def test_market_regime_factor_bull(self, mock_load_data, mock_safe_get_latest, risk_manager):
+    def test_market_regime_factor_bull(self, mock_safe_get_latest, mock_get_vnindex, risk_manager):
         """Test market regime factor in bull market"""
-        # Mock VNINDEX data showing bull market (>2% gain)
-        mock_df = Mock()
-        mock_df.__len__ = Mock(return_value=50)
-        # Mock the "close" column access for iloc[-20]
-        close_column_mock = Mock()
-        close_column_mock.iloc = Mock()
-        close_column_mock.iloc.__getitem__ = Mock(return_value=100)  # Past close (20 days ago)
-        mock_df.__getitem__ = Mock(return_value=close_column_mock)
-        mock_load_data.return_value = mock_df
+        import pandas as pd
+        import numpy as np
+
+        # Create mock VNINDEX data showing bull market (>2% gain)
+        mock_df = pd.DataFrame({"close": np.linspace(100, 110, 50)})  # Uptrend
+        mock_get_vnindex.return_value = mock_df
         mock_safe_get_latest.return_value = 110  # Current close price
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 1.1
 
-    @patch("src.data.loader.load_data")
-    def test_market_regime_factor_bear(self, mock_load_data, risk_manager):
+    @patch("src.data.vnindex_cache.get_cached_vnindex")
+    @patch("utils.dataframe_utils.safe_get_latest")
+    def test_market_regime_factor_bear(self, mock_safe_get_latest, mock_get_vnindex, risk_manager):
         """Test market regime factor in bear market"""
-        # Mock VNINDEX data showing bear market (<-2% loss)
-        mock_df = Mock()
-        mock_df.__len__ = Mock(return_value=50)
-        mock_df.__getitem__ = Mock(
-            return_value=Mock(iloc=Mock(__getitem__=Mock(side_effect=[95, 100])))  # -5% loss
-        )
-        mock_load_data.return_value = mock_df
+        import pandas as pd
+        import numpy as np
+
+        # Create mock VNINDEX data showing bear market (<-2% loss)
+        mock_df = pd.DataFrame({"close": np.linspace(100, 95, 50)})  # Downtrend
+        mock_get_vnindex.return_value = mock_df
+        mock_safe_get_latest.return_value = 95  # Current close price (5% loss)
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 0.6
 
+    @patch("src.data.vnindex_cache.get_cached_vnindex")
     @patch("utils.dataframe_utils.safe_get_latest")
-    @patch("src.data.loader.load_data")
-    def test_market_regime_factor_sideway(self, mock_load_data, mock_safe_get_latest, risk_manager):
+    def test_market_regime_factor_sideway(
+        self, mock_safe_get_latest, mock_get_vnindex, risk_manager
+    ):
         """Test market regime factor in sideway market"""
-        # Mock VNINDEX data showing sideway market (-2% to 2%)
-        mock_df = Mock()
-        mock_df.__len__ = Mock(return_value=50)
-        # Mock the "close" column access for iloc[-20]
-        close_column_mock = Mock()
-        close_column_mock.iloc = Mock()
-        close_column_mock.iloc.__getitem__ = Mock(return_value=100)  # Past close (20 days ago)
-        mock_df.__getitem__ = Mock(return_value=close_column_mock)
-        mock_load_data.return_value = mock_df
-        mock_safe_get_latest.return_value = 101  # Current close price
+        import pandas as pd
+        import numpy as np
+
+        # Create mock VNINDEX data showing sideway market (-2% to 2%)
+        mock_df = pd.DataFrame({"close": np.linspace(100, 101, 50)})  # Flat
+        mock_get_vnindex.return_value = mock_df
+        mock_safe_get_latest.return_value = 101  # Current close price (1% gain)
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 0.8
 
-    @patch("src.data.loader.load_data")
-    def test_market_regime_factor_error_handling(self, mock_load_data, risk_manager):
+    @patch("src.data.vnindex_cache.get_cached_vnindex")
+    def test_market_regime_factor_error_handling(self, mock_get_vnindex, risk_manager):
         """Test market regime factor returns default on error"""
-        # Mock load_data to raise exception
-        mock_load_data.side_effect = Exception("Data not available")
+        # Mock get_cached_vnindex to raise exception
+        mock_get_vnindex.side_effect = Exception("Data not available")
 
         factor = risk_manager._calculate_market_regime_factor()
         assert factor == 1.0  # Default value

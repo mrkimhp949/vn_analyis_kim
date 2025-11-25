@@ -120,11 +120,11 @@ class EnhancedPositionSizer:
         # =================================================================
         if market_regime is None and auto_detect_regime:
             try:
-                from src.data.loader import load_data
+                from src.data.vnindex_cache import get_cached_vnindex
                 from src.market.regime_detector import detect_regime
 
-                # Load VNINDEX data
-                vnindex_df = load_data("VNINDEX", lookback=250, is_index=True)
+                # IMPROVEMENT: Use cached VNINDEX to avoid repeated API calls
+                vnindex_df = get_cached_vnindex(lookback=250)
 
                 if vnindex_df is not None and not vnindex_df.empty:
                     regime_obj = detect_regime(vnindex_df)
@@ -432,21 +432,21 @@ class EnhancedPositionSizer:
         # Use half-Kelly for safety
         half_kelly = kelly * self.kelly_fraction
 
-        # CRITICAL FIX: Raise exception if Kelly is negative (indicates negative EV strategy)
+        # IMPROVED: Warning + conservative fallback instead of exception for negative Kelly
+        # This allows trading to continue with minimal position size while alerting the issue
         if kelly < 0:
-            raise RiskManagementError(
-                f"⚠️ NEGATIVE Kelly ({kelly:.1%}) suggests unfavorable trading odds. "
-                f"Strategy has NEGATIVE expected value. STOP TRADING.",
-                context={
-                    "kelly": kelly,
-                    "win_rate": win_rate,
-                    "win_loss_ratio": avg_win_loss_ratio,
-                    "recommendation": (
-                        "Review strategy parameters. Negative Kelly means "
-                        "you're expected to LOSE money over time."
-                    ),
-                },
+            logger.critical(
+                f"⚠️⚠️⚠️ NEGATIVE Kelly ({kelly:.1%}) detected! "
+                f"Strategy has NEGATIVE expected value. "
+                f"Win rate: {win_rate:.1%}, W/L ratio: {avg_win_loss_ratio:.2f}"
             )
+            logger.warning(
+                "🔧 Using minimum position size (1%) as fallback. "
+                "STRONGLY recommend reviewing strategy parameters!"
+            )
+            # Return minimum position size instead of throwing exception
+            # This allows system to continue operating while flagging the issue
+            return 0.01  # 1% minimum - very conservative
 
         if kelly > 0.5:
             logger.warning(
