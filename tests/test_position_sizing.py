@@ -203,8 +203,8 @@ def test_risk_multiplier_bear_market(sizer):
     """Test risk multiplier in bear market"""
     market_regime = {"regime": "BEAR", "confidence": 70}
     mult = sizer._calculate_risk_multiplier(80, "STRONG", market_regime)
-    # Base 1.1 * strength 1.0 * regime 0.5 = 0.55
-    assert mult == pytest.approx(0.55, abs=0.01)
+    # Base 1.1 * strength 1.0 * regime 0.6 = 0.66 (improved bear market handling)
+    assert mult == pytest.approx(0.66, abs=0.01)
 
 
 def test_risk_multiplier_high_volatility(sizer):

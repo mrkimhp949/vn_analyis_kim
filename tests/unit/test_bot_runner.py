@@ -273,8 +273,9 @@ def test_bot_initialization_failure(caplog):
     """
     import importlib
 
-    # We need to patch 'telegram.Bot' before the module is reloaded
-    with patch("telegram.Bot", side_effect=Exception("Bot init failed")):
+    # We need to patch both 'telegram.Bot' and 'TELEGRAM_TOKEN' before the module is reloaded
+    with patch("telegram.Bot", side_effect=Exception("Bot init failed")), \
+         patch("src.core.bot_runner.TELEGRAM_TOKEN", "test_token"):
         # Reload the bot_runner module to trigger the initialization code
         import src.core.bot_runner as bot_runner_reloaded
 
@@ -319,9 +320,15 @@ def test_main_block(mock_run_bot_sync):
     # The __main__ block is special. We can't just import it.
     # We execute the file as a script and check the side effects.
     import subprocess
+    import os
 
+    # Run as module to avoid import path issues
     result = subprocess.run(
-        ["python", "src/core/bot_runner.py"], capture_output=True, text=True, check=False
+        ["python", "-m", "src.core.bot_runner"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=os.getcwd()  # Ensure we're in the project root
     )
     assert "TESTING BOT RUNNER" in result.stdout
     assert "Chạy thử bot trong 5 giây..." in result.stdout

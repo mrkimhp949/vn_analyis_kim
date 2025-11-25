@@ -132,7 +132,7 @@ def run_bot_sync():
     try:
         asyncio.run(run_bot_with_context(bot, CHAT_ID))
     except ConfigurationError as e:
-        logging.critical(f"CRITICAL CONFIG ERROR: {e.message}")
+        logging.critical(f"CRITICAL CONFIG ERROR: {str(e)}")
         # Maybe send a notification through a different channel if Telegram bot failed
     except Exception:
         logging.critical("❌ Lỗi không xác định khi chạy bot", exc_info=True)
