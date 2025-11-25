@@ -284,9 +284,7 @@ class T2SettlementTracker:
             "sellable_shares": sellable_shares,
         }
 
-    def get_pending_settlements(
-        self, settled: Optional[bool] = None
-    ) -> List[SettlementRecord]:
+    def get_pending_settlements(self, settled: Optional[bool] = None) -> List[SettlementRecord]:
         """
         Get pending settlements, optionally filtered by settled status
 
@@ -363,7 +361,9 @@ class T2SettlementTracker:
         cleaned = before_count - after_count
 
         if cleaned > 0:
-            logger.info(f"🧹 Cleaned up {cleaned} old settlement records (kept last {days_to_keep} days)")
+            logger.info(
+                f"🧹 Cleaned up {cleaned} old settlement records (kept last {days_to_keep} days)"
+            )
 
         return cleaned
 

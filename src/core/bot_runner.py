@@ -38,8 +38,8 @@ try:
     else:
         logging.warning("⚠️ TELEGRAM_TOKEN không khả dụng")
         bot = None
-except Exception:
-    logging.critical("❌ Lỗi khởi tạo Telegram bot")
+except Exception as e:
+    logging.critical(f"❌ Lỗi khởi tạo Telegram bot: {e}")
     bot = None
 
 try:
@@ -132,6 +132,7 @@ def run_bot_sync():
     try:
         asyncio.run(run_bot_with_context(bot, CHAT_ID))
     except ConfigurationError as e:
+        # Fix: Use str(e) instead of e.message for compatibility
         logging.critical(f"CRITICAL CONFIG ERROR: {str(e)}")
         # Maybe send a notification through a different channel if Telegram bot failed
     except Exception:

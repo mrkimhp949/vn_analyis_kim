@@ -821,7 +821,10 @@ class ImprovedEntryLogic:
             return (
                 False,
                 f"Reward không hợp lệ sau khi trừ phí: {reward:.0f} (before costs: {reward_before_costs:.0f})",
-                0, 0, [], 0
+                0,
+                0,
+                [],
+                0,
             )
 
         # Calculate realistic R:R with transaction costs

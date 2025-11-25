@@ -159,7 +159,9 @@ def add_enhanced_features(
     try:
         # 10. VOLUME-PRICE RELATIONSHIP
         # OBV (On-Balance Volume)
-        df["obv"] = ta.volume.OnBalanceVolumeIndicator(df["close"], df["volume"]).on_balance_volume()
+        df["obv"] = ta.volume.OnBalanceVolumeIndicator(
+            df["close"], df["volume"]
+        ).on_balance_volume()
         df["obv_ema"] = df["obv"].ewm(span=20).mean()
         df["obv_signal"] = (df["obv"] > df["obv_ema"]).astype(int)
 

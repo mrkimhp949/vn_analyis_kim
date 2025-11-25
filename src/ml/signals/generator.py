@@ -235,7 +235,7 @@ class MLSignalGenerator:
                 self._track_failure(
                     f"missing_{len(missing_features)}_features",
                     symbol=symbol,
-                    features=list(missing_features)
+                    features=list(missing_features),
                 )
                 return self._fallback_technical_analysis(df)
 
@@ -636,7 +636,9 @@ class MLSignalGenerator:
                 f"{overall_accuracy:.1%}"
             )
 
-    def _track_failure(self, reason: str, symbol: Optional[str] = None, features: Optional[list] = None):
+    def _track_failure(
+        self, reason: str, symbol: Optional[str] = None, features: Optional[list] = None
+    ):
         """
         Track ML analysis failure for diagnostics
 
@@ -706,19 +708,19 @@ class MLSignalGenerator:
         logger.info(f"Successful: {stats['successful_analyses']} ({stats['success_rate']:.1f}%)")
         logger.info(f"Failed: {stats['failed_analyses']} ({stats['failure_rate']:.1f}%)")
 
-        if stats['top_failure_reasons']:
+        if stats["top_failure_reasons"]:
             logger.info("\nTop Failure Reasons:")
-            for i, (reason, count) in enumerate(stats['top_failure_reasons'], 1):
+            for i, (reason, count) in enumerate(stats["top_failure_reasons"], 1):
                 logger.info(f"  {i}. {reason}: {count}")
 
-        if stats['top_failed_symbols']:
+        if stats["top_failed_symbols"]:
             logger.info("\nTop Failed Symbols:")
-            for i, (symbol, count) in enumerate(stats['top_failed_symbols'], 1):
+            for i, (symbol, count) in enumerate(stats["top_failed_symbols"], 1):
                 logger.info(f"  {i}. {symbol}: {count}")
 
-        if stats['top_missing_features']:
+        if stats["top_missing_features"]:
             logger.info("\nTop Missing Features:")
-            for i, (feature, count) in enumerate(stats['top_missing_features'], 1):
+            for i, (feature, count) in enumerate(stats["top_missing_features"], 1):
                 logger.info(f"  {i}. {feature}: {count}")
 
         logger.info("=" * 70 + "\n")
