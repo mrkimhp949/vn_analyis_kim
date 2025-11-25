@@ -46,83 +46,153 @@ def add_enhanced_features(
     df = df.copy()
 
     # ========================================================================
-    # BASE FEATURES (từ features.py cũ)
+    # BASE FEATURES (từ features.py cũ) - WITH ROBUST ERROR HANDLING
     # ========================================================================
 
-    # 1. Moving Averages
-    df["sma20"] = df["close"].rolling(20).mean()
-    df["ema20"] = df["close"].ewm(span=20).mean()
-    df["ema50"] = df["close"].ewm(span=50).mean()
+    try:
+        # 1. Moving Averages
+        df["sma20"] = df["close"].rolling(20).mean()
+        df["ema20"] = df["close"].ewm(span=20).mean()
+        df["ema50"] = df["close"].ewm(span=50).mean()
+    except Exception as e:
+        logger.warning(f"⚠️ Moving averages failed: {e}")
+        df["sma20"] = df["close"]
+        df["ema20"] = df["close"]
+        df["ema50"] = df["close"]
 
-    # 2. RSI
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-    df["rsi_signal"] = (df["rsi"] > 30) & (df["rsi"] < 70)
+    try:
+        # 2. RSI
+        df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+        df["rsi_signal"] = (df["rsi"] > 30) & (df["rsi"] < 70)
+    except Exception as e:
+        logger.warning(f"⚠️ RSI calculation failed: {e}")
+        df["rsi"] = 50.0  # Neutral RSI
+        df["rsi_signal"] = True
 
-    # 3. ATR
-    df["atr"] = ta.volatility.AverageTrueRange(
-        df["high"], df["low"], df["close"], window=14
-    ).average_true_range()
+    try:
+        # 3. ATR
+        df["atr"] = ta.volatility.AverageTrueRange(
+            df["high"], df["low"], df["close"], window=14
+        ).average_true_range()
+    except Exception as e:
+        logger.warning(f"⚠️ ATR calculation failed: {e}")
+        df["atr"] = df["close"] * 0.02  # 2% of price as fallback
 
-    # 4. MACD
-    macd = ta.trend.MACD(df["close"])
-    df["macd"] = macd.macd()
-    df["macd_signal"] = macd.macd_signal()
-    df["macd_dif"] = macd.macd_diff()
-    df["macd_signal_line"] = (df["macd"] > df["macd_signal"]).astype(int)
+    try:
+        # 4. MACD
+        macd = ta.trend.MACD(df["close"])
+        df["macd"] = macd.macd()
+        df["macd_signal"] = macd.macd_signal()
+        df["macd_dif"] = macd.macd_diff()
+        df["macd_signal_line"] = (df["macd"] > df["macd_signal"]).astype(int)
+    except Exception as e:
+        logger.warning(f"⚠️ MACD calculation failed: {e}")
+        df["macd"] = 0.0
+        df["macd_signal"] = 0.0
+        df["macd_dif"] = 0.0
+        df["macd_signal_line"] = 0
 
-    # 5. Bollinger Bands
-    bb = ta.volatility.BollingerBands(df["close"])
-    df["bb_high"] = bb.bollinger_hband()
-    df["bb_low"] = bb.bollinger_lband()
-    df["bb_mid"] = bb.bollinger_mavg()
-    df["bb_width"] = (df["bb_high"] - df["bb_low"]) / df["bb_mid"]
-    df["bb_position"] = (df["close"] - df["bb_low"]) / (df["bb_high"] - df["bb_low"])
+    try:
+        # 5. Bollinger Bands
+        bb = ta.volatility.BollingerBands(df["close"])
+        df["bb_high"] = bb.bollinger_hband()
+        df["bb_low"] = bb.bollinger_lband()
+        df["bb_mid"] = bb.bollinger_mavg()
+        df["bb_width"] = (df["bb_high"] - df["bb_low"]) / df["bb_mid"]
+        df["bb_position"] = (df["close"] - df["bb_low"]) / (df["bb_high"] - df["bb_low"])
+    except Exception as e:
+        logger.warning(f"⚠️ Bollinger Bands calculation failed: {e}")
+        df["bb_high"] = df["close"] * 1.02
+        df["bb_low"] = df["close"] * 0.98
+        df["bb_mid"] = df["close"]
+        df["bb_width"] = 0.04  # 4% width
+        df["bb_position"] = 0.5  # Middle
 
-    # 6. Momentum
-    df["momentum_5"] = df["close"].pct_change(5)
-    df["momentum_10"] = df["close"].pct_change(10)
-    df["momentum_20"] = df["close"].pct_change(20)
+    try:
+        # 6. Momentum
+        df["momentum_5"] = df["close"].pct_change(5)
+        df["momentum_10"] = df["close"].pct_change(10)
+        df["momentum_20"] = df["close"].pct_change(20)
+    except Exception as e:
+        logger.warning(f"⚠️ Momentum calculation failed: {e}")
+        df["momentum_5"] = 0.0
+        df["momentum_10"] = 0.0
+        df["momentum_20"] = 0.0
 
-    # 7. Volume
-    df["volume_sma20"] = df["volume"].rolling(20).mean()
-    df["volume_ratio"] = df["volume"] / df["volume_sma20"]
-    df["volume_surge"] = (df["volume_ratio"] > 1.5).astype(int)
+    try:
+        # 7. Volume
+        df["volume_sma20"] = df["volume"].rolling(20).mean()
+        df["volume_ratio"] = df["volume"] / df["volume_sma20"]
+        df["volume_surge"] = (df["volume_ratio"] > 1.5).astype(int)
+    except Exception as e:
+        logger.warning(f"⚠️ Volume features failed: {e}")
+        df["volume_sma20"] = df["volume"]
+        df["volume_ratio"] = 1.0
+        df["volume_surge"] = 0
 
-    # 8. Volatility
-    df["volatility_20"] = df["close"].pct_change().rolling(20).std()
+    try:
+        # 8. Volatility
+        df["volatility_20"] = df["close"].pct_change().rolling(20).std()
+    except Exception as e:
+        logger.warning(f"⚠️ Volatility calculation failed: {e}")
+        df["volatility_20"] = 0.02  # 2% default volatility
 
     # ========================================================================
-    # NEW FEATURES
+    # NEW FEATURES - WITH ROBUST ERROR HANDLING
     # ========================================================================
 
-    # 9. PRICE MOMENTUM INDICATORS
-    df["roc_5"] = ta.momentum.ROCIndicator(df["close"], window=5).roc()
-    df["roc_10"] = ta.momentum.ROCIndicator(df["close"], window=10).roc()
-    df["stoch_k"] = ta.momentum.StochasticOscillator(df["high"], df["low"], df["close"]).stoch()
-    df["stoch_d"] = ta.momentum.StochasticOscillator(
-        df["high"], df["low"], df["close"]
-    ).stoch_signal()
+    try:
+        # 9. PRICE MOMENTUM INDICATORS
+        df["roc_5"] = ta.momentum.ROCIndicator(df["close"], window=5).roc()
+        df["roc_10"] = ta.momentum.ROCIndicator(df["close"], window=10).roc()
+        df["stoch_k"] = ta.momentum.StochasticOscillator(df["high"], df["low"], df["close"]).stoch()
+        df["stoch_d"] = ta.momentum.StochasticOscillator(
+            df["high"], df["low"], df["close"]
+        ).stoch_signal()
+    except Exception as e:
+        logger.warning(f"⚠️ Price momentum indicators failed: {e}")
+        df["roc_5"] = 0.0
+        df["roc_10"] = 0.0
+        df["stoch_k"] = 50.0
+        df["stoch_d"] = 50.0
 
-    # 10. VOLUME-PRICE RELATIONSHIP
-    # OBV (On-Balance Volume)
-    df["obv"] = ta.volume.OnBalanceVolumeIndicator(df["close"], df["volume"]).on_balance_volume()
-    df["obv_ema"] = df["obv"].ewm(span=20).mean()
-    df["obv_signal"] = (df["obv"] > df["obv_ema"]).astype(int)
+    try:
+        # 10. VOLUME-PRICE RELATIONSHIP
+        # OBV (On-Balance Volume)
+        df["obv"] = ta.volume.OnBalanceVolumeIndicator(
+            df["close"], df["volume"]
+        ).on_balance_volume()
+        df["obv_ema"] = df["obv"].ewm(span=20).mean()
+        df["obv_signal"] = (df["obv"] > df["obv_ema"]).astype(int)
 
-    # Volume-Weighted Average Price (VWAP)
-    df["vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
-    df["price_vs_vwap"] = (df["close"] - df["vwap"]) / df["vwap"]
+        # Volume-Weighted Average Price (VWAP)
+        df["vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+        df["price_vs_vwap"] = (df["close"] - df["vwap"]) / df["vwap"]
+    except Exception as e:
+        logger.warning(f"⚠️ Volume-price relationship failed: {e}")
+        df["obv"] = 0.0
+        df["obv_ema"] = 0.0
+        df["obv_signal"] = 0
+        df["vwap"] = df["close"]
+        df["price_vs_vwap"] = 0.0
 
-    # 11. VOLATILITY REGIME
-    # Historical Volatility
-    df["hv_10"] = df["close"].pct_change().rolling(10).std() * np.sqrt(252)
-    df["hv_20"] = df["close"].pct_change().rolling(20).std() * np.sqrt(252)
-    df["hv_ratio"] = df["hv_10"] / df["hv_20"]
+    try:
+        # 11. VOLATILITY REGIME
+        # Historical Volatility
+        df["hv_10"] = df["close"].pct_change().rolling(10).std() * np.sqrt(252)
+        df["hv_20"] = df["close"].pct_change().rolling(20).std() * np.sqrt(252)
+        df["hv_ratio"] = df["hv_10"] / df["hv_20"]
 
-    # ATR Percentile
-    df["atr_percentile"] = (
-        df["atr"].rolling(50).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
-    )
+        # ATR Percentile
+        df["atr_percentile"] = (
+            df["atr"].rolling(50).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Volatility regime failed: {e}")
+        df["hv_10"] = 0.02
+        df["hv_20"] = 0.02
+        df["hv_ratio"] = 1.0
+        df["atr_percentile"] = 0.5
 
     # 12. MARKET MICROSTRUCTURE
     # High-Low Range
@@ -222,15 +292,22 @@ def add_enhanced_features(
     df["distance_to_resistance"] = (df["resistance_20"] - df["close"]) / df["close"]
     df["distance_to_support"] = (df["close"] - df["support_20"]) / df["close"]
 
-    # 18. TREND STRENGTH
-    # ADX (Average Directional Index)
-    adx = ta.trend.ADXIndicator(df["high"], df["low"], df["close"])
-    df["adx"] = adx.adx()
-    df["adx_pos"] = adx.adx_pos()
-    df["adx_neg"] = adx.adx_neg()
+    try:
+        # 18. TREND STRENGTH
+        # ADX (Average Directional Index)
+        adx = ta.trend.ADXIndicator(df["high"], df["low"], df["close"])
+        df["adx"] = adx.adx()
+        df["adx_pos"] = adx.adx_pos()
+        df["adx_neg"] = adx.adx_neg()
 
-    # EMA alignment (trend confirmation)
-    df["ema_alignment"] = (df["ema20"] > df["ema50"]).astype(int)
+        # EMA alignment (trend confirmation)
+        df["ema_alignment"] = (df["ema20"] > df["ema50"]).astype(int)
+    except Exception as e:
+        logger.warning(f"⚠️ Trend strength (ADX) failed: {e}")
+        df["adx"] = 25.0  # Neutral ADX
+        df["adx_pos"] = 20.0
+        df["adx_neg"] = 20.0
+        df["ema_alignment"] = 1  # Assume uptrend
 
     # ========================================================================
     # TARGET
@@ -238,12 +315,47 @@ def add_enhanced_features(
     df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
 
     # ========================================================================
-    # FILL NaN
+    # FILL NaN - ROBUST STRATEGY
     # ========================================================================
-    # Forward fill then backward fill (pandas 2.0+ compatible)
-    df = df.ffill()  # Replaces fillna(method="ffill")
-    df = df.bfill()  # Replaces fillna(method="bfill")
-    df = df.fillna(0)  # Fill remaining NaN with 0
+    # Get list of required features
+    required_features = get_feature_columns()
+
+    # Ensure all required features exist
+    for feature in required_features:
+        if feature not in df.columns:
+            logger.warning(f"⚠️ Missing feature: {feature}, adding with default value 0")
+            df[feature] = 0.0
+
+    # Fill NaN values intelligently
+    # 1. Forward fill (use previous valid value)
+    df[required_features] = df[required_features].ffill()
+
+    # 2. Backward fill (for leading NaNs)
+    df[required_features] = df[required_features].bfill()
+
+    # 3. Fill remaining NaN with sensible defaults
+    for feature in required_features:
+        if df[feature].isna().any():
+            # Use median for ratio/percentage features, 0 for others
+            if any(keyword in feature.lower() for keyword in ["ratio", "pct", "momentum", "roc"]):
+                default_value = 0.0
+            elif "rsi" in feature.lower():
+                default_value = 50.0  # Neutral RSI
+            elif "stoch" in feature.lower():
+                default_value = 50.0  # Neutral stochastic
+            elif "signal" in feature.lower():
+                default_value = 0  # Binary signal
+            else:
+                default_value = 0.0
+
+            df[feature] = df[feature].fillna(default_value)
+            logger.debug(f"Filled NaN in {feature} with {default_value}")
+
+    # Final check: ensure no NaN in required features
+    nan_count = df[required_features].isna().sum().sum()
+    if nan_count > 0:
+        logger.warning(f"⚠️ {nan_count} NaN values remain after filling, using 0 as last resort")
+        df[required_features] = df[required_features].fillna(0)
 
     return df
 

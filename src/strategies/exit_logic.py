@@ -73,6 +73,8 @@ class ImprovedExitStrategy:
         # SIMPLIFIED PROFIT PROTECTION: Single threshold replaces complex 3-5-8% logic
         profit_protection_activation: float = 0.05,  # Activate at 5% profit
         profit_protection_percent: float = 0.50,  # Protect 50% of max profit
+        # ENHANCEMENT: Account for transaction costs in Vietnam market
+        include_transaction_costs: bool = True,  # Use realistic P&L including costs
     ):
         self.tp_levels = take_profit_levels
         self.sl_atr_mult = stop_loss_atr_multiplier
@@ -87,6 +89,7 @@ class ImprovedExitStrategy:
         # SIMPLIFIED: Profit protection config
         self.profit_protection_activation = profit_protection_activation
         self.profit_protection_percent = profit_protection_percent
+        self.include_transaction_costs = include_transaction_costs
 
         # Tracking
         self.position_highs = {}  # {symbol: highest_price_since_entry}
@@ -130,9 +133,26 @@ class ImprovedExitStrategy:
         # Pass df for ATR-based calculation if needed
         stop_loss = self._ensure_stop_loss(symbol, entry_price, stop_loss, df)
 
-        # Calculate P&L
-        pnl_percent = ((current_price - entry_price) / entry_price) * 100
-        pnl_amount = current_price - entry_price  # Per share
+        # Calculate P&L with transaction costs
+        if self.include_transaction_costs:
+            from src.config.constants import ROUND_TRIP_COST
+
+            # Realistic P&L = price change - round trip costs (0.9%)
+            gross_pnl_percent = ((current_price - entry_price) / entry_price) * 100
+            transaction_cost_percent = ROUND_TRIP_COST * 100
+            pnl_percent = gross_pnl_percent - transaction_cost_percent
+
+            # Per share: price change - (entry cost + exit cost)
+            pnl_amount = (current_price - entry_price) - (entry_price * ROUND_TRIP_COST)
+
+            logger.debug(
+                f"📊 {symbol} P&L: Gross {gross_pnl_percent:+.2f}% - "
+                f"Costs {transaction_cost_percent:.2f}% = Net {pnl_percent:+.2f}%"
+            )
+        else:
+            # Legacy: P&L without costs
+            pnl_percent = ((current_price - entry_price) / entry_price) * 100
+            pnl_amount = current_price - entry_price  # Per share
 
         # CRITICAL FIX: Use trading days instead of calendar days
         # to account for weekends and holidays

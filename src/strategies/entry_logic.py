@@ -54,22 +54,30 @@ class EntrySignal:
 
 class ImprovedEntryLogic:
     """
-    Logic vào lệnh nâng cao với 12 filters:
+    Logic vào lệnh nâng cao với 9 core filters (simplified from 12):
 
+    CORE FILTERS (Always applied):
     1. Market Regime - Thị trường phải tradeable
+    1a. Vietnam Price Limits - Avoid floor/ceiling (±7%)
     2. Trend Alignment - EMA alignment (20/50/200)
     3. Support/Resistance - Vào gần support, tránh resistance
     4. Volume Confirmation - Volume + OBV + trend
     5. Liquidity Check - Tiered thresholds (large/mid/small/micro caps)
+    5a. Vietnam Market Liquidity - Min 2B VND daily value
     6. Volatility Filter - ATR/Price trong range hợp lý
-    7. RSI Check - Tránh overbought
-    8. Price Action - Candlestick patterns
-    9. Sector Strength - Relative strength vs market
-    10. Multi-Timeframe - Weekly/monthly trend confirmation
-    11. Market Breadth - Advance/decline ratio
+    7. RSI Check - Tránh overbought, favor oversold
+    10. Multi-Timeframe - Weekly trend confirmation (simplified)
     12. Portfolio Correlation - Đa dạng hóa portfolio
 
-    Features:
+    OPTIONAL FILTERS (Can be disabled):
+    8. Price Action - Candlestick patterns (low impact)
+    9. Sector Strength - Relative strength vs market (redundant with correlation)
+    11. Market Breadth - Advance/decline ratio (redundant with regime)
+
+    IMPROVEMENTS:
+    - Reduced from 12 to 9 filters to lower false negative rate
+    - Transaction costs (0.9% round trip) included in R:R
+    - Vietnam market price limits (±7%) validation
     - Dynamic penalty scaling based on market regime (BULL/BEAR/SIDEWAYS)
     - ML fallback to technical analysis when ML signal unavailable
     - Tiered liquidity thresholds for different market cap sizes
@@ -88,6 +96,11 @@ class ImprovedEntryLogic:
         min_liquidity_value: float = 5_000_000_000,  # 5B VND daily value (for large caps)
         min_avg_volume: int = 150_000,
         use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
+        # SIMPLIFIED: Optional filters (disabled by default to reduce false negatives)
+        use_price_action_filter: bool = False,  # Candlestick patterns (subjective, low impact)
+        use_sector_strength_filter: bool = False,  # Redundant with correlation check
+        use_market_breadth_filter: bool = False,  # Redundant with market regime
+        use_monthly_timeframe: bool = False,  # Only use weekly timeframe check
     ):
         """
         Args:
@@ -112,6 +125,12 @@ class ImprovedEntryLogic:
         self.min_avg_volume = min_avg_volume
         self.use_tiered_liquidity = use_tiered_liquidity
         self._current_symbol = None
+
+        # Optional filter flags
+        self.use_price_action_filter = use_price_action_filter
+        self.use_sector_strength_filter = use_sector_strength_filter
+        self.use_market_breadth_filter = use_market_breadth_filter
+        self.use_monthly_timeframe = use_monthly_timeframe
 
         # Tiered liquidity thresholds from config (replaces hardcoded values)
         from src.config.strategy_config import get_strategy_config
@@ -266,6 +285,35 @@ class ImprovedEntryLogic:
                 [],
                 adjustment_breakdown,
             )
+
+        # FILTER 1a: VIETNAM PRICE LIMITS (NEW)
+        # Check early to avoid wasting compute on stocks near floor/ceiling
+        price_limit_check = self._check_vietnam_price_limits(df, current_price)
+        if price_limit_check["near_limit"]:
+            limit_type = price_limit_check["limit_type"]
+            warning_msg = price_limit_check["warning"]
+
+            # CEILING: Block entry (too risky)
+            if limit_type == "CEILING":
+                adjustment_breakdown.append(
+                    {
+                        "filter": "vietnam_price_limits",
+                        "delta": None,
+                        "note": warning_msg,
+                    }
+                )
+                return (False, [], [], [], adjustment_breakdown)
+
+            # FLOOR: Allow but with strong warning and penalty
+            elif limit_type == "FLOOR":
+                warnings.append(f"⚠️ {warning_msg}")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vietnam_price_limits",
+                    -20,  # Strong penalty for floor trading
+                    warning_msg,
+                )
 
         # FILTER 2: TREND ALIGNMENT
         trend_check = self._check_trend_alignment(df, signal_type)
@@ -521,53 +569,55 @@ class ImprovedEntryLogic:
                 "Optimal RSI",
             )
 
-        # FILTER 8: PRICE ACTION
-        price_action = self._check_price_action(df)
-        if price_action["bullish_pattern"]:
-            pattern_note = f"Pattern: {price_action['pattern']}"
-            reasons.append(f"✅ {pattern_note}")
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "price_action",
-                +10,
-                pattern_note,
-            )
-        elif price_action["bearish_pattern"]:
-            warning_msg = f"⚠️ Pattern: {price_action['pattern']}"
-            warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "price_action",
-                -10,
-                warning_msg,
-            )
+        # FILTER 8: PRICE ACTION (OPTIONAL - disabled by default)
+        if self.use_price_action_filter:
+            price_action = self._check_price_action(df)
+            if price_action["bullish_pattern"]:
+                pattern_note = f"Pattern: {price_action['pattern']}"
+                reasons.append(f"✅ {pattern_note}")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "price_action",
+                    +10,
+                    pattern_note,
+                )
+            elif price_action["bearish_pattern"]:
+                warning_msg = f"⚠️ Pattern: {price_action['pattern']}"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "price_action",
+                    -10,
+                    warning_msg,
+                )
 
-        # FILTER 9: SECTOR STRENGTH
-        sector_strength_check = self._check_sector_strength(df, market_regime)
-        if sector_strength_check["is_leading"]:
-            reason_msg = f"Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)"
-            reasons.append(f"✅ {reason_msg}")
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "sector_strength",
-                +10,
-                reason_msg,
-            )
-        elif sector_strength_check["is_lagging"]:
-            warning_msg = f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)"
-            warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "sector_strength",
-                -15,
-                warning_msg,
-            )
+        # FILTER 9: SECTOR STRENGTH (OPTIONAL - disabled by default, redundant with correlation)
+        if self.use_sector_strength_filter:
+            sector_strength_check = self._check_sector_strength(df, market_regime)
+            if sector_strength_check["is_leading"]:
+                reason_msg = f"Ngành dẫn dắt ({sector_strength_check['sector_perf']:.1f}%)"
+                reasons.append(f"✅ {reason_msg}")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector_strength",
+                    +10,
+                    reason_msg,
+                )
+            elif sector_strength_check["is_lagging"]:
+                warning_msg = f"⚠️ Ngành yếu ({sector_strength_check['sector_perf']:.1f}%)"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector_strength",
+                    -15,
+                    warning_msg,
+                )
 
-        # FILTER 10: MULTI-TIMEFRAME CONFIRMATION
+        # FILTER 10: MULTI-TIMEFRAME CONFIRMATION (SIMPLIFIED - weekly only by default)
         mtf_check = self._check_multi_timeframe_trend(df)
         if not mtf_check["weekly_up"]:
             warning_msg = f"⚠️ Weekly trend yếu ({mtf_check['weekly_change']:.1f}%)"
@@ -581,40 +631,44 @@ class ImprovedEntryLogic:
             )
         else:
             reasons.append(f"✅ Weekly trend tăng ({mtf_check['weekly_change']:+.1f}%)")
-        if not mtf_check["monthly_up"]:
-            warning_msg = f"⚠️ Monthly trend yếu ({mtf_check['monthly_change']:.1f}%)"
-            warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "multi_timeframe",
-                -5,
-                warning_msg,
-            )
-        else:
-            reasons.append(f"✅ Monthly trend tăng ({mtf_check['monthly_change']:+.1f}%)")
 
-        # FILTER 11: MARKET BREADTH
-        breadth_check = self._check_market_breadth(market_regime)
-        if breadth_check["weak"]:
-            warning_msg = "⚠️ Market breadth yếu (ít mã tham gia tăng)"
-            warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "market_breadth",
-                -10,
-                warning_msg,
-            )
-        elif breadth_check["strong"]:
-            reasons.append("✅ Market breadth mạnh (nhiều mã tham gia)")
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "market_breadth",
-                +5,
-                "Market breadth strong",
-            )
+        # Monthly check is optional (disabled by default to reduce false negatives)
+        if self.use_monthly_timeframe:
+            if not mtf_check["monthly_up"]:
+                warning_msg = f"⚠️ Monthly trend yếu ({mtf_check['monthly_change']:.1f}%)"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "multi_timeframe",
+                    -5,
+                    warning_msg,
+                )
+            else:
+                reasons.append(f"✅ Monthly trend tăng ({mtf_check['monthly_change']:+.1f}%)")
+
+        # FILTER 11: MARKET BREADTH (OPTIONAL - disabled by default, redundant with regime)
+        if self.use_market_breadth_filter:
+            breadth_check = self._check_market_breadth(market_regime)
+            if breadth_check["weak"]:
+                warning_msg = "⚠️ Market breadth yếu (ít mã tham gia tăng)"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "market_breadth",
+                    -10,
+                    warning_msg,
+                )
+            elif breadth_check["strong"]:
+                reasons.append("✅ Market breadth mạnh (nhiều mã tham gia)")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "market_breadth",
+                    +5,
+                    "Market breadth strong",
+                )
 
         # FILTER 12: PORTFOLIO CORRELATION
         correlation_check = self._check_portfolio_correlation(
@@ -665,10 +719,15 @@ class ImprovedEntryLogic:
         """
         Calculate entry price, stop loss, take profit targets, and risk/reward
 
+        ENHANCEMENT: Includes transaction costs (0.45% per trade) and round-trip costs (0.9%)
+        for realistic risk/reward calculations in Vietnam market
+
         Returns:
             (success, error_msg, stop_loss, reward, take_profit_targets,
              risk_reward)
         """
+        from src.config.constants import TOTAL_TRANSACTION_COST, ROUND_TRIP_COST, DEFAULT_SLIPPAGE
+
         atr = IndicatorUtils.get_atr(df)
         support_level = sr_check.get("support_level", None)
 
@@ -725,12 +784,22 @@ class ImprovedEntryLogic:
         except ValueError as e:
             return (False, f"Take profit calculation failed: {str(e)}", 0, 0, [], 0)
 
-        # Risk/Reward check
-        risk = entry_price - stop_loss
+        # Risk/Reward check with transaction costs
+        # CRITICAL FIX: Account for Vietnam market transaction costs (0.9% round trip)
+        # Real risk includes entry cost, real reward excludes exit cost
+
+        # Entry cost = entry slippage + commission
+        entry_cost = entry_price * TOTAL_TRANSACTION_COST
+        # Exit cost = exit slippage + commission
+        exit_cost = entry_price * TOTAL_TRANSACTION_COST  # Use entry_price as approximation
+
+        # Adjusted risk: includes entry cost and potential stop loss cost
+        risk = (entry_price - stop_loss) + entry_cost + (stop_loss * DEFAULT_SLIPPAGE)
+
         if risk <= 0:
             error_msg = (
                 f"Risk calculation error: risk={risk:.0f} "
-                f"(entry={entry_price:.0f}, sl={stop_loss:.0f})"
+                f"(entry={entry_price:.0f}, sl={stop_loss:.0f}, costs={entry_cost:.0f})"
             )
             return (False, error_msg, 0, 0, [], 0)
 
@@ -744,19 +813,36 @@ class ImprovedEntryLogic:
                 0,
             )
 
-        reward = take_profit_targets[1] - entry_price  # Use TP2
-        if reward <= 0:
-            return (False, f"Reward không hợp lệ: {reward:.0f}", 0, 0, [], 0)
+        # Adjusted reward: subtract exit costs
+        reward_before_costs = take_profit_targets[1] - entry_price  # Use TP2
+        reward = reward_before_costs - exit_cost
 
+        if reward <= 0:
+            return (
+                False,
+                f"Reward không hợp lệ sau khi trừ phí: {reward:.0f} (before costs: {reward_before_costs:.0f})",
+                0,
+                0,
+                [],
+                0,
+            )
+
+        # Calculate realistic R:R with transaction costs
         risk_reward = reward / risk
-        # IMPROVED: Enforce minimum R:R ratio for favorable risk-adjusted returns
-        # Vietnam market: Higher R:R needed due to transaction costs and slippage
+
+        # IMPROVED: Enforce minimum R:R ratio accounting for Vietnam transaction costs (0.9% round trip)
+        # With 0.9% costs, need higher R:R for positive expectancy
         if risk_reward < self.min_risk_reward:
             error_msg = (
                 f"R:R ratio thấp: {risk_reward:.2f} < {self.min_risk_reward:.2f} "
-                "(need asymmetric upside for positive expectancy)"
+                f"(after 0.9% transaction costs - need asymmetric upside for positive expectancy)"
             )
             return (False, error_msg, 0, 0, [], 0)
+
+        logger.debug(
+            f"✅ R:R calculation: risk={risk:.0f} (incl. {entry_cost:.0f} entry cost), "
+            f"reward={reward:.0f} (after {exit_cost:.0f} exit cost), R:R={risk_reward:.2f}"
+        )
 
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
 
@@ -2051,6 +2137,85 @@ class ImprovedEntryLogic:
             return {
                 "sufficient": True,
                 "reason": f"Liquidity check error: {str(e)}",
+            }
+
+    def _check_vietnam_price_limits(self, df: pd.DataFrame, current_price: float) -> Dict:
+        """
+        NEW: Check if stock is near Vietnam market price limits (±7% floor/ceiling)
+
+        In Vietnam market, stocks can only move ±7% per day from reference price.
+        Trading near floor/ceiling has different implications:
+        - Near ceiling (>+6%): May hit ceiling, hard to buy, potential reversal
+        - Near floor (<-6%): May hit floor, potential bounce but risky
+
+        Returns:
+            Dict with near_limit flag, limit_type, and distance
+        """
+        from src.config.constants import VIETNAM_PRICE_LIMIT_PERCENT
+
+        if len(df) < 2:
+            return {
+                "near_limit": False,
+                "limit_type": None,
+                "distance_to_limit": 0,
+                "warning": None,
+            }
+
+        try:
+            # Reference price = yesterday's close
+            reference_price = df["close"].iloc[-2]
+            if reference_price <= 0:
+                return {
+                    "near_limit": False,
+                    "limit_type": None,
+                    "distance_to_limit": 0,
+                    "warning": "Invalid reference price",
+                }
+
+            # Calculate daily change from reference
+            daily_change_pct = ((current_price - reference_price) / reference_price) * 100
+
+            # Price limits
+            ceiling_price = reference_price * (1 + VIETNAM_PRICE_LIMIT_PERCENT)
+            floor_price = reference_price * (1 - VIETNAM_PRICE_LIMIT_PERCENT)
+
+            # Check proximity to limits (within 1% of limit = "near")
+            near_ceiling = daily_change_pct >= (VIETNAM_PRICE_LIMIT_PERCENT - 0.01) * 100  # >+6%
+            near_floor = daily_change_pct <= -(VIETNAM_PRICE_LIMIT_PERCENT - 0.01) * 100  # <-6%
+
+            if near_ceiling:
+                return {
+                    "near_limit": True,
+                    "limit_type": "CEILING",
+                    "distance_to_limit": daily_change_pct,
+                    "warning": f"Gần ceiling (+{daily_change_pct:.1f}%) - rủi ro hit limit, khó mua",
+                    "ceiling_price": ceiling_price,
+                    "reference_price": reference_price,
+                }
+            elif near_floor:
+                return {
+                    "near_limit": True,
+                    "limit_type": "FLOOR",
+                    "distance_to_limit": daily_change_pct,
+                    "warning": f"Gần floor ({daily_change_pct:.1f}%) - có thể bounce nhưng rủi ro cao",
+                    "floor_price": floor_price,
+                    "reference_price": reference_price,
+                }
+
+            return {
+                "near_limit": False,
+                "limit_type": None,
+                "distance_to_limit": daily_change_pct,
+                "warning": None,
+            }
+
+        except Exception as e:
+            logger.warning(f"Error checking Vietnam price limits: {e}")
+            return {
+                "near_limit": False,
+                "limit_type": None,
+                "distance_to_limit": 0,
+                "warning": f"Price limit check error: {str(e)}",
             }
 
     def _no_signal(self, reason: str, telemetry: Optional[Dict] = None) -> EntrySignal:

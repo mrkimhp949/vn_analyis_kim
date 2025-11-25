@@ -496,6 +496,89 @@ class MLPredictor:
 
         return ensemble_pred
 
+    def validate_models(self) -> bool:
+        """
+        Validate ML models with sample data to ensure they work correctly
+
+        IMPROVEMENT: Pre-flight check to catch issues before production
+
+        Returns:
+            True if models are valid and ready for use, False otherwise
+        """
+        if not self.ml_enabled:
+            logger.warning("ML is disabled, skipping validation")
+            return False
+
+        try:
+            logger.info("🔍 Validating ML models...")
+
+            # Generate sample data with correct number of features
+            n_samples = 10
+            X_sample = np.random.randn(n_samples, self.expected_features)
+
+            # Test scaling
+            if hasattr(self.scaler, "mean_"):
+                X_scaled = self.scaler.transform(X_sample)
+                logger.debug(f"✅ Scaler works (input: {X_sample.shape}, output: {X_scaled.shape})")
+            else:
+                logger.warning("⚠️ Scaler not fitted, using raw features")
+                X_scaled = X_sample
+
+            # Test predictions
+            predictions = []
+
+            # Test RF
+            if self.rf_model is not None:
+                try:
+                    rf_pred = self.rf_model.predict_proba(X_scaled)
+                    if rf_pred.shape == (n_samples, 2):
+                        predictions.append("RF")
+                        logger.debug(f"✅ Random Forest works (output shape: {rf_pred.shape})")
+                    else:
+                        logger.error(f"❌ RF output shape mismatch: {rf_pred.shape}")
+                        return False
+                except Exception as e:
+                    logger.error(f"❌ Random Forest prediction failed: {e}")
+                    return False
+
+            # Test XGBoost
+            if self.xgb_model is not None:
+                try:
+                    xgb_pred = self.xgb_model.predict_proba(X_scaled)
+                    if xgb_pred.shape == (n_samples, 2):
+                        predictions.append("XGBoost")
+                        logger.debug(f"✅ XGBoost works (output shape: {xgb_pred.shape})")
+                    else:
+                        logger.error(f"❌ XGBoost output shape mismatch: {xgb_pred.shape}")
+                        return False
+                except Exception as e:
+                    logger.error(f"❌ XGBoost prediction failed: {e}")
+                    return False
+
+            if not predictions:
+                logger.error("❌ No valid models available for prediction")
+                return False
+
+            # Test ensemble prediction
+            try:
+                ensemble_pred = self.predict(X_sample)
+                if ensemble_pred.shape == (n_samples,):
+                    logger.info(
+                        f"✅ ML models validated successfully! Available models: {', '.join(predictions)}"
+                    )
+                    logger.info(f"   Sample predictions: {ensemble_pred[:3]}")
+                    return True
+                else:
+                    logger.error(f"❌ Ensemble output shape mismatch: {ensemble_pred.shape}")
+                    return False
+            except Exception as e:
+                logger.error(f"❌ Ensemble prediction failed: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Model validation failed: {e}", exc_info=True)
+            return False
+
     def load_models(self):
         """Load pre-trained models và scaler"""
         self.ensure_models_dir()
@@ -573,6 +656,12 @@ class MLPredictor:
                 models_loaded = True
                 self.ml_enabled = True
                 self.using_dummy_models = False
+
+                # IMPROVEMENT: Validate models after loading
+                if not self.validate_models():
+                    logger.error("❌ Model validation failed! Disabling ML.")
+                    self.ml_enabled = False
+                    models_loaded = False
             else:
                 # CRITICAL: No models found
                 logger.critical(
