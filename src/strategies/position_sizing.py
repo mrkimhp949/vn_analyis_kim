@@ -120,11 +120,11 @@ class EnhancedPositionSizer:
         # =================================================================
         if market_regime is None and auto_detect_regime:
             try:
-                from src.data.loader import load_data
+                from src.data.vnindex_cache import get_cached_vnindex
                 from src.market.regime_detector import detect_regime
 
-                # Load VNINDEX data
-                vnindex_df = load_data("VNINDEX", lookback=250, is_index=True)
+                # IMPROVEMENT: Use cached VNINDEX to avoid repeated API calls
+                vnindex_df = get_cached_vnindex(lookback=250)
 
                 if vnindex_df is not None and not vnindex_df.empty:
                     regime_obj = detect_regime(vnindex_df)

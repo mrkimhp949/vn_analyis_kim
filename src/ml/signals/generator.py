@@ -1,4 +1,5 @@
 from src.data.loader import load_data
+from src.data.vnindex_cache import get_cached_vnindex
 import logging
 import traceback
 from typing import Optional
@@ -101,11 +102,9 @@ class MLSignalGenerator:
                 raise ValueError(f"Insufficient data: {len(df)} rows, need at least 50")
 
             # Thêm ML features, cố gắng tự nạp VNINDEX nếu thiếu index_df
+            # IMPROVEMENT: Use cached VNINDEX to avoid repeated API calls
             if index_df is None or getattr(index_df, "empty", True):
-                try:
-                    index_df = load_data("VNINDEX", lookback=200, is_index=True)
-                except Exception:
-                    index_df = None
+                index_df = get_cached_vnindex(lookback=250)
 
             # Require OHLCV basics before attempting ML features
             required_cols = {"open", "high", "low", "close", "volume"}
@@ -257,12 +256,8 @@ class MLSignalGenerator:
             # Use advanced technical fallback
             from src.ml.signals.technical_fallback import analyze_technical
 
-            # Try to load index for better analysis
-            index_df = None
-            try:
-                index_df = load_data("VNINDEX", lookback=200, is_index=True)
-            except Exception:
-                pass
+            # IMPROVEMENT: Use cached VNINDEX instead of loading each time
+            index_df = get_cached_vnindex(lookback=250)
 
             # Run advanced technical analysis
             tech_signal = analyze_technical(df, index_df)
@@ -478,12 +473,8 @@ class MLSignalGenerator:
         try:
             from src.market.regime_detector import detect_regime
 
-            # Get VN-Index data for regime detection (need 200+ bars)
-            vnindex_df = None
-            try:
-                vnindex_df = load_data("VNINDEX", lookback=250, is_index=True)
-            except Exception as e:
-                logging.getLogger(__name__).debug(f"Could not load VNINDEX: {e}")
+            # IMPROVEMENT: Use cached VNINDEX for regime detection
+            vnindex_df = get_cached_vnindex(lookback=250)
 
             # Check if we have enough data for regime detection
             if vnindex_df is not None and not vnindex_df.empty and len(vnindex_df) >= 200:

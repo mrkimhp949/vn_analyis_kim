@@ -91,12 +91,14 @@ class EmergencyStop:
             (is_crash, reason)
         """
         try:
-            from src.data.loader import load_data
+            from src.data.vnindex_cache import get_cached_vnindex
 
-            # Load VNINDEX
-            vnindex = load_data("VNINDEX", lookback=10, use_cache=False)
+            # IMPROVEMENT: Use cached VNINDEX with force_refresh for emergency checks
+            # This ensures we get fresh data while still benefiting from cache
+            # during rapid consecutive checks
+            vnindex = get_cached_vnindex(lookback=10, force_refresh=True)
 
-            if vnindex.empty or len(vnindex) < 2:
+            if vnindex is None or vnindex.empty or len(vnindex) < 2:
                 return False, None
 
             # Check 1: Daily change

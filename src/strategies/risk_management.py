@@ -154,11 +154,12 @@ class EnhancedRiskManager(RiskManager):
         # Trong thực tế, cần phân tích trend VNINDEX
         # Tạm thời giả lập:
         try:
-            from src.data.loader import load_data
+            from src.data.vnindex_cache import get_cached_vnindex
             from utils.dataframe_utils import safe_get_latest
 
-            vnindex_data = load_data("VNINDEX", lookback=50)
-            if len(vnindex_data) > 20:
+            # IMPROVEMENT: Use cached VNINDEX
+            vnindex_data = get_cached_vnindex(lookback=50)
+            if vnindex_data is not None and len(vnindex_data) > 20:
                 current_close = safe_get_latest(vnindex_data, "close", 0)
                 past_close = (
                     vnindex_data["close"].iloc[-20] if len(vnindex_data) > 20 else current_close
