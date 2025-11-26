@@ -1,6 +1,12 @@
 """
 Entry Signal Service
 Handles entry signal generation and validation
+
+IMPROVEMENTS V2:
+- Per-symbol circuit breaker integration
+- Vietnam market session boundary check
+- Price floor/ceiling validation
+- Position size vs volume validation
 """
 
 import asyncio
@@ -18,6 +24,31 @@ from src.strategies.entry_logic import ImprovedEntryLogic
 from src.strategies.position_sizing import EnhancedPositionSizer
 from src.utils.validation import DataValidator
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
+
+# Import per-symbol circuit breaker
+try:
+    from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
+
+    PER_SYMBOL_CB_AVAILABLE = True
+except ImportError:
+    PER_SYMBOL_CB_AVAILABLE = False
+
+# Import Vietnam market validator
+try:
+    from src.utils.vietnam_market import get_vietnam_market_validator
+    from src.market.schedule import is_near_session_boundary
+
+    VN_MARKET_VALIDATOR_AVAILABLE = True
+except ImportError:
+    VN_MARKET_VALIDATOR_AVAILABLE = False
+
+# Import T+2 Settlement Tracker
+try:
+    from src.portfolio.settlement import get_settlement_tracker
+
+    T2_SETTLEMENT_AVAILABLE = True
+except ImportError:
+    T2_SETTLEMENT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +209,27 @@ class EntrySignalService:
                 logger.debug(f"[{symbol}] Đang pending, skip")
                 return None
 
+            # ================================================================
+            # NEW: Per-Symbol Circuit Breaker Check
+            # ================================================================
+            if PER_SYMBOL_CB_AVAILABLE:
+                per_symbol_cb = get_per_symbol_circuit_breaker()
+                can_trade, reason = per_symbol_cb.can_trade(symbol)
+                if not can_trade:
+                    logger.info(f"[{symbol}] Blocked by per-symbol circuit breaker: {reason}")
+                    return None
+
+            # ================================================================
+            # NEW: Vietnam Market Session Boundary Check
+            # ================================================================
+            if VN_MARKET_VALIDATOR_AVAILABLE:
+                is_near_boundary, boundary_type = is_near_session_boundary()
+                if is_near_boundary:
+                    logger.debug(
+                        f"[{symbol}] Skipping entry near session boundary ({boundary_type})"
+                    )
+                    return None
+
             # Load data
             df = load_data(symbol, lookback=200)
 
@@ -211,6 +263,21 @@ class EntrySignalService:
                     logger.debug(f"[{symbol}] Không tìm thấy tín hiệu mua: {reason}")
                 return None
 
+            # ================================================================
+            # NEW: Vietnam Market Price Floor/Ceiling Check
+            # ================================================================
+            if VN_MARKET_VALIDATOR_AVAILABLE and len(df) >= 2:
+                validator = get_vietnam_market_validator()
+                current_price = safe_get_latest(df, "close", 0)
+                reference_price = df["close"].iloc[-2]  # Yesterday's close
+
+                is_safe, warning = validator.check_price_floor_ceiling(
+                    current_price, reference_price, symbol
+                )
+                if not is_safe:
+                    logger.info(f"[{symbol}] Skipping: {warning}")
+                    return None
+
             # Calculate position size
             position_size = self.position_sizer.calculate_position_size(
                 symbol=symbol,
@@ -229,6 +296,57 @@ class EntrySignalService:
                     f"Reason: {', '.join(position_size.warnings) if position_size.warnings else 'Unknown'}"
                 )
                 return None
+
+            # ================================================================
+            # NEW IMPROVEMENT #5: T+2 Settlement Cash Check
+            # Kiểm tra cash available sau T+2 settlement obligations
+            # ================================================================
+            if T2_SETTLEMENT_AVAILABLE and VN_MARKET_VALIDATOR_AVAILABLE:
+                try:
+                    t2_check = self._check_t2_cash_availability(
+                        symbol=symbol,
+                        position_value=position_size.value,
+                    )
+                    if not t2_check["sufficient"]:
+                        logger.info(
+                            f"[{symbol}] Skipping: Insufficient cash after T+2 obligations. "
+                            f"Required: {t2_check['required']:,.0f}, "
+                            f"Available: {t2_check['available']:,.0f}"
+                        )
+                        return None
+                    elif t2_check.get("warning"):
+                        logger.warning(f"[{symbol}] T+2 Warning: {t2_check['warning']}")
+                except Exception as e:
+                    logger.warning(f"[{symbol}] T+2 check failed: {e}, proceeding anyway")
+
+            # ================================================================
+            # NEW: Vietnam Market Position Size vs Volume Check
+            # ================================================================
+            if VN_MARKET_VALIDATOR_AVAILABLE and "volume" in df.columns:
+                validator = get_vietnam_market_validator()
+                avg_volume = df["volume"].tail(20).mean()
+
+                is_safe, warning = validator.validate_position_size_vs_volume(
+                    position_size.shares, avg_volume, symbol
+                )
+                if not is_safe:
+                    # Reduce position size instead of skipping
+                    max_shares = int(avg_volume * validator.max_position_pct_of_volume)
+                    from src.config.constants import VIETNAM_LOT_SIZE
+
+                    max_shares = (max_shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
+
+                    if max_shares > 0:
+                        logger.warning(
+                            f"[{symbol}] Reducing position from {position_size.shares} "
+                            f"to {max_shares} shares due to volume constraint"
+                        )
+                        position_size.shares = max_shares
+                        position_size.value = max_shares * entry_signal.entry_price
+                        position_size.warnings.append(warning)
+                    else:
+                        logger.info(f"[{symbol}] Skipping: {warning}")
+                        return None
 
             # Validate entry price and stop loss
             if entry_signal.entry_price <= 0 or entry_signal.stop_loss <= 0:
@@ -377,6 +495,114 @@ class EntrySignalService:
             )
 
         return top_signals
+
+    def _check_t2_cash_availability(
+        self,
+        symbol: str,
+        position_value: float,
+    ) -> dict:
+        """
+        IMPROVEMENT #5: Check T+2 cash availability before entry
+
+        Vietnam market uses T+2 settlement:
+        - Day T: Trade executed
+        - Day T+2: Cash settlement
+
+        Must ensure sufficient cash for:
+        1. New trade value
+        2. Pending T+2 settlement obligations
+        3. Buffer for safety (10%)
+
+        Args:
+            symbol: Stock symbol
+            position_value: Value of new position
+
+        Returns:
+            Dict with:
+            - sufficient: bool - True if enough cash
+            - available: float - Available cash after T+2 obligations
+            - required: float - Total cash required
+            - warning: str - Warning message if any
+        """
+        try:
+            from src.config.trading_config import get_config
+            from src.portfolio.settlement import get_settlement_tracker
+            from src.utils.vietnam_market import get_vietnam_market_validator
+
+            config = get_config(validate=False)
+            settlement_tracker = get_settlement_tracker()
+            vn_validator = get_vietnam_market_validator()
+
+            # Get total capital
+            total_capital = config.trading.total_capital
+
+            # Get current portfolio value to estimate used capital
+            try:
+                from src.portfolio.manager import PortfolioManager
+
+                pm = PortfolioManager()
+                positions = pm.get_positions()
+                used_capital = sum(
+                    pos.get("shares", 0) * pos.get("avg_price", 0) for pos in positions.values()
+                )
+            except Exception:
+                used_capital = 0
+
+            # Get pending settlements summary
+            settlement_summary = settlement_tracker.get_settlement_summary()
+            pending_stock_value = settlement_summary.get("pending_stock_value", 0)
+
+            # Calculate available cash
+            # Available = Total Capital - Used Capital - Pending Stock Settlements
+            gross_available = total_capital - used_capital - pending_stock_value
+
+            # Calculate T+2 cash requirement for new trade
+            pending_settlements = {}  # Get from settlement tracker if needed
+            total_t2_required, buffer = vn_validator.calculate_t2_cash_requirement(
+                pending_settlements=pending_settlements,
+                new_trade_value=position_value,
+            )
+
+            # Total required = new position + buffer
+            total_required = total_t2_required + buffer
+
+            # Check if sufficient
+            is_sufficient = gross_available >= total_required
+
+            # Generate warning if close to limit
+            warning = None
+            if is_sufficient and gross_available < total_required * 1.2:
+                warning = (
+                    f"Cash utilization high: {gross_available:,.0f} available, "
+                    f"{total_required:,.0f} required (including T+2 buffer)"
+                )
+
+            logger.debug(
+                f"[{symbol}] T+2 Cash Check: "
+                f"Available={gross_available:,.0f}, "
+                f"Required={total_required:,.0f}, "
+                f"Pending={pending_stock_value:,.0f}, "
+                f"Sufficient={is_sufficient}"
+            )
+
+            return {
+                "sufficient": is_sufficient,
+                "available": gross_available,
+                "required": total_required,
+                "pending_settlements": pending_stock_value,
+                "buffer": buffer,
+                "warning": warning,
+            }
+
+        except Exception as e:
+            logger.warning(f"[{symbol}] T+2 cash check error: {e}")
+            # Return sufficient=True to not block on error
+            return {
+                "sufficient": True,
+                "available": 0,
+                "required": position_value,
+                "warning": f"T+2 check failed: {e}",
+            }
 
 
 # Singleton

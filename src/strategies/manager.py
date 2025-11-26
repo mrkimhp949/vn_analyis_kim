@@ -100,7 +100,10 @@ class StrategyManager:
             return
 
         regime = (market_regime or {}).get("regime", "UNKNOWN").upper()
-        logging.info(f"⚙️ Áp dụng điều chỉnh chiến lược cho thị trường: {regime}")
+        confidence = (market_regime or {}).get("confidence", 50)
+        logging.info(
+            f"⚙️ Áp dụng điều chỉnh chiến lược cho thị trường: {regime} (confidence: {confidence:.1f}%)"
+        )
 
         # DYNAMIC THRESHOLD based on market regime
         if regime == "BULL":
@@ -113,6 +116,16 @@ class StrategyManager:
             self.entry_logic.min_risk_reward = 2.0
             if hasattr(self.position_sizer, "max_total_exposure"):
                 self.position_sizer.max_total_exposure = 0.30
+        elif regime == "HIGH_VOLATILITY":
+            # NEW: Handle HIGH_VOLATILITY regime - most conservative
+            self.entry_logic.min_confidence = 70  # Higher confidence required
+            self.entry_logic.min_risk_reward = 2.5  # Better R:R required
+            if hasattr(self.position_sizer, "max_total_exposure"):
+                self.position_sizer.max_total_exposure = 0.25  # Very low exposure
+            logging.warning(
+                f"🚨 HIGH VOLATILITY detected! Using conservative settings: "
+                f"min_conf=70%, R:R>=2.5, max_exposure=25%"
+            )
         else:  # SIDEWAYS / UNKNOWN
             self.entry_logic.min_confidence = 55
             self.entry_logic.min_risk_reward = 1.8

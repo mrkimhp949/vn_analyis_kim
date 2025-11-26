@@ -2,6 +2,11 @@
 Portfolio Manager - Quản lý portfolio với SQLite
 Thay thế JSON files bằng database
 Thread-safe với locking mechanism
+
+IMPROVEMENTS V2:
+- Integration with Circuit Breaker (record_trade on close)
+- Integration with Per-Symbol Circuit Breaker (record_trade on close)
+- Improved DCA stop loss validation
 """
 
 import logging
@@ -15,6 +20,21 @@ from src.config.trading_config import get_config
 
 from src.monitoring.performance import get_performance_monitor
 from src.monitoring.signal_performance import get_signal_performance_tracker
+
+# Import circuit breakers
+try:
+    from src.risk.circuit_breaker import get_circuit_breaker
+
+    CIRCUIT_BREAKER_AVAILABLE = True
+except ImportError:
+    CIRCUIT_BREAKER_AVAILABLE = False
+
+try:
+    from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
+
+    PER_SYMBOL_CB_AVAILABLE = True
+except ImportError:
+    PER_SYMBOL_CB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +68,45 @@ class PortfolioManager:
             yield
         finally:
             self._lock.release()
+
+    def _record_to_circuit_breakers(
+        self, symbol: str, pnl: float, is_win: bool, pnl_percent: float
+    ):
+        """
+        CRITICAL FIX #1 & #2: Record trade results to circuit breakers
+
+        This ensures:
+        1. Global circuit breaker tracks daily P&L and consecutive losses
+        2. Per-symbol circuit breaker tracks symbol-specific performance
+
+        Args:
+            symbol: Stock symbol
+            pnl: Profit/Loss amount in VND
+            is_win: True if trade was profitable
+            pnl_percent: P&L as percentage
+        """
+        # Record to global circuit breaker
+        if CIRCUIT_BREAKER_AVAILABLE:
+            try:
+                circuit_breaker = get_circuit_breaker()
+                circuit_breaker.record_trade(pnl)
+                logger.debug(
+                    f"📊 Recorded to circuit breaker: {symbol} PnL={pnl:+,.0f} "
+                    f"(consecutive_losses={circuit_breaker.stats.get('consecutive_losses', 0)})"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to record to circuit breaker: {e}")
+
+        # Record to per-symbol circuit breaker
+        if PER_SYMBOL_CB_AVAILABLE:
+            try:
+                per_symbol_cb = get_per_symbol_circuit_breaker()
+                per_symbol_cb.record_trade(symbol, is_win, pnl_percent)
+                logger.debug(
+                    f"📊 Recorded to per-symbol CB: {symbol} win={is_win} pnl={pnl_percent:+.2f}%"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to record to per-symbol circuit breaker: {e}")
 
     def get_positions(self) -> Dict:
         """Get all active positions (thread-safe)"""
@@ -202,20 +261,49 @@ class PortfolioManager:
         old_stop_loss = existing_pos.get("stop_loss")
         old_take_profit = existing_pos.get("take_profit")
 
-        # Calculate new stop loss: -7% below new avg price (or use existing if better)
+        # CRITICAL FIX #3: Improved DCA stop loss validation
+        # Calculate new stop loss: -7% below new avg price
         default_stop_pct = 0.93  # -7%
         new_stop_loss = new_avg_price * default_stop_pct
 
-        # Keep the higher (less restrictive) of old or new stop loss to avoid tightening stops too much
-        if old_stop_loss and old_stop_loss > new_stop_loss:
-            final_stop_loss = old_stop_loss
-            logger.info(
-                f"🔒 {symbol}: Keeping existing stop loss {old_stop_loss:,.0f} (higher than new {new_stop_loss:,.0f})"
+        # VALIDATION: Ensure stop loss is ALWAYS below new avg price
+        # This is critical when DCA-ing into a falling stock
+        if old_stop_loss and old_stop_loss >= new_avg_price:
+            # Old stop loss is above new avg price - INVALID after DCA
+            logger.warning(
+                f"⚠️ {symbol}: Old stop loss {old_stop_loss:,.0f} >= new avg price {new_avg_price:,.0f}. "
+                f"Recalculating to {new_stop_loss:,.0f}"
             )
+            final_stop_loss = new_stop_loss
+        elif old_stop_loss and old_stop_loss > new_stop_loss:
+            # Old stop loss is valid but higher (less restrictive) - keep it
+            # But ensure it's still at least 3% below new avg price for safety
+            min_safe_stop = new_avg_price * 0.97  # -3% minimum
+            if old_stop_loss > min_safe_stop:
+                # Old stop is too close to new avg price - use new calculated stop
+                logger.warning(
+                    f"⚠️ {symbol}: Old stop loss {old_stop_loss:,.0f} too close to new avg {new_avg_price:,.0f}. "
+                    f"Using {new_stop_loss:,.0f} for safety"
+                )
+                final_stop_loss = new_stop_loss
+            else:
+                final_stop_loss = old_stop_loss
+                logger.info(
+                    f"🔒 {symbol}: Keeping existing stop loss {old_stop_loss:,.0f} "
+                    f"(valid and higher than new {new_stop_loss:,.0f})"
+                )
         else:
             final_stop_loss = new_stop_loss
             logger.info(
-                f"📊 {symbol}: Updated stop loss to {final_stop_loss:,.0f} based on new avg price {new_avg_price:,.0f}"
+                f"📊 {symbol}: Updated stop loss to {final_stop_loss:,.0f} "
+                f"based on new avg price {new_avg_price:,.0f}"
+            )
+
+        # Final validation: stop loss must be below entry price
+        if final_stop_loss >= new_avg_price:
+            final_stop_loss = new_avg_price * default_stop_pct
+            logger.error(
+                f"🚨 {symbol}: Stop loss validation failed! Forcing to {final_stop_loss:,.0f}"
             )
 
         # Calculate new take profit: 15% above new avg price
@@ -322,6 +410,10 @@ class PortfolioManager:
             exit_price=exit_price,
             shares=shares_to_sell,
         )
+
+        # CRITICAL FIX #1 & #2: Record trade to circuit breakers
+        is_win = pnl > 0
+        self._record_to_circuit_breakers(symbol, pnl, is_win, pnl_percent)
 
         # CRITICAL: Wrap in database transaction for atomicity
         # Both save_trade and save_position succeed together or fail together
@@ -434,6 +526,10 @@ class PortfolioManager:
             shares=shares,
         )
 
+        # CRITICAL FIX #1 & #2: Record trade to circuit breakers
+        is_win = pnl > 0
+        self._record_to_circuit_breakers(symbol, pnl, is_win, pnl_percent)
+
         # CRITICAL: Wrap in database transaction for atomicity
         # Both save_trade and delete_position succeed together or fail together
         with self.db.transaction() as conn:
@@ -453,7 +549,7 @@ class PortfolioManager:
             # Delete position
             self.db.delete_position(symbol, conn=conn)
 
-        print("✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
+        logger.info(f"✅ Closed position: {symbol} - P&L: {pnl:+,.0f} ({pnl_percent:+.1f}%)")
 
     def update_position_price(self, symbol: str, current_price: float):
         """Update current price for position"""
@@ -691,6 +787,217 @@ class PortfolioManager:
             "total_value": total_value,
             "suggestions": suggestions,
         }
+
+    def get_sector_exposure(self) -> Dict:
+        """
+        IMPROVEMENT #8: Track sector exposure của portfolio
+
+        Tính toán phân bổ theo ngành để tránh over-concentration
+
+        Returns:
+            Dict with sector exposure analysis
+        """
+        positions = self.db.get_positions()
+        if not positions:
+            return {
+                "sectors": {},
+                "max_sector_exposure": 0.0,
+                "is_concentrated": False,
+                "warnings": [],
+            }
+
+        try:
+            # Get sector mapping for symbols
+            sector_mapping = self._get_sector_mapping(list(positions.keys()))
+
+            portfolio = self.get_portfolio_value()
+            total_value = portfolio["total_value"]
+
+            if total_value == 0:
+                return {
+                    "sectors": {},
+                    "max_sector_exposure": 0.0,
+                    "is_concentrated": False,
+                    "warnings": [],
+                }
+
+            # Calculate sector exposure
+            sector_values = {}
+            for symbol, pos in positions.items():
+                shares = pos["shares"]
+                current_price = pos.get("metadata", {}).get("last_price", pos["avg_price"])
+                position_value = shares * current_price
+
+                sector = sector_mapping.get(symbol, "Unknown")
+                sector_values[sector] = sector_values.get(sector, 0) + position_value
+
+            # Calculate percentages
+            sector_exposure = {}
+            for sector, value in sector_values.items():
+                pct = (value / total_value) * 100 if total_value > 0 else 0
+                sector_exposure[sector] = {
+                    "value": value,
+                    "percentage": pct,
+                    "symbols": [
+                        s
+                        for s, p in positions.items()
+                        if sector_mapping.get(s, "Unknown") == sector
+                    ],
+                }
+
+            # Find max exposure
+            max_exposure = max((s["percentage"] for s in sector_exposure.values()), default=0)
+
+            # Check for concentration (>40% in one sector)
+            is_concentrated = max_exposure > 40
+            warnings = []
+
+            if is_concentrated:
+                concentrated_sectors = [
+                    sector for sector, data in sector_exposure.items() if data["percentage"] > 40
+                ]
+                warnings.append(
+                    f"⚠️ Over-concentrated in: {', '.join(concentrated_sectors)} "
+                    f"(>{max_exposure:.1f}%)"
+                )
+
+            # Warn if >30% in any sector
+            for sector, data in sector_exposure.items():
+                if 30 < data["percentage"] <= 40:
+                    warnings.append(f"⚠️ High exposure to {sector}: {data['percentage']:.1f}%")
+
+            return {
+                "sectors": sector_exposure,
+                "max_sector_exposure": max_exposure,
+                "is_concentrated": is_concentrated,
+                "warnings": warnings,
+                "total_value": total_value,
+            }
+
+        except Exception as e:
+            logger.warning(f"⚠️ Error calculating sector exposure: {e}")
+            return {
+                "sectors": {},
+                "max_sector_exposure": 0.0,
+                "is_concentrated": False,
+                "warnings": [f"Error: {e}"],
+            }
+
+    def _get_sector_mapping(self, symbols: list) -> Dict[str, str]:
+        """
+        Get sector mapping for symbols
+
+        Returns:
+            Dict mapping symbol -> sector name
+        """
+        # Default sector mapping for common VN stocks
+        # In production, this should come from a database or API
+        SECTOR_MAPPING = {
+            # Banking
+            "VCB": "Banking",
+            "BID": "Banking",
+            "CTG": "Banking",
+            "TCB": "Banking",
+            "MBB": "Banking",
+            "ACB": "Banking",
+            "VPB": "Banking",
+            "HDB": "Banking",
+            "TPB": "Banking",
+            "STB": "Banking",
+            "SHB": "Banking",
+            "EIB": "Banking",
+            # Real Estate
+            "VHM": "Real Estate",
+            "VIC": "Real Estate",
+            "NVL": "Real Estate",
+            "KDH": "Real Estate",
+            "DXG": "Real Estate",
+            "PDR": "Real Estate",
+            "NLG": "Real Estate",
+            "DIG": "Real Estate",
+            "CEO": "Real Estate",
+            # Steel & Materials
+            "HPG": "Steel",
+            "HSG": "Steel",
+            "NKG": "Steel",
+            "TLH": "Steel",
+            "POM": "Steel",
+            # Consumer
+            "VNM": "Consumer",
+            "MSN": "Consumer",
+            "SAB": "Consumer",
+            "MWG": "Consumer",
+            "PNJ": "Consumer",
+            "FRT": "Consumer",
+            # Technology
+            "FPT": "Technology",
+            "CMG": "Technology",
+            # Oil & Gas
+            "GAS": "Oil & Gas",
+            "PLX": "Oil & Gas",
+            "PVD": "Oil & Gas",
+            "PVS": "Oil & Gas",
+            "BSR": "Oil & Gas",
+            # Utilities
+            "POW": "Utilities",
+            "REE": "Utilities",
+            "PC1": "Utilities",
+            "GEG": "Utilities",
+            "NT2": "Utilities",
+            # Aviation
+            "HVN": "Aviation",
+            "VJC": "Aviation",
+            # Securities
+            "SSI": "Securities",
+            "VND": "Securities",
+            "HCM": "Securities",
+            "VCI": "Securities",
+            "SHS": "Securities",
+            # Insurance
+            "BVH": "Insurance",
+            "BMI": "Insurance",
+        }
+
+        result = {}
+        for symbol in symbols:
+            result[symbol] = SECTOR_MAPPING.get(symbol, "Other")
+
+        return result
+
+    def check_sector_before_entry(self, symbol: str, max_sector_pct: float = 40.0) -> tuple:
+        """
+        Check if adding a symbol would exceed sector concentration limit
+
+        Args:
+            symbol: Symbol to check
+            max_sector_pct: Maximum allowed sector percentage (default 40%)
+
+        Returns:
+            (can_add, warning_message)
+        """
+        sector_exposure = self.get_sector_exposure()
+        sector_mapping = self._get_sector_mapping([symbol])
+        target_sector = sector_mapping.get(symbol, "Other")
+
+        current_exposure = sector_exposure["sectors"].get(target_sector, {}).get("percentage", 0)
+
+        # Estimate new exposure (rough estimate assuming 10% position)
+        estimated_new_exposure = current_exposure + 10  # Assume 10% position
+
+        if estimated_new_exposure > max_sector_pct:
+            return (
+                False,
+                f"Adding {symbol} would increase {target_sector} exposure to ~{estimated_new_exposure:.1f}% "
+                f"(limit: {max_sector_pct}%)",
+            )
+
+        if current_exposure > max_sector_pct * 0.8:  # Warning at 80% of limit
+            return (
+                True,
+                f"⚠️ {target_sector} sector already at {current_exposure:.1f}% - approaching limit",
+            )
+
+        return (True, None)
 
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""

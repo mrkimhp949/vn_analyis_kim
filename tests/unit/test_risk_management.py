@@ -87,48 +87,45 @@ class TestEnhancedRiskManager:
     @patch("utils.dataframe_utils.safe_get_latest")
     def test_market_regime_factor_bull(self, mock_safe_get_latest, mock_get_vnindex, risk_manager):
         """Test market regime factor in bull market"""
-        import pandas as pd
-        import numpy as np
+        # IMPROVEMENT #4: Test with market_regime dict from regime_detector
+        # Bull market with high confidence
+        market_regime = {
+            "regime": "BULL",
+            "confidence": 75,
+            "tradeable": True,
+            "components": {"trend": 0.5, "momentum": 0.3, "volatility": 0.3},
+        }
 
-        # Create mock VNINDEX data showing bull market (>2% gain)
-        mock_df = pd.DataFrame({"close": np.linspace(100, 110, 50)})  # Uptrend
-        mock_get_vnindex.return_value = mock_df
-        mock_safe_get_latest.return_value = 110  # Current close price
+        factor = risk_manager._calculate_market_regime_factor(market_regime)
+        assert factor == 1.2  # Strong bull -> 1.2x
 
-        factor = risk_manager._calculate_market_regime_factor()
-        assert factor == 1.1
-
-    @patch("src.data.vnindex_cache.get_cached_vnindex")
-    @patch("utils.dataframe_utils.safe_get_latest")
-    def test_market_regime_factor_bear(self, mock_safe_get_latest, mock_get_vnindex, risk_manager):
+    def test_market_regime_factor_bear(self, risk_manager):
         """Test market regime factor in bear market"""
-        import pandas as pd
-        import numpy as np
+        # IMPROVEMENT #4: Test with market_regime dict from regime_detector
+        # Bear market with high confidence
+        market_regime = {
+            "regime": "BEAR",
+            "confidence": 75,
+            "tradeable": True,
+            "components": {"trend": -0.5, "momentum": -0.3, "volatility": 0.4},
+        }
 
-        # Create mock VNINDEX data showing bear market (<-2% loss)
-        mock_df = pd.DataFrame({"close": np.linspace(100, 95, 50)})  # Downtrend
-        mock_get_vnindex.return_value = mock_df
-        mock_safe_get_latest.return_value = 95  # Current close price (5% loss)
+        factor = risk_manager._calculate_market_regime_factor(market_regime)
+        assert factor == 0.4  # Strong bear -> 0.4x
 
-        factor = risk_manager._calculate_market_regime_factor()
-        assert factor == 0.6
-
-    @patch("src.data.vnindex_cache.get_cached_vnindex")
-    @patch("utils.dataframe_utils.safe_get_latest")
-    def test_market_regime_factor_sideway(
-        self, mock_safe_get_latest, mock_get_vnindex, risk_manager
-    ):
+    def test_market_regime_factor_sideway(self, risk_manager):
         """Test market regime factor in sideway market"""
-        import pandas as pd
-        import numpy as np
+        # IMPROVEMENT #4: Test with market_regime dict from regime_detector
+        # Sideways market with low volatility
+        market_regime = {
+            "regime": "SIDEWAYS",
+            "confidence": 60,
+            "tradeable": True,
+            "components": {"trend": 0.1, "momentum": 0.0, "volatility": 0.3},
+        }
 
-        # Create mock VNINDEX data showing sideway market (-2% to 2%)
-        mock_df = pd.DataFrame({"close": np.linspace(100, 101, 50)})  # Flat
-        mock_get_vnindex.return_value = mock_df
-        mock_safe_get_latest.return_value = 101  # Current close price (1% gain)
-
-        factor = risk_manager._calculate_market_regime_factor()
-        assert factor == 0.8
+        factor = risk_manager._calculate_market_regime_factor(market_regime)
+        assert factor == 0.85  # Sideways + low vol -> 0.85x
 
     @patch("src.data.vnindex_cache.get_cached_vnindex")
     def test_market_regime_factor_error_handling(self, mock_get_vnindex, risk_manager):

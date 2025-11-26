@@ -17,6 +17,14 @@ from src.utils.indicators import IndicatorUtils, StopLossCalculator
 from src.utils.validation import DataValidator
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
+# IMPROVEMENT #10: Trading hours check
+try:
+    from src.market.schedule import is_trading_hour, is_trading_day
+
+    TRADING_SCHEDULE_AVAILABLE = True
+except ImportError:
+    TRADING_SCHEDULE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -862,6 +870,7 @@ class ImprovedEntryLogic:
         ml_signal: Dict,
         market_regime: Optional[Dict] = None,
         symbol: Optional[str] = None,
+        check_trading_hours: bool = True,
     ) -> EntrySignal:
         """
         Phân tích đầy đủ để quyết định có nên vào lệnh
@@ -870,10 +879,25 @@ class ImprovedEntryLogic:
             df: DataFrame với OHLCV + indicators
             ml_signal: Signal từ ML model
             market_regime: Thông tin market regime (optional)
+            symbol: Mã cổ phiếu (optional)
+            check_trading_hours: Kiểm tra giờ giao dịch (default: True)
 
         Returns:
             EntrySignal object với đầy đủ thông tin
         """
+        # IMPROVEMENT #10: Check trading hours before generating signals
+        if check_trading_hours and TRADING_SCHEDULE_AVAILABLE:
+            if not is_trading_day():
+                return self._no_signal(
+                    "Không phải ngày giao dịch (T7/CN hoặc ngày lễ)",
+                    telemetry={"reason": "non_trading_day"},
+                )
+            if not is_trading_hour():
+                return self._no_signal(
+                    "Ngoài giờ giao dịch (9:00-11:30, 13:00-15:00)",
+                    telemetry={"reason": "outside_trading_hours"},
+                )
+
         # ENHANCEMENT: Adjust thresholds dynamically based on market regime
         self._adjust_thresholds_for_market(market_regime)
 
