@@ -13,6 +13,14 @@ from typing import Dict, List, Optional
 import pandas as pd
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
+# IMPROVEMENT #10: Trading hours check
+try:
+    from src.market.schedule import is_trading_hour, is_trading_day
+
+    TRADING_SCHEDULE_AVAILABLE = True
+except ImportError:
+    TRADING_SCHEDULE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -132,12 +140,18 @@ class ImprovedExitStrategy:
     4. Market protection - Thoát khi thị trường đảo chiều
     5. Pattern recognition - Thoát khi xuất hiện pattern đảo chiều
     6. Portfolio protection - Thoát khi portfolio loss quá nhiều
+    7. NEW: Per-Symbol Performance - Thoát sớm symbols có track record xấu
 
     IMPROVEMENTS v2.0:
     - Simplified from 3 TP levels to 2 (TP1: partial, TP2: full)
     - Cleaner partial exit tracking with PartialExitTracker
     - Transaction costs included in all P&L calculations
     - Better logging for debugging
+
+    IMPROVEMENT #6 (v2.1):
+    - Per-symbol performance integration
+    - Exit decisions consider historical win rate and avg holding time
+    - Tighter stops for symbols with poor track record
     """
 
     def __init__(
@@ -181,6 +195,11 @@ class ImprovedExitStrategy:
         self.position_highs = {}  # {symbol: highest_price_since_entry}
         self.partial_exit_tracker = PartialExitTracker()  # NEW: Cleaner tracking
 
+        # IMPROVEMENT #6: Per-symbol performance integration
+        self.use_per_symbol_performance = True
+        self.poor_performer_max_holding_days = 15  # Shorter holding for poor performers
+        self.poor_performer_tighter_stop_pct = 0.03  # 3% tighter stop for poor performers
+
     def check_exit(
         self,
         symbol: str,
@@ -193,6 +212,7 @@ class ImprovedExitStrategy:
         ml_signal: Optional[Dict] = None,
         market_regime: Optional[Dict] = None,
         partial_exits: List[float] = None,
+        check_trading_hours: bool = False,
     ) -> ExitDecision:
         """
         Kiểm tra xem có nên thoát lệnh không
@@ -208,6 +228,7 @@ class ImprovedExitStrategy:
             ml_signal: Signal từ ML (optional)
             market_regime: Market regime info (optional)
             partial_exits: List các lần đã chốt lời 1 phần (optional)
+            check_trading_hours: Kiểm tra giờ giao dịch (default: False để backward compatible)
 
         Returns:
             ExitDecision
@@ -215,6 +236,15 @@ class ImprovedExitStrategy:
 
         if partial_exits is None:
             partial_exits = []
+
+        # IMPROVEMENT #10: Check trading hours
+        # Note: For exits, we still check stop loss even outside trading hours
+        # but skip other exit signals to avoid false signals
+        is_outside_trading_hours = False
+        if check_trading_hours and TRADING_SCHEDULE_AVAILABLE:
+            if not is_trading_day() or not is_trading_hour():
+                is_outside_trading_hours = True
+                logger.debug(f"[{symbol}] Outside trading hours - only checking stop loss")
 
         # Ensure stop loss is valid even if missing from stored position
         # Pass df for ATR-based calculation if needed
@@ -270,12 +300,36 @@ class ImprovedExitStrategy:
         highest_price = self.position_highs[symbol]
 
         # ====================================================================
+        # IMPROVEMENT #6: Get Per-Symbol Performance for exit decisions
+        # ====================================================================
+        symbol_performance = self._get_symbol_performance(symbol)
+        is_poor_performer = symbol_performance.get("is_poor_performer", False)
+        symbol_win_rate = symbol_performance.get("win_rate", 0.5)
+        symbol_avg_holding = symbol_performance.get("avg_holding_days", self.max_holding_days)
+
+        if is_poor_performer:
+            logger.info(
+                f"⚠️ {symbol} is a POOR PERFORMER (win_rate: {symbol_win_rate:.1%}, "
+                f"avg_holding: {symbol_avg_holding:.0f} days) - applying tighter exit rules"
+            )
+
+        # ====================================================================
         # CHECK 1: STOP LOSS (Ưu tiên cao nhất)
         # ====================================================================
         # Use stop_loss if available, otherwise fallback to 7% below entry
         effective_stop_loss = stop_loss
         if effective_stop_loss is None or effective_stop_loss <= 0:
             effective_stop_loss = entry_price * 0.93  # 7% below entry as fallback
+
+        # IMPROVEMENT #6: Tighter stop loss for poor performers
+        if is_poor_performer and self.use_per_symbol_performance:
+            tighter_stop = entry_price * (1 - self.poor_performer_tighter_stop_pct)
+            if tighter_stop > effective_stop_loss:
+                logger.debug(
+                    f"📉 {symbol}: Tightening stop from {effective_stop_loss:,.0f} "
+                    f"to {tighter_stop:,.0f} (poor performer)"
+                )
+                effective_stop_loss = max(effective_stop_loss, tighter_stop)
 
         if current_price <= effective_stop_loss:
             return ExitDecision(
@@ -288,6 +342,31 @@ class ImprovedExitStrategy:
                 message=f"⛔ STOP LOSS: {pnl_percent:+.2f}%",
                 urgency=5,
             )
+
+        # ====================================================================
+        # CHECK 1.5: SESSION BOUNDARY - Tighten exits near session end
+        # ====================================================================
+        session_boundary_urgency_boost = 0
+        try:
+            from src.market.schedule import is_near_session_boundary
+
+            is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
+            if is_near_boundary:
+                session_boundary_urgency_boost = 1  # Increase urgency for all exits
+                # If profitable near session end, consider early exit
+                if pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.TRAILING_STOP,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
+                        urgency=4,
+                    )
+        except ImportError:
+            pass  # Schedule module not available
 
         # ====================================================================
         # CHECK 2: MARKET CRASH PROTECTION
@@ -303,7 +382,7 @@ class ImprovedExitStrategy:
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
                     message=f"🚨 THỊ TRƯỜNG GIẢM ĐIỂM - Chốt lời sớm: {pnl_percent:+.2f}%",
-                    urgency=4,
+                    urgency=4 + session_boundary_urgency_boost,
                 )
             elif pnl_percent > -2:  # Lỗ ít thì cũng thoát
                 return ExitDecision(
@@ -314,7 +393,7 @@ class ImprovedExitStrategy:
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
                     message=f"🚨 THỊ TRƯỜNG GIẢM ĐIỂM - Cắt lỗ sớm: {pnl_percent:+.2f}%",
-                    urgency=4,
+                    urgency=4 + session_boundary_urgency_boost,
                 )
 
         # ====================================================================
@@ -405,7 +484,7 @@ class ImprovedExitStrategy:
             return breakdown_check["decision"]
 
         # ====================================================================
-        # CHECK 9: TIME DECAY (ADAPTIVE BY MARKET REGIME)
+        # CHECK 9: TIME DECAY (ADAPTIVE BY MARKET REGIME + PER-SYMBOL PERFORMANCE)
         # ====================================================================
         # IMPROVEMENT: Adapt holding period based on market regime
         # BULL: 25 days (hold longer in uptrend)
@@ -424,6 +503,13 @@ class ImprovedExitStrategy:
             elif regime == "BEAR":
                 adaptive_max_days = 15  # Much shorter in bear
                 logger.debug(f"📉 BEAR market: Using {adaptive_max_days} day holding limit")
+
+        # IMPROVEMENT #6: Shorter holding for poor performers
+        if is_poor_performer and self.use_per_symbol_performance:
+            adaptive_max_days = min(adaptive_max_days, self.poor_performer_max_holding_days)
+            logger.debug(
+                f"⚠️ {symbol}: Reducing max holding to {adaptive_max_days} days (poor performer)"
+            )
 
         if days_held >= adaptive_max_days:
             # Nếu giữ quá lâu mà lời < threshold → thoát
@@ -815,6 +901,87 @@ class ImprovedExitStrategy:
             }
 
         return {"should_exit": False}
+
+    def _get_symbol_performance(self, symbol: str) -> Dict:
+        """
+        IMPROVEMENT #6: Get historical performance for a symbol
+
+        Integrates with per_symbol_circuit_breaker to get:
+        - Win rate
+        - Total trades
+        - Consecutive losses
+        - Average holding time (if available)
+
+        Returns:
+            Dict with performance metrics and is_poor_performer flag
+        """
+        try:
+            from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
+
+            cb = get_per_symbol_circuit_breaker()
+            stats = cb.get_symbol_stats(symbol)
+
+            if stats is None:
+                # No history for this symbol
+                return {
+                    "is_poor_performer": False,
+                    "win_rate": 0.5,  # Assume neutral
+                    "total_trades": 0,
+                    "consecutive_losses": 0,
+                    "avg_holding_days": self.max_holding_days,
+                    "reason": "No trading history",
+                }
+
+            # Determine if poor performer
+            # Criteria:
+            # 1. Win rate < 35% after at least 3 trades
+            # 2. OR 2+ consecutive losses
+            is_poor = False
+            reason = ""
+
+            if stats.total_trades >= 3 and stats.win_rate < 0.35:
+                is_poor = True
+                reason = (
+                    f"Low win rate: {stats.win_rate:.1%} ({stats.total_wins}/{stats.total_trades})"
+                )
+
+            if stats.consecutive_losses >= 2:
+                is_poor = True
+                reason = f"Consecutive losses: {stats.consecutive_losses}"
+
+            # If blocked by circuit breaker, definitely poor performer
+            if stats.blocked:
+                is_poor = True
+                reason = stats.blocked_reason
+
+            return {
+                "is_poor_performer": is_poor,
+                "win_rate": stats.win_rate,
+                "total_trades": stats.total_trades,
+                "total_wins": stats.total_wins,
+                "total_losses": stats.total_losses,
+                "consecutive_losses": stats.consecutive_losses,
+                "blocked": stats.blocked,
+                "avg_holding_days": self.max_holding_days,  # TODO: Track actual holding time
+                "reason": reason,
+            }
+
+        except ImportError:
+            logger.debug("Per-symbol circuit breaker not available")
+            return {
+                "is_poor_performer": False,
+                "win_rate": 0.5,
+                "total_trades": 0,
+                "reason": "Circuit breaker not available",
+            }
+        except Exception as e:
+            logger.warning(f"Error getting symbol performance for {symbol}: {e}")
+            return {
+                "is_poor_performer": False,
+                "win_rate": 0.5,
+                "total_trades": 0,
+                "reason": f"Error: {e}",
+            }
 
     def _check_volume_for_exit(self, df: pd.DataFrame) -> bool:
         """

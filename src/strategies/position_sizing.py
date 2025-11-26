@@ -297,6 +297,29 @@ class EnhancedPositionSizer:
         final_shares = int(base_shares * portfolio_adj * sector_adj * correlation_adj)
 
         # =================================================================
+        # NEW: Circuit Breaker Caution Mode Adjustment
+        # =================================================================
+        try:
+            from src.risk.circuit_breaker import get_circuit_breaker
+
+            circuit_breaker = get_circuit_breaker()
+            if circuit_breaker.is_caution_mode():
+                caution_multiplier = 0.5  # Reduce position by 50% in caution mode
+                final_shares = int(final_shares * caution_multiplier)
+                adjustments["caution_mode_adj"] = caution_multiplier
+                warnings.append(
+                    f"⚠️ Circuit breaker caution mode: Position reduced by {(1-caution_multiplier)*100:.0f}%"
+                )
+                logger.warning(
+                    f"🚨 Circuit breaker caution mode active - "
+                    f"reducing position from {int(final_shares/caution_multiplier)} to {final_shares} shares"
+                )
+        except ImportError:
+            pass  # Circuit breaker not available
+        except Exception as e:
+            logger.debug(f"Circuit breaker check failed: {e}")
+
+        # =================================================================
         # ENFORCE LIMITS
         # =================================================================
 

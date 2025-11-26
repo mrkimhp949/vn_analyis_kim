@@ -20,5 +20,38 @@
     "last_trade_date": "2025-11-22",
     "blocked": true,
     "blocked_reason": "🚫 Blocked: Win rate 20.0% < 30.0% (1/5 trades)"
+  },
+  "LOSER": {
+    "symbol": "LOSER",
+    "consecutive_losses": 18,
+    "total_trades": 18,
+    "total_wins": 0,
+    "total_losses": 18,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-11-26",
+    "blocked": true,
+    "blocked_reason": "🚫 Blocked: Win rate 0.0% < 30.0% (0/18 trades)"
+  },
+  "SYMBOL": {
+    "symbol": "SYMBOL",
+    "consecutive_losses": 0,
+    "total_trades": 9,
+    "total_wins": 3,
+    "total_losses": 6,
+    "win_rate": 0.3333333333333333,
+    "last_trade_date": "2025-11-26",
+    "blocked": true,
+    "blocked_reason": "🚫 Blocked: Win rate 20.0% < 30.0% (1/5 trades)"
+  },
+  "VCB": {
+    "symbol": "VCB",
+    "consecutive_losses": 0,
+    "total_trades": 2,
+    "total_wins": 2,
+    "total_losses": 0,
+    "win_rate": 1.0,
+    "last_trade_date": "2025-11-26",
+    "blocked": false,
+    "blocked_reason": ""
   }
 }

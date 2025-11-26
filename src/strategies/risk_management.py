@@ -74,13 +74,26 @@ class EnhancedRiskManager(RiskManager):
         self.market_regime_adjustment = True
 
     def calculate_enhanced_position_size(
-        self, symbol, price, atr, confidence, signal="BUY", market_volatility=0.02
+        self,
+        symbol,
+        price,
+        atr,
+        confidence,
+        signal="BUY",
+        market_volatility=0.02,
+        market_regime=None,
     ):
         """
         Position sizing nâng cao với nhiều yếu tố điều chỉnh
 
         Args:
+            symbol: Mã cổ phiếu
+            price: Giá hiện tại
+            atr: Average True Range
+            confidence: Độ tin cậy tín hiệu (0-100)
+            signal: 'BUY' hoặc 'SELL'
             market_volatility: Độ biến động thị trường (VIX proxy)
+            market_regime: Dict từ regime_detector (IMPROVEMENT #4)
         """
         # Base position size từ class cha
         base_position = super().calculate_position_size(price, atr, confidence, signal)
@@ -103,13 +116,12 @@ class EnhancedRiskManager(RiskManager):
         base_position["max_loss"] = base_position["risk_per_share"] * base_position["shares"]
         print(f"  🎯 Confidence adjustment: {confidence_factor:.2f}x")
 
-        # ĐIỀU CHỈNH 3: Market Regime
+        # ĐIỀU CHỈNH 3: Market Regime (IMPROVEMENT #4 - Tích hợp với regime_detector)
         if self.market_regime_adjustment:
-            regime_factor = self._calculate_market_regime_factor()
+            regime_factor = self._calculate_market_regime_factor(market_regime)
             base_position["shares"] = int(base_position["shares"] * regime_factor)
             base_position["value"] = base_position["shares"] * price
             base_position["max_loss"] = base_position["risk_per_share"] * base_position["shares"]
-            print(f"  🌡️ Market regime adjustment: {regime_factor:.2f}x")
 
         # Đảm bảo không vượt quá giới hạn
         max_shares_by_capital = int((self.total_capital * self.max_position_pct) / price)
@@ -149,33 +161,112 @@ class EnhancedRiskManager(RiskManager):
         else:
             return 0.3  # Very low confidence -> giảm mạnh
 
-    def _calculate_market_regime_factor(self):
-        """Điều chỉnh theo regime thị trường (giả lập)"""
-        # Trong thực tế, cần phân tích trend VNINDEX
-        # Tạm thời giả lập:
+    def _calculate_market_regime_factor(self, market_regime: dict = None):
+        """
+        Điều chỉnh theo regime thị trường từ regime_detector.py
+
+        IMPROVEMENT #4: Tích hợp với MarketRegimeDetector thay vì tính toán riêng
+        Position sizing phản ánh đúng market conditions
+
+        Args:
+            market_regime: Dict từ regime_detector.detect() hoặc None để tự detect
+
+        Returns:
+            float: Factor điều chỉnh position size (0.3 - 1.2)
+        """
         try:
-            from src.data.vnindex_cache import get_cached_vnindex
-            from utils.dataframe_utils import safe_get_latest
+            # Nếu không có market_regime, tự detect
+            if market_regime is None:
+                from src.market.regime_detector import get_regime_detector
+                from src.data.vnindex_cache import get_cached_vnindex
 
-            # IMPROVEMENT: Use cached VNINDEX
-            vnindex_data = get_cached_vnindex(lookback=50)
-            if vnindex_data is not None and len(vnindex_data) > 20:
-                current_close = safe_get_latest(vnindex_data, "close", 0)
-                past_close = (
-                    vnindex_data["close"].iloc[-20] if len(vnindex_data) > 20 else current_close
-                )
-                market_trend = (current_close / past_close - 1) if past_close > 0 else 0
+                vnindex_data = get_cached_vnindex(lookback=250)
+                if vnindex_data is not None and len(vnindex_data) >= 200:
+                    detector = get_regime_detector()
+                    regime_result = detector.detect(vnindex_data)
+                    market_regime = {
+                        "regime": regime_result.regime,
+                        "confidence": regime_result.confidence,
+                        "tradeable": regime_result.tradeable,
+                        "components": regime_result.components,
+                    }
 
-                if market_trend > 0.02:
-                    return 1.1  # Bull market -> tăng nhẹ
-                elif market_trend < -0.02:
-                    return 0.6  # Bear market -> giảm mạnh
+            if market_regime is None:
+                return 1.0  # Default nếu không detect được
+
+            regime = market_regime.get("regime", "SIDEWAYS")
+            confidence = market_regime.get("confidence", 50)
+            tradeable = market_regime.get("tradeable", True)
+            components = market_regime.get("components", {})
+
+            # Không tradeable -> giảm mạnh position
+            if not tradeable:
+                print(f"  🚫 Market not tradeable (regime: {regime})")
+                return 0.3
+
+            # Điều chỉnh theo regime và confidence
+            if regime == "BULL":
+                # Bull market: tăng position, scale theo confidence
+                if confidence >= 70:
+                    factor = 1.2  # Strong bull -> tăng 20%
+                elif confidence >= 50:
+                    factor = 1.1  # Moderate bull -> tăng 10%
                 else:
-                    return 0.8  # Sideway -> giảm nhẹ
-        except Exception:
-            pass
+                    factor = 1.0  # Weak bull -> giữ nguyên
 
-        return 1.0  # Default
+            elif regime == "BEAR":
+                # Bear market: giảm mạnh position
+                if confidence >= 70:
+                    factor = 0.4  # Strong bear -> giảm 60%
+                elif confidence >= 50:
+                    factor = 0.5  # Moderate bear -> giảm 50%
+                else:
+                    factor = 0.6  # Weak bear -> giảm 40%
+
+            elif regime == "HIGH_VOLATILITY":
+                # High volatility: giảm position để quản lý risk
+                volatility = components.get("volatility", 0.5)
+                if volatility > 0.8:
+                    factor = 0.3  # Extreme volatility -> giảm 70%
+                else:
+                    factor = 0.5  # High volatility -> giảm 50%
+
+            else:  # SIDEWAYS
+                # Sideways: giảm nhẹ, tùy thuộc vào volatility
+                volatility = components.get("volatility", 0.5)
+                if volatility > 0.5:
+                    factor = 0.7  # Sideways + high vol -> giảm 30%
+                else:
+                    factor = 0.85  # Sideways + low vol -> giảm 15%
+
+            # Điều chỉnh thêm theo sector rotation và foreign flow nếu có
+            sector_score = components.get("sector_rotation", 0)
+            foreign_score = components.get("foreign_flow", 0)
+
+            # Bonus/penalty từ sector rotation (-0.1 to +0.1)
+            if sector_score > 0.3:
+                factor += 0.05  # Leading sectors -> bonus nhỏ
+            elif sector_score < -0.3:
+                factor -= 0.05  # Lagging sectors -> penalty nhỏ
+
+            # Bonus/penalty từ foreign flow (-0.1 to +0.1)
+            if foreign_score > 0.3:
+                factor += 0.05  # Foreign buying -> bonus nhỏ
+            elif foreign_score < -0.3:
+                factor -= 0.05  # Foreign selling -> penalty nhỏ
+
+            # Clamp factor trong range hợp lý
+            factor = max(0.3, min(1.2, factor))
+
+            print(f"  🌡️ Market regime: {regime} (conf: {confidence:.0f}%) -> factor: {factor:.2f}")
+            return factor
+
+        except ImportError as e:
+            print(f"  ⚠️ Regime detector not available: {e}")
+            return 1.0
+        except Exception as e:
+            print(f"  ⚠️ Error calculating regime factor: {e}")
+            return 1.0
 
     def suggest_enhanced_limit_orders(self, current_price, atr, signal="BUY", confidence=50):
         """Đề xuất limit orders nâng cao"""

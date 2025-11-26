@@ -18,8 +18,57 @@ TRADING_HOURS = {
 }
 
 # Ngày nghỉ (0=Monday, 6=Sunday)
-# Thứ 3 = 2, Thứ 7 = 5
-NON_TRADING_DAYS = [2, 5]  # Thứ 3 và Thứ 7
+# Thứ 7 = 5, Chủ Nhật = 6
+NON_TRADING_DAYS = [5, 6]  # Thứ 7 và Chủ Nhật (FIXED: was incorrectly [2, 5])
+
+# Vietnam public holidays (can be updated annually)
+# Format: (month, day) - does not include lunar calendar holidays which vary
+VIETNAM_FIXED_HOLIDAYS = [
+    (1, 1),  # New Year's Day
+    (4, 30),  # Reunification Day
+    (5, 1),  # International Workers' Day
+    (9, 2),  # National Day
+]
+
+# Lunar holidays (approximate dates - should be updated each year)
+# These are placeholder dates and should be configured externally
+VIETNAM_LUNAR_HOLIDAYS_2024 = [
+    # Tet Holiday 2024 (approximate)
+    (2, 8),
+    (2, 9),
+    (2, 10),
+    (2, 11),
+    (2, 12),
+    (2, 13),
+    (2, 14),
+    # Hung Kings' Day 2024 (approximate)
+    (4, 18),
+]
+
+# Combined holidays for current year
+VIETNAM_HOLIDAYS = VIETNAM_FIXED_HOLIDAYS + VIETNAM_LUNAR_HOLIDAYS_2024
+
+
+def is_public_holiday(dt: Optional[datetime] = None) -> bool:
+    """
+    Check if date is a Vietnam public holiday
+
+    Args:
+        dt: Datetime to check (None = today)
+
+    Returns:
+        True if it's a public holiday
+    """
+    if dt is None:
+        dt = datetime.now(VN_TZ)
+    else:
+        if dt.tzinfo is None:
+            dt = VN_TZ.localize(dt)
+        else:
+            dt = dt.astimezone(VN_TZ)
+
+    month_day = (dt.month, dt.day)
+    return month_day in VIETNAM_HOLIDAYS
 
 
 def is_trading_hour(dt: Optional[datetime] = None) -> bool:
@@ -41,9 +90,13 @@ def is_trading_hour(dt: Optional[datetime] = None) -> bool:
         else:
             dt = dt.astimezone(VN_TZ)
 
-    # Check ngày nghỉ (Thứ 3 và Thứ 7)
+    # Check weekend (Saturday = 5, Sunday = 6)
     weekday = dt.weekday()
     if weekday in NON_TRADING_DAYS:
+        return False
+
+    # Check public holidays
+    if is_public_holiday(dt):
         return False
 
     # Check giờ giao dịch
@@ -64,7 +117,7 @@ def is_trading_hour(dt: Optional[datetime] = None) -> bool:
 
 def is_trading_day(dt: Optional[datetime] = None) -> bool:
     """
-    Kiểm tra xem có phải ngày giao dịch không (không phải T3/T7)
+    Kiểm tra xem có phải ngày giao dịch không (không phải T7/CN và không phải ngày lễ)
 
     Args:
         dt: Datetime để check (None = hiện tại)
@@ -80,8 +133,16 @@ def is_trading_day(dt: Optional[datetime] = None) -> bool:
         else:
             dt = dt.astimezone(VN_TZ)
 
+    # Check weekend
     weekday = dt.weekday()
-    return weekday not in NON_TRADING_DAYS
+    if weekday in NON_TRADING_DAYS:
+        return False
+
+    # Check public holidays
+    if is_public_holiday(dt):
+        return False
+
+    return True
 
 
 def get_next_trading_time(dt: Optional[datetime] = None) -> Optional[datetime]:
@@ -109,15 +170,23 @@ def get_next_trading_time(dt: Optional[datetime] = None) -> Optional[datetime]:
     current_time = dt.time()
     current_weekday = dt.weekday()
 
-    # Nếu là T3 hoặc T7, chuyển sang ngày tiếp theo
+    # Nếu là T7 hoặc CN, chuyển sang ngày tiếp theo
     if current_weekday in NON_TRADING_DAYS:
         days_ahead = 1
-        if current_weekday == 2:  # T3 -> T4
-            days_ahead = 1
-        elif current_weekday == 5:  # T7 -> T2
+        if current_weekday == 5:  # T7 -> T2
             days_ahead = 2
+        elif current_weekday == 6:  # CN -> T2
+            days_ahead = 1
 
         next_date = dt.date() + timedelta(days=days_ahead)
+
+        # Skip holidays
+        while is_public_holiday(VN_TZ.localize(datetime.combine(next_date, time(9, 0)))):
+            next_date += timedelta(days=1)
+            # Also skip weekends
+            if next_date.weekday() in NON_TRADING_DAYS:
+                next_date += timedelta(days=1 if next_date.weekday() == 5 else 2)
+
         next_dt = VN_TZ.localize(datetime.combine(next_date, TRADING_HOURS["morning"][0]))
         return next_dt
 
@@ -132,13 +201,19 @@ def get_next_trading_time(dt: Optional[datetime] = None) -> Optional[datetime]:
     # Nếu sau 15:00, return 9:00 ngày mai
     if current_time > TRADING_HOURS["afternoon"][1]:
         next_date = dt.date() + timedelta(days=1)
-        # Skip T3 và T7
+        # Skip T7 và CN
         next_weekday = next_date.weekday()
         if next_weekday in NON_TRADING_DAYS:
-            if next_weekday == 2:  # T3 -> T4
-                next_date += timedelta(days=1)
-            elif next_weekday == 5:  # T7 -> T2
+            if next_weekday == 5:  # T7 -> T2
                 next_date += timedelta(days=2)
+            elif next_weekday == 6:  # CN -> T2
+                next_date += timedelta(days=1)
+
+        # Skip holidays
+        while is_public_holiday(VN_TZ.localize(datetime.combine(next_date, time(9, 0)))):
+            next_date += timedelta(days=1)
+            if next_date.weekday() in NON_TRADING_DAYS:
+                next_date += timedelta(days=1 if next_date.weekday() == 6 else 2)
 
         return VN_TZ.localize(datetime.combine(next_date, TRADING_HOURS["morning"][0]))
 
@@ -181,12 +256,70 @@ def get_trading_sessions_today(
     return sessions
 
 
+def is_near_session_boundary(dt: Optional[datetime] = None, minutes: int = 5) -> Tuple[bool, str]:
+    """
+    Check if current time is near session boundary (avoid trading)
+
+    Args:
+        dt: Datetime to check (None = now)
+        minutes: Minutes before/after boundary to avoid
+
+    Returns:
+        (is_near_boundary, boundary_type)
+        - is_near_boundary: True if near a session boundary
+        - boundary_type: "AM_END", "PM_START", "PM_END", or ""
+    """
+    if dt is None:
+        dt = datetime.now(VN_TZ)
+    else:
+        if dt.tzinfo is None:
+            dt = VN_TZ.localize(dt)
+        else:
+            dt = dt.astimezone(VN_TZ)
+
+    current_time = dt.time()
+
+    def subtract_minutes(t: time, mins: int) -> time:
+        """Safely subtract minutes from time"""
+        total_mins = t.hour * 60 + t.minute - mins
+        if total_mins < 0:
+            total_mins = 0
+        return time(total_mins // 60, total_mins % 60)
+
+    def add_minutes(t: time, mins: int) -> time:
+        """Safely add minutes to time"""
+        total_mins = t.hour * 60 + t.minute + mins
+        if total_mins >= 24 * 60:
+            total_mins = 24 * 60 - 1
+        return time(total_mins // 60, total_mins % 60)
+
+    # Morning session end (11:30)
+    am_end = TRADING_HOURS["morning"][1]
+    am_end_start = subtract_minutes(am_end, minutes)
+    if am_end_start <= current_time <= am_end:
+        return (True, "AM_END")
+
+    # Afternoon session start (13:00)
+    pm_start = TRADING_HOURS["afternoon"][0]
+    pm_start_end = add_minutes(pm_start, minutes)
+    if pm_start <= current_time <= pm_start_end:
+        return (True, "PM_START")
+
+    # Afternoon session end (15:00)
+    pm_end = TRADING_HOURS["afternoon"][1]
+    pm_end_start = subtract_minutes(pm_end, minutes)
+    if pm_end_start <= current_time <= pm_end:
+        return (True, "PM_END")
+
+    return (False, "")
+
+
 def should_run_scheduled_task(dt: Optional[datetime] = None) -> bool:
     """
     Kiểm tra xem có nên chạy scheduled task không
 
     - Chỉ chạy trong giờ giao dịch
-    - Không chạy vào T3 và T7
+    - Không chạy vào T7/CN và ngày lễ
 
     Args:
         dt: Datetime để check (None = hiện tại)

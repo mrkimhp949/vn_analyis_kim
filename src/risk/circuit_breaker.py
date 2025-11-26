@@ -49,6 +49,9 @@ class CircuitBreaker:
         # NEW: Gradual response levels
         warning_threshold_pct: float = -1.5,  # Warning at -1.5%
         caution_threshold_pct: float = -2.0,  # Caution at -2.0% (reduce position sizes)
+        # IMPROVEMENT #9: Max drawdown protection
+        max_drawdown_pct: float = 0.15,  # 15% max drawdown from peak
+        drawdown_warning_pct: float = 0.10,  # 10% drawdown warning
     ):
         self.max_trades_per_day = max_trades_per_day
         self.max_loss_per_day_pct = max_loss_per_day_pct
@@ -72,6 +75,12 @@ class CircuitBreaker:
         self.stats_file = stats_file
         self.max_portfolio_heat = max_portfolio_heat
         self.volatility_multiplier = volatility_multiplier
+
+        # IMPROVEMENT #9: Drawdown protection
+        self.max_drawdown_pct = max_drawdown_pct
+        self.drawdown_warning_pct = drawdown_warning_pct
+        self.peak_portfolio_value = total_capital  # Track peak value
+        self.current_drawdown = 0.0
 
         self.stats = self._load_stats()
         self._check_new_day()
@@ -460,6 +469,126 @@ class CircuitBreaker:
         self.tripped_reason = ""
         self._save_stats()
         print("Circuit breaker has been reset.")
+
+    # ========================================================================
+    # IMPROVEMENT #9: Drawdown Protection
+    # ========================================================================
+
+    def update_portfolio_value(self, current_value: float) -> Dict:
+        """
+        IMPROVEMENT #9: Update portfolio value and check drawdown
+
+        Tracks peak portfolio value and calculates current drawdown.
+        Triggers circuit breaker if drawdown exceeds max threshold.
+
+        Args:
+            current_value: Current portfolio value
+
+        Returns:
+            Dict with drawdown analysis
+        """
+        with self._lock:
+            # Update peak if new high
+            if current_value > self.peak_portfolio_value:
+                self.peak_portfolio_value = current_value
+                self.current_drawdown = 0.0
+                return {
+                    "new_peak": True,
+                    "peak_value": self.peak_portfolio_value,
+                    "current_drawdown": 0.0,
+                    "drawdown_warning": False,
+                    "drawdown_critical": False,
+                }
+
+            # Calculate drawdown from peak
+            if self.peak_portfolio_value > 0:
+                self.current_drawdown = (
+                    self.peak_portfolio_value - current_value
+                ) / self.peak_portfolio_value
+            else:
+                self.current_drawdown = 0.0
+
+            # Check warning level
+            drawdown_warning = self.current_drawdown >= self.drawdown_warning_pct
+            drawdown_critical = self.current_drawdown >= self.max_drawdown_pct
+
+            # Trip circuit breaker if max drawdown exceeded
+            if drawdown_critical and not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 Max drawdown exceeded: {self.current_drawdown:.1%} "
+                    f"(limit: {self.max_drawdown_pct:.1%}). "
+                    f"Peak: {self.peak_portfolio_value:,.0f}, "
+                    f"Current: {current_value:,.0f}"
+                )
+                self._save_stats()
+                print(f"🚨 CIRCUIT BREAKER TRIPPED: {self.tripped_reason}")
+
+            return {
+                "new_peak": False,
+                "peak_value": self.peak_portfolio_value,
+                "current_value": current_value,
+                "current_drawdown": self.current_drawdown,
+                "drawdown_pct": self.current_drawdown * 100,
+                "drawdown_warning": drawdown_warning,
+                "drawdown_critical": drawdown_critical,
+                "tripped": self.tripped,
+            }
+
+    def check_drawdown(self, current_value: float) -> tuple:
+        """
+        IMPROVEMENT #9: Check if drawdown is within acceptable limits
+
+        Args:
+            current_value: Current portfolio value
+
+        Returns:
+            (is_ok, warning_message)
+        """
+        result = self.update_portfolio_value(current_value)
+
+        if result["drawdown_critical"]:
+            return (
+                False,
+                f"🚨 CRITICAL: Drawdown {result['drawdown_pct']:.1f}% exceeds max {self.max_drawdown_pct*100:.1f}%",
+            )
+
+        if result["drawdown_warning"]:
+            return (
+                True,
+                f"⚠️ WARNING: Drawdown {result['drawdown_pct']:.1f}% approaching limit "
+                f"({self.max_drawdown_pct*100:.1f}%)",
+            )
+
+        return (True, None)
+
+    def get_drawdown_status(self) -> Dict:
+        """
+        Get current drawdown status
+
+        Returns:
+            Dict with drawdown metrics
+        """
+        return {
+            "peak_value": self.peak_portfolio_value,
+            "current_drawdown_pct": self.current_drawdown * 100,
+            "max_drawdown_pct": self.max_drawdown_pct * 100,
+            "warning_threshold_pct": self.drawdown_warning_pct * 100,
+            "is_warning": self.current_drawdown >= self.drawdown_warning_pct,
+            "is_critical": self.current_drawdown >= self.max_drawdown_pct,
+        }
+
+    def reset_peak(self, new_peak: float = None):
+        """
+        Reset peak value (e.g., after capital injection or manual reset)
+
+        Args:
+            new_peak: New peak value (default: current total_capital)
+        """
+        with self._lock:
+            self.peak_portfolio_value = new_peak or self.total_capital
+            self.current_drawdown = 0.0
+            print(f"📊 Peak portfolio value reset to {self.peak_portfolio_value:,.0f}")
 
 
 # Global instance
