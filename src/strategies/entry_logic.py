@@ -95,16 +95,16 @@ class ImprovedEntryLogic:
 
     def __init__(
         self,
-        min_confidence: int = 55,  # LOWERED from 60 to reduce false negatives
-        min_risk_reward: float = 1.8,  # LOWERED from 2.0 for more opportunities
-        support_distance_percent: float = 5.0,  # INCREASED from 3.0 for flexibility
-        require_trend_alignment: bool = True,
-        require_volume_confirmation: bool = False,  # CHANGED: Now soft filter (warning only)
+        min_confidence: int = 45,  # RELAXED: từ 55 xuống 45
+        min_risk_reward: float = 1.5,  # RELAXED: từ 1.8 xuống 1.5
+        support_distance_percent: float = 7.0,  # RELAXED: từ 5.0 lên 7.0
+        require_trend_alignment: bool = False,  # RELAXED: từ True xuống False
+        require_volume_confirmation: bool = False,  # Soft filter (warning only)
         regime_aware_filtering: bool = True,  # Relax filters in BULL/SIDEWAYS markets
         portfolio_manager=None,
         performance_monitor=None,
-        min_liquidity_value: float = 2_000_000_000,  # LOWERED to 2B VND (was 5B)
-        min_avg_volume: int = 100_000,  # LOWERED from 150K
+        min_liquidity_value: float = 1_000_000_000,  # RELAXED: từ 2B xuống 1B VND
+        min_avg_volume: int = 50_000,  # RELAXED: từ 100K xuống 50K
         use_tiered_liquidity: bool = True,  # Enable tiered liquidity thresholds
         # SIMPLIFIED: All optional filters disabled by default
         use_price_action_filter: bool = False,  # REMOVED: Low predictive value
@@ -113,7 +113,7 @@ class ImprovedEntryLogic:
         use_monthly_timeframe: bool = False,  # REMOVED: Too restrictive
         # NEW: Soft filter mode - warnings instead of blocks
         soft_filter_mode: bool = True,  # When True, most filters add/subtract confidence
-        max_warnings_allowed: int = 3,  # Max warnings before blocking (when soft_filter_mode=True)
+        max_warnings_allowed: int = 5,  # RELAXED: từ 3 lên 5 warnings
     ):
         """
         Args:
@@ -171,16 +171,22 @@ class ImprovedEntryLogic:
         self._correlation_cache_portfolio_hash = None  # NEW: Track portfolio composition
 
     def _validate_initial_signal(
-        self, df: pd.DataFrame, ml_signal: Optional[Dict]
+        self, df: pd.DataFrame, ml_signal: Optional[Dict], symbol: Optional[str] = None
     ) -> tuple[bool, str, float, float]:
         """
         Validate initial data and ML signal
         ENHANCED: Allow fallback to technical analysis when ML signal is None
 
+        Args:
+            df: DataFrame with OHLCV data
+            ml_signal: ML signal dict or None
+            symbol: Stock symbol for logging
+
         Returns:
             (is_valid, signal_type, base_confidence, current_price) or
             (False, reason, 0, 0) if invalid
         """
+        symbol_tag = f"[{symbol}] " if symbol else ""
         try:
             DataValidator.validate_dataframe(df, min_rows=50)
         except Exception as e:
@@ -195,7 +201,7 @@ class ImprovedEntryLogic:
         # CRITICAL: Track whether signal is ML-based or technical-only
         if ml_signal is None:
             logger.warning(
-                "⚠️ ML signal is None - using technical analysis fallback. "
+                f"{symbol_tag}⚠️ ML signal is None - using technical analysis fallback. "
                 "This will be tracked separately for performance analysis."
             )
             # Use technical indicators to generate a fallback signal
@@ -912,7 +918,7 @@ class ImprovedEntryLogic:
                 signal_or_reason,
                 base_confidence,
                 current_price,
-            ) = self._validate_initial_signal(df, ml_signal)
+            ) = self._validate_initial_signal(df, ml_signal, symbol)
             if not is_valid:
                 return self._no_signal(signal_or_reason)
 

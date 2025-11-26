@@ -45,11 +45,44 @@
   },
   "VCB": {
     "symbol": "VCB",
-    "consecutive_losses": 0,
-    "total_trades": 2,
+    "consecutive_losses": 1,
+    "total_trades": 3,
     "total_wins": 2,
-    "total_losses": 0,
-    "win_rate": 1.0,
+    "total_losses": 1,
+    "win_rate": 0.6666666666666666,
+    "last_trade_date": "2025-11-26",
+    "blocked": false,
+    "blocked_reason": ""
+  },
+  "ACV": {
+    "symbol": "ACV",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-11-26",
+    "blocked": false,
+    "blocked_reason": ""
+  },
+  "APS": {
+    "symbol": "APS",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-11-26",
+    "blocked": false,
+    "blocked_reason": ""
+  },
+  "BVH": {
+    "symbol": "BVH",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
     "last_trade_date": "2025-11-26",
     "blocked": false,
     "blocked_reason": ""

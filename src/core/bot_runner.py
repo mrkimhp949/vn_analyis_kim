@@ -87,6 +87,15 @@ async def run_bot_with_context(bot_instance: Bot, chat_id: str):
             vnindex_df=vnindex_df,  # Truyền vnindex_df vào
         )
         logging.info("✅ Trading Orchestrator initialized.")
+
+        # Set orchestrator instance for /sell and /hold commands
+        try:
+            from src.notifications.listener import set_orchestrator_instance
+
+            set_orchestrator_instance(orchestrator)
+            logging.info("✅ Orchestrator instance set for exit confirmation commands.")
+        except ImportError:
+            logging.warning("⚠️ Could not set orchestrator instance for listener")
     except Exception:
         logging.critical("❌ Lỗi khởi tạo TradingOrchestrator", exc_info=True)
         await bot_instance.send_message(chat_id, "FATAL: Không thể khởi tạo Orchestrator")
