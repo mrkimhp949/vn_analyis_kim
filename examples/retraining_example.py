@@ -11,8 +11,7 @@ from datetime import datetime
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 logger = logging.getLogger(__name__)
@@ -31,8 +30,7 @@ def example_1_manual_retraining():
 
     # Manual trigger
     result = pipeline.run_retraining(
-        trigger=RetrainingTrigger.MANUAL,
-        trigger_reason="Testing automated retraining pipeline"
+        trigger=RetrainingTrigger.MANUAL, trigger_reason="Testing automated retraining pipeline"
     )
 
     if result.training_successful:
@@ -70,22 +68,18 @@ def example_2_check_triggers():
 
     # Simulate current performance
     current_performance = {
-        'win_rate': 0.55,  # Below 60% threshold
-        'accuracy': 0.58,
+        "win_rate": 0.55,  # Below 60% threshold
+        "accuracy": 0.58,
     }
 
     # Simulate current features (for drift detection)
     # In production, these would be real features from recent predictions
-    feature_names = ['rsi_14', 'macd', 'volume_ratio', 'ema_20_50']
-    current_features = pd.DataFrame(
-        np.random.randn(100, len(feature_names)),
-        columns=feature_names
-    )
+    feature_names = ["rsi_14", "macd", "volume_ratio", "ema_20_50"]
+    current_features = pd.DataFrame(np.random.randn(100, len(feature_names)), columns=feature_names)
 
     # Check triggers
     should_retrain, trigger, reason = pipeline.check_triggers(
-        current_performance=current_performance,
-        current_features=current_features
+        current_performance=current_performance, current_features=current_features
     )
 
     if should_retrain:
@@ -146,9 +140,7 @@ def example_4_manual_trigger_scheduler():
     scheduler = get_retraining_scheduler()
 
     # Manual trigger
-    result = scheduler.manual_trigger(
-        reason="Testing manual trigger from scheduler"
-    )
+    result = scheduler.manual_trigger(reason="Testing manual trigger from scheduler")
 
     if result.training_successful:
         logger.info(f"✅ Manual retraining successful!")
@@ -180,10 +172,7 @@ def example_5_model_versioning():
         logger.info(f"✅ Model loaded: {type(model).__name__}")
 
         # Get performance history
-        perf_history = manager.get_performance_history(
-            model_id=active_model_id,
-            days=7
-        )
+        perf_history = manager.get_performance_history(model_id=active_model_id, days=7)
 
         if not perf_history.empty:
             logger.info(f"\nPerformance history (last 7 days):")
@@ -213,10 +202,9 @@ def example_6_drift_detection():
     detector = get_drift_detector()
 
     # Simulate baseline features (training data)
-    feature_names = ['rsi_14', 'macd', 'volume_ratio', 'ema_20_50']
+    feature_names = ["rsi_14", "macd", "volume_ratio", "ema_20_50"]
     baseline_features = pd.DataFrame(
-        np.random.randn(1000, len(feature_names)),
-        columns=feature_names
+        np.random.randn(1000, len(feature_names)), columns=feature_names
     )
 
     # Set baseline
@@ -226,8 +214,7 @@ def example_6_drift_detection():
     # Simulate current features (with drift)
     # Add shift to simulate drift
     current_features = pd.DataFrame(
-        np.random.randn(500, len(feature_names)) + 0.5,  # +0.5 shift
-        columns=feature_names
+        np.random.randn(500, len(feature_names)) + 0.5, columns=feature_names  # +0.5 shift
     )
 
     # Detect drift
@@ -237,14 +224,18 @@ def example_6_drift_detection():
     logger.info(f"\nDrift report:")
     logger.info(f"   Overall PSI: {drift_report.overall_drift_score:.3f}")
     logger.info(f"   Severity: {drift_report.drift_severity}")
-    logger.info(f"   Features with drift: {drift_report.features_with_drift}/{drift_report.total_features}")
+    logger.info(
+        f"   Features with drift: {drift_report.features_with_drift}/{drift_report.total_features}"
+    )
     logger.info(f"   Requires retraining: {drift_report.requires_retraining}")
 
     if drift_report.features_with_drift > 0:
         logger.info(f"\nDrifted features:")
         for feature_drift in drift_report.feature_drifts:
             if feature_drift.has_drift:
-                logger.info(f"   - {feature_drift.feature_name}: PSI={feature_drift.psi_score:.3f} ({feature_drift.drift_severity})")
+                logger.info(
+                    f"   - {feature_drift.feature_name}: PSI={feature_drift.psi_score:.3f} ({feature_drift.drift_severity})"
+                )
 
 
 def example_7_full_workflow():

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class RetrainingTrigger(Enum):
     """Lý do trigger retraining"""
+
     DRIFT_DETECTED = "drift"  # Feature drift > threshold
     PERFORMANCE_DEGRADED = "performance"  # Production performance < threshold
     SCHEDULED = "scheduled"  # Scheduled retraining (e.g., monthly)
@@ -164,20 +165,20 @@ class AutomatedRetrainingPipeline:
                     RetrainingTrigger.DRIFT_DETECTED,
                     f"Feature drift detected: PSI={drift_report.overall_drift_score:.3f} "
                     f"(threshold={self.config.drift_threshold}). "
-                    f"{drift_report.features_with_drift}/{drift_report.total_features} features drifted."
+                    f"{drift_report.features_with_drift}/{drift_report.total_features} features drifted.",
                 )
 
         # 2. PERFORMANCE CHECK
         if current_performance is not None:
-            win_rate = current_performance.get('win_rate', 0)
-            accuracy = current_performance.get('accuracy', 0)
+            win_rate = current_performance.get("win_rate", 0)
+            accuracy = current_performance.get("accuracy", 0)
 
             if win_rate < self.config.performance_threshold:
                 return (
                     True,
                     RetrainingTrigger.PERFORMANCE_DEGRADED,
                     f"Performance degraded: win_rate={win_rate:.1%} < "
-                    f"threshold={self.config.performance_threshold:.1%}"
+                    f"threshold={self.config.performance_threshold:.1%}",
                 )
 
             if accuracy < self.config.performance_threshold:
@@ -185,17 +186,13 @@ class AutomatedRetrainingPipeline:
                     True,
                     RetrainingTrigger.PERFORMANCE_DEGRADED,
                     f"Accuracy degraded: accuracy={accuracy:.1%} < "
-                    f"threshold={self.config.performance_threshold:.1%}"
+                    f"threshold={self.config.performance_threshold:.1%}",
                 )
 
         # 3. SCHEDULED CHECK
         if self.config.enable_scheduled_retraining:
             if self.last_retraining_date is None:
-                return (
-                    True,
-                    RetrainingTrigger.SCHEDULED,
-                    "Initial training - no previous model"
-                )
+                return (True, RetrainingTrigger.SCHEDULED, "Initial training - no previous model")
 
             days_since_last = (datetime.now() - self.last_retraining_date).days
             if days_since_last >= self.config.scheduled_interval_days:
@@ -203,7 +200,7 @@ class AutomatedRetrainingPipeline:
                     True,
                     RetrainingTrigger.SCHEDULED,
                     f"Scheduled retraining: {days_since_last} days since last training "
-                    f"(interval: {self.config.scheduled_interval_days} days)"
+                    f"(interval: {self.config.scheduled_interval_days} days)",
                 )
 
         return (False, None, "")
@@ -236,7 +233,7 @@ class AutomatedRetrainingPipeline:
                 trigger_reason=trigger_reason,
                 timestamp=datetime.now().isoformat(),
                 training_successful=False,
-                errors=["Retraining already in progress"]
+                errors=["Retraining already in progress"],
             )
 
         self.retraining_in_progress = True
@@ -260,14 +257,16 @@ class AutomatedRetrainingPipeline:
                 errors.append(error_msg)
                 return self._failed_result(trigger, trigger_reason, errors)
 
-            logger.info(f"✅ Training data ready: {len(training_data)} samples, {len(feature_names)} features")
-
-            # 2. SPLIT DATA
-            X_train, X_val, X_test, y_train, y_val, y_test = self._split_data(
-                training_data, labels
+            logger.info(
+                f"✅ Training data ready: {len(training_data)} samples, {len(feature_names)} features"
             )
 
-            logger.info(f"📊 Data split: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+            # 2. SPLIT DATA
+            X_train, X_val, X_test, y_train, y_val, y_test = self._split_data(training_data, labels)
+
+            logger.info(
+                f"📊 Data split: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}"
+            )
 
             # 3. SET BASELINE FOR DRIFT DETECTION
             logger.info("📈 Setting baseline for future drift detection...")
@@ -285,12 +284,14 @@ class AutomatedRetrainingPipeline:
 
                 if model is not None:
                     trained_models[model_type] = {
-                        'model': model,
-                        'train_metrics': train_metrics,
-                        'val_metrics': val_metrics,
-                        'test_metrics': test_metrics,
+                        "model": model,
+                        "train_metrics": train_metrics,
+                        "val_metrics": val_metrics,
+                        "test_metrics": test_metrics,
                     }
-                    logger.info(f"   ✅ {model_type}: val_acc={val_metrics['accuracy']:.3f}, val_auc={val_metrics['auc']:.3f}")
+                    logger.info(
+                        f"   ✅ {model_type}: val_acc={val_metrics['accuracy']:.3f}, val_auc={val_metrics['auc']:.3f}"
+                    )
                 else:
                     logger.warning(f"   ❌ {model_type} training failed")
 
@@ -312,17 +313,15 @@ class AutomatedRetrainingPipeline:
 
             # Calculate feature importance
             feature_importance = self._calculate_feature_importance(
-                best_model_info['model'],
-                best_model_type,
-                feature_names
+                best_model_info["model"], best_model_type, feature_names
             )
 
             new_model_id = self.model_manager.register_model(
-                model=best_model_info['model'],
+                model=best_model_info["model"],
                 model_type=best_model_type,
                 version=new_version,
-                train_metrics=best_model_info['train_metrics'],
-                val_metrics=best_model_info['val_metrics'],
+                train_metrics=best_model_info["train_metrics"],
+                val_metrics=best_model_info["val_metrics"],
                 feature_names=feature_names,
                 training_period=f"{datetime.now() - timedelta(days=365)} to {datetime.now()}",
                 feature_importance=feature_importance,
@@ -339,9 +338,7 @@ class AutomatedRetrainingPipeline:
 
             if current_model_id is not None:
                 improvement_pct = self._compare_models(
-                    new_model_id,
-                    current_model_id,
-                    metric='val_accuracy'
+                    new_model_id, current_model_id, metric="val_accuracy"
                 )
 
                 logger.info(f"📊 Improvement vs current: {improvement_pct:+.1f}%")
@@ -350,7 +347,9 @@ class AutomatedRetrainingPipeline:
                 if improvement_pct >= self.config.min_improvement_for_deploy * 100:
                     should_deploy = True
                 else:
-                    logger.info(f"⚠️ Improvement {improvement_pct:.1f}% < threshold {self.config.min_improvement_for_deploy*100:.1f}% - not deploying")
+                    logger.info(
+                        f"⚠️ Improvement {improvement_pct:.1f}% < threshold {self.config.min_improvement_for_deploy*100:.1f}% - not deploying"
+                    )
             else:
                 # No current model - deploy this one
                 should_deploy = True
@@ -377,12 +376,12 @@ class AutomatedRetrainingPipeline:
                 training_successful=True,
                 new_model_id=new_model_id,
                 new_version=new_version,
-                train_accuracy=best_model_info['train_metrics']['accuracy'],
-                val_accuracy=best_model_info['val_metrics']['accuracy'],
-                test_accuracy=best_model_info['test_metrics']['accuracy'],
-                train_auc=best_model_info['train_metrics']['auc'],
-                val_auc=best_model_info['val_metrics']['auc'],
-                test_auc=best_model_info['test_metrics']['auc'],
+                train_accuracy=best_model_info["train_metrics"]["accuracy"],
+                val_accuracy=best_model_info["val_metrics"]["accuracy"],
+                test_accuracy=best_model_info["test_metrics"]["accuracy"],
+                train_auc=best_model_info["train_metrics"]["auc"],
+                val_auc=best_model_info["val_metrics"]["auc"],
+                test_auc=best_model_info["test_metrics"]["auc"],
                 current_model_id=current_model_id,
                 improvement_pct=improvement_pct,
                 deployed=deployed,
@@ -418,11 +417,7 @@ class AutomatedRetrainingPipeline:
         logger.warning("⚠️ _fetch_training_data not implemented - using placeholder")
         return None, None, []
 
-    def _split_data(
-        self,
-        features: pd.DataFrame,
-        labels: pd.Series
-    ) -> tuple:
+    def _split_data(self, features: pd.DataFrame, labels: pd.Series) -> tuple:
         """
         Split data into train/val/test
 
@@ -437,7 +432,7 @@ class AutomatedRetrainingPipeline:
             labels,
             test_size=self.config.test_split,
             random_state=42,
-            stratify=labels if len(labels.unique()) > 1 else None
+            stratify=labels if len(labels.unique()) > 1 else None,
         )
 
         # Second split: train vs val
@@ -447,7 +442,7 @@ class AutomatedRetrainingPipeline:
             y_temp,
             test_size=val_size,
             random_state=42,
-            stratify=y_temp if len(y_temp.unique()) > 1 else None
+            stratify=y_temp if len(y_temp.unique()) > 1 else None,
         )
 
         return X_train, X_val, X_test, y_train, y_val, y_test
@@ -490,12 +485,12 @@ class AutomatedRetrainingPipeline:
 
         # Hyperparameters (can be tuned with Optuna/GridSearch)
         params = {
-            'max_depth': 6,
-            'learning_rate': 0.1,
-            'n_estimators': 100,
-            'objective': 'multi:softmax',
-            'num_class': len(y_train.unique()),
-            'random_state': 42,
+            "max_depth": 6,
+            "learning_rate": 0.1,
+            "n_estimators": 100,
+            "objective": "multi:softmax",
+            "num_class": len(y_train.unique()),
+            "random_state": 42,
         }
 
         model = xgb.XGBClassifier(**params)
@@ -514,12 +509,12 @@ class AutomatedRetrainingPipeline:
         from sklearn.metrics import accuracy_score, roc_auc_score
 
         params = {
-            'max_depth': 6,
-            'learning_rate': 0.1,
-            'n_estimators': 100,
-            'objective': 'multiclass',
-            'num_class': len(y_train.unique()),
-            'random_state': 42,
+            "max_depth": 6,
+            "learning_rate": 0.1,
+            "n_estimators": 100,
+            "objective": "multiclass",
+            "num_class": len(y_train.unique()),
+            "random_state": 42,
         }
 
         model = lgb.LGBMClassifier(**params)
@@ -537,10 +532,10 @@ class AutomatedRetrainingPipeline:
         from sklearn.metrics import accuracy_score, roc_auc_score
 
         params = {
-            'n_estimators': 100,
-            'max_depth': 10,
-            'random_state': 42,
-            'n_jobs': -1,
+            "n_estimators": 100,
+            "max_depth": 10,
+            "random_state": 42,
+            "n_jobs": -1,
         }
 
         model = RandomForestClassifier(**params)
@@ -566,19 +561,19 @@ class AutomatedRetrainingPipeline:
                 if len(np.unique(y)) == 2:
                     auc = roc_auc_score(y, y_proba[:, 1])
                 else:
-                    auc = roc_auc_score(y, y_proba, multi_class='ovr')
+                    auc = roc_auc_score(y, y_proba, multi_class="ovr")
             except Exception:
                 auc = 0.0
 
             return {
-                'accuracy': accuracy,
-                'auc': auc,
-                'samples': len(y),
+                "accuracy": accuracy,
+                "auc": auc,
+                "samples": len(y),
             }
 
         except Exception as e:
             logger.error(f"Error calculating metrics: {e}")
-            return {'accuracy': 0.0, 'auc': 0.0, 'samples': len(y)}
+            return {"accuracy": 0.0, "auc": 0.0, "samples": len(y)}
 
     def _select_best_model(self, trained_models: Dict) -> tuple[str, Dict]:
         """
@@ -592,7 +587,7 @@ class AutomatedRetrainingPipeline:
         best_val_accuracy = -1
 
         for model_type, model_info in trained_models.items():
-            val_accuracy = model_info['val_metrics']['accuracy']
+            val_accuracy = model_info["val_metrics"]["accuracy"]
 
             if val_accuracy > best_val_accuracy:
                 best_val_accuracy = val_accuracy
@@ -602,19 +597,13 @@ class AutomatedRetrainingPipeline:
         return best_model_type, best_model_info
 
     def _calculate_feature_importance(
-        self,
-        model: Any,
-        model_type: str,
-        feature_names: List[str]
+        self, model: Any, model_type: str, feature_names: List[str]
     ) -> Dict[str, float]:
         """Calculate feature importance"""
         try:
-            if hasattr(model, 'feature_importances_'):
+            if hasattr(model, "feature_importances_"):
                 importances = model.feature_importances_
-                return {
-                    feature_names[i]: float(importances[i])
-                    for i in range(len(feature_names))
-                }
+                return {feature_names[i]: float(importances[i]) for i in range(len(feature_names))}
         except Exception as e:
             logger.warning(f"Could not calculate feature importance: {e}")
 
@@ -630,10 +619,10 @@ class AutomatedRetrainingPipeline:
         if current_model_id not in registry:
             return "1.0.0"
 
-        current_version = registry[current_model_id]['version']
+        current_version = registry[current_model_id]["version"]
 
         # Increment minor version
-        parts = current_version.split('.')
+        parts = current_version.split(".")
         major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
 
         # Increment minor for retraining
@@ -642,10 +631,7 @@ class AutomatedRetrainingPipeline:
         return new_version
 
     def _compare_models(
-        self,
-        new_model_id: str,
-        current_model_id: str,
-        metric: str = 'val_accuracy'
+        self, new_model_id: str, current_model_id: str, metric: str = "val_accuracy"
     ) -> float:
         """
         Compare new model with current model
@@ -666,10 +652,7 @@ class AutomatedRetrainingPipeline:
         return improvement
 
     def _failed_result(
-        self,
-        trigger: RetrainingTrigger,
-        trigger_reason: str,
-        errors: List[str]
+        self, trigger: RetrainingTrigger, trigger_reason: str, errors: List[str]
     ) -> RetrainingResult:
         """Create failed result"""
         return RetrainingResult(

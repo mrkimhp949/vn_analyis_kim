@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class LiquidityTier(Enum):
     """Phân loại thanh khoản"""
+
     MEGA_CAP = "mega"  # VN30 constituents (>50T VND market cap)
     LARGE_CAP = "large"  # 10-50T VND
     MID_CAP = "mid"  # 1-10T VND
@@ -27,6 +28,7 @@ class LiquidityTier(Enum):
 @dataclass
 class LiquidityThresholds:
     """Ngưỡng thanh khoản cho từng tier"""
+
     min_daily_value: float  # VND
     min_avg_volume: int  # Shares
     min_trade_frequency: float  # % days with volume > 0
@@ -156,15 +158,15 @@ class EnhancedLiquidityAnalyzer:
             # 1. CALCULATE METRICS
             recent_df = df.tail(self.lookback_days)
 
-            avg_volume = recent_df['volume'].mean()
+            avg_volume = recent_df["volume"].mean()
             avg_daily_value = avg_volume * current_price
 
             # Trade frequency: % of days with volume > 0
-            trade_frequency = (recent_df['volume'] > 0).sum() / len(recent_df)
+            trade_frequency = (recent_df["volume"] > 0).sum() / len(recent_df)
 
             # Volume consistency: Coefficient of variation (CV)
             # Lower CV = more consistent volume
-            volume_cv = recent_df['volume'].std() / avg_volume if avg_volume > 0 else 999
+            volume_cv = recent_df["volume"].std() / avg_volume if avg_volume > 0 else 999
 
             # 2. DETERMINE LIQUIDITY TIER
             tier = self._determine_tier(market_cap, avg_daily_value)
@@ -174,24 +176,22 @@ class EnhancedLiquidityAnalyzer:
 
             # 4. CHECK SUFFICIENCY
             is_sufficient = (
-                avg_daily_value >= thresholds.min_daily_value and
-                avg_volume >= thresholds.min_avg_volume and
-                trade_frequency >= thresholds.min_trade_frequency
+                avg_daily_value >= thresholds.min_daily_value
+                and avg_volume >= thresholds.min_avg_volume
+                and trade_frequency >= thresholds.min_trade_frequency
             )
 
             # 5. CHECK CRITICAL (below critical = block entry)
             critical_value_threshold = thresholds.min_daily_value * self.critical_multiplier
             critical_volume_threshold = thresholds.min_avg_volume * self.critical_multiplier
             is_critical = (
-                avg_daily_value < critical_value_threshold or
-                avg_volume < critical_volume_threshold or
-                trade_frequency < 0.50  # Less than 50% days traded = critical
+                avg_daily_value < critical_value_threshold
+                or avg_volume < critical_volume_threshold
+                or trade_frequency < 0.50  # Less than 50% days traded = critical
             )
 
             # 6. ESTIMATE SLIPPAGE
-            expected_slippage = self._estimate_slippage(
-                tier, volume_cv, bid_ask_spread
-            )
+            expected_slippage = self._estimate_slippage(tier, volume_cv, bid_ask_spread)
 
             # 7. CALCULATE RECOMMENDED MAX POSITION
             recommended_max_position_value = (
@@ -205,9 +205,16 @@ class EnhancedLiquidityAnalyzer:
 
             # 9. BUILD MESSAGES
             self._build_messages(
-                reasons, warnings, tier, avg_daily_value, avg_volume,
-                trade_frequency, volume_cv, is_sufficient, is_critical,
-                expected_slippage
+                reasons,
+                warnings,
+                tier,
+                avg_daily_value,
+                avg_volume,
+                trade_frequency,
+                volume_cv,
+                is_sufficient,
+                is_critical,
+                expected_slippage,
             )
 
             # 10. RETURN RESULT
@@ -231,11 +238,7 @@ class EnhancedLiquidityAnalyzer:
             logger.error(f"Error in liquidity analysis: {e}", exc_info=True)
             return self._insufficient_data_result()
 
-    def _determine_tier(
-        self,
-        market_cap: Optional[float],
-        avg_daily_value: float
-    ) -> LiquidityTier:
+    def _determine_tier(self, market_cap: Optional[float], avg_daily_value: float) -> LiquidityTier:
         """
         Determine liquidity tier based on market cap or daily value
 
@@ -267,10 +270,7 @@ class EnhancedLiquidityAnalyzer:
             return LiquidityTier.MICRO_CAP
 
     def _estimate_slippage(
-        self,
-        tier: LiquidityTier,
-        volume_cv: float,
-        bid_ask_spread: Optional[float]
+        self, tier: LiquidityTier, volume_cv: float, bid_ask_spread: Optional[float]
     ) -> float:
         """
         Estimate expected slippage % based on tier and volume consistency
@@ -307,7 +307,7 @@ class EnhancedLiquidityAnalyzer:
         is_sufficient: bool,
         is_critical: bool,
         volume_cv: float,
-        trade_frequency: float
+        trade_frequency: float,
     ) -> int:
         """
         Calculate confidence adjustment based on liquidity
@@ -357,7 +357,7 @@ class EnhancedLiquidityAnalyzer:
         volume_cv: float,
         is_sufficient: bool,
         is_critical: bool,
-        expected_slippage: float
+        expected_slippage: float,
     ):
         """Build reason and warning messages"""
 
@@ -378,27 +378,20 @@ class EnhancedLiquidityAnalyzer:
             )
         else:
             warnings.append(
-                f"⚠️ Low liquidity ({tier_name}, "
-                f"{avg_daily_value/1_000_000_000:.2f}B VND/day)"
+                f"⚠️ Low liquidity ({tier_name}, " f"{avg_daily_value/1_000_000_000:.2f}B VND/day)"
             )
 
         # Trade frequency warning
         if trade_frequency < 0.90:
-            warnings.append(
-                f"⚠️ Low trade frequency ({trade_frequency:.0%} days traded)"
-            )
+            warnings.append(f"⚠️ Low trade frequency ({trade_frequency:.0%} days traded)")
 
         # Volume consistency warning
         if volume_cv > 1.5:
-            warnings.append(
-                f"⚠️ Inconsistent volume (CV: {volume_cv:.2f})"
-            )
+            warnings.append(f"⚠️ Inconsistent volume (CV: {volume_cv:.2f})")
 
         # Slippage warning
         if expected_slippage >= 0.50:
-            warnings.append(
-                f"⚠️ High expected slippage ({expected_slippage:.2f}%)"
-            )
+            warnings.append(f"⚠️ High expected slippage ({expected_slippage:.2f}%)")
 
     def _insufficient_data_result(self) -> LiquidityAnalysis:
         """Return result for insufficient data"""

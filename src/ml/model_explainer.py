@@ -16,11 +16,13 @@ logger = logging.getLogger(__name__)
 # SHAP is optional dependency
 try:
     import shap
+
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
-    logger.warning("SHAP not installed - explainability features disabled. "
-                   "Install with: pip install shap")
+    logger.warning(
+        "SHAP not installed - explainability features disabled. " "Install with: pip install shap"
+    )
 
 
 @dataclass
@@ -111,11 +113,7 @@ class ModelExplainer:
             self.explainer = None
 
     def explain_prediction(
-        self,
-        features: pd.Series,
-        prediction: str,
-        confidence: float,
-        top_n: int = 5
+        self, features: pd.Series, prediction: str, confidence: float, top_n: int = 5
     ) -> PredictionExplanation:
         """
         Explain a single prediction
@@ -164,9 +162,7 @@ class ModelExplainer:
 
             # Sort by absolute value
             sorted_contributions = sorted(
-                contributions.items(),
-                key=lambda x: abs(x[1]),
-                reverse=True
+                contributions.items(), key=lambda x: abs(x[1]), reverse=True
             )
 
             # Top positive and negative
@@ -195,9 +191,7 @@ class ModelExplainer:
             return self._fallback_explanation(prediction, confidence)
 
     def get_feature_importance(
-        self,
-        test_features: pd.DataFrame,
-        sample_size: int = 1000
+        self, test_features: pd.DataFrame, sample_size: int = 1000
     ) -> pd.DataFrame:
         """
         Calculate global feature importance using SHAP
@@ -235,12 +229,11 @@ class ModelExplainer:
             mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
 
             # Create DataFrame
-            importance_df = pd.DataFrame({
-                'feature': self.feature_names,
-                'importance': mean_abs_shap
-            })
+            importance_df = pd.DataFrame(
+                {"feature": self.feature_names, "importance": mean_abs_shap}
+            )
 
-            importance_df = importance_df.sort_values('importance', ascending=False)
+            importance_df = importance_df.sort_values("importance", ascending=False)
 
             return importance_df
 
@@ -282,11 +275,7 @@ class ModelExplainer:
 
         return "\n".join(lines)
 
-    def _fallback_explanation(
-        self,
-        prediction: str,
-        confidence: float
-    ) -> PredictionExplanation:
+    def _fallback_explanation(self, prediction: str, confidence: float) -> PredictionExplanation:
         """Return minimal explanation when SHAP unavailable"""
         return PredictionExplanation(
             prediction=prediction,

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class SettlementPhase(Enum):
     """Giai đoạn trong T+2 settlement cycle"""
+
     T0_OPTIMAL = "T0_OPTIMAL"  # Best day to buy (settlement in 2 days)
     T0_GOOD = "T0_GOOD"  # Good day to buy
     T0_CAUTION = "T0_CAUTION"  # Can buy but need cash reserve
@@ -109,14 +110,10 @@ class SettlementTimingAnalyzer:
 
         try:
             # 1. GET PENDING SETTLEMENTS
-            pending_settlements = self._get_pending_settlements(
-                portfolio_manager, current_date
-            )
+            pending_settlements = self._get_pending_settlements(portfolio_manager, current_date)
 
             # 2. CALCULATE TOTAL PENDING AMOUNT
-            total_pending = sum(
-                settlement.get('amount', 0) for settlement in pending_settlements
-            )
+            total_pending = sum(settlement.get("amount", 0) for settlement in pending_settlements)
 
             # 3. DETERMINE SETTLEMENT PHASE
             phase = self._determine_phase(
@@ -124,9 +121,7 @@ class SettlementTimingAnalyzer:
             )
 
             # 4. CALCULATE DAYS UNTIL NEXT SETTLEMENT
-            days_until_next = self._days_until_next_settlement(
-                pending_settlements, current_date
-            )
+            days_until_next = self._days_until_next_settlement(pending_settlements, current_date)
 
             # 5. CALCULATE AVAILABLE BUYING POWER
             # Need to reserve cash for:
@@ -141,9 +136,9 @@ class SettlementTimingAnalyzer:
             # 6. CHECK IF CAN TRADE
             pending_pct = total_pending / total_capital if total_capital > 0 else 0
             can_trade = (
-                pending_pct < self.max_pending_settlement_pct and
-                available_buying_power > 0 and
-                phase != SettlementPhase.T2_SETTLEMENT
+                pending_pct < self.max_pending_settlement_pct
+                and available_buying_power > 0
+                and phase != SettlementPhase.T2_SETTLEMENT
             )
 
             # 7. RECOMMENDED POSITION SIZE REDUCTION
@@ -156,8 +151,14 @@ class SettlementTimingAnalyzer:
 
             # 9. BUILD MESSAGES
             self._build_messages(
-                reasons, warnings, phase, pending_settlements, total_pending,
-                available_buying_power, total_capital, days_until_next
+                reasons,
+                warnings,
+                phase,
+                pending_settlements,
+                total_pending,
+                available_buying_power,
+                total_capital,
+                days_until_next,
             )
 
             return SettlementAnalysis(
@@ -177,11 +178,7 @@ class SettlementTimingAnalyzer:
             logger.error(f"Error in settlement timing analysis: {e}", exc_info=True)
             return self._default_result()
 
-    def _get_pending_settlements(
-        self,
-        portfolio_manager,
-        current_date: datetime
-    ) -> List[Dict]:
+    def _get_pending_settlements(self, portfolio_manager, current_date: datetime) -> List[Dict]:
         """
         Get pending settlements from portfolio manager
 
@@ -198,7 +195,7 @@ class SettlementTimingAnalyzer:
 
             for symbol, pos in positions.items():
                 # Get entry date
-                entry_date_str = pos.get('entry_date')
+                entry_date_str = pos.get("entry_date")
                 if not entry_date_str:
                     continue
 
@@ -209,17 +206,19 @@ class SettlementTimingAnalyzer:
 
                 # If settlement is in future, add to pending
                 if settlement_date > current_date:
-                    amount = pos.get('shares', 0) * pos.get('avg_price', 0)
-                    pending.append({
-                        'symbol': symbol,
-                        'entry_date': entry_date,
-                        'settlement_date': settlement_date,
-                        'amount': amount,
-                        'days_remaining': (settlement_date - current_date).days
-                    })
+                    amount = pos.get("shares", 0) * pos.get("avg_price", 0)
+                    pending.append(
+                        {
+                            "symbol": symbol,
+                            "entry_date": entry_date,
+                            "settlement_date": settlement_date,
+                            "amount": amount,
+                            "days_remaining": (settlement_date - current_date).days,
+                        }
+                    )
 
             # Sort by settlement date
-            pending.sort(key=lambda x: x['settlement_date'])
+            pending.sort(key=lambda x: x["settlement_date"])
 
         except Exception as e:
             logger.error(f"Error getting pending settlements: {e}")
@@ -231,7 +230,7 @@ class SettlementTimingAnalyzer:
         current_date: datetime,
         pending_settlements: List[Dict],
         total_pending: float,
-        total_capital: float
+        total_capital: float,
     ) -> SettlementPhase:
         """
         Determine current settlement phase
@@ -270,38 +269,28 @@ class SettlementTimingAnalyzer:
         else:
             return SettlementPhase.T0_OPTIMAL
 
-    def _is_settlement_day(
-        self,
-        pending_settlements: List[Dict],
-        check_date: datetime
-    ) -> bool:
+    def _is_settlement_day(self, pending_settlements: List[Dict], check_date: datetime) -> bool:
         """Check if check_date is a settlement day"""
         for settlement in pending_settlements:
-            settlement_date = settlement['settlement_date']
+            settlement_date = settlement["settlement_date"]
             if settlement_date.date() == check_date.date():
                 return True
         return False
 
     def _days_until_next_settlement(
-        self,
-        pending_settlements: List[Dict],
-        current_date: datetime
+        self, pending_settlements: List[Dict], current_date: datetime
     ) -> int:
         """Calculate days until next settlement"""
         if not pending_settlements:
             return 999  # No pending settlements
 
         # Get earliest settlement
-        next_settlement = pending_settlements[0]['settlement_date']
+        next_settlement = pending_settlements[0]["settlement_date"]
         days = (next_settlement - current_date).days
 
         return max(0, days)
 
-    def _calculate_reduction(
-        self,
-        phase: SettlementPhase,
-        pending_pct: float
-    ) -> float:
+    def _calculate_reduction(self, phase: SettlementPhase, pending_pct: float) -> float:
         """
         Calculate recommended position size reduction
 
@@ -329,7 +318,7 @@ class SettlementTimingAnalyzer:
         phase: SettlementPhase,
         pending_pct: float,
         available_buying_power: float,
-        total_capital: float
+        total_capital: float,
     ) -> int:
         """
         Calculate confidence adjustment
@@ -365,7 +354,7 @@ class SettlementTimingAnalyzer:
         total_pending: float,
         available_buying_power: float,
         total_capital: float,
-        days_until_next: int
+        days_until_next: int,
     ):
         """Build reason and warning messages"""
 
@@ -386,13 +375,11 @@ class SettlementTimingAnalyzer:
         if total_pending > 0:
             if pending_pct >= 0.50:
                 warnings.append(
-                    f"⚠️ High pending settlements: {total_pending:,.0f} VND "
-                    f"({pending_pct:.0%})"
+                    f"⚠️ High pending settlements: {total_pending:,.0f} VND " f"({pending_pct:.0%})"
                 )
             else:
                 reasons.append(
-                    f"ℹ️ Pending settlements: {total_pending:,.0f} VND "
-                    f"({pending_pct:.0%})"
+                    f"ℹ️ Pending settlements: {total_pending:,.0f} VND " f"({pending_pct:.0%})"
                 )
 
         # Buying power

@@ -164,14 +164,14 @@ class ModelVersionManager:
             version=version,
             created_at=datetime.now().isoformat(),
             model_type=model_type,
-            train_accuracy=train_metrics.get('accuracy', 0.0),
-            val_accuracy=val_metrics.get('accuracy', 0.0),
-            train_auc=train_metrics.get('auc', 0.0),
-            val_auc=val_metrics.get('auc', 0.0),
+            train_accuracy=train_metrics.get("accuracy", 0.0),
+            val_accuracy=val_metrics.get("accuracy", 0.0),
+            train_auc=train_metrics.get("auc", 0.0),
+            val_auc=val_metrics.get("auc", 0.0),
             num_features=len(feature_names),
             feature_names=feature_names,
             feature_importance=feature_importance,
-            training_samples=train_metrics.get('samples', 0),
+            training_samples=train_metrics.get("samples", 0),
             training_period=training_period,
             hyperparameters=hyperparameters,
             is_active=False,
@@ -181,7 +181,7 @@ class ModelVersionManager:
 
         # Save model file
         model_path = self.models_dir / f"{model_id}.pkl"
-        with open(model_path, 'wb') as f:
+        with open(model_path, "wb") as f:
             pickle.dump(model, f)
 
         logger.info(f"✅ Model saved: {model_path}")
@@ -221,12 +221,12 @@ class ModelVersionManager:
 
         # Deactivate all models
         for mid in self.registry:
-            self.registry[mid]['is_active'] = False
-            self.registry[mid]['deployment_date'] = None
+            self.registry[mid]["is_active"] = False
+            self.registry[mid]["deployment_date"] = None
 
         # Activate target model
-        self.registry[model_id]['is_active'] = True
-        self.registry[model_id]['deployment_date'] = datetime.now().isoformat()
+        self.registry[model_id]["is_active"] = True
+        self.registry[model_id]["deployment_date"] = datetime.now().isoformat()
 
         self._save_registry()
 
@@ -255,7 +255,7 @@ class ModelVersionManager:
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
-        with open(model_path, 'rb') as f:
+        with open(model_path, "rb") as f:
             model = pickle.load(f)
 
         logger.info(f"📦 Model loaded: {model_id}")
@@ -264,7 +264,7 @@ class ModelVersionManager:
     def get_active_model_id(self) -> Optional[str]:
         """Get currently active model ID"""
         for model_id, metadata in self.registry.items():
-            if metadata.get('is_active', False):
+            if metadata.get("is_active", False):
                 return model_id
         return None
 
@@ -314,15 +314,13 @@ class ModelVersionManager:
         )
 
         # Append to log file (JSONL format)
-        with open(self.performance_log_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(asdict(log_entry)) + '\n')
+        with open(self.performance_log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(asdict(log_entry)) + "\n")
 
         logger.debug(f"📊 Performance logged for {model_id}")
 
     def get_performance_history(
-        self,
-        model_id: Optional[str] = None,
-        days: int = 30
+        self, model_id: Optional[str] = None, days: int = 30
     ) -> pd.DataFrame:
         """
         Get performance history for model(s)
@@ -339,12 +337,12 @@ class ModelVersionManager:
 
         # Read JSONL file
         logs = []
-        with open(self.performance_log_file, 'r', encoding='utf-8') as f:
+        with open(self.performance_log_file, "r", encoding="utf-8") as f:
             for line in f:
                 log = json.loads(line.strip())
 
                 # Filter by model_id if specified
-                if model_id is not None and log.get('model_id') != model_id:
+                if model_id is not None and log.get("model_id") != model_id:
                     continue
 
                 logs.append(log)
@@ -353,18 +351,15 @@ class ModelVersionManager:
             return pd.DataFrame()
 
         df = pd.DataFrame(logs)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
 
         # Filter by days
         cutoff = datetime.now() - pd.Timedelta(days=days)
-        df = df[df['timestamp'] >= cutoff]
+        df = df[df["timestamp"] >= cutoff]
 
-        return df.sort_values('timestamp')
+        return df.sort_values("timestamp")
 
-    def compare_models(
-        self,
-        model_ids: Optional[List[str]] = None
-    ) -> pd.DataFrame:
+    def compare_models(self, model_ids: Optional[List[str]] = None) -> pd.DataFrame:
         """
         Compare multiple models
 
@@ -386,30 +381,27 @@ class ModelVersionManager:
 
             # Get recent performance
             perf_df = self.get_performance_history(model_id, days=7)
-            recent_accuracy = perf_df['accuracy'].mean() if not perf_df.empty else 0.0
-            recent_win_rate = perf_df['win_rate'].mean() if not perf_df.empty else 0.0
+            recent_accuracy = perf_df["accuracy"].mean() if not perf_df.empty else 0.0
+            recent_win_rate = perf_df["win_rate"].mean() if not perf_df.empty else 0.0
 
-            comparisons.append({
-                'model_id': model_id,
-                'version': metadata['version'],
-                'model_type': metadata['model_type'],
-                'is_active': metadata['is_active'],
-                'val_accuracy': metadata['val_accuracy'],
-                'val_auc': metadata['val_auc'],
-                'recent_accuracy_7d': recent_accuracy,
-                'recent_win_rate_7d': recent_win_rate,
-                'num_features': metadata['num_features'],
-                'created_at': metadata['created_at'],
-            })
+            comparisons.append(
+                {
+                    "model_id": model_id,
+                    "version": metadata["version"],
+                    "model_type": metadata["model_type"],
+                    "is_active": metadata["is_active"],
+                    "val_accuracy": metadata["val_accuracy"],
+                    "val_auc": metadata["val_auc"],
+                    "recent_accuracy_7d": recent_accuracy,
+                    "recent_win_rate_7d": recent_win_rate,
+                    "num_features": metadata["num_features"],
+                    "created_at": metadata["created_at"],
+                }
+            )
 
-        return pd.DataFrame(comparisons).sort_values('val_accuracy', ascending=False)
+        return pd.DataFrame(comparisons).sort_values("val_accuracy", ascending=False)
 
-    def _generate_model_id(
-        self,
-        model: Any,
-        version: str,
-        hyperparameters: Optional[Dict]
-    ) -> str:
+    def _generate_model_id(self, model: Any, version: str, hyperparameters: Optional[Dict]) -> str:
         """Generate unique model ID from model + config"""
         # Create hash from version + hyperparameters
         hash_input = f"{version}_{json.dumps(hyperparameters or {}, sort_keys=True)}"
@@ -420,11 +412,7 @@ class ModelVersionManager:
 
         return model_id
 
-    def _should_auto_promote(
-        self,
-        new_model_id: str,
-        current_model_id: str
-    ) -> bool:
+    def _should_auto_promote(self, new_model_id: str, current_model_id: str) -> bool:
         """
         Check if new model should be auto-promoted
 
@@ -436,13 +424,13 @@ class ModelVersionManager:
         current_meta = self.registry[current_model_id]
 
         # Compare validation metrics
-        acc_improvement = new_meta['val_accuracy'] - current_meta['val_accuracy']
-        auc_improvement = new_meta['val_auc'] - current_meta['val_auc']
+        acc_improvement = new_meta["val_accuracy"] - current_meta["val_accuracy"]
+        auc_improvement = new_meta["val_auc"] - current_meta["val_auc"]
 
         # Auto-promote if accuracy improved by threshold AND AUC not degraded
         should_promote = (
-            acc_improvement >= self.auto_promote_threshold and
-            auc_improvement >= -0.01  # Allow tiny AUC degradation
+            acc_improvement >= self.auto_promote_threshold
+            and auc_improvement >= -0.01  # Allow tiny AUC degradation
         )
 
         if should_promote:
@@ -460,7 +448,7 @@ class ModelVersionManager:
             return {}
 
         try:
-            with open(self.metadata_file, 'r', encoding='utf-8') as f:
+            with open(self.metadata_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Error loading registry: {e}")
@@ -469,7 +457,7 @@ class ModelVersionManager:
     def _save_registry(self):
         """Save model registry to file"""
         try:
-            with open(self.metadata_file, 'w', encoding='utf-8') as f:
+            with open(self.metadata_file, "w", encoding="utf-8") as f:
                 json.dump(self.registry, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error saving registry: {e}")

@@ -118,11 +118,7 @@ class FeatureDriftDetector:
         # Recent samples buffer (for online drift detection)
         self.recent_samples = deque(maxlen=window_size)
 
-    def set_baseline(
-        self,
-        features_df: pd.DataFrame,
-        feature_names: List[str]
-    ):
+    def set_baseline(self, features_df: pd.DataFrame, feature_names: List[str]):
         """
         Set baseline distribution từ training data
 
@@ -145,21 +141,20 @@ class FeatureDriftDetector:
 
             # Calculate baseline statistics
             baseline[feature] = {
-                'mean': float(np.mean(values)),
-                'std': float(np.std(values)),
-                'min': float(np.min(values)),
-                'max': float(np.max(values)),
-                'q25': float(np.percentile(values, 25)),
-                'q50': float(np.percentile(values, 50)),
-                'q75': float(np.percentile(values, 75)),
+                "mean": float(np.mean(values)),
+                "std": float(np.std(values)),
+                "min": float(np.min(values)),
+                "max": float(np.max(values)),
+                "q25": float(np.percentile(values, 25)),
+                "q50": float(np.percentile(values, 50)),
+                "q75": float(np.percentile(values, 75)),
                 # Store histogram for PSI calculation
-                'hist_bins': np.percentile(values, np.linspace(0, 100, 11)).tolist(),
-                'hist_counts': np.histogram(
-                    values,
-                    bins=np.percentile(values, np.linspace(0, 100, 11))
+                "hist_bins": np.percentile(values, np.linspace(0, 100, 11)).tolist(),
+                "hist_counts": np.histogram(
+                    values, bins=np.percentile(values, np.linspace(0, 100, 11))
                 )[0].tolist(),
-                'sample_size': len(values),
-                'created_at': datetime.now().isoformat(),
+                "sample_size": len(values),
+                "created_at": datetime.now().isoformat(),
             }
 
         self.baseline = baseline
@@ -168,9 +163,7 @@ class FeatureDriftDetector:
         logger.info(f"✅ Baseline set for {len(baseline)} features")
 
     def detect_drift(
-        self,
-        current_features_df: pd.DataFrame,
-        feature_names: Optional[List[str]] = None
+        self, current_features_df: pd.DataFrame, feature_names: Optional[List[str]] = None
     ) -> DriftReport:
         """
         Detect drift in current features vs baseline
@@ -203,8 +196,7 @@ class FeatureDriftDetector:
 
             # Calculate drift for this feature
             drift = self._calculate_feature_drift(
-                feature,
-                current_features_df[feature].dropna().values
+                feature, current_features_df[feature].dropna().values
             )
 
             if drift is not None:
@@ -223,8 +215,8 @@ class FeatureDriftDetector:
 
         # Determine if retraining needed
         requires_retraining = (
-            overall_psi >= self.psi_threshold_high or
-            features_with_drift >= len(feature_names) * 0.30  # 30% features drifted
+            overall_psi >= self.psi_threshold_high
+            or features_with_drift >= len(feature_names) * 0.30  # 30% features drifted
         )
 
         # Create report
@@ -260,9 +252,7 @@ class FeatureDriftDetector:
         return report
 
     def _calculate_feature_drift(
-        self,
-        feature_name: str,
-        current_values: np.ndarray
+        self, feature_name: str, current_values: np.ndarray
     ) -> Optional[DriftMetrics]:
         """
         Calculate drift metrics for a single feature
@@ -282,27 +272,27 @@ class FeatureDriftDetector:
             std_current = np.std(current_values)
 
             # Baseline statistics
-            mean_baseline = baseline['mean']
-            std_baseline = baseline['std']
+            mean_baseline = baseline["mean"]
+            std_baseline = baseline["std"]
 
             # 1. PSI CALCULATION
             psi = self._calculate_psi(
                 current_values,
-                baseline['hist_bins'],
-                baseline['hist_counts'],
-                baseline['sample_size']
+                baseline["hist_bins"],
+                baseline["hist_counts"],
+                baseline["sample_size"],
             )
 
             # 2. KS TEST
             # Reconstruct baseline distribution from histogram
-            baseline_bins = np.array(baseline['hist_bins'])
-            baseline_counts = np.array(baseline['hist_counts'])
+            baseline_bins = np.array(baseline["hist_bins"])
+            baseline_counts = np.array(baseline["hist_counts"])
 
             # Create samples from baseline histogram (approximate)
             baseline_samples = []
             for i in range(len(baseline_counts)):
                 if i < len(baseline_bins) - 1:
-                    bin_center = (baseline_bins[i] + baseline_bins[i+1]) / 2
+                    bin_center = (baseline_bins[i] + baseline_bins[i + 1]) / 2
                     baseline_samples.extend([bin_center] * int(baseline_counts[i]))
 
             baseline_samples = np.array(baseline_samples)
@@ -312,10 +302,7 @@ class FeatureDriftDetector:
 
             # 3. DETERMINE DRIFT
             # Drift if: PSI > threshold OR KS test significant
-            has_drift = (
-                psi >= self.psi_threshold_low or
-                ks_pvalue < self.ks_pvalue_threshold
-            )
+            has_drift = psi >= self.psi_threshold_low or ks_pvalue < self.ks_pvalue_threshold
 
             # Classify severity
             severity = self._classify_psi(psi)
@@ -343,7 +330,7 @@ class FeatureDriftDetector:
         current_values: np.ndarray,
         baseline_bins: List[float],
         baseline_counts: List[int],
-        baseline_total: int
+        baseline_total: int,
     ) -> float:
         """
         Calculate Population Stability Index (PSI)
@@ -364,9 +351,7 @@ class FeatureDriftDetector:
             baseline_pcts = (np.array(baseline_counts) + epsilon) / (baseline_total + epsilon)
 
             # PSI formula
-            psi = np.sum(
-                (current_pcts - baseline_pcts) * np.log(current_pcts / baseline_pcts)
-            )
+            psi = np.sum((current_pcts - baseline_pcts) * np.log(current_pcts / baseline_pcts))
 
             return float(psi)
 
@@ -393,7 +378,7 @@ class FeatureDriftDetector:
             return {}
 
         try:
-            with open(self.baseline_file, 'r', encoding='utf-8') as f:
+            with open(self.baseline_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Error loading baseline: {e}")
@@ -402,7 +387,7 @@ class FeatureDriftDetector:
     def _save_baseline(self):
         """Save baseline to file"""
         try:
-            with open(self.baseline_file, 'w', encoding='utf-8') as f:
+            with open(self.baseline_file, "w", encoding="utf-8") as f:
                 json.dump(self.baseline, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving baseline: {e}")
@@ -412,24 +397,21 @@ class FeatureDriftDetector:
         try:
             # Convert to dict (simplified for logging)
             log_entry = {
-                'timestamp': report.timestamp,
-                'total_features': report.total_features,
-                'features_with_drift': report.features_with_drift,
-                'overall_drift_score': report.overall_drift_score,
-                'drift_severity': report.drift_severity,
-                'requires_retraining': report.requires_retraining,
-                'drifted_features': [
-                    {
-                        'feature': m.feature_name,
-                        'psi': m.psi_score,
-                        'severity': m.drift_severity
-                    }
-                    for m in report.feature_drifts if m.has_drift
-                ]
+                "timestamp": report.timestamp,
+                "total_features": report.total_features,
+                "features_with_drift": report.features_with_drift,
+                "overall_drift_score": report.overall_drift_score,
+                "drift_severity": report.drift_severity,
+                "requires_retraining": report.requires_retraining,
+                "drifted_features": [
+                    {"feature": m.feature_name, "psi": m.psi_score, "severity": m.drift_severity}
+                    for m in report.feature_drifts
+                    if m.has_drift
+                ],
             }
 
-            with open(self.drift_log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry) + '\n')
+            with open(self.drift_log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
 
         except Exception as e:
             logger.error(f"Error logging drift report: {e}")

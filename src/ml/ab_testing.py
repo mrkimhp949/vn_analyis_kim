@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class SignalSource(Enum):
     """Nguồn signal"""
+
     ML_MODEL = "ml"
     TECHNICAL_ANALYSIS = "technical"
     ENSEMBLE = "ensemble"  # Combine ML + Technical
@@ -176,11 +177,11 @@ class ABTestingFramework:
             return SignalSource.ML_MODEL
 
         # Hash-based allocation (deterministic)
-        hash_value = hash(symbol + self.active_test['test_id'])
+        hash_value = hash(symbol + self.active_test["test_id"])
         random.seed(hash_value)
         rand = random.random()
 
-        ml_allocation = self.active_test['ml_allocation']
+        ml_allocation = self.active_test["ml_allocation"]
 
         if rand < ml_allocation:
             return SignalSource.ML_MODEL
@@ -239,18 +240,14 @@ class ABTestingFramework:
             return None
 
         # Calculate results for each variant
-        ml_result = self._calculate_result(
-            SignalSource.ML_MODEL,
-            self.ml_tracker
-        )
+        ml_result = self._calculate_result(SignalSource.ML_MODEL, self.ml_tracker)
 
         technical_result = self._calculate_result(
-            SignalSource.TECHNICAL_ANALYSIS,
-            self.technical_tracker
+            SignalSource.TECHNICAL_ANALYSIS, self.technical_tracker
         )
 
         # Check minimum sample size
-        min_samples = self.active_test['min_sample_size']
+        min_samples = self.active_test["min_sample_size"]
         if ml_result.total_trades < min_samples or technical_result.total_trades < min_samples:
             logger.info(
                 f"ℹ️ Insufficient samples for significance test "
@@ -264,9 +261,7 @@ class ABTestingFramework:
         # Statistical significance test
         if not insufficient:
             winner, p_value, is_significant, improvement = self._statistical_test(
-                ml_result,
-                technical_result,
-                self.active_test['primary_metric']
+                ml_result, technical_result, self.active_test["primary_metric"]
             )
         else:
             winner = None
@@ -280,16 +275,13 @@ class ABTestingFramework:
         )
 
         # Create summary
-        start_date = self.active_test['start_date']
+        start_date = self.active_test["start_date"]
         end_date = datetime.now().isoformat()
-        duration = (
-            datetime.fromisoformat(end_date) -
-            datetime.fromisoformat(start_date)
-        ).days
+        duration = (datetime.fromisoformat(end_date) - datetime.fromisoformat(start_date)).days
 
         summary = ABTestSummary(
-            test_id=self.active_test['test_id'],
-            test_name=self.active_test['name'],
+            test_id=self.active_test["test_id"],
+            test_name=self.active_test["name"],
             start_date=start_date,
             end_date=end_date,
             duration_days=duration,
@@ -334,7 +326,7 @@ class ABTestingFramework:
 
         return summary
 
-    def _get_tracker(self, variant: SignalSource) -> 'PerformanceTracker':
+    def _get_tracker(self, variant: SignalSource) -> "PerformanceTracker":
         """Get tracker for variant"""
         if variant == SignalSource.ML_MODEL:
             return self.ml_tracker
@@ -342,44 +334,36 @@ class ABTestingFramework:
             return self.technical_tracker
 
     def _calculate_result(
-        self,
-        variant: SignalSource,
-        tracker: 'PerformanceTracker'
+        self, variant: SignalSource, tracker: "PerformanceTracker"
     ) -> ABTestResult:
         """Calculate result for a variant"""
 
         metrics = tracker.get_metrics()
 
         # Calculate confidence interval for win rate
-        if metrics['total_trades'] > 0:
-            win_rate_ci = self._wilson_confidence_interval(
-                metrics['wins'],
-                metrics['total_trades']
-            )
+        if metrics["total_trades"] > 0:
+            win_rate_ci = self._wilson_confidence_interval(metrics["wins"], metrics["total_trades"])
         else:
             win_rate_ci = (0.0, 0.0)
 
         return ABTestResult(
             variant=variant,
-            total_signals=metrics['total_signals'],
-            buy_signals=metrics['buy_signals'],
-            total_trades=metrics['total_trades'],
-            wins=metrics['wins'],
-            losses=metrics['losses'],
-            win_rate=metrics['win_rate'],
-            avg_profit_pct=metrics['avg_profit_pct'],
-            total_profit=metrics['total_profit'],
-            sharpe_ratio=metrics['sharpe_ratio'],
-            max_drawdown=metrics['max_drawdown'],
+            total_signals=metrics["total_signals"],
+            buy_signals=metrics["buy_signals"],
+            total_trades=metrics["total_trades"],
+            wins=metrics["wins"],
+            losses=metrics["losses"],
+            win_rate=metrics["win_rate"],
+            avg_profit_pct=metrics["avg_profit_pct"],
+            total_profit=metrics["total_profit"],
+            sharpe_ratio=metrics["sharpe_ratio"],
+            max_drawdown=metrics["max_drawdown"],
             win_rate_ci_lower=win_rate_ci[0],
             win_rate_ci_upper=win_rate_ci[1],
         )
 
     def _statistical_test(
-        self,
-        ml_result: ABTestResult,
-        technical_result: ABTestResult,
-        primary_metric: str
+        self, ml_result: ABTestResult, technical_result: ABTestResult, primary_metric: str
     ) -> tuple[Optional[str], float, bool, float]:
         """
         Perform statistical significance test
@@ -413,7 +397,7 @@ class ABTestingFramework:
         is_significant = p_value < 0.05
 
         # Only declare winner if significant AND meets minimum improvement threshold
-        min_improvement = self.active_test['min_improvement_threshold'] * 100
+        min_improvement = self.active_test["min_improvement_threshold"] * 100
         if is_significant and improvement >= min_improvement:
             winner = winner_candidate
         else:
@@ -422,18 +406,16 @@ class ABTestingFramework:
 
         return winner, p_value, is_significant, improvement
 
-    def _chi_square_test(
-        self,
-        ml_result: ABTestResult,
-        technical_result: ABTestResult
-    ) -> float:
+    def _chi_square_test(self, ml_result: ABTestResult, technical_result: ABTestResult) -> float:
         """Chi-square test for win rates"""
         try:
             # Contingency table
-            observed = np.array([
-                [ml_result.wins, ml_result.losses],
-                [technical_result.wins, technical_result.losses]
-            ])
+            observed = np.array(
+                [
+                    [ml_result.wins, ml_result.losses],
+                    [technical_result.wins, technical_result.losses],
+                ]
+            )
 
             # Chi-square test
             chi2, p_value, _, _ = stats.chi2_contingency(observed)
@@ -445,10 +427,7 @@ class ABTestingFramework:
             return 1.0  # No significance
 
     def _t_test(
-        self,
-        ml_result: ABTestResult,
-        technical_result: ABTestResult,
-        metric: str
+        self, ml_result: ABTestResult, technical_result: ABTestResult, metric: str
     ) -> float:
         """T-test for continuous metrics"""
         # Note: This is simplified - ideally we'd have individual trade data
@@ -462,7 +441,11 @@ class ABTestingFramework:
 
         # Estimate standard errors
         ml_se = ml_value / np.sqrt(ml_result.total_trades) if ml_result.total_trades > 0 else 0
-        tech_se = tech_value / np.sqrt(technical_result.total_trades) if technical_result.total_trades > 0 else 0
+        tech_se = (
+            tech_value / np.sqrt(technical_result.total_trades)
+            if technical_result.total_trades > 0
+            else 0
+        )
 
         # Pooled standard error
         pooled_se = np.sqrt(ml_se**2 + tech_se**2)
@@ -482,10 +465,7 @@ class ABTestingFramework:
         return p_value
 
     def _wilson_confidence_interval(
-        self,
-        successes: int,
-        total: int,
-        confidence: float = 0.95
+        self, successes: int, total: int, confidence: float = 0.95
     ) -> tuple[float, float]:
         """
         Wilson score confidence interval for win rate
@@ -513,7 +493,7 @@ class ABTestingFramework:
         technical_result: ABTestResult,
         winner: Optional[str],
         is_significant: bool,
-        improvement: float
+        improvement: float,
     ) -> str:
         """Generate actionable recommendation"""
 
@@ -550,7 +530,7 @@ class ABTestingFramework:
             return None
 
         try:
-            with open(self.active_test_file, 'r', encoding='utf-8') as f:
+            with open(self.active_test_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Error loading active test: {e}")
@@ -559,7 +539,7 @@ class ABTestingFramework:
     def _save_active_test(self):
         """Save active test config"""
         try:
-            with open(self.active_test_file, 'w', encoding='utf-8') as f:
+            with open(self.active_test_file, "w", encoding="utf-8") as f:
                 json.dump(self.active_test, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving active test: {e}")
@@ -569,8 +549,8 @@ class ABTestingFramework:
         try:
             log_entry = asdict(summary)
 
-            with open(self.results_log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry) + '\n')
+            with open(self.results_log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
 
         except Exception as e:
             logger.error(f"Error logging test results: {e}")
@@ -585,35 +565,39 @@ class PerformanceTracker:
 
     def track_signal(self, symbol: str, signal: str, confidence: float):
         """Track a signal"""
-        self.signals.append({
-            'symbol': symbol,
-            'signal': signal,
-            'confidence': confidence,
-            'timestamp': datetime.now().isoformat()
-        })
+        self.signals.append(
+            {
+                "symbol": symbol,
+                "signal": signal,
+                "confidence": confidence,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     def track_trade(self, symbol: str, is_win: bool, profit_pct: float, holding_days: int):
         """Track a trade result"""
-        self.trades.append({
-            'symbol': symbol,
-            'is_win': is_win,
-            'profit_pct': profit_pct,
-            'holding_days': holding_days,
-            'timestamp': datetime.now().isoformat()
-        })
+        self.trades.append(
+            {
+                "symbol": symbol,
+                "is_win": is_win,
+                "profit_pct": profit_pct,
+                "holding_days": holding_days,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     def get_metrics(self) -> Dict:
         """Calculate metrics"""
         total_signals = len(self.signals)
-        buy_signals = sum(1 for s in self.signals if s['signal'] == 'BUY')
+        buy_signals = sum(1 for s in self.signals if s["signal"] == "BUY")
 
         total_trades = len(self.trades)
-        wins = sum(1 for t in self.trades if t['is_win'])
+        wins = sum(1 for t in self.trades if t["is_win"])
         losses = total_trades - wins
 
         win_rate = wins / total_trades if total_trades > 0 else 0.0
 
-        profits = [t['profit_pct'] for t in self.trades]
+        profits = [t["profit_pct"] for t in self.trades]
         avg_profit = np.mean(profits) if profits else 0.0
         total_profit = sum(profits) if profits else 0.0
 
@@ -627,16 +611,16 @@ class PerformanceTracker:
         max_dd = np.max(drawdown) if len(drawdown) > 0 else 0.0
 
         return {
-            'total_signals': total_signals,
-            'buy_signals': buy_signals,
-            'total_trades': total_trades,
-            'wins': wins,
-            'losses': losses,
-            'win_rate': win_rate,
-            'avg_profit_pct': avg_profit,
-            'total_profit': total_profit,
-            'sharpe_ratio': sharpe,
-            'max_drawdown': max_dd,
+            "total_signals": total_signals,
+            "buy_signals": buy_signals,
+            "total_trades": total_trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "avg_profit_pct": avg_profit,
+            "total_profit": total_profit,
+            "sharpe_ratio": sharpe,
+            "max_drawdown": max_dd,
         }
 
 

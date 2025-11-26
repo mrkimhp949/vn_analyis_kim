@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class TimeframeTrend(Enum):
     """Xu hướng trên từng khung thời gian"""
+
     STRONG_UP = 3
     MODERATE_UP = 2
     WEAK_UP = 1
@@ -129,17 +130,13 @@ class MultiTimeframeAnalyzer:
 
         # 1. DAILY TIMEFRAME ANALYSIS
         daily_trend, daily_score = self._analyze_timeframe(
-            df_daily,
-            lookback=self.daily_lookback,
-            timeframe_name="Daily"
+            df_daily, lookback=self.daily_lookback, timeframe_name="Daily"
         )
 
         # 2. WEEKLY TIMEFRAME ANALYSIS (resample from daily)
         df_weekly = self._resample_to_weekly(df_daily)
         weekly_trend, weekly_score = self._analyze_timeframe(
-            df_weekly,
-            lookback=self.weekly_lookback,
-            timeframe_name="Weekly"
+            df_weekly, lookback=self.weekly_lookback, timeframe_name="Weekly"
         )
 
         # 3. 4-HOUR TIMEFRAME ANALYSIS (if available)
@@ -147,9 +144,7 @@ class MultiTimeframeAnalyzer:
         four_hour_score = None
         if self.use_four_hour and df_4h is not None and not df_4h.empty:
             four_hour_trend, four_hour_score = self._analyze_timeframe(
-                df_4h,
-                lookback=self.four_hour_lookback,
-                timeframe_name="4H"
+                df_4h, lookback=self.four_hour_lookback, timeframe_name="4H"
             )
 
         # 4. CALCULATE ALIGNMENT SCORE
@@ -168,8 +163,15 @@ class MultiTimeframeAnalyzer:
 
         # 7. BUILD REASONS AND WARNINGS
         self._build_messages(
-            reasons, warnings, daily_trend, weekly_trend, four_hour_trend,
-            daily_score, weekly_score, four_hour_score, alignment_score
+            reasons,
+            warnings,
+            daily_trend,
+            weekly_trend,
+            four_hour_trend,
+            daily_score,
+            weekly_score,
+            four_hour_score,
+            alignment_score,
         )
 
         return MultiTimeframeAnalysis(
@@ -187,10 +189,7 @@ class MultiTimeframeAnalyzer:
         )
 
     def _analyze_timeframe(
-        self,
-        df: pd.DataFrame,
-        lookback: int,
-        timeframe_name: str
+        self, df: pd.DataFrame, lookback: int, timeframe_name: str
     ) -> tuple[TimeframeTrend, float]:
         """
         Phân tích xu hướng cho một timeframe cụ thể
@@ -217,30 +216,33 @@ class MultiTimeframeAnalyzer:
             score_components = []
 
             # 1. EMA ALIGNMENT (weight: 40%)
-            if all(col in latest.index for col in ['ema_20', 'ema_50', 'ema_200']):
+            if all(col in latest.index for col in ["ema_20", "ema_50", "ema_200"]):
                 ema_score = self._calculate_ema_score(latest)
-                score_components.append(('ema', ema_score, 0.40))
+                score_components.append(("ema", ema_score, 0.40))
 
             # 2. PRICE MOMENTUM - ROC (weight: 25%)
-            if 'close' in recent_df.columns and len(recent_df) >= 10:
-                roc_10 = ((latest['close'] - recent_df['close'].iloc[-10]) /
-                          recent_df['close'].iloc[-10] * 100)
+            if "close" in recent_df.columns and len(recent_df) >= 10:
+                roc_10 = (
+                    (latest["close"] - recent_df["close"].iloc[-10])
+                    / recent_df["close"].iloc[-10]
+                    * 100
+                )
                 # Normalize: -5% to +5% maps to -100 to +100
                 roc_score = np.clip(roc_10 / 0.05 * 100, -100, 100)
-                score_components.append(('roc', roc_score, 0.25))
+                score_components.append(("roc", roc_score, 0.25))
 
             # 3. MACD HISTOGRAM (weight: 20%)
-            if 'macd_histogram' in latest.index:
+            if "macd_histogram" in latest.index:
                 # MACD histogram: positive = bullish, negative = bearish
-                macd_hist = latest['macd_histogram']
+                macd_hist = latest["macd_histogram"]
                 # Normalize: -1.0 to +1.0 maps to -100 to +100
                 macd_score = np.clip(macd_hist / 1000 * 100, -100, 100)
-                score_components.append(('macd', macd_score, 0.20))
+                score_components.append(("macd", macd_score, 0.20))
 
             # 4. LINEAR REGRESSION SLOPE (weight: 15%)
-            if 'close' in recent_df.columns:
-                slope_score = self._calculate_slope_score(recent_df['close'])
-                score_components.append(('slope', slope_score, 0.15))
+            if "close" in recent_df.columns:
+                slope_score = self._calculate_slope_score(recent_df["close"])
+                score_components.append(("slope", slope_score, 0.15))
 
             # Calculate weighted composite score
             if not score_components:
@@ -271,9 +273,9 @@ class MultiTimeframeAnalyzer:
         Perfect alignment: EMA20 > EMA50 > EMA200 = +100
         Perfect bearish: EMA20 < EMA50 < EMA200 = -100
         """
-        ema_20 = latest['ema_20']
-        ema_50 = latest['ema_50']
-        ema_200 = latest['ema_200']
+        ema_20 = latest["ema_20"]
+        ema_50 = latest["ema_50"]
+        ema_200 = latest["ema_200"]
 
         # Calculate separation percentages
         sep_20_50 = ((ema_20 - ema_50) / ema_50) * 100
@@ -351,25 +353,25 @@ class MultiTimeframeAnalyzer:
         try:
             # Set date as index if not already
             df = df_daily.copy()
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-                df.set_index('date', inplace=True)
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"])
+                df.set_index("date", inplace=True)
 
             # Resample rules
             ohlc_dict = {
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum',
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
             }
 
             # Add indicators (take last value of week)
             indicator_cols = [col for col in df.columns if col not in ohlc_dict.keys()]
             for col in indicator_cols:
-                ohlc_dict[col] = 'last'
+                ohlc_dict[col] = "last"
 
-            df_weekly = df.resample('W').agg(ohlc_dict)
+            df_weekly = df.resample("W").agg(ohlc_dict)
             df_weekly.dropna(inplace=True)
 
             return df_weekly
@@ -379,10 +381,7 @@ class MultiTimeframeAnalyzer:
             return pd.DataFrame()
 
     def _calculate_alignment_score(
-        self,
-        daily_score: float,
-        weekly_score: float,
-        four_hour_score: Optional[float]
+        self, daily_score: float, weekly_score: float, four_hour_score: Optional[float]
     ) -> float:
         """
         Calculate composite alignment score using weighted average
@@ -390,10 +389,7 @@ class MultiTimeframeAnalyzer:
         Returns: -100 (fully bearish) to +100 (fully bullish)
         """
         # Weighted composite
-        alignment = (
-            daily_score * self.daily_weight +
-            weekly_score * self.weekly_weight
-        )
+        alignment = daily_score * self.daily_weight + weekly_score * self.weekly_weight
 
         if four_hour_score is not None and self.use_four_hour:
             alignment += four_hour_score * self.four_hour_weight
@@ -412,16 +408,16 @@ class MultiTimeframeAnalyzer:
         if not market_regime:
             return base_threshold
 
-        regime = market_regime.get('regime', 'SIDEWAYS')
-        confidence = market_regime.get('confidence', 50)
+        regime = market_regime.get("regime", "SIDEWAYS")
+        confidence = market_regime.get("confidence", 50)
 
-        if regime == 'BULL' and confidence >= 70:
+        if regime == "BULL" and confidence >= 70:
             # In strong bull, relax threshold by 20%
             return base_threshold * 0.80
-        elif regime == 'BEAR':
+        elif regime == "BEAR":
             # In bear, tighten threshold by 20%
             return base_threshold * 1.20
-        elif regime == 'HIGH_VOLATILITY':
+        elif regime == "HIGH_VOLATILITY":
             # In high vol, tighten threshold by 30%
             return base_threshold * 1.30
 
@@ -433,7 +429,7 @@ class MultiTimeframeAnalyzer:
         is_aligned: bool,
         daily_trend: TimeframeTrend,
         weekly_trend: TimeframeTrend,
-        four_hour_trend: Optional[TimeframeTrend]
+        four_hour_trend: Optional[TimeframeTrend],
     ) -> int:
         """
         Calculate confidence adjustment based on timeframe alignment
@@ -446,7 +442,8 @@ class MultiTimeframeAnalyzer:
 
         # Bonus for strong trends
         if daily_trend == TimeframeTrend.STRONG_UP and weekly_trend in [
-            TimeframeTrend.STRONG_UP, TimeframeTrend.MODERATE_UP
+            TimeframeTrend.STRONG_UP,
+            TimeframeTrend.MODERATE_UP,
         ]:
             base_adj += 5  # Extra bonus for strong multi-timeframe alignment
 
@@ -466,7 +463,7 @@ class MultiTimeframeAnalyzer:
         daily_score: float,
         weekly_score: float,
         four_hour_score: Optional[float],
-        alignment_score: float
+        alignment_score: float,
     ):
         """Build reason and warning messages"""
 

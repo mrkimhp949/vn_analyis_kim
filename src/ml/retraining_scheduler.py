@@ -186,10 +186,7 @@ class RetrainingScheduler:
                 f"Please investigate immediately!"
             )
 
-    def manual_trigger(
-        self,
-        reason: str = "Manual trigger"
-    ) -> RetrainingResult:
+    def manual_trigger(self, reason: str = "Manual trigger") -> RetrainingResult:
         """
         Manually trigger retraining
 
@@ -209,10 +206,7 @@ class RetrainingScheduler:
         )
 
         # Run retraining
-        result = self.pipeline.run_retraining(
-            RetrainingTrigger.MANUAL,
-            reason
-        )
+        result = self.pipeline.run_retraining(RetrainingTrigger.MANUAL, reason)
 
         # Update state
         self.last_retraining_time = datetime.now()
@@ -230,12 +224,18 @@ class RetrainingScheduler:
     def get_status(self) -> dict:
         """Get current scheduler status"""
         return {
-            'is_running': self.is_running,
-            'last_check_time': self.last_check_time.isoformat() if self.last_check_time else None,
-            'last_retraining_time': self.last_retraining_time.isoformat() if self.last_retraining_time else None,
-            'total_retrainings': self.total_retrainings,
-            'next_check': str(schedule.next_run()) if schedule.jobs else None,
-            'last_result': self._result_to_dict(self.last_retraining_result) if self.last_retraining_result else None,
+            "is_running": self.is_running,
+            "last_check_time": self.last_check_time.isoformat() if self.last_check_time else None,
+            "last_retraining_time": (
+                self.last_retraining_time.isoformat() if self.last_retraining_time else None
+            ),
+            "total_retrainings": self.total_retrainings,
+            "next_check": str(schedule.next_run()) if schedule.jobs else None,
+            "last_result": (
+                self._result_to_dict(self.last_retraining_result)
+                if self.last_retraining_result
+                else None
+            ),
         }
 
     def _send_notification(self, message: str):
@@ -249,11 +249,10 @@ class RetrainingScheduler:
 
         try:
             import asyncio
+
             asyncio.create_task(
                 self.telegram_bot.send_message(
-                    self.telegram_chat_id,
-                    message,
-                    parse_mode="Markdown"
+                    self.telegram_chat_id, message, parse_mode="Markdown"
                 )
             )
         except Exception as e:
@@ -282,9 +281,7 @@ class RetrainingScheduler:
 
         else:
             message = (
-                f"❌ **Retraining Failed**\n\n"
-                f"Trigger: {result.trigger.value}\n"
-                f"Errors:\n"
+                f"❌ **Retraining Failed**\n\n" f"Trigger: {result.trigger.value}\n" f"Errors:\n"
             )
             for error in result.errors:
                 message += f"• {error}\n"
@@ -294,17 +291,17 @@ class RetrainingScheduler:
     def _result_to_dict(self, result: RetrainingResult) -> dict:
         """Convert RetrainingResult to dict"""
         return {
-            'trigger': result.trigger.value,
-            'trigger_reason': result.trigger_reason,
-            'timestamp': result.timestamp,
-            'training_successful': result.training_successful,
-            'new_model_id': result.new_model_id,
-            'new_version': result.new_version,
-            'val_accuracy': result.val_accuracy,
-            'test_accuracy': result.test_accuracy,
-            'improvement_pct': result.improvement_pct,
-            'deployed': result.deployed,
-            'errors': result.errors,
+            "trigger": result.trigger.value,
+            "trigger_reason": result.trigger_reason,
+            "timestamp": result.timestamp,
+            "training_successful": result.training_successful,
+            "new_model_id": result.new_model_id,
+            "new_version": result.new_version,
+            "val_accuracy": result.val_accuracy,
+            "test_accuracy": result.test_accuracy,
+            "improvement_pct": result.improvement_pct,
+            "deployed": result.deployed,
+            "errors": result.errors,
         }
 
     def _load_status(self):
@@ -313,12 +310,20 @@ class RetrainingScheduler:
             return
 
         try:
-            with open(self.status_file, 'r', encoding='utf-8') as f:
+            with open(self.status_file, "r", encoding="utf-8") as f:
                 status = json.load(f)
 
-            self.last_check_time = datetime.fromisoformat(status['last_check_time']) if status.get('last_check_time') else None
-            self.last_retraining_time = datetime.fromisoformat(status['last_retraining_time']) if status.get('last_retraining_time') else None
-            self.total_retrainings = status.get('total_retrainings', 0)
+            self.last_check_time = (
+                datetime.fromisoformat(status["last_check_time"])
+                if status.get("last_check_time")
+                else None
+            )
+            self.last_retraining_time = (
+                datetime.fromisoformat(status["last_retraining_time"])
+                if status.get("last_retraining_time")
+                else None
+            )
+            self.total_retrainings = status.get("total_retrainings", 0)
 
         except Exception as e:
             logger.error(f"Error loading status: {e}")
@@ -329,13 +334,21 @@ class RetrainingScheduler:
             self.status_file.parent.mkdir(parents=True, exist_ok=True)
 
             status = {
-                'last_check_time': self.last_check_time.isoformat() if self.last_check_time else None,
-                'last_retraining_time': self.last_retraining_time.isoformat() if self.last_retraining_time else None,
-                'total_retrainings': self.total_retrainings,
-                'last_result': self._result_to_dict(self.last_retraining_result) if self.last_retraining_result else None,
+                "last_check_time": (
+                    self.last_check_time.isoformat() if self.last_check_time else None
+                ),
+                "last_retraining_time": (
+                    self.last_retraining_time.isoformat() if self.last_retraining_time else None
+                ),
+                "total_retrainings": self.total_retrainings,
+                "last_result": (
+                    self._result_to_dict(self.last_retraining_result)
+                    if self.last_retraining_result
+                    else None
+                ),
             }
 
-            with open(self.status_file, 'w', encoding='utf-8') as f:
+            with open(self.status_file, "w", encoding="utf-8") as f:
                 json.dump(status, f, indent=2)
 
         except Exception as e:
