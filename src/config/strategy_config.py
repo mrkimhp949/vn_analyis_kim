@@ -16,7 +16,7 @@ from typing import Dict, List
 @dataclass
 class LiquidityTiers:
     """
-    Liquidity requirements for different market cap tiers
+    Liquidity requirements for different market cap tiers - RELAXED VERSION
 
     Rationale:
     - Large caps: More liquid, higher volume requirements
@@ -26,22 +26,22 @@ class LiquidityTiers:
 
     large_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 5_000_000_000,  # 5B VND daily value
-            "min_volume": 150_000,  # Min 150K shares
+            "min_value": 3_000_000_000,  # RELAXED: từ 5B xuống 3B VND
+            "min_volume": 100_000,  # RELAXED: từ 150K xuống 100K shares
         }
     )
 
     mid_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 2_000_000_000,  # 2B VND daily value
-            "min_volume": 80_000,  # Min 80K shares
+            "min_value": 1_000_000_000,  # RELAXED: từ 2B xuống 1B VND
+            "min_volume": 50_000,  # RELAXED: từ 80K xuống 50K shares
         }
     )
 
     small_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 1_000_000_000,  # 1B VND daily value
-            "min_volume": 50_000,  # Min 50K shares
+            "min_value": 500_000_000,  # RELAXED: từ 1B xuống 500M VND
+            "min_volume": 30_000,  # RELAXED: từ 50K xuống 30K shares
         }
     )
 
@@ -49,49 +49,43 @@ class LiquidityTiers:
 @dataclass
 class EntryConfig:
     """
-    Entry logic configuration
+    Entry logic configuration - RELAXED VERSION
 
     All confidence thresholds and filters
     """
 
-    # Minimum confidence thresholds
-    # IMPROVED: Raised ML threshold for better signal quality and reduced false positives
-    min_confidence_ml: int = 65  # Min confidence for ML signals (raised from 60 for quality)
-    # IMPROVED: Raised technical threshold to match quality standards and filter weak signals
-    min_confidence_technical: int = 55  # Min confidence for technical-only signals (raised from 50)
+    # Minimum confidence thresholds - RELAXED
+    min_confidence_ml: int = 50  # RELAXED: từ 65 xuống 50
+    min_confidence_technical: int = 45  # RELAXED: từ 55 xuống 45
 
-    # Risk/Reward
-    # IMPROVED: Increased to 2.5 for better risk-adjusted returns and more selective entries
-    # Higher R:R ratio ensures we only take trades with favorable asymmetric upside
-    min_risk_reward: float = 2.5  # Minimum R:R ratio (raised from 2.0 to 2.5)
+    # Risk/Reward - RELAXED
+    min_risk_reward: float = 1.5  # RELAXED: từ 2.5 xuống 1.5
 
-    # Support/Resistance
-    # IMPROVED: Widened to 4% to catch more valid bounce opportunities without false entries
-    # Vietnam market support zones tend to be wider than US market
-    support_distance_percent: float = 4.0  # Max distance to support (widened from 3%)
+    # Support/Resistance - RELAXED
+    support_distance_percent: float = 6.0  # RELAXED: từ 4% lên 6%
 
-    # Volume
-    require_volume_confirmation: bool = True
-    volume_spike_threshold: float = 1.5  # 1.5x average volume
+    # Volume - RELAXED
+    require_volume_confirmation: bool = False  # RELAXED: từ True xuống False
+    volume_spike_threshold: float = 1.2  # RELAXED: từ 1.5 xuống 1.2
 
-    # Trend
-    require_trend_alignment: bool = True
+    # Trend - RELAXED
+    require_trend_alignment: bool = False  # RELAXED: từ True xuống False
 
     # Liquidity
     use_tiered_liquidity: bool = True
     liquidity_tiers: LiquidityTiers = field(default_factory=LiquidityTiers)
 
-    # Portfolio correlation
-    max_correlation: float = 0.70  # Max correlation with existing positions
-    good_diversification_threshold: float = 0.30  # < 0.3 = good diversification
+    # Portfolio correlation - RELAXED
+    max_correlation: float = 0.85  # RELAXED: từ 0.70 lên 0.85
+    good_diversification_threshold: float = 0.45  # RELAXED: từ 0.30 lên 0.45
     correlation_cache_ttl: int = 300  # 5 minutes cache
 
-    # Volatility
-    min_volatility: float = 0.01  # 1% minimum ATR/Price
-    max_volatility: float = 0.10  # 10% maximum ATR/Price
+    # Volatility - RELAXED
+    min_volatility: float = 0.005  # RELAXED: từ 1% xuống 0.5%
+    max_volatility: float = 0.15  # RELAXED: từ 10% lên 15%
 
-    # RSI
-    max_rsi_for_entry: float = 70.0  # Don't buy if RSI > 70 (overbought)
+    # RSI - RELAXED
+    max_rsi_for_entry: float = 78.0  # RELAXED: từ 70 lên 78
 
 
 @dataclass

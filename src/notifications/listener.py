@@ -85,7 +85,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/run - Lấy tín hiệu giao dịch\n"
         "/portfolio - Xem portfolio\n"
         "/addstock SYMBOL SHARES PRICE - Thêm cổ phiếu\n"
-        "/sellstock SYMBOL [SHARES] - Bán cổ phiếu\n"
+        "/sellstock SYMBOL [SHARES] - Bán cổ phiếu thủ công\n"
+        "/sell SYMBOL [%] - Xác nhận bán theo khuyến nghị\n"
+        "/hold SYMBOL - Giữ lại, không bán\n"
+        "/pending - Xem khuyến nghị đang chờ\n"
         "/news SYMBOL - Tin tức & sentiment\n"
         "/subscribe SYMBOL - Đăng ký nhận tin\n"
         "/unsubscribe SYMBOL - Hủy đăng ký\n"
@@ -312,6 +315,179 @@ async def sell_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     except Exception as e:
         logger.error(f"Error in sell_stock_command: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Lỗi: {str(e)}")
+
+
+# ===== EXIT CONFIRMATION COMMANDS =====
+# Global orchestrator instance for exit confirmations
+_orchestrator_instance = None
+
+
+def set_orchestrator_instance(orchestrator):
+    """Set orchestrator instance for exit confirmation commands"""
+    global _orchestrator_instance
+    _orchestrator_instance = orchestrator
+
+
+def get_orchestrator_instance():
+    """Get orchestrator instance"""
+    return _orchestrator_instance
+
+
+async def sell_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /sell SYMBOL [PERCENT] - Xác nhận bán theo khuyến nghị thoát lệnh
+
+    Ví dụ:
+        /sell VNM - Bán toàn bộ VNM
+        /sell VNM 50% - Bán 50% VNM
+        /sell VNM 50 - Bán 50% VNM
+    """
+    try:
+        if not context.args:
+            await update.message.reply_text(
+                "⚠️ Usage: /sell SYMBOL [PERCENT]\n"
+                "Ví dụ:\n"
+                "  /sell VNM - Bán toàn bộ\n"
+                "  /sell VNM 50% - Bán 50%\n"
+                "  /sell VNM 50 - Bán 50%"
+            )
+            return
+
+        symbol = context.args[0].upper()
+        percent = 100.0  # Default: bán toàn bộ
+
+        # Parse percent if provided
+        if len(context.args) >= 2:
+            percent_str = context.args[1].replace("%", "").strip()
+            try:
+                percent = float(percent_str)
+                if percent <= 0 or percent > 100:
+                    await update.message.reply_text("⚠️ Phần trăm phải từ 1-100%")
+                    return
+            except ValueError:
+                await update.message.reply_text("⚠️ Phần trăm không hợp lệ")
+                return
+
+        orchestrator = get_orchestrator_instance()
+
+        if orchestrator is None:
+            # Fallback: Nếu không có orchestrator, dùng sellstock logic
+            await update.message.reply_text(
+                f"⚠️ Không có khuyến nghị thoát lệnh đang chờ.\n"
+                f"💡 Dùng /sellstock {symbol} để bán thủ công."
+            )
+            return
+
+        # Check pending exits
+        pending_exits = orchestrator.get_pending_exits()
+
+        if symbol not in pending_exits:
+            await update.message.reply_text(
+                f"⚠️ Không có khuyến nghị thoát lệnh cho {symbol}.\n"
+                f"💡 Dùng /sellstock {symbol} để bán thủ công."
+            )
+            return
+
+        # Confirm exit
+        success = await orchestrator.confirm_exit(symbol, percent)
+
+        if success:
+            if percent < 100:
+                await update.message.reply_text(
+                    f"✅ Đã xác nhận bán {percent:.0f}% vị thế {symbol}"
+                )
+            else:
+                await update.message.reply_text(f"✅ Đã xác nhận bán toàn bộ vị thế {symbol}")
+        else:
+            await update.message.reply_text(f"❌ Không thể thực hiện lệnh bán {symbol}")
+
+    except Exception as e:
+        logger.error(f"Error in sell_command: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Lỗi: {str(e)}")
+
+
+async def hold_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /hold SYMBOL - Hủy khuyến nghị thoát lệnh, tiếp tục giữ vị thế
+
+    Ví dụ:
+        /hold VNM - Giữ lại VNM, không bán
+    """
+    try:
+        if not context.args:
+            await update.message.reply_text(
+                "⚠️ Usage: /hold SYMBOL\n" "Ví dụ: /hold VNM - Giữ lại VNM, không bán"
+            )
+            return
+
+        symbol = context.args[0].upper()
+
+        orchestrator = get_orchestrator_instance()
+
+        if orchestrator is None:
+            await update.message.reply_text(
+                f"⚠️ Không có khuyến nghị thoát lệnh đang chờ cho {symbol}."
+            )
+            return
+
+        # Check pending exits
+        pending_exits = orchestrator.get_pending_exits()
+
+        if symbol not in pending_exits:
+            await update.message.reply_text(f"⚠️ Không có khuyến nghị thoát lệnh cho {symbol}.")
+            return
+
+        # Cancel exit (hold)
+        success = await orchestrator.cancel_exit(symbol)
+
+        if not success:
+            await update.message.reply_text(f"❌ Không thể hủy khuyến nghị cho {symbol}")
+
+    except Exception as e:
+        logger.error(f"Error in hold_command: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Lỗi: {str(e)}")
+
+
+async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lệnh /pending - Xem danh sách khuyến nghị thoát lệnh đang chờ xác nhận"""
+    try:
+        orchestrator = get_orchestrator_instance()
+
+        if orchestrator is None:
+            await update.message.reply_text("📭 Không có khuyến nghị thoát lệnh nào đang chờ.")
+            return
+
+        pending_exits = orchestrator.get_pending_exits()
+
+        if not pending_exits:
+            await update.message.reply_text("📭 Không có khuyến nghị thoát lệnh nào đang chờ.")
+            return
+
+        msg = "📋 *KHUYẾN NGHỊ THOÁT LỆNH ĐANG CHỜ:*\n\n"
+
+        for symbol, data in pending_exits.items():
+            pos_data = data.get("pos_data", {})
+            exit_decision = data.get("exit_decision")
+            current_price = data.get("current_price", 0)
+
+            entry_price = pos_data.get("avg_price", 0)
+            shares = pos_data.get("shares", 0)
+            pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+            emoji = "🟢" if pnl_pct >= 0 else "🔴"
+            reason = (
+                exit_decision.exit_reason.value
+                if exit_decision and exit_decision.exit_reason
+                else "N/A"
+            )
+
+            msg += f"{emoji} *{symbol}*\n"
+            msg += f"   P&L: {pnl_pct:+.2f}% | Lý do: {reason}\n"
+            msg += f"   → /sell {symbol} hoặc /hold {symbol}\n\n"
+
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error in pending_command: {e}", exc_info=True)
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
 
@@ -942,6 +1118,9 @@ async def run_bot_async():
     app.add_handler(CommandHandler("portfolio", portfolio_command))
     app.add_handler(CommandHandler("addstock", add_stock_command))
     app.add_handler(CommandHandler("sellstock", sell_stock_command))
+    app.add_handler(CommandHandler("sell", sell_command))
+    app.add_handler(CommandHandler("hold", hold_command))
+    app.add_handler(CommandHandler("pending", pending_command))
     app.add_handler(CommandHandler("news", news_command))
     app.add_handler(CommandHandler("subscribe", subscribe_command))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))

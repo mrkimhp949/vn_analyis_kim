@@ -502,7 +502,30 @@ class TradingOrchestrator:
             )
 
             if exit_decision and exit_decision.should_exit:
-                await self.execute_exit(symbol, pos_data, exit_decision, current_price)
+                # Check if auto-sell is enabled or if this is a stop loss (always auto)
+                auto_sell = os.getenv("AUTO_SELL", "false").lower() == "true"
+                auto_sell_stop_loss = os.getenv("AUTO_SELL_STOP_LOSS", "true").lower() == "true"
+
+                from src.strategies.exit_logic import ExitReason
+
+                is_stop_loss = exit_decision.exit_reason == ExitReason.STOP_LOSS
+                is_emergency = exit_decision.exit_reason in [
+                    ExitReason.MARKET_CRASH,
+                    ExitReason.EMERGENCY_EXIT,
+                ]
+
+                # Auto-sell if: AUTO_SELL=true OR (stop loss AND AUTO_SELL_STOP_LOSS=true) OR emergency
+                should_auto_sell = (
+                    auto_sell or (is_stop_loss and auto_sell_stop_loss) or is_emergency
+                )
+
+                if should_auto_sell:
+                    await self.execute_exit(symbol, pos_data, exit_decision, current_price)
+                else:
+                    # Send exit recommendation and wait for user confirmation
+                    await self.send_exit_recommendation(
+                        symbol, pos_data, exit_decision, current_price
+                    )
 
         except Exception:
             logging.error(f"Lỗi khi kiểm tra vị thế {symbol}", exc_info=True)
@@ -572,6 +595,136 @@ class TradingOrchestrator:
 
         except Exception:
             logging.error(f"Lỗi khi thực hiện thoát lệnh {symbol}", exc_info=True)
+
+    async def send_exit_recommendation(self, symbol, pos_data, exit_decision, current_price):
+        """
+        Gửi khuyến nghị thoát lệnh và chờ xác nhận từ user.
+        Tương tự như entry recommendation.
+        """
+        try:
+            # Format exit recommendation message
+            msg = self._format_exit_recommendation(symbol, pos_data, exit_decision, current_price)
+
+            await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
+
+            logging.info(f"📤 Đã gửi khuyến nghị THOÁT LỆNH cho {symbol}, chờ xác nhận từ user")
+
+            # Store pending exit for later confirmation
+            if not hasattr(self, "_pending_exits"):
+                self._pending_exits = {}
+
+            self._pending_exits[symbol] = {
+                "pos_data": pos_data,
+                "exit_decision": exit_decision,
+                "current_price": current_price,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        except Exception:
+            logging.error(f"Lỗi khi gửi khuyến nghị thoát lệnh {symbol}", exc_info=True)
+
+    def _format_exit_recommendation(self, symbol, pos_data, exit_decision, current_price) -> str:
+        """Format exit recommendation message"""
+        entry_price = pos_data.get("avg_price", 0)
+        shares = pos_data.get("shares", 0)
+        pnl_percent = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        pnl_amount = (current_price - entry_price) * shares
+
+        # Emoji based on P&L
+        pnl_emoji = "🟢" if pnl_percent >= 0 else "🔴"
+
+        # Exit reason
+        exit_reason = exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
+
+        msg = f"📊 *KHUYẾN NGHỊ THOÁT LỆNH - {symbol}*\n\n"
+        msg += f"⚠️ *Cần xác nhận của bạn để thực hiện*\n\n"
+
+        msg += f"📈 *Thông tin vị thế:*\n"
+        msg += f"  • Số lượng: {shares:,} CP\n"
+        msg += f"  • Giá vào: {entry_price:,.0f} VNĐ\n"
+        msg += f"  • Giá hiện tại: {current_price:,.0f} VNĐ\n"
+        msg += f"  • {pnl_emoji} P&L: {pnl_percent:+.2f}% ({pnl_amount:+,.0f} VNĐ)\n\n"
+
+        msg += f"🎯 *Lý do thoát:* {exit_reason}\n"
+        msg += f"📝 *Chi tiết:* {exit_decision.message}\n"
+        msg += f"⚡ *Mức độ khẩn cấp:* {exit_decision.urgency}/5\n\n"
+
+        msg += f"💡 *Hành động:*\n"
+        msg += f"  • Gửi `/sell {symbol}` để xác nhận bán\n"
+        msg += f"  • Gửi `/hold {symbol}` để giữ lại\n"
+        msg += f"  • Gửi `/sell {symbol} 50%` để bán một phần\n\n"
+
+        msg += f"⏰ Khuyến nghị lúc: {datetime.now().strftime('%H:%M %d/%m/%Y')}"
+
+        return msg
+
+    async def confirm_exit(self, symbol: str, percent: float = 100.0) -> bool:
+        """
+        Xác nhận và thực hiện thoát lệnh sau khi user confirm.
+
+        Args:
+            symbol: Mã cổ phiếu
+            percent: Phần trăm muốn bán (default 100%)
+
+        Returns:
+            True nếu thành công
+        """
+        if not hasattr(self, "_pending_exits") or symbol not in self._pending_exits:
+            await self.bot.send_message(
+                self.chat_id, f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}"
+            )
+            return False
+
+        pending = self._pending_exits[symbol]
+        pos_data = pending["pos_data"]
+        exit_decision = pending["exit_decision"]
+        current_price = pending["current_price"]
+
+        # Update exit type if partial
+        if percent < 100:
+            exit_decision.exit_type = f"PARTIAL_{int(percent)}%"
+
+        # Execute the exit
+        await self.execute_exit(symbol, pos_data, exit_decision, current_price)
+
+        # Remove from pending
+        del self._pending_exits[symbol]
+
+        return True
+
+    async def cancel_exit(self, symbol: str) -> bool:
+        """
+        Hủy khuyến nghị thoát lệnh (user chọn hold).
+
+        Args:
+            symbol: Mã cổ phiếu
+
+        Returns:
+            True nếu thành công
+        """
+        if not hasattr(self, "_pending_exits") or symbol not in self._pending_exits:
+            await self.bot.send_message(
+                self.chat_id, f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}"
+            )
+            return False
+
+        del self._pending_exits[symbol]
+
+        await self.bot.send_message(
+            self.chat_id,
+            f"✅ Đã hủy khuyến nghị thoát lệnh cho {symbol}. Tiếp tục giữ vị thế.",
+            parse_mode="Markdown",
+        )
+
+        logging.info(f"🔄 User chọn HOLD cho {symbol}, hủy khuyến nghị thoát lệnh")
+
+        return True
+
+    def get_pending_exits(self) -> dict:
+        """Lấy danh sách các khuyến nghị thoát lệnh đang chờ xác nhận"""
+        if not hasattr(self, "_pending_exits"):
+            return {}
+        return self._pending_exits.copy()
 
     async def scan_for_new_entries(self, current_tickers, existing_symbols, market_regime):
         """Quét song song để tìm các tín hiệu vào lệnh mới."""
@@ -738,6 +891,7 @@ class TradingOrchestrator:
                 df=df,
                 ml_signal=ml_signal,
                 market_regime=market_regime,
+                symbol=symbol,
             )
 
             # Validate entry signal
