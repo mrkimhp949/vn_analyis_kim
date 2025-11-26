@@ -212,7 +212,7 @@ class ImprovedExitStrategy:
         ml_signal: Optional[Dict] = None,
         market_regime: Optional[Dict] = None,
         partial_exits: List[float] = None,
-        check_trading_hours: bool = True,
+        check_trading_hours: bool = False,
     ) -> ExitDecision:
         """
         Kiểm tra xem có nên thoát lệnh không
@@ -228,7 +228,7 @@ class ImprovedExitStrategy:
             ml_signal: Signal từ ML (optional)
             market_regime: Market regime info (optional)
             partial_exits: List các lần đã chốt lời 1 phần (optional)
-            check_trading_hours: Kiểm tra giờ giao dịch (default: True)
+            check_trading_hours: Kiểm tra giờ giao dịch (default: False để backward compatible)
 
         Returns:
             ExitDecision

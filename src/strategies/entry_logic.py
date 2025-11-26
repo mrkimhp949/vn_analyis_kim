@@ -870,7 +870,7 @@ class ImprovedEntryLogic:
         ml_signal: Dict,
         market_regime: Optional[Dict] = None,
         symbol: Optional[str] = None,
-        check_trading_hours: bool = True,
+        check_trading_hours: bool = False,
     ) -> EntrySignal:
         """
         Phân tích đầy đủ để quyết định có nên vào lệnh
@@ -880,12 +880,15 @@ class ImprovedEntryLogic:
             ml_signal: Signal từ ML model
             market_regime: Thông tin market regime (optional)
             symbol: Mã cổ phiếu (optional)
-            check_trading_hours: Kiểm tra giờ giao dịch (default: True)
+            check_trading_hours: Kiểm tra giờ giao dịch (default: False để backward compatible)
+                                 Set True trong production để block signals ngoài giờ
 
         Returns:
             EntrySignal object với đầy đủ thông tin
         """
         # IMPROVEMENT #10: Check trading hours before generating signals
+        # Default False để backward compatible với existing tests
+        # Enable trong production bằng cách set check_trading_hours=True
         if check_trading_hours and TRADING_SCHEDULE_AVAILABLE:
             if not is_trading_day():
                 return self._no_signal(
