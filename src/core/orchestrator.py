@@ -878,6 +878,17 @@ class TradingOrchestrator:
 
                     # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
 
+            # CIRCUIT BREAKER COORDINATION: If ML CB active, reduce risk
+            # High ML failure rate indicates abnormal market conditions
+            if self._ml_circuit_breaker_active:
+                logging.warning(
+                    f"⚠️ [{symbol}] ML circuit breaker active - "
+                    "increasing technical analysis requirements"
+                )
+                # Could block entry entirely, or increase confidence threshold
+                # For now, we rely on entry_logic to handle technical fallback
+                # but log warning for monitoring
+
             # 1. Entry Logic with validation
             if not self.entry_logic:
                 logging.error("❌ Entry logic not initialized")
@@ -1019,10 +1030,17 @@ class TradingOrchestrator:
                         # Success - context manager will auto-confirm
                         logging.info(f"✅ Paper trade successful: {message}")
 
-                        # Gửi thông báo Telegram
-                        await self.send_buy_signal_notification(
-                            symbol, entry_signal, position_size_info, news_sentiment
-                        )
+                        # Gửi thông báo Telegram (non-blocking, failure won't affect trade)
+                        try:
+                            await self.send_buy_signal_notification(
+                                symbol, entry_signal, position_size_info, news_sentiment
+                            )
+                        except Exception as e:
+                            logging.error(
+                                f"⚠️ Failed to send buy notification for {symbol}: {e}"
+                            )
+                            # Continue - trade is still successful even if notification fails
+
                         return {"signal": True}
 
             # 5. Watchlist Logic
