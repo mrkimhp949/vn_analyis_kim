@@ -484,27 +484,54 @@ class ImprovedExitStrategy:
             return breakdown_check["decision"]
 
         # ====================================================================
-        # CHECK 9: TIME DECAY (ADAPTIVE BY MARKET REGIME + PER-SYMBOL PERFORMANCE)
+        # CHECK 9: TIME DECAY (ADAPTIVE BY MARKET REGIME + TREND STRENGTH + PER-SYMBOL PERFORMANCE)
         # ====================================================================
-        # IMPROVEMENT: Adapt holding period based on market regime
-        # BULL: 25 days (hold longer in uptrend)
-        # SIDEWAYS: 20 days (normal)
-        # BEAR: 15 days (exit faster in downtrend)
-        adaptive_max_days = self.max_holding_days  # Default: 30
+        # IMPROVEMENT v2: Adapt holding period based on:
+        # 1. Market regime (BULL/SIDEWAYS/BEAR)
+        # 2. Trend strength (ADX) - NEW
+        # 3. Per-symbol performance
+        adaptive_max_days = self.max_holding_days  # Default: 25
 
+        # Step 1: Adjust by market regime
         if market_regime:
             regime = market_regime.get("regime", "SIDEWAYS")
             if regime == "BULL":
-                adaptive_max_days = 25  # Reduced from 30 to 25
+                adaptive_max_days = 30  # Hold longer in bull market
                 logger.debug(f"📈 BULL market: Using {adaptive_max_days} day holding limit")
             elif regime == "SIDEWAYS":
-                adaptive_max_days = 20  # Reduced from 30 to 20
+                adaptive_max_days = 20  # Standard for sideways
                 logger.debug(f"➡️ SIDEWAYS market: Using {adaptive_max_days} day holding limit")
             elif regime == "BEAR":
-                adaptive_max_days = 15  # Much shorter in bear
+                adaptive_max_days = 15  # Exit faster in bear market
                 logger.debug(f"📉 BEAR market: Using {adaptive_max_days} day holding limit")
 
-        # IMPROVEMENT #6: Shorter holding for poor performers
+        # Step 2: IMPROVEMENT - Adjust by trend strength (ADX)
+        # Strong trend (ADX > 35) = hold longer
+        # Medium trend (ADX 25-35) = normal
+        # Weak trend (ADX < 25) = exit faster
+        try:
+            adx = 0
+            if len(df) > 0 and "adx" in df.columns:
+                adx = df.iloc[-1]["adx"] if pd.notna(df.iloc[-1]["adx"]) else 0
+            if adx > 35:  # Strong trend
+                trend_adjustment = 1.5  # Increase holding by 50%
+                logger.debug(f"💪 Strong trend (ADX {adx:.1f}): Extending holding by 50%")
+            elif adx > 25:  # Medium trend
+                trend_adjustment = 1.2  # Increase holding by 20%
+                logger.debug(f"📊 Medium trend (ADX {adx:.1f}): Extending holding by 20%")
+            elif adx > 15:  # Weak trend
+                trend_adjustment = 1.0  # No adjustment
+                logger.debug(f"➡️ Weak trend (ADX {adx:.1f}): No adjustment")
+            else:  # Very weak/no trend
+                trend_adjustment = 0.8  # Reduce holding by 20%
+                logger.debug(f"📉 No trend (ADX {adx:.1f}): Reducing holding by 20%")
+
+            adaptive_max_days = int(adaptive_max_days * trend_adjustment)
+        except Exception as e:
+            logger.warning(f"⚠️ Error calculating ADX-based adjustment: {e}")
+            # Continue with regime-based adjustment only
+
+        # Step 3: Shorter holding for poor performers
         if is_poor_performer and self.use_per_symbol_performance:
             adaptive_max_days = min(adaptive_max_days, self.poor_performer_max_holding_days)
             logger.debug(

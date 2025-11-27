@@ -660,12 +660,12 @@ class TestExitLogicMarketCrash:
         # Note: Market crash protection chỉ trigger khi:
         # - pnl_percent > 3 (có lời) hoặc
         # - pnl_percent > -2 (lỗ ít)
-        # Với transaction costs 0.9%, giá 79000 từ 80000 = -1.25% gross = -2.15% net
-        # Net PnL -2.15% < -2%, nên không trigger market crash protection
+        # Với transaction costs 1.6%, cần gross loss < 0.4% để net loss > -2%
+        # -0.25% gross = -1.85% net (trong khoảng > -2%)
         decision = exit_strategy_default.check_exit(
             symbol="VNM",
             entry_price=80000,
-            current_price=79500,  # -0.625% gross, ~-1.5% net (trong khoảng > -2%)
+            current_price=79800,  # -0.25% gross, ~-1.85% net (trong khoảng > -2%)
             stop_loss=76000,
             take_profit_targets=[88000, 96000],
             entry_date=datetime.now() - timedelta(days=5),

@@ -38,6 +38,7 @@ python-telegram-bot==21.7
 # Technical Analysis
 ta==0.11.0
 matplotlib==3.8.2
+seaborn==0.13.2
 
 # Market Data
 yfinance==0.2.36

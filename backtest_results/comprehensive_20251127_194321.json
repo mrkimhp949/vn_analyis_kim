@@ -1,0 +1,41 @@
+{
+  "results": {
+    "start_date": "2020-01-01",
+    "end_date": "2025-11-27",
+    "initial_capital": 100000000.0,
+    "final_capital": 100000000.0,
+    "total_return_pct": 0.0,
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "win_rate": 0.0,
+    "avg_win": 0.0,
+    "avg_loss": 0.0,
+    "profit_factor": 0.0,
+    "max_drawdown_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "sortino_ratio": 0.0,
+    "calmar_ratio": 0.0,
+    "benchmark_return_pct": 20.711229601599623,
+    "alpha": -20.711229601599623,
+    "beta": 0.0,
+    "information_ratio": 0.0
+  },
+  "tickers": [
+    "VNM",
+    "VCB",
+    "HPG",
+    "VIC",
+    "VHM",
+    "MSN",
+    "GAS",
+    "SAB",
+    "FPT",
+    "TCB"
+  ],
+  "trades": [],
+  "config": {
+    "transaction_cost": 0.013000000000000001,
+    "initial_capital": 100000000.0
+  }
+}
