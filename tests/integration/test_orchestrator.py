@@ -155,7 +155,7 @@ def orchestrator(
         patch("src.core.orchestrator.get_portfolio_manager", return_value=mock_portfolio_manager),
         patch("src.core.orchestrator.get_circuit_breaker", return_value=mock_circuit_breaker),
         patch("src.core.orchestrator.get_strategy_manager", return_value=mock_strategy_manager),
-        patch("src.core.orchestrator.MLSignalGenerator", return_value=mock_ml_generator),
+        patch("src.core.orchestrator.EnhancedMLSignalGenerator", return_value=mock_ml_generator),
         patch("src.core.orchestrator.get_paper_account", return_value=mock_paper_account),
         patch("src.core.orchestrator.get_portfolio_risk_manager"),
         patch("src.core.orchestrator.get_portfolio_lock"),

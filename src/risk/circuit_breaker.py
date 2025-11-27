@@ -34,24 +34,28 @@ class CircuitBreaker:
 
     def __init__(
         self,
-        max_trades_per_day: int = 10,
-        max_loss_per_day_pct: float = 0.05,  # 5% vốn
-        max_consecutive_losses: int = 5,
-        vnindex_drop_threshold: float = -2.5,  # IMPROVED: Configurable threshold
+        max_trades_per_day: int = 8,  # TIGHTENED: Max 8 trades/day
+        max_loss_per_day_pct: float = 0.03,  # TIGHTENED: 3% max daily loss
+        max_consecutive_losses: int = 3,  # TIGHTENED: 3 consecutive losses
+        vnindex_drop_threshold: float = -2.5,  # -2.5% VNINDEX drop triggers stop
         # VN market specific: -2.5% is standard, but can be adjusted
         # Use vnindex_drop_threshold_conservative for stricter protection
         vnindex_drop_threshold_conservative: float = -2.0,  # Stricter threshold option
-        use_conservative_threshold: bool = False,  # Toggle for conservative mode
+        use_conservative_threshold: bool = True,  # ENABLED: Use conservative mode by default
         total_capital: float = 100_000_000,
         stats_file: str = "circuit_breaker_stats.json",
-        max_portfolio_heat: float = 0.70,  # ENHANCEMENT: Max portfolio exposure
-        volatility_multiplier: float = 1.5,  # ENHANCEMENT: Adjust thresholds by volatility
-        # NEW: Gradual response levels
-        warning_threshold_pct: float = -1.5,  # Warning at -1.5%
-        caution_threshold_pct: float = -2.0,  # Caution at -2.0% (reduce position sizes)
-        # IMPROVEMENT #9: Max drawdown protection
-        max_drawdown_pct: float = 0.15,  # 15% max drawdown from peak
-        drawdown_warning_pct: float = 0.10,  # 10% drawdown warning
+        max_portfolio_heat: float = 0.60,  # TIGHTENED: Max 60% portfolio exposure
+        volatility_multiplier: float = 1.5,  # Adjust thresholds by volatility
+        # Gradual response levels - TIGHTENED
+        warning_threshold_pct: float = -1.0,  # TIGHTENED: Warning at -1.0%
+        caution_threshold_pct: float = -1.5,  # TIGHTENED: Caution at -1.5%
+        # Max drawdown protection - TIGHTENED
+        max_drawdown_pct: float = 0.12,  # TIGHTENED: 12% max drawdown from peak
+        drawdown_warning_pct: float = 0.08,  # TIGHTENED: 8% drawdown warning
+        # NEW: Per-session limits
+        max_trades_per_session: int = 4,  # NEW: Max 4 trades per session (AM/PM)
+        # NEW: Winning streak protection (avoid overconfidence)
+        max_consecutive_wins: int = 5,  # NEW: Pause after 5 consecutive wins
     ):
         self.max_trades_per_day = max_trades_per_day
         self.max_loss_per_day_pct = max_loss_per_day_pct
@@ -66,21 +70,30 @@ class CircuitBreaker:
             self.vnindex_drop_threshold = vnindex_drop_threshold / 100.0
         self.base_vnindex_drop_threshold = self.vnindex_drop_threshold  # Store original
 
-        # NEW: Gradual response thresholds
+        # Gradual response thresholds - TIGHTENED
         self.warning_threshold = warning_threshold_pct / 100.0
         self.caution_threshold = caution_threshold_pct / 100.0
         self.caution_mode = False  # When True, reduce position sizes by 50%
+        self.warning_mode = False  # NEW: Warning mode (reduce by 25%)
 
         self.total_capital = total_capital
         self.stats_file = stats_file
         self.max_portfolio_heat = max_portfolio_heat
         self.volatility_multiplier = volatility_multiplier
 
-        # IMPROVEMENT #9: Drawdown protection
+        # Drawdown protection - TIGHTENED
         self.max_drawdown_pct = max_drawdown_pct
         self.drawdown_warning_pct = drawdown_warning_pct
         self.peak_portfolio_value = total_capital  # Track peak value
         self.current_drawdown = 0.0
+
+        # NEW: Per-session limits
+        self.max_trades_per_session = max_trades_per_session
+        self._session_trades = {"morning": 0, "afternoon": 0}
+
+        # NEW: Winning streak protection
+        self.max_consecutive_wins = max_consecutive_wins
+        self._consecutive_wins = 0
 
         self.stats = self._load_stats()
         self._check_new_day()

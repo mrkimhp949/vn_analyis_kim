@@ -108,6 +108,7 @@ class PaperTradingAccount:
         take_profit: Optional[float] = None,
         is_limit_order: bool = False,
         limit_price: Optional[float] = None,
+        metadata: Optional[Dict] = None,  # NEW: Trade metadata for tracking
     ) -> Tuple[bool, str, Optional[PaperTrade]]:
         """
         Thực thi lệnh mua (Market hoặc Limit order)
@@ -165,16 +166,21 @@ class PaperTradingAccount:
 
         # Use PortfolioManager to add the position to the database
         try:
+            # Merge default metadata with provided metadata
+            trade_metadata = {
+                "signal_confidence": signal_confidence,
+                "signal_reason": signal_reason,
+            }
+            if metadata:
+                trade_metadata.update(metadata)
+
             self.portfolio_manager.add_position(
                 symbol=symbol.upper(),
                 shares=shares,
                 entry_price=execution_price,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                metadata={
-                    "signal_confidence": signal_confidence,
-                    "signal_reason": signal_reason,
-                },
+                metadata=trade_metadata,
             )
         except Exception:
             return False, f"Lỗi DB khi thêm vị thế {symbol}", None

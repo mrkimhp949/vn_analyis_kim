@@ -3,13 +3,13 @@ Trading Constants - Centralized configuration values
 Replaces magic numbers throughout the codebase
 """
 
-# Risk Management Constants
-DEFAULT_RISK_PER_TRADE = 0.02  # 2% risk per trade
-DEFAULT_MAX_POSITION_SIZE = 0.15  # 15% max position size
-DEFAULT_MIN_POSITION_SIZE = 0.05  # 5% min position size
-DEFAULT_MAX_TOTAL_EXPOSURE = 0.60  # 60% max total exposure
-DEFAULT_MAX_SECTOR_EXPOSURE = 0.40  # 40% max sector exposure
-DEFAULT_MAX_DRAWDOWN = 0.15  # 15% max drawdown
+# Risk Management Constants - OPTIMIZED v3.0
+DEFAULT_RISK_PER_TRADE = 0.015  # TIGHTENED: 1.5% risk per trade (was 2%)
+DEFAULT_MAX_POSITION_SIZE = 0.12  # TIGHTENED: 12% max position size (was 15%)
+DEFAULT_MIN_POSITION_SIZE = 0.03  # TIGHTENED: 3% min position size (was 5%)
+DEFAULT_MAX_TOTAL_EXPOSURE = 0.60  # Max 60% total exposure
+DEFAULT_MAX_SECTOR_EXPOSURE = 0.30  # TIGHTENED: 30% max sector exposure (was 40%)
+DEFAULT_MAX_DRAWDOWN = 0.12  # TIGHTENED: 12% max drawdown (was 15%)
 
 # Technical Analysis Constants
 DEFAULT_ATR_PERCENTAGE = 0.02  # 2% ATR fallback
@@ -19,9 +19,9 @@ DEFAULT_SHORT_MA_PERIOD = 20  # 20-period short moving average
 DEFAULT_MEDIUM_MA_PERIOD = 50  # 50-period medium moving average
 DEFAULT_LONG_MA_PERIOD = 200  # 200-period long moving average
 
-# Risk/Reward Ratios
-DEFAULT_MIN_RISK_REWARD = 1.5  # Minimum 1.5:1 risk/reward
-DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 3.0, 5.0]  # Multiple take profit levels
+# Risk/Reward Ratios - TIGHTENED v3.0
+DEFAULT_MIN_RISK_REWARD = 2.0  # TIGHTENED: Minimum 2:1 risk/reward (was 1.5)
+DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 2.5, 4.0]  # OPTIMIZED: Better R:R ratios
 
 # Position Sizing Multipliers
 MIN_POSITION_MULTIPLIER = 0.3  # Minimum position size multiplier
@@ -62,10 +62,10 @@ VIETNAM_LOT_SIZE = 100  # Minimum trading lot size
 VIETNAM_SETTLEMENT_DAYS = 2  # T+2 settlement
 VIETNAM_TICK_SIZE = 10  # 10 VND minimum tick size for most stocks
 
-# Stop Loss and Take Profit
-DEFAULT_STOP_LOSS_LEVELS = [0.10, 0.15, 0.25]  # 10%, 15%, 25%
-DEFAULT_TRAILING_STOP_ACTIVATION = 0.08  # 8% profit to activate trailing
-DEFAULT_TRAILING_STOP_DISTANCE = 0.05  # 5% trailing distance
+# Stop Loss and Take Profit - TIGHTENED v3.0
+DEFAULT_STOP_LOSS_LEVELS = [0.08, 0.15, 0.25]  # TIGHTENED: 8%, 15%, 25%
+DEFAULT_TRAILING_STOP_ACTIVATION = 0.05  # TIGHTENED: 5% profit to activate trailing
+DEFAULT_TRAILING_STOP_DISTANCE = 0.03  # TIGHTENED: 3% trailing distance
 DEFAULT_TIME_DECAY_THRESHOLD = 0.02  # 2% time decay threshold
 
 # Capital and Sizing
@@ -83,26 +83,32 @@ RSI_OVERSOLD = 30  # RSI oversold level
 RSI_OVERBOUGHT = 70  # RSI overbought level
 RSI_NEUTRAL = 50  # RSI neutral level
 
-# Market Regime Adjustments
-BULL_MARKET_CONFIDENCE = 50  # Lower confidence in bull market
-BULL_MARKET_RR = 1.5  # Lower R:R in bull market
-BULL_MARKET_EXPOSURE = 0.70  # Higher exposure in bull market
+# Market Regime Adjustments - OPTIMIZED v3.0
+BULL_MARKET_CONFIDENCE = 55  # TIGHTENED: Still need 55% confidence in bull
+BULL_MARKET_RR = 1.8  # TIGHTENED: 1.8:1 R:R in bull market
+BULL_MARKET_EXPOSURE = 0.65  # TIGHTENED: 65% max exposure in bull
 
-BEAR_MARKET_CONFIDENCE = 65  # Higher confidence in bear market
-BEAR_MARKET_RR = 2.0  # Higher R:R in bear market
-BEAR_MARKET_EXPOSURE = 0.30  # Lower exposure in bear market
+BEAR_MARKET_CONFIDENCE = 70  # TIGHTENED: Need 70% confidence in bear
+BEAR_MARKET_RR = 2.5  # TIGHTENED: 2.5:1 R:R in bear market
+BEAR_MARKET_EXPOSURE = 0.25  # TIGHTENED: 25% max exposure in bear
 
-SIDEWAYS_MARKET_CONFIDENCE = 55  # Medium confidence in sideways market
-SIDEWAYS_MARKET_RR = 1.8  # Medium R:R in sideways market
-SIDEWAYS_MARKET_EXPOSURE = 0.50  # Medium exposure in sideways market
+SIDEWAYS_MARKET_CONFIDENCE = 60  # TIGHTENED: 60% confidence in sideways
+SIDEWAYS_MARKET_RR = 2.0  # TIGHTENED: 2:1 R:R in sideways
+SIDEWAYS_MARKET_EXPOSURE = 0.45  # TIGHTENED: 45% exposure in sideways
 
 # ML Model Constants
 ML_SIGNAL_WEIGHT = 1.5  # Weight for ML signals
 TECH_SIGNAL_WEIGHT = 0.5  # Weight for technical signals
 
-# Validation Thresholds
-MAX_CORRELATION = 0.70  # Maximum correlation between positions
-DIVERSIFICATION_PENALTY = 20  # Points deducted per warning
+# Validation Thresholds - TIGHTENED v3.0
+MAX_CORRELATION = 0.65  # TIGHTENED: Maximum 0.65 correlation between positions
+DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
+
+# NEW: Vietnam Market Specific Thresholds
+VN_MIN_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND minimum daily value
+VN_MIN_VOLUME = 50_000  # 50K shares minimum
+VN_MAX_INTRADAY_RANGE = 5.0  # 5% max intraday range for entry
+VN_OPTIMAL_ENTRY_TIMES = [(9, 30, 10, 30), (13, 30, 14, 30)]  # Optimal entry windows
 
 # Export all constants
 __all__ = [

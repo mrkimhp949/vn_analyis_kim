@@ -127,8 +127,8 @@ class StrategyManager:
                 f"min_conf=70%, R:R>=2.5, max_exposure=25%"
             )
         else:  # SIDEWAYS / UNKNOWN
-            self.entry_logic.min_confidence = 55
-            self.entry_logic.min_risk_reward = 1.8
+            self.entry_logic.min_confidence = 45  # RELAXED: từ 55 xuống 45
+            self.entry_logic.min_risk_reward = 1.2  # RELAXED: từ 1.8 xuống 1.2
             if hasattr(self.position_sizer, "max_total_exposure"):
                 self.position_sizer.max_total_exposure = 0.50
 

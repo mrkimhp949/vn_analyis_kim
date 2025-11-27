@@ -44,6 +44,7 @@ class EnhancedMLSignalGenerator:
         df: pd.DataFrame,
         index_df: Optional[pd.DataFrame] = None,
         explain: bool = False,
+        symbol: Optional[str] = None,  # Added for compatibility with orchestrator
     ) -> Dict:
         """
         Phân tích và tạo tín hiệu từ Enhanced ML + Technical Analysis
@@ -52,6 +53,7 @@ class EnhancedMLSignalGenerator:
             df: DataFrame với OHLCV data
             index_df: DataFrame của VNINDEX
             explain: Có explain prediction không
+            symbol: Stock symbol (optional, for logging)
 
         Returns:
             Dict với signal, confidence, reasons, etc.
@@ -76,12 +78,16 @@ class EnhancedMLSignalGenerator:
                 logger.warning(f"Missing features: {missing_features}")
                 return self._fallback_technical_analysis(df_enhanced)
 
-            # Extract features
-            X = df_enhanced[feature_cols].values
+            # Extract features - ensure numeric types
+            X = df_enhanced[feature_cols].values.astype(np.float64)
 
             # Check for NaN
-            if np.isnan(X[-1]).any():
-                logger.warning("NaN in features, using fallback")
+            try:
+                if np.isnan(X[-1]).any():
+                    logger.warning("NaN in features, using fallback")
+                    return self._fallback_technical_analysis(df_enhanced)
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Feature type error: {e}, using fallback")
                 return self._fallback_technical_analysis(df_enhanced)
 
             # ML Prediction
@@ -166,19 +172,18 @@ class EnhancedMLSignalGenerator:
         """
         Decision engine: Kết hợp ML + Technical
 
+        UPDATED: Allow technical signals to override weak ML signals
+        When ML is uncertain (0.35-0.65), give more weight to technical analysis
+
         Returns:
             (signal, confidence, reason)
         """
         reasons = []
 
-        # ML Signal
-        ml_signal = 1 if ml_score > 0.55 else (-1 if ml_score < 0.45 else 0)
-        ml_confidence = abs(ml_score - 0.5) * 200  # 0-100
-
-        # Technical Signal
+        # Technical Signal - Calculate first
         tech_signal = 0
 
-        # Trend
+        # Trend (EMA alignment)
         if tech_score["trend"] > 0.02:
             tech_signal += 0.5
             reasons.append(f"Trend Up ({tech_score['trend']:.2f})")
@@ -186,7 +191,7 @@ class EnhancedMLSignalGenerator:
             tech_signal -= 0.5
             reasons.append(f"Trend Down ({tech_score['trend']:.2f})")
 
-        # Momentum
+        # Momentum (RSI + Stochastic)
         if tech_score["momentum"] > 0.1:
             tech_signal += 0.5
             reasons.append(f"Momentum Up ({tech_score['momentum']:.2f})")
@@ -194,29 +199,75 @@ class EnhancedMLSignalGenerator:
             tech_signal -= 0.5
             reasons.append(f"Momentum Down ({tech_score['momentum']:.2f})")
 
-        # Volume
+        # Volume confirmation
         if tech_score["volume"] > 0.5:
             tech_signal += 0.3
             reasons.append("Volume Confirm")
 
-        # ADX (trend strength)
+        # ADX (trend strength) - bonus for strong trends
         adx = latest.get("adx", 0)
         if adx > 25:
+            tech_signal += 0.2
             reasons.append(f"Strong Trend (ADX {adx:.0f})")
 
-        # Combined Signal (ML weight = 60%, Technical = 40%)
-        combined_signal = (ml_signal * 0.6) + (tech_signal * 0.4)
+        # RSI oversold/overbought - strong reversal signals
+        rsi = latest.get("rsi", 50)
+        if rsi < 30:
+            tech_signal += 0.4
+            reasons.append(f"RSI Oversold ({rsi:.0f})")
+        elif rsi > 70:
+            tech_signal -= 0.4
+            reasons.append(f"RSI Overbought ({rsi:.0f})")
 
-        # Confidence
-        tech_confidence = min(abs(tech_signal) * 30, 50)
-        confidence = (ml_confidence * 0.6) + (tech_confidence * 0.4)
+        # DYNAMIC ML WEIGHT based on ML confidence
+        # When ML is uncertain (score near 0.5), trust technical more
+        ml_uncertainty = 1 - abs(ml_score - 0.5) * 2  # 0 at extremes, 1 at 0.5
+
+        # Adjust weights: ML gets less weight when uncertain
+        ml_weight = 0.6 - (ml_uncertainty * 0.3)  # 0.3 to 0.6
+        tech_weight = 1 - ml_weight  # 0.4 to 0.7
+
+        # ML Signal with VERY relaxed thresholds
+        # Only consider ML bearish if score < 0.40 (was 0.48)
+        # Only consider ML bullish if score > 0.60 (was 0.52)
+        # This creates a wider "neutral" zone where technical can dominate
+        if ml_score > 0.60:
+            ml_signal = 1
+        elif ml_score < 0.40:
+            ml_signal = -1
+        else:
+            ml_signal = 0  # Neutral - let technical decide
+
+        # Combined Signal with dynamic weights
+        combined_signal = (ml_signal * ml_weight) + (tech_signal * tech_weight)
+
+        # Confidence calculation
+        ml_confidence = abs(ml_score - 0.5) * 200
+        ml_confidence = min(ml_confidence * 1.5, 80)
+        tech_confidence = min(abs(tech_signal) * 50, 70)  # Increased tech confidence weight
+
+        # Base confidence
+        confidence = (ml_confidence * ml_weight) + (tech_confidence * tech_weight)
+
+        # Bonus for alignment
+        if ml_score > 0.55 and tech_signal > 0.3:
+            confidence += 15
+        elif ml_score < 0.45 and tech_signal < -0.3:
+            confidence += 15
+        # NEW: Bonus for strong technical when ML is neutral
+        elif 0.40 <= ml_score <= 0.60 and abs(tech_signal) > 0.5:
+            confidence += 10
+            reasons.append("Tech Override")
+
         confidence = min(confidence, 100)
 
-        # Decision
-        if combined_signal >= 0.8:
+        # Decision - VERY RELAXED for current market
+        # Allow BUY when combined >= 0.2 (was 0.3)
+        # Allow technical to generate BUY even with neutral/weak ML
+        if combined_signal >= 0.2:
             signal = "BUY"
             reasons.insert(0, f"ML({ml_score:.2f})")
-        elif combined_signal <= -0.8:
+        elif combined_signal <= -0.2:
             signal = "SELL"
             reasons.insert(0, f"ML({ml_score:.2f})")
         else:
@@ -230,9 +281,6 @@ class EnhancedMLSignalGenerator:
         try:
             if df.empty or len(df) < 20:
                 return self._default_signal()
-
-            # Use safe access instead of df.iloc[-1]
-            from utils.dataframe_utils import safe_get_latest
 
             latest = df.iloc[-1]  # Get latest row for technical analysis
 

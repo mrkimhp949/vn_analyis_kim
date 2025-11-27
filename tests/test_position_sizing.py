@@ -61,11 +61,11 @@ def sizer_with_positions():
 
 
 def test_initialization_default():
-    """Test initialization with default parameters"""
+    """Test initialization with default parameters (v3.0 - tightened)"""
     sizer = EnhancedPositionSizer()
     assert sizer.total_capital == 100_000_000
-    assert sizer.max_risk_per_trade == 0.02
-    assert sizer.max_position_size == 0.10
+    assert sizer.max_risk_per_trade == 0.015  # TIGHTENED: 1.5% (was 2%)
+    assert sizer.max_position_size == 0.12  # TIGHTENED: 12% (was 10%)
     assert sizer.use_kelly is True
     assert sizer.kelly_fraction == 0.5
     assert sizer.current_positions == {}

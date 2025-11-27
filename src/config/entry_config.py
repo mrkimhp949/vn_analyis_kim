@@ -10,95 +10,95 @@ import os
 
 @dataclass
 class FilterThresholds:
-    """Thresholds for entry signal filters - RELAXED VERSION"""
+    """Thresholds for entry signal filters - OPTIMIZED VERSION v3.0"""
 
-    # Market Regime Adjustments
-    regime_confidence_threshold: int = 60  # RELAXED: từ 70 xuống 60
+    # Market Regime Adjustments - TIGHTENED
+    regime_confidence_threshold: int = 70  # TIGHTENED: Need 70% regime confidence
 
-    # Trend Alignment - RELAXED
-    trend_perfect_bonus: int = 8  # INCREASED: từ 5 lên 8
-    trend_weak_penalty: int = -5  # RELAXED: từ -10 xuống -5
+    # Trend Alignment - BALANCED
+    trend_perfect_bonus: int = 10  # Bonus for perfect trend alignment
+    trend_weak_penalty: int = -15  # TIGHTENED: Penalty for weak trend
 
-    # Support/Resistance - RELAXED
-    support_distance_percent: float = 5.0  # RELAXED: từ 3.0 lên 5.0
-    resistance_proximity_percent: float = 1.5  # RELAXED: từ 2.0 xuống 1.5
-    support_bounce_distance: float = 0.03  # RELAXED: từ 0.02 lên 0.03
-    support_near_bonus: int = 12  # INCREASED: từ 10 lên 12
-    support_bounce_bonus: int = 18  # INCREASED: từ 15 lên 18
-    resistance_close_penalty: int = -8  # RELAXED: từ -15 xuống -8
+    # Support/Resistance - TIGHTENED
+    support_distance_percent: float = 3.0  # TIGHTENED: Max 3% from support
+    resistance_proximity_percent: float = 2.0  # TIGHTENED: Warning if within 2% of resistance
+    support_bounce_distance: float = 0.02  # TIGHTENED: 2% bounce from support
+    support_near_bonus: int = 10  # Bonus for near support
+    support_bounce_bonus: int = 15  # Bonus for bouncing from support
+    resistance_close_penalty: int = -15  # TIGHTENED: Penalty for near resistance
 
-    # Volume Confirmation - RELAXED
-    volume_ratio_threshold: float = 1.0  # RELAXED: từ 1.2 xuống 1.0
-    volume_surge_threshold: float = 1.3  # RELAXED: từ 1.5 xuống 1.3
-    volume_low_penalty: int = -5  # RELAXED: từ -10 xuống -5
-    volume_surge_bonus: int = 8  # INCREASED: từ 5 lên 8
+    # Volume Confirmation - TIGHTENED
+    volume_ratio_threshold: float = 1.2  # TIGHTENED: Need 1.2x average volume
+    volume_surge_threshold: float = 1.5  # TIGHTENED: 1.5x for volume surge
+    volume_low_penalty: int = -10  # TIGHTENED: Penalty for low volume
+    volume_surge_bonus: int = 10  # Bonus for volume surge
 
-    # Liquidity Tiers (VND daily value) - RELAXED
-    liquidity_large_cap: float = 3_000_000_000  # RELAXED: từ 5B xuống 3B VND
-    liquidity_mid_cap: float = 1_000_000_000  # RELAXED: từ 2B xuống 1B VND
-    liquidity_small_cap: float = 500_000_000  # RELAXED: từ 1B xuống 500M VND
-    liquidity_volume_large: int = 100_000  # RELAXED: từ 150K xuống 100K
-    liquidity_volume_mid: int = 50_000  # RELAXED: từ 80K xuống 50K
-    liquidity_volume_small: int = 30_000  # RELAXED: từ 50K xuống 30K
-    liquidity_low_penalty: int = -8  # RELAXED: từ -15 xuống -8
-    liquidity_good_bonus: int = 8  # INCREASED: từ 5 lên 8
+    # Liquidity Tiers (VND daily value) - TIGHTENED
+    liquidity_large_cap: float = 5_000_000_000  # TIGHTENED: 5B VND for large cap
+    liquidity_mid_cap: float = 2_000_000_000  # TIGHTENED: 2B VND for mid cap
+    liquidity_small_cap: float = 1_000_000_000  # TIGHTENED: 1B VND for small cap
+    liquidity_volume_large: int = 150_000  # TIGHTENED: 150K shares for large cap
+    liquidity_volume_mid: int = 80_000  # TIGHTENED: 80K shares for mid cap
+    liquidity_volume_small: int = 50_000  # TIGHTENED: 50K shares for small cap
+    liquidity_low_penalty: int = -15  # TIGHTENED: Penalty for low liquidity
+    liquidity_good_bonus: int = 5  # Bonus for good liquidity
 
-    # Volatility - RELAXED
-    volatility_optimal_min: float = 1.5  # RELAXED: từ 2.0 xuống 1.5
-    volatility_optimal_max: float = 4.0  # RELAXED: từ 3.0 lên 4.0
-    volatility_too_high: float = 5.0  # RELAXED: từ 4.0 lên 5.0
-    volatility_high_penalty: int = -8  # RELAXED: từ -15 xuống -8
-    volatility_optimal_bonus: int = 8  # INCREASED: từ 5 lên 8
+    # Volatility - TIGHTENED
+    volatility_optimal_min: float = 1.5  # Min 1.5% volatility (avoid dead stocks)
+    volatility_optimal_max: float = 3.5  # TIGHTENED: Max 3.5% optimal volatility
+    volatility_too_high: float = 5.0  # Block if > 5% volatility
+    volatility_high_penalty: int = -15  # TIGHTENED: Penalty for high volatility
+    volatility_optimal_bonus: int = 5  # Bonus for optimal volatility
 
-    # RSI - RELAXED
-    rsi_oversold: float = 35  # RELAXED: từ 30 lên 35 (dễ trigger hơn)
-    rsi_optimal_min: float = 25  # RELAXED: từ 30 xuống 25
-    rsi_optimal_max: float = 65  # RELAXED: từ 60 lên 65
-    rsi_overbought: float = 75  # RELAXED: từ 70 lên 75
-    rsi_oversold_bonus: int = 18  # INCREASED: từ 15 lên 18
-    rsi_optimal_bonus: int = 8  # INCREASED: từ 5 lên 8
-    rsi_overbought_penalty: int = -5  # RELAXED: từ -10 xuống -5
+    # RSI - TIGHTENED
+    rsi_oversold: float = 30  # TIGHTENED: Classic oversold level
+    rsi_optimal_min: float = 30  # TIGHTENED: Optimal RSI range
+    rsi_optimal_max: float = 60  # TIGHTENED: Optimal RSI range
+    rsi_overbought: float = 70  # TIGHTENED: Classic overbought level
+    rsi_oversold_bonus: int = 15  # Bonus for oversold
+    rsi_optimal_bonus: int = 5  # Bonus for optimal RSI
+    rsi_overbought_penalty: int = -15  # TIGHTENED: Penalty for overbought
 
-    # Price Action - RELAXED
-    price_action_bullish_bonus: int = 12  # INCREASED: từ 10 lên 12
-    price_action_bearish_penalty: int = -5  # RELAXED: từ -10 xuống -5
+    # Price Action - BALANCED
+    price_action_bullish_bonus: int = 10  # Bonus for bullish pattern
+    price_action_bearish_penalty: int = -10  # Penalty for bearish pattern
 
-    # Sector Strength - RELAXED
-    sector_rs_threshold: float = 0.95  # RELAXED: từ 1.0 xuống 0.95
-    sector_weak_threshold: float = 0.90  # RELAXED: từ 0.95 xuống 0.90
-    sector_leading_bonus: int = 12  # INCREASED: từ 10 lên 12
-    sector_lagging_penalty: int = -8  # RELAXED: từ -15 xuống -8
+    # Sector Strength - TIGHTENED
+    sector_rs_threshold: float = 1.0  # TIGHTENED: Sector must outperform market
+    sector_weak_threshold: float = 0.95  # TIGHTENED: Sector underperforming
+    sector_leading_bonus: int = 10  # Bonus for leading sector
+    sector_lagging_penalty: int = -15  # TIGHTENED: Penalty for lagging sector
 
-    # Multi-Timeframe - RELAXED
-    mtf_weekly_penalty: int = -3  # RELAXED: từ -5 xuống -3
-    mtf_monthly_penalty: int = -3  # RELAXED: từ -5 xuống -3
+    # Multi-Timeframe - TIGHTENED
+    mtf_weekly_penalty: int = -10  # TIGHTENED: Penalty for weak weekly trend
+    mtf_monthly_penalty: int = -5  # Penalty for weak monthly trend
 
-    # Market Breadth - RELAXED
-    breadth_strong_threshold: float = 0.55  # RELAXED: từ 0.6 xuống 0.55
-    breadth_weak_threshold: float = 0.35  # RELAXED: từ 0.4 xuống 0.35
-    breadth_strong_bonus: int = 8  # INCREASED: từ 5 lên 8
-    breadth_weak_penalty: int = -5  # RELAXED: từ -10 xuống -5
+    # Market Breadth - TIGHTENED
+    breadth_strong_threshold: float = 0.60  # TIGHTENED: 60% stocks advancing
+    breadth_weak_threshold: float = 0.40  # TIGHTENED: 40% stocks advancing
+    breadth_strong_bonus: int = 5  # Bonus for strong breadth
+    breadth_weak_penalty: int = -10  # TIGHTENED: Penalty for weak breadth
 
-    # Portfolio Correlation - RELAXED
-    correlation_max_threshold: float = 0.80  # RELAXED: từ 0.70 lên 0.80
-    correlation_diversification_threshold: float = 0.40  # RELAXED: từ 0.30 lên 0.40
-    correlation_avg_threshold: float = 0.35  # RELAXED: từ 0.25 lên 0.35
-    correlation_high_penalty: int = -10  # RELAXED: từ -20 xuống -10
-    correlation_good_bonus: int = 8  # INCREASED: từ 5 lên 8
+    # Portfolio Correlation - TIGHTENED for diversification
+    correlation_max_threshold: float = 0.70  # TIGHTENED: Max 0.70 correlation
+    correlation_diversification_threshold: float = 0.30  # TIGHTENED: Good if < 0.30
+    correlation_avg_threshold: float = 0.25  # TIGHTENED: Avg correlation threshold
+    correlation_high_penalty: int = -20  # TIGHTENED: Strong penalty for high correlation
+    correlation_good_bonus: int = 5  # Bonus for good diversification
 
-    # Earnings/Events - RELAXED
-    earnings_days_before: int = 3  # RELAXED: từ 5 xuống 3
-    earnings_penalty: int = -15  # RELAXED: từ -25 xuống -15
+    # Earnings/Events - TIGHTENED
+    earnings_days_before: int = 5  # TIGHTENED: Avoid 5 days before earnings
+    earnings_penalty: int = -25  # TIGHTENED: Strong penalty near earnings
 
-    # Fundamentals - RELAXED
-    pe_ratio_max: float = 40  # RELAXED: từ 30 lên 40
-    pe_ratio_min: float = 3  # RELAXED: từ 5 xuống 3
-    pe_ratio_optimal_min: float = 5  # RELAXED: từ 8 xuống 5
-    pe_ratio_optimal_max: float = 25  # RELAXED: từ 20 lên 25
-    debt_ratio_max: float = 0.80  # RELAXED: từ 0.70 lên 0.80
-    debt_ratio_optimal: float = 0.40  # RELAXED: từ 0.30 lên 0.40
-    fundamentals_poor_penalty: int = -8  # RELAXED: từ -15 xuống -8
-    fundamentals_good_bonus: int = 8  # INCREASED: từ 5 lên 8
+    # Fundamentals - TIGHTENED
+    pe_ratio_max: float = 30  # TIGHTENED: Max P/E ratio
+    pe_ratio_min: float = 5  # TIGHTENED: Min P/E ratio (avoid value traps)
+    pe_ratio_optimal_min: float = 8  # TIGHTENED: Optimal P/E range
+    pe_ratio_optimal_max: float = 20  # TIGHTENED: Optimal P/E range
+    debt_ratio_max: float = 0.70  # TIGHTENED: Max debt ratio
+    debt_ratio_optimal: float = 0.30  # TIGHTENED: Optimal debt ratio
+    fundamentals_poor_penalty: int = -15  # TIGHTENED: Penalty for poor fundamentals
+    fundamentals_good_bonus: int = 5  # Bonus for good fundamentals
 
 
 @dataclass
@@ -174,36 +174,36 @@ class EntryOptimizationConfig:
 
 @dataclass
 class RiskManagementConfig:
-    """Risk management for entry signals - RELAXED VERSION"""
+    """Risk management for entry signals - OPTIMIZED VERSION v3.0"""
 
-    # Stop Loss
-    stop_loss_atr_multiplier: float = 2.0  # 2x ATR
+    # Stop Loss - TIGHTENED for capital preservation
+    stop_loss_atr_multiplier: float = 1.5  # TIGHTENED: 1.5x ATR (was 2.0)
     stop_loss_min_percent: float = 3.0  # Min 3% stop loss
-    stop_loss_max_percent: float = 12.0  # RELAXED: từ 10% lên 12%
+    stop_loss_max_percent: float = 7.0  # TIGHTENED: Max 7% (matches VN price limit)
 
     # Take Profit
     take_profit_ratios: List[float] = None  # Will be set in __post_init__
 
-    # Risk/Reward - RELAXED
-    min_risk_reward: float = 1.5  # RELAXED: từ 2.0 xuống 1.5
+    # Risk/Reward - TIGHTENED for profitability
+    min_risk_reward: float = 2.0  # TIGHTENED: Minimum 2:1 R:R ratio
 
-    # Position Sizing - RELAXED
-    position_multiplier_min: float = 0.4  # RELAXED: từ 0.3 lên 0.4
-    position_multiplier_max: float = 1.5
+    # Position Sizing - TIGHTENED
+    position_multiplier_min: float = 0.3  # TIGHTENED: Min 30% of base size
+    position_multiplier_max: float = 1.2  # TIGHTENED: Max 120% of base size
 
-    # Signal Strength Thresholds - RELAXED
-    strength_very_strong: float = 4.5  # RELAXED: từ 5.0 xuống 4.5
-    strength_strong: float = 3.5  # RELAXED: từ 4.0 xuống 3.5
-    strength_moderate: float = 2.5  # RELAXED: từ 3.0 xuống 2.5
-    strength_weak: float = 1.5  # RELAXED: từ 2.0 xuống 1.5
+    # Signal Strength Thresholds - TIGHTENED
+    strength_very_strong: float = 5.0  # TIGHTENED: Need 5.0 for very strong
+    strength_strong: float = 4.0  # TIGHTENED: Need 4.0 for strong
+    strength_moderate: float = 3.0  # TIGHTENED: Need 3.0 for moderate
+    strength_weak: float = 2.0  # TIGHTENED: Below 2.0 is weak
 
-    # Max Drawdown - RELAXED
-    max_portfolio_drawdown: float = 0.18  # RELAXED: từ 15% lên 18%
-    max_position_drawdown: float = 0.25  # RELAXED: từ 20% lên 25%
+    # Max Drawdown - TIGHTENED for capital preservation
+    max_portfolio_drawdown: float = 0.12  # TIGHTENED: 12% max portfolio drawdown
+    max_position_drawdown: float = 0.15  # TIGHTENED: 15% max position drawdown
 
     def __post_init__(self):
         if self.take_profit_ratios is None:
-            self.take_profit_ratios = [1.2, 2.5, 4.0]  # RELAXED: TP1 từ 1.5 xuống 1.2
+            self.take_profit_ratios = [1.5, 3.0, 5.0]  # TIGHTENED: Better R:R ratios
 
 
 @dataclass
@@ -273,7 +273,7 @@ class FilterWeights:
 
 @dataclass
 class EntryLogicConfig:
-    """Master configuration for entry logic"""
+    """Master configuration for entry logic - OPTIMIZED VERSION v3.0"""
 
     # Sub-configurations
     filters: FilterThresholds = None
@@ -284,11 +284,11 @@ class EntryLogicConfig:
     performance: PerformanceFeedbackConfig = None
     weights: FilterWeights = None
 
-    # Base settings - RELAXED
-    min_confidence: int = 50  # RELAXED: từ 60 xuống 50
-    base_min_confidence: int = 50  # RELAXED: từ 60 xuống 50
-    min_confidence_lower_bound: int = 35  # RELAXED: từ 40 xuống 35
-    min_confidence_upper_bound: int = 75  # RELAXED: từ 80 xuống 75
+    # Base settings - TIGHTENED for quality
+    min_confidence: int = 60  # TIGHTENED: Need 60% confidence
+    base_min_confidence: int = 60  # TIGHTENED: Base 60% confidence
+    min_confidence_lower_bound: int = 50  # TIGHTENED: Never go below 50%
+    min_confidence_upper_bound: int = 80  # TIGHTENED: Cap at 80%
 
     # Filter simplification
     use_simplified_filters: bool = True  # Use 8-10 core filters instead of 14
@@ -296,9 +296,9 @@ class EntryLogicConfig:
     # Tiered liquidity
     use_tiered_liquidity: bool = True
 
-    # Requirements - ALL OPTIONAL
-    require_trend_alignment: bool = False  # Optional - cho phép reversal trades
-    require_volume_confirmation: bool = False  # Optional - không bắt buộc volume
+    # Requirements - ENABLED for quality
+    require_trend_alignment: bool = True  # ENABLED: Trade with the trend
+    require_volume_confirmation: bool = True  # ENABLED: Volume confirms momentum
 
     def __post_init__(self):
         if self.filters is None:

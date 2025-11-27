@@ -15,7 +15,7 @@ class TestCircuitBreakerImprovements:
     """Test circuit breaker gradual response and configurable thresholds"""
 
     def test_gradual_response_levels(self, tmp_path):
-        """Test warning -> caution -> trip progression"""
+        """Test warning -> caution -> trip progression (v3.0 - tightened thresholds)"""
         from src.risk.circuit_breaker import CircuitBreaker
 
         # Use temp stats file to avoid interference from existing state
@@ -23,23 +23,25 @@ class TestCircuitBreakerImprovements:
         breaker = CircuitBreaker(
             vnindex_drop_threshold=-2.5,
             use_conservative_threshold=False,
+            warning_threshold_pct=-1.0,  # v3.0: Warning at -1.0%
+            caution_threshold_pct=-1.5,  # v3.0: Caution at -1.5%
             stats_file=str(temp_stats),
         )
         # Ensure clean state
         breaker.reset()
 
-        # Level 1: Warning at -1.5%
+        # Level 1: Warning at -1.0% (v3.0 tightened)
         result = breaker.check_and_update(
             portfolio_pnl_pct=0.0,
-            vnindex_change_pct=-0.015,  # -1.5%
+            vnindex_change_pct=-0.010,  # -1.0%
         )
         assert not result, "Should not trip at warning level"
         assert not breaker.caution_mode, "Should not be in caution mode yet"
 
-        # Level 2: Caution at -2.0%
+        # Level 2: Caution at -1.5% (v3.0 tightened)
         result = breaker.check_and_update(
             portfolio_pnl_pct=0.0,
-            vnindex_change_pct=-0.020,  # -2.0%
+            vnindex_change_pct=-0.016,  # -1.6%
         )
         assert not result, "Should not trip at caution level"
         assert breaker.caution_mode, "Should be in caution mode"
@@ -124,13 +126,14 @@ class TestEntryLogicImprovements:
     """Test simplified entry logic with soft filters"""
 
     def test_reduced_min_confidence(self):
-        """Test that min_confidence is lowered to 45% (v2.1 further relaxed)"""
+        """Test that min_confidence is set correctly (v3.0 - constructor defaults)"""
         from src.strategies.entry_logic import ImprovedEntryLogic
 
         logic = ImprovedEntryLogic()
 
+        # v3.0: These are constructor defaults
         assert logic.min_confidence == 45, f"Expected 45, got {logic.min_confidence}"
-        assert logic.min_risk_reward == 1.5, f"Expected 1.5, got {logic.min_risk_reward}"
+        assert logic.min_risk_reward == 1.0, f"Expected 1.0, got {logic.min_risk_reward}"
 
     def test_soft_filter_mode_enabled(self):
         """Test that soft filter mode is enabled by default (v2.1 further relaxed)"""
