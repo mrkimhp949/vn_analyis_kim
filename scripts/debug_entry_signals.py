@@ -56,7 +56,7 @@ def debug_ticker(ticker: str):
     print(f"\n📈 Entry Logic Analysis (min_confidence=35)...")
     entry_logic = ImprovedEntryLogic(
         min_confidence=35,  # Lowered for testing
-        min_risk_reward=1.2,  # Lowered for testing
+        min_risk_reward=1.0,  # Lowered for testing - allow R:R >= 1.0
         soft_filter_mode=True,
     )
 

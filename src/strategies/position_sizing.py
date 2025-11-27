@@ -606,13 +606,11 @@ class EnhancedPositionSizer:
         )
 
         try:
-            from src.data.loader import TCBSDataLoader
-
-            loader = TCBSDataLoader()
+            from src.data.loader import load_data
 
             # Load data for both symbols
-            df1 = loader.load_data(symbol1, days=days)
-            df2 = loader.load_data(symbol2, days=days)
+            df1 = load_data(symbol1, lookback=days)
+            df2 = load_data(symbol2, lookback=days)
 
             if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
                 logger.warning(f"Insufficient data for correlation: {symbol1}-{symbol2}")
