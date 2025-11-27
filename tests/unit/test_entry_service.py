@@ -28,9 +28,6 @@ for mod_name, mock_mod in mock_modules.items():
     if mod_name not in sys.modules:
         sys.modules[mod_name] = mock_mod
 
-# Mock src.services.__init__ to avoid importing other services
-sys.modules["src.services"] = MagicMock()
-
 # Now import entry_service directly without going through services.__init__
 import importlib.util
 
