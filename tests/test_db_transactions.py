@@ -27,8 +27,23 @@ def db():
 
     db_module._db_instance = None
 
+    # Remove existing test database to ensure clean state
+    if os.path.exists(test_db_path):
+        os.remove(test_db_path)
+
     # Create new instance
     database = get_db()
+
+    # Clear any existing data
+    try:
+        # Clear positions table
+        database.conn.execute("DELETE FROM positions")
+        # Clear trades table
+        database.conn.execute("DELETE FROM trades")
+        database.conn.commit()
+    except Exception:
+        pass  # Tables may not exist yet
+
     yield database
 
     # Cleanup
