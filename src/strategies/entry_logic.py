@@ -1361,26 +1361,60 @@ class ImprovedEntryLogic:
             "monthly_change": monthly_change,
         }
 
-    def _calculate_obv(self, df: pd.DataFrame) -> pd.Series:
+    def _calculate_obv(self, df: pd.DataFrame) -> Optional[pd.Series]:
         """
-        Calculate On-Balance Volume (OBV)
+        ROBUST: Calculate On-Balance Volume (OBV) with error handling
 
         OBV measures buying/selling pressure by adding volume on up days
         and subtracting on down days.
 
         Returns:
-            Series with OBV values
+            Series with OBV values, or None if calculation fails
         """
-        obv = [0]
-        for i in range(1, len(df)):
-            if df["close"].iloc[i] > df["close"].iloc[i - 1]:
-                obv.append(obv[-1] + df["volume"].iloc[i])
-            elif df["close"].iloc[i] < df["close"].iloc[i - 1]:
-                obv.append(obv[-1] - df["volume"].iloc[i])
-            else:
-                obv.append(obv[-1])
+        try:
+            # Validate required columns
+            if "close" not in df.columns or "volume" not in df.columns:
+                logger.warning("OBV calculation failed: missing close or volume columns")
+                return None
 
-        return pd.Series(obv, index=df.index)
+            # Check for NaN values
+            if df["close"].isna().any() or df["volume"].isna().any():
+                logger.warning("OBV calculation: NaN values detected, filling forward")
+                df = df.fillna(method="ffill")
+
+            # Check for sufficient data
+            if len(df) < 2:
+                logger.warning("OBV calculation failed: insufficient data")
+                return None
+
+            obv = [0]
+            for i in range(1, len(df)):
+                try:
+                    close_curr = df["close"].iloc[i]
+                    close_prev = df["close"].iloc[i - 1]
+                    volume_curr = df["volume"].iloc[i]
+
+                    # Validate values
+                    if pd.isna(close_curr) or pd.isna(close_prev) or pd.isna(volume_curr):
+                        obv.append(obv[-1])  # Keep previous OBV
+                        continue
+
+                    if close_curr > close_prev:
+                        obv.append(obv[-1] + volume_curr)
+                    elif close_curr < close_prev:
+                        obv.append(obv[-1] - volume_curr)
+                    else:
+                        obv.append(obv[-1])
+
+                except Exception as e:
+                    logger.warning(f"OBV calculation error at index {i}: {e}")
+                    obv.append(obv[-1] if obv else 0)
+
+            return pd.Series(obv, index=df.index)
+
+        except Exception as e:
+            logger.error(f"OBV calculation failed: {e}")
+            return None
 
     def _check_volume_confirmation(
         self, df: pd.DataFrame, market_regime: Optional[Dict] = None
@@ -1425,20 +1459,43 @@ class ImprovedEntryLogic:
             }
 
         # ============================================================
-        # ENHANCEMENT: Dynamic threshold based on market regime
+        # ENHANCEMENT: Tiered threshold based on liquidity + market regime
+        # Small caps need lower thresholds due to naturally lower volume
         # ============================================================
         base_threshold = 0.5  # Default threshold
+
+        # 1. Adjust for liquidity tier (market cap)
+        liquidity_adjustment = 0.0
+        avg_value = avg_volume_20 * safe_get_latest(df, "close", 100_000)
+
+        if avg_value < 1_000_000_000:  # Small cap (<1B VND daily value)
+            liquidity_adjustment = -0.15  # Much lower threshold
+            logger.debug(f"Small cap: Reducing volume threshold by 15%")
+        elif avg_value < 5_000_000_000:  # Mid cap (<5B VND daily value)
+            liquidity_adjustment = -0.10  # Lower threshold
+            logger.debug(f"Mid cap: Reducing volume threshold by 10%")
+        # Large cap: No adjustment
+
+        # 2. Adjust for market regime
+        regime_adjustment = 0.0
         if market_regime:
             regime = market_regime.get("regime", "SIDEWAYS")
             regime_confidence = market_regime.get("confidence", 50)
 
             if regime == "BULL" and regime_confidence >= 70:
                 # Bull market: Lower threshold to catch more opportunities
-                base_threshold = 0.4
+                regime_adjustment = -0.10
             elif regime == "BEAR" or regime == "HIGH_VOLATILITY":
                 # Bear/high vol: Higher threshold to be more selective
-                base_threshold = 0.6
-            # SIDEWAYS: Keep default 0.5
+                regime_adjustment = +0.10
+            # SIDEWAYS: No adjustment
+
+        # Combine adjustments
+        base_threshold = max(0.25, min(0.75, base_threshold + liquidity_adjustment + regime_adjustment))
+        logger.debug(
+            f"Volume threshold: {base_threshold:.2f} "
+            f"(liquidity: {liquidity_adjustment:+.2f}, regime: {regime_adjustment:+.2f})"
+        )
 
         # ============================================================
         # 1. VOLUME RATIO (existing logic)
@@ -1452,22 +1509,40 @@ class ImprovedEntryLogic:
         volume_trending_up = avg_volume_5 > avg_volume_20
 
         # ============================================================
-        # 3. OBV - ACCUMULATION/DISTRIBUTION (NEW)
+        # 3. OBV - ACCUMULATION/DISTRIBUTION (ROBUST)
         # ============================================================
         obv = self._calculate_obv(df)
+        obv_bullish = True  # Default to neutral if OBV fails
+        obv_available = False
 
-        # Calculate OBV slope over last 5 days
-        if len(obv) >= 5:
-            obv_recent = obv.iloc[-5:]
-            obv_slope = (obv_recent.iloc[-1] - obv_recent.iloc[0]) / 5
+        if obv is not None and len(obv) >= 5:
+            try:
+                obv_recent = obv.iloc[-5:]
+                obv_slope = (obv_recent.iloc[-1] - obv_recent.iloc[0]) / 5
 
-            # Also check OBV moving average
-            obv_ma_5 = obv.rolling(5).mean().iloc[-1]
-            obv_ma_20 = obv.rolling(20).mean().iloc[-1]
+                # Also check OBV moving average
+                if len(obv) >= 20:
+                    obv_ma_5 = obv.rolling(5).mean().iloc[-1]
+                    obv_ma_20 = obv.rolling(20).mean().iloc[-1]
 
-            obv_bullish = (obv_slope > 0) and (obv_ma_5 > obv_ma_20)
+                    if not pd.isna(obv_ma_5) and not pd.isna(obv_ma_20):
+                        obv_bullish = (obv_slope > 0) and (obv_ma_5 > obv_ma_20)
+                        obv_available = True
+                    else:
+                        logger.debug("OBV MAs contain NaN, using slope only")
+                        obv_bullish = obv_slope > 0
+                        obv_available = True
+                else:
+                    # Not enough data for MA, use slope only
+                    obv_bullish = obv_slope > 0
+                    obv_available = True
+
+            except Exception as e:
+                logger.warning(f"OBV analysis failed: {e}, defaulting to neutral")
+                obv_bullish = True
+                obv_available = False
         else:
-            obv_bullish = True  # Default to True if not enough data
+            logger.debug("OBV calculation failed or insufficient data, skipping OBV factor")
 
         # ============================================================
         # 4. COMBINE ALL SIGNALS

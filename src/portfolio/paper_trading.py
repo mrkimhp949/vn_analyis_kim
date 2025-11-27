@@ -469,40 +469,91 @@ class PaperTradingAccount:
         )
 
     def check_limit_orders(
-        self, current_prices: Dict[str, float]
+        self,
+        current_prices: Dict[str, float],
+        timeout_hours: int = 24,
+        fallback_to_market: bool = True,
     ) -> List[Tuple[bool, str, PaperTrade]]:
         """
-        NEW: Check và fill limit orders nếu giá đạt limit price
+        ENHANCED: Check và fill limit orders với timeout và market order fallback
 
         Args:
             current_prices: Dict mapping symbol -> current_price
+            timeout_hours: Hours after which limit order expires (default: 24h)
+            fallback_to_market: Convert to market order on timeout (default: True)
 
         Returns:
             List of (filled, message, trade) tuples
         """
         filled_orders = []
         remaining_orders = []
+        current_time = datetime.now()
 
         for order_dict in self.account.get("pending_orders", []):
             symbol = order_dict["symbol"]
             limit_price = order_dict.get("limit_price", order_dict["price"])
 
+            # Check for timeout
+            order_time = datetime.fromisoformat(order_dict["timestamp"])
+            time_elapsed = (current_time - order_time).total_seconds() / 3600  # hours
+
+            if time_elapsed > timeout_hours:
+                # Order timed out
+                if fallback_to_market and symbol in current_prices:
+                    # Convert to market order
+                    logger.info(
+                        f"⏰ Limit order {symbol} timed out after {time_elapsed:.1f}h, "
+                        "converting to market order"
+                    )
+                    # Will be processed as market order below
+                    order_dict["timed_out"] = True
+                    order_dict["original_limit_price"] = limit_price
+                    # Use current price for market order execution
+                else:
+                    # Cancel expired order
+                    logger.info(
+                        f"⏰ Limit order {symbol} expired after {time_elapsed:.1f}h, cancelling"
+                    )
+                    cancelled_order = PaperTrade(**order_dict)
+                    cancelled_order.status = "EXPIRED"
+                    filled_orders.append(
+                        (
+                            False,
+                            f"⏰ Limit order {symbol} expired after {time_elapsed:.1f}h",
+                            cancelled_order,
+                        )
+                    )
+                    continue
+
             if symbol not in current_prices:
-                # No price data - keep order pending
-                remaining_orders.append(order_dict)
+                # No price data - keep order pending (if not timed out)
+                if time_elapsed <= timeout_hours:
+                    remaining_orders.append(order_dict)
                 continue
 
             current_price = current_prices[symbol]
 
-            # Check if limit order should be filled
-            # For BUY limit order: fill if price <= limit_price
-            if order_dict["action"] == "BUY" and current_price <= limit_price:
+            # Check if limit order should be filled OR timed out with fallback
+            timed_out_with_fallback = order_dict.get("timed_out", False)
+            should_fill = (
+                order_dict["action"] == "BUY"
+                and (current_price <= limit_price or timed_out_with_fallback)
+            )
+
+            if should_fill:
                 # Fill the order
                 filled_order = PaperTrade(**order_dict)
                 filled_order.status = "FILLED"
 
                 # Calculate execution price (with slippage)
-                execution_price = current_price * (1 + self.slippage_pct)
+                # If timed out with fallback, use current market price
+                if timed_out_with_fallback:
+                    execution_price = current_price * (1 + self.slippage_pct)
+                    filled_order.order_type = "MARKET (from LIMIT timeout)"
+                else:
+                    # Normal limit order fill
+                    execution_price = current_price * (1 + self.slippage_pct)
+
                 filled_order.price = execution_price
 
                 # Calculate cost
@@ -555,16 +606,24 @@ class PaperTradingAccount:
 
                 # Record filled trade
                 self.account["trades"].append(asdict(filled_order))
-                filled_orders.append(
-                    (
-                        True,
-                        f"✅ Limit order filled: {filled_order.shares} CP {symbol} @ {execution_price:,.0f} VNĐ",
-                        filled_order,
+
+                # Generate message based on fill type
+                if timed_out_with_fallback:
+                    message = (
+                        f"✅ Market order (timeout fallback): {filled_order.shares} CP {symbol} "
+                        f"@ {execution_price:,.0f} VNĐ (limit was {limit_price:,.0f})"
                     )
-                )
+                else:
+                    message = (
+                        f"✅ Limit order filled: {filled_order.shares} CP {symbol} "
+                        f"@ {execution_price:,.0f} VNĐ"
+                    )
+
+                filled_orders.append((True, message, filled_order))
             else:
-                # Order not yet fillable - keep pending
-                remaining_orders.append(order_dict)
+                # Order not yet fillable - keep pending (if not timed out)
+                if not timed_out_with_fallback:
+                    remaining_orders.append(order_dict)
 
         # Update pending orders
         self.account["pending_orders"] = remaining_orders
