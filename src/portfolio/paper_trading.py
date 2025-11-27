@@ -4,12 +4,15 @@ Mô phỏng thực thi lệnh để test strategy mà không cần tiền thật
 """
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from src.portfolio.manager import get_portfolio_manager
+
+logger = logging.getLogger(__name__)
 
 PAPER_TRADING_FILE = "paper_trading.json"
 
