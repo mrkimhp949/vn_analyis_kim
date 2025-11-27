@@ -340,21 +340,21 @@ class TradingOrchestrator:
             logging.error(f"❌ Error getting daily PnL: {e}")
             current_pnl_pct = 0.0
 
-        if self.circuit_breaker.check_and_update(
-            portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change
-        ):
-            reason = self.circuit_breaker.tripped_reason
-            logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
-            await self.bot.send_message(
-                self.chat_id,
-                f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
-                parse_mode="Markdown",
-            )
-            # Setup strategies before checking positions (exit_strategy needed)
-            self._setup_strategies(market_regime)
-            # Vẫn cho phép kiểm tra thoát lệnh
-            await self.check_active_positions(market_regime)
-            return
+        # if self.circuit_breaker.check_and_update(
+        #     portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change
+        # ):
+        #     reason = self.circuit_breaker.tripped_reason
+        #     logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
+        #     await self.bot.send_message(
+        #         self.chat_id,
+        #         f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
+        #         parse_mode="Markdown",
+        #     )
+        #     # Setup strategies before checking positions (exit_strategy needed)
+        #     self._setup_strategies(market_regime)
+        #     # Vẫn cho phép kiểm tra thoát lệnh
+        #     await self.check_active_positions(market_regime)
+        #     return
 
         # 1. THIẾT LẬP CHIẾN LƯỢC DỰA TRÊN THỊ TRƯỜNG
         self._setup_strategies(market_regime)

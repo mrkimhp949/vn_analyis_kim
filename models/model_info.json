@@ -1,12 +1,6 @@
 {
-  "expected_features": 28,
-  "saved_at": "2025-11-25T23:16:52.145372",
-  "has_xgboost": false,
-  "has_rf": true,
-  "ensemble_weights": {
-    "rf": 0.5,
-    "xgb": 0.5
-  },
+  "timestamp": "20251127_214359",
+  "n_features": 28,
   "feature_names": [
     "sma20",
     "ema20",
@@ -36,5 +30,11 @@
     "rs_momentum",
     "price_vs_sma20",
     "adx"
+  ],
+  "models": [
+    "rf",
+    "xgb",
+    "lgb",
+    "gb"
   ]
 }

@@ -96,7 +96,7 @@ class ImprovedEntryLogic:
     def __init__(
         self,
         min_confidence: int = 45,  # RELAXED: từ 55 xuống 45
-        min_risk_reward: float = 1.5,  # RELAXED: từ 1.8 xuống 1.5
+        min_risk_reward: float = 1.0,  # RELAXED: từ 1.5 xuống 1.0 (realistic with 0.9% transaction costs)
         support_distance_percent: float = 7.0,  # RELAXED: từ 5.0 lên 7.0
         require_trend_alignment: bool = False,  # RELAXED: từ True xuống False
         require_volume_confirmation: bool = False,  # Soft filter (warning only)

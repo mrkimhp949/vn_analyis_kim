@@ -76,12 +76,16 @@ class EnhancedMLSignalGenerator:
                 logger.warning(f"Missing features: {missing_features}")
                 return self._fallback_technical_analysis(df_enhanced)
 
-            # Extract features
-            X = df_enhanced[feature_cols].values
+            # Extract features - ensure numeric types
+            X = df_enhanced[feature_cols].values.astype(np.float64)
 
             # Check for NaN
-            if np.isnan(X[-1]).any():
-                logger.warning("NaN in features, using fallback")
+            try:
+                if np.isnan(X[-1]).any():
+                    logger.warning("NaN in features, using fallback")
+                    return self._fallback_technical_analysis(df_enhanced)
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Feature type error: {e}, using fallback")
                 return self._fallback_technical_analysis(df_enhanced)
 
             # ML Prediction
@@ -207,16 +211,33 @@ class EnhancedMLSignalGenerator:
         # Combined Signal (ML weight = 60%, Technical = 40%)
         combined_signal = (ml_signal * 0.6) + (tech_signal * 0.4)
 
-        # Confidence
-        tech_confidence = min(abs(tech_signal) * 30, 50)
+        # Confidence calculation - IMPROVED to give higher confidence for clear signals
+        # ML confidence: scale from 0.5-1.0 to 0-100 (more generous)
+        if ml_score > 0.5:
+            ml_confidence = (ml_score - 0.5) * 200  # 0.55 -> 10%, 0.6 -> 20%, 0.7 -> 40%
+            ml_confidence = min(ml_confidence * 1.5, 80)  # Boost and cap at 80%
+        else:
+            ml_confidence = (0.5 - ml_score) * 200
+            ml_confidence = min(ml_confidence * 1.5, 80)
+
+        tech_confidence = min(abs(tech_signal) * 40, 60)  # Increased from 30 to 40
+
+        # Base confidence from ML + tech
         confidence = (ml_confidence * 0.6) + (tech_confidence * 0.4)
+
+        # Bonus for strong signals
+        if ml_score > 0.55 and tech_signal > 0.3:
+            confidence += 15  # Alignment bonus
+        elif ml_score < 0.45 and tech_signal < -0.3:
+            confidence += 15
+
         confidence = min(confidence, 100)
 
-        # Decision
-        if combined_signal >= 0.8:
+        # Decision - RELAXED thresholds for more signals
+        if combined_signal >= 0.5:  # Lowered from 0.8
             signal = "BUY"
             reasons.insert(0, f"ML({ml_score:.2f})")
-        elif combined_signal <= -0.8:
+        elif combined_signal <= -0.5:  # Lowered from -0.8
             signal = "SELL"
             reasons.insert(0, f"ML({ml_score:.2f})")
         else:

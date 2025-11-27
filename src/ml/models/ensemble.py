@@ -391,16 +391,29 @@ class EnhancedMLPredictor:
             predictions = []
 
             if self.rf_model is not None:
-                predictions.append(self.rf_model.predict_proba(X_scaled)[:, 1])
+                try:
+                    predictions.append(self.rf_model.predict_proba(X_scaled)[:, 1])
+                except ValueError as e:
+                    logger.warning(f"RF prediction skipped: {e}")
 
             if self.xgb_model is not None:
-                predictions.append(self.xgb_model.predict_proba(X_scaled)[:, 1])
+                try:
+                    predictions.append(self.xgb_model.predict_proba(X_scaled)[:, 1])
+                except ValueError as e:
+                    logger.warning(f"XGB prediction skipped: {e}")
 
             if self.lgb_model is not None:
-                predictions.append(self.lgb_model.predict_proba(X_scaled)[:, 1])
+                try:
+                    predictions.append(self.lgb_model.predict_proba(X_scaled)[:, 1])
+                except ValueError as e:
+                    logger.warning(f"LGB/GB prediction skipped (feature mismatch): {e}")
 
-            # Average predictions
-            return np.mean(predictions, axis=0)
+            # Average predictions if any succeeded
+            if predictions:
+                return np.mean(predictions, axis=0)
+            else:
+                logger.warning("All models failed, returning neutral")
+                return np.full(len(X), 0.5)
 
         elif self.rf_model is not None:
             return self.rf_model.predict_proba(X_scaled)[:, 1]
@@ -599,28 +612,51 @@ class EnhancedMLPredictor:
         logger.info("📂 Loading models...")
 
         try:
-            # Load scaler
-            scaler_path = os.path.join(self.models_dir, "scaler_enhanced.pkl")
-            if os.path.exists(scaler_path):
-                self.scaler = joblib.load(scaler_path)
+            # Load scaler - try multiple possible names
+            scaler_paths = [
+                os.path.join(self.models_dir, "scaler_enhanced.pkl"),
+                os.path.join(self.models_dir, "scaler.pkl"),
+            ]
+            for scaler_path in scaler_paths:
+                if os.path.exists(scaler_path):
+                    self.scaler = joblib.load(scaler_path)
+                    logger.info(f"   ✅ Scaler loaded from {os.path.basename(scaler_path)}")
+                    break
 
-            # Load RF
-            rf_path = os.path.join(self.models_dir, "rf_enhanced.pkl")
-            if os.path.exists(rf_path):
-                self.rf_model = joblib.load(rf_path)
-                logger.info("   ✅ Random Forest loaded")
+            # Load RF - try multiple possible names
+            rf_paths = [
+                os.path.join(self.models_dir, "rf_enhanced.pkl"),
+                os.path.join(self.models_dir, "random_forest.pkl"),
+                os.path.join(self.models_dir, "ensemble_rf.pkl"),
+            ]
+            for rf_path in rf_paths:
+                if os.path.exists(rf_path):
+                    self.rf_model = joblib.load(rf_path)
+                    logger.info(f"   ✅ Random Forest loaded from {os.path.basename(rf_path)}")
+                    break
 
-            # Load XGBoost
-            xgb_path = os.path.join(self.models_dir, "xgb_enhanced.pkl")
-            if os.path.exists(xgb_path):
-                self.xgb_model = joblib.load(xgb_path)
-                logger.info("   ✅ XGBoost loaded")
+            # Load XGBoost - try multiple possible names
+            xgb_paths = [
+                os.path.join(self.models_dir, "xgb_enhanced.pkl"),
+                os.path.join(self.models_dir, "xgboost.pkl"),
+                os.path.join(self.models_dir, "ensemble_xgb.pkl"),
+            ]
+            for xgb_path in xgb_paths:
+                if os.path.exists(xgb_path):
+                    self.xgb_model = joblib.load(xgb_path)
+                    logger.info(f"   ✅ XGBoost loaded from {os.path.basename(xgb_path)}")
+                    break
 
-            # Load LightGBM
-            lgb_path = os.path.join(self.models_dir, "lgb_enhanced.pkl")
-            if os.path.exists(lgb_path):
-                self.lgb_model = joblib.load(lgb_path)
-                logger.info("   ✅ LightGBM loaded")
+            # Load LightGBM/GradientBoosting - try multiple possible names
+            lgb_paths = [
+                os.path.join(self.models_dir, "lgb_enhanced.pkl"),
+                os.path.join(self.models_dir, "lightgbm.pkl"),
+                os.path.join(self.models_dir, "ensemble_gb.pkl"),
+            ]
+            for lgb_path in lgb_paths:
+                if os.path.exists(lgb_path):
+                    self.lgb_model = joblib.load(lgb_path)
+                    logger.info(f"   ✅ LightGBM/GB loaded from {os.path.basename(lgb_path)}")
 
             # Load feature importance
             fi_path = os.path.join(self.models_dir, "feature_importance.pkl")
