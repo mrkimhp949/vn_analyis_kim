@@ -28,8 +28,8 @@ for mod_name, mock_mod in mock_modules.items():
     if mod_name not in sys.modules:
         sys.modules[mod_name] = mock_mod
 
-# Mock services.__init__ to avoid importing other services
-sys.modules["services"] = MagicMock()
+# Mock src.services.__init__ to avoid importing other services
+sys.modules["src.services"] = MagicMock()
 
 # Now import entry_service directly without going through services.__init__
 import importlib.util
@@ -38,6 +38,7 @@ spec = importlib.util.spec_from_file_location(
     "entry_service",
     os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "src",
         "services",
         "entry_service.py",
     ),
@@ -119,10 +120,10 @@ def bull_market_regime():
 def entry_service():
     """Create EntrySignalService with mocked dependencies"""
     with (
-        patch("services.entry_service.EnhancedMLSignalGenerator") as mock_ml,
-        patch("services.entry_service.ImprovedEntryLogic") as mock_entry,
-        patch("services.entry_service.EnhancedPositionSizer") as mock_sizer,
-        patch("services.entry_service.get_portfolio_lock") as mock_lock,
+        patch("src.services.entry_service.EnhancedMLSignalGenerator") as mock_ml,
+        patch("src.services.entry_service.ImprovedEntryLogic") as mock_entry,
+        patch("src.services.entry_service.EnhancedPositionSizer") as mock_sizer,
+        patch("src.services.entry_service.get_portfolio_lock") as mock_lock,
     ):
 
         mock_lock.return_value = Mock()
@@ -149,10 +150,10 @@ class TestEntryServiceInit:
     def test_init_creates_components(self):
         """Test khởi tạo tạo đủ các components"""
         with (
-            patch("services.entry_service.EnhancedMLSignalGenerator"),
-            patch("services.entry_service.ImprovedEntryLogic"),
-            patch("services.entry_service.EnhancedPositionSizer"),
-            patch("services.entry_service.get_portfolio_lock"),
+            patch("src.services.entry_service.EnhancedMLSignalGenerator"),
+            patch("src.services.entry_service.ImprovedEntryLogic"),
+            patch("src.services.entry_service.EnhancedPositionSizer"),
+            patch("src.services.entry_service.get_portfolio_lock"),
         ):
 
             service = EntrySignalService()
@@ -202,7 +203,7 @@ class TestScanForEntries:
     @pytest.mark.asyncio
     async def test_scan_skips_existing_symbols(self, entry_service, sample_df, bull_market_regime):
         """Test scan bỏ qua symbols đã có trong portfolio"""
-        with patch("services.entry_service.load_data", return_value=sample_df):
+        with patch("src.services.entry_service.load_data", return_value=sample_df):
             result = await entry_service.scan_for_entries(
                 tickers=["VNM", "VCB"],
                 existing_symbols={"VNM", "VCB"},  # Cả 2 đều đã có
@@ -216,7 +217,7 @@ class TestScanForEntries:
         """Test scan bỏ qua symbols đang pending"""
         entry_service.portfolio_lock.is_pending.return_value = True
 
-        with patch("services.entry_service.load_data", return_value=sample_df):
+        with patch("src.services.entry_service.load_data", return_value=sample_df):
             result = await entry_service.scan_for_entries(
                 tickers=["VNM"],
                 existing_symbols=set(),
@@ -236,8 +237,8 @@ class TestScanForEntries:
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             result = await entry_service.scan_for_entries(
@@ -283,8 +284,8 @@ class TestScanForEntries:
         entry_service.entry_logic.analyze_entry.return_value = no_entry_signal
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             result = await entry_service.scan_for_entries(
@@ -309,8 +310,8 @@ class TestScanForEntries:
         entry_service.position_sizer.calculate_position_size.return_value = zero_position
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             result = await entry_service.scan_for_entries(
@@ -332,8 +333,8 @@ class TestScanForEntries:
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             await entry_service.scan_for_entries(
@@ -369,8 +370,8 @@ class TestScanForEntries:
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             result = await entry_service.scan_for_entries(
@@ -523,8 +524,8 @@ class TestScanSingleTicker:
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             result = await entry_service._scan_single_ticker(
@@ -553,8 +554,8 @@ class TestScanSingleTicker:
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             await entry_service._scan_single_ticker(
@@ -590,8 +591,8 @@ class TestEntryServiceIntegration:
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             # Scan
@@ -644,8 +645,8 @@ class TestEntryServiceIntegration:
         entry_service.entry_logic.analyze_entry.side_effect = mock_analyze_entry
 
         with (
-            patch("services.entry_service.load_data", return_value=sample_df),
-            patch("services.entry_service.DataValidator.validate_dataframe"),
+            patch("src.services.entry_service.load_data", return_value=sample_df),
+            patch("src.services.entry_service.DataValidator.validate_dataframe"),
         ):
 
             signals = await entry_service.scan_for_entries(
