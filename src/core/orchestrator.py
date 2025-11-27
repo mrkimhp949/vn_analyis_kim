@@ -878,16 +878,21 @@ class TradingOrchestrator:
 
                     # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
 
-            # CIRCUIT BREAKER COORDINATION: If ML CB active, reduce risk
+            # CIRCUIT BREAKER COORDINATION: If ML CB active, apply strict mode
             # High ML failure rate indicates abnormal market conditions
+            ml_cb_strict_mode = False
             if self._ml_circuit_breaker_active:
                 logging.warning(
                     f"⚠️ [{symbol}] ML circuit breaker active - "
-                    "increasing technical analysis requirements"
+                    "applying strict risk controls (reduced size, higher threshold)"
                 )
-                # Could block entry entirely, or increase confidence threshold
-                # For now, we rely on entry_logic to handle technical fallback
-                # but log warning for monitoring
+                ml_cb_strict_mode = True
+
+                # Option 1: Block all technical-only entries (strictest)
+                # Uncomment to enable:
+                # if ml_signal is None:
+                #     logging.warning(f"🚫 [{symbol}] ML CB active - blocking technical-only entry")
+                #     return {"symbol": symbol, "warnings": ["ML circuit breaker active"], "is_watchlist": False}
 
             # 1. Entry Logic with validation
             if not self.entry_logic:
@@ -909,6 +914,24 @@ class TradingOrchestrator:
             if not entry_signal or not entry_signal.should_enter:
                 warnings = getattr(entry_signal, "warnings", ["Không rõ lý do"])
                 return {"symbol": symbol, "warnings": warnings, "is_watchlist": False}
+
+            # CIRCUIT BREAKER COORDINATION: Apply stricter confidence threshold
+            if ml_cb_strict_mode:
+                # Increase minimum confidence requirement by 15 points
+                strict_confidence_threshold = 70  # Normally 45-55
+                if entry_signal.confidence < strict_confidence_threshold:
+                    logging.warning(
+                        f"⚠️ [{symbol}] ML CB strict mode: Confidence {entry_signal.confidence}% "
+                        f"< threshold {strict_confidence_threshold}% - blocking entry"
+                    )
+                    return {
+                        "symbol": symbol,
+                        "warnings": [
+                            f"ML circuit breaker active - need confidence ≥{strict_confidence_threshold}% "
+                            f"(got {entry_signal.confidence}%)"
+                        ],
+                        "is_watchlist": False,
+                    }
 
             # Track signal generation (ML vs Technical)
             is_ml_signal = getattr(entry_signal, "telemetry", {}).get("signal_source") == "ml"
@@ -951,6 +974,15 @@ class TradingOrchestrator:
                     else entry_signal.entry_price * 1.1  # Default 10% gain
                 )
 
+                # CIRCUIT BREAKER COORDINATION: Reduce position size if ML CB active
+                # Apply 50% size reduction in strict mode
+                size_multiplier = 0.5 if ml_cb_strict_mode else 1.0
+
+                if ml_cb_strict_mode:
+                    logging.warning(
+                        f"⚠️ [{symbol}] ML CB strict mode: Reducing position size by 50%"
+                    )
+
                 # Calculate position size using EnhancedPositionSizer
                 position_size_info = self.position_sizer.calculate_position_size(
                     symbol=symbol,
@@ -962,6 +994,21 @@ class TradingOrchestrator:
                     market_regime=market_regime,
                     # Optional: portfolio_risk, win_rate, avg_win_loss_ratio
                 )
+
+                # CIRCUIT BREAKER COORDINATION: Apply size multiplier
+                if ml_cb_strict_mode and position_size_info:
+                    original_shares = position_size_info.shares
+                    original_value = position_size_info.value
+
+                    # Reduce shares and value by 50%
+                    position_size_info.shares = max(1, int(position_size_info.shares * size_multiplier))
+                    position_size_info.value = position_size_info.shares * entry_signal.entry_price
+
+                    logging.info(
+                        f"📊 [{symbol}] ML CB strict mode: Position size reduced from "
+                        f"{original_shares} → {position_size_info.shares} shares "
+                        f"({original_value:,.0f} → {position_size_info.value:,.0f} VNĐ)"
+                    )
 
                 # 4. Paper Trade & Notification
                 # If symbol already has position, skip buying but still send notification
