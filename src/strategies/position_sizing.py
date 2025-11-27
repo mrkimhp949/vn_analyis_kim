@@ -43,17 +43,20 @@ class EnhancedPositionSizer:
     def __init__(
         self,
         total_capital: float = 100_000_000,
-        max_risk_per_trade: float = 0.02,  # 2% max risk
-        max_position_size: float = 0.10,  # 10% max position (safer than 15% to prevent over-concentration)
-        min_position_size: float = 0.05,  # 5% min position
-        max_total_exposure: float = 0.60,  # 60% max exposure (leaves 40% cash for opportunities)
-        max_portfolio_risk: float = 0.20,  # 20% max portfolio risk
-        max_sector_exposure: float = 0.40,  # 40% max per sector (prevents sector over-concentration)
+        max_risk_per_trade: float = 0.015,  # TIGHTENED: 1.5% max risk (was 2%)
+        max_position_size: float = 0.12,  # TIGHTENED: 12% max position (was 10%)
+        min_position_size: float = 0.03,  # TIGHTENED: 3% min position (was 5%)
+        max_total_exposure: float = 0.60,  # 60% max exposure (leaves 40% cash)
+        max_portfolio_risk: float = 0.15,  # TIGHTENED: 15% max portfolio risk (was 20%)
+        max_sector_exposure: float = 0.30,  # TIGHTENED: 30% max per sector (was 40%)
         use_kelly: bool = True,
-        kelly_fraction: float = 0.5,  # Half-Kelly for safety (full Kelly too aggressive)
+        kelly_fraction: float = 0.5,  # Half-Kelly for safety
         correlation_cache_ttl: int = 3600,  # Cache correlations for 1 hour
-        correlation_cache_maxsize: int = 500,  # ENHANCEMENT: Configurable cache size
-    ):  # Half-Kelly
+        correlation_cache_maxsize: int = 500,  # Configurable cache size
+        # NEW v3.0: Additional parameters
+        max_correlation_threshold: float = 0.70,  # NEW: Max correlation with portfolio
+        volatility_adjustment: bool = True,  # NEW: Adjust size by volatility
+    ):
         self.total_capital = total_capital
         self.max_risk_per_trade = max_risk_per_trade
         self.max_position_size = max_position_size
@@ -66,10 +69,19 @@ class EnhancedPositionSizer:
         self.correlation_cache_ttl = correlation_cache_ttl
         self.correlation_cache_maxsize = correlation_cache_maxsize
 
+        # NEW v3.0: Additional parameters
+        self.max_correlation_threshold = max_correlation_threshold
+        self.volatility_adjustment = volatility_adjustment
+
         # Tracking
         self.current_positions = {}  # {symbol: position_data}
         self.trade_history = []  # Track trades for win rate calculation
         self.sector_exposure = {}  # Track sector exposure
+
+        # NEW v3.0: Performance tracking for Kelly
+        self._win_rate = 0.5  # Default 50%
+        self._avg_win = 0.08  # Default 8% avg win
+        self._avg_loss = 0.05  # Default 5% avg loss
 
         # ENHANCEMENT: LRU cache for correlation performance
         # OrderedDict maintains insertion order and allows efficient move_to_end()
