@@ -1,11 +1,11 @@
 {
   "today": {
-    "date": "2025-11-26",
-    "trades_count": 8,
-    "total_loss": 9652159.999999996,
+    "date": "2025-11-27",
+    "trades_count": 0,
+    "total_loss": 0.0,
     "total_profit": 0.0,
-    "net_pnl": -9652159.999999996,
-    "last_updated": "2025-11-26T22:33:58.793423"
+    "net_pnl": 0.0,
+    "last_updated": "2025-11-27T19:54:57.203845"
   },
   "consecutive_losses": 8,
   "last_trade_date": "2025-11-26"

@@ -350,6 +350,8 @@ class TradingOrchestrator:
                 f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
                 parse_mode="Markdown",
             )
+            # Setup strategies before checking positions (exit_strategy needed)
+            self._setup_strategies(market_regime)
             # Vẫn cho phép kiểm tra thoát lệnh
             await self.check_active_positions(market_regime)
             return

@@ -104,13 +104,10 @@ class LiquidityValidator:
                 return (
                     False,
                     f"Estimated spread too wide: {estimated_spread_pct*100:.2f}% "
-                    f"(max: {self.max_spread_pct*100:.2f}%)"
+                    f"(max: {self.max_spread_pct*100:.2f}%)",
                 )
             elif estimated_spread_pct > self.warn_spread_pct:
-                return (
-                    True,
-                    f"⚠️ Wide estimated spread: {estimated_spread_pct*100:.2f}%"
-                )
+                return (True, f"⚠️ Wide estimated spread: {estimated_spread_pct*100:.2f}%")
 
             return (True, None)
 
@@ -135,7 +132,7 @@ class LiquidityValidator:
             return (
                 False,
                 f"Bid-ask spread too wide: {spread_pct*100:.2f}% "
-                f"(max: {max_allowed_spread*100:.2f}% for {'large' if is_large_order else 'normal'} order)"
+                f"(max: {max_allowed_spread*100:.2f}% for {'large' if is_large_order else 'normal'} order)",
             )
 
         # Warning for moderately wide spread
@@ -143,7 +140,7 @@ class LiquidityValidator:
             return (
                 True,
                 f"⚠️ Moderate spread: {spread_pct*100:.2f}% "
-                f"(bid: {bid_price:,.0f}, ask: {ask_price:,.0f})"
+                f"(bid: {bid_price:,.0f}, ask: {ask_price:,.0f})",
             )
 
         # Spread acceptable
@@ -179,14 +176,11 @@ class LiquidityValidator:
             return (
                 False,
                 f"Low volume: {volume_ratio*100:.0f}% of average "
-                f"(min: {self.min_volume_ratio*100:.0f}%)"
+                f"(min: {self.min_volume_ratio*100:.0f}%)",
             )
 
         if volume_ratio < self.min_volume_ratio * 1.2:  # 60% of average
-            return (
-                True,
-                f"⚠️ Below-average volume: {volume_ratio*100:.0f}% of average"
-            )
+            return (True, f"⚠️ Below-average volume: {volume_ratio*100:.0f}% of average")
 
         return (True, None)
 
@@ -223,7 +217,7 @@ class LiquidityValidator:
 
         # Market impact (more significant for large orders)
         # Rule of thumb: market impact ≈ volatility × sqrt(order% of volume)
-        market_impact = volatility * (order_pct_of_volume ** 0.5)
+        market_impact = volatility * (order_pct_of_volume**0.5)
 
         # Total slippage
         total_slippage = base_slippage + market_impact

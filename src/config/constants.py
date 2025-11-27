@@ -53,7 +53,7 @@ ROUND_TRIP_COST = TOTAL_TRANSACTION_COST * 2  # 1.6% round trip (buy + sell) - c
 
 # Alternative costs for different scenarios
 OPTIMISTIC_ROUND_TRIP_COST = 0.012  # 1.2% with best execution and limit orders
-REALISTIC_ROUND_TRIP_COST = 0.016   # 1.6% with market orders (default)
+REALISTIC_ROUND_TRIP_COST = 0.016  # 1.6% with market orders (default)
 PESSIMISTIC_ROUND_TRIP_COST = 0.020  # 2.0% with poor execution and high slippage
 
 # Vietnam Market Specific Constants

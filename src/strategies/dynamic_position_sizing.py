@@ -32,18 +32,15 @@ class DynamicPositionSizeAdjuster:
         bull_multiplier: float = 1.1,  # Increase size in bull market
         sideways_multiplier: float = 0.9,  # Slightly reduce in sideways
         bear_multiplier: float = 0.5,  # Significantly reduce in bear market
-
         # Volatility thresholds and multipliers
         low_vol_threshold: float = 0.015,  # 1.5% volatility threshold
         high_vol_threshold: float = 0.030,  # 3.0% volatility threshold
         high_vol_multiplier: float = 0.6,  # Reduce to 60% in high volatility
         medium_vol_multiplier: float = 0.85,  # Reduce to 85% in medium volatility
-
         # Performance-based adjustments
         consecutive_wins_boost: float = 1.1,  # 10% boost after 3+ wins
         consecutive_losses_penalty: float = 0.6,  # Reduce to 60% after 2+ losses
         min_trades_for_adjustment: int = 3,  # Minimum trades before adjusting
-
         # Drawdown-based adjustments
         warning_drawdown_pct: float = 0.05,  # 5% drawdown warning
         critical_drawdown_pct: float = 0.10,  # 10% drawdown critical
@@ -92,7 +89,10 @@ class DynamicPositionSizeAdjuster:
         elif regime == "BEAR":
             return self.bear_multiplier, f"Bear market ({(self.bear_multiplier-1)*100:.0f}%)"
         else:  # SIDEWAYS
-            return self.sideways_multiplier, f"Sideways market ({(self.sideways_multiplier-1)*100:.0f}%)"
+            return (
+                self.sideways_multiplier,
+                f"Sideways market ({(self.sideways_multiplier-1)*100:.0f}%)",
+            )
 
     def get_volatility_multiplier(self, market_volatility: float) -> tuple:
         """
@@ -112,21 +112,18 @@ class DynamicPositionSizeAdjuster:
         if vol_pct > self.high_vol_threshold * 100:
             return (
                 self.high_vol_multiplier,
-                f"High volatility ({vol_pct:.1f}%) - reduce to {self.high_vol_multiplier*100:.0f}%"
+                f"High volatility ({vol_pct:.1f}%) - reduce to {self.high_vol_multiplier*100:.0f}%",
             )
         elif vol_pct > self.low_vol_threshold * 100:
             return (
                 self.medium_vol_multiplier,
-                f"Medium volatility ({vol_pct:.1f}%) - reduce to {self.medium_vol_multiplier*100:.0f}%"
+                f"Medium volatility ({vol_pct:.1f}%) - reduce to {self.medium_vol_multiplier*100:.0f}%",
             )
         else:
             return 1.0, f"Low volatility ({vol_pct:.1f}%) - no adjustment"
 
     def get_performance_multiplier(
-        self,
-        consecutive_wins: int = 0,
-        consecutive_losses: int = 0,
-        total_trades: int = 0
+        self, consecutive_wins: int = 0, consecutive_losses: int = 0, total_trades: int = 0
     ) -> tuple:
         """
         Get position size multiplier based on recent trading performance
@@ -147,14 +144,14 @@ class DynamicPositionSizeAdjuster:
         if consecutive_losses >= 2:
             return (
                 self.consecutive_losses_penalty,
-                f"Losing streak ({consecutive_losses} losses) - reduce to {self.consecutive_losses_penalty*100:.0f}%"
+                f"Losing streak ({consecutive_losses} losses) - reduce to {self.consecutive_losses_penalty*100:.0f}%",
             )
 
         # Winning streak - slightly increase size
         if consecutive_wins >= 3:
             return (
                 self.consecutive_wins_boost,
-                f"Winning streak ({consecutive_wins} wins) - boost to {self.consecutive_wins_boost*100:.0f}%"
+                f"Winning streak ({consecutive_wins} wins) - boost to {self.consecutive_wins_boost*100:.0f}%",
             )
 
         return 1.0, "Performance neutral"
@@ -172,12 +169,12 @@ class DynamicPositionSizeAdjuster:
         if current_drawdown_pct >= self.critical_drawdown_pct:
             return (
                 self.drawdown_critical_multiplier,
-                f"CRITICAL drawdown ({current_drawdown_pct*100:.1f}%) - reduce to {self.drawdown_critical_multiplier*100:.0f}%"
+                f"CRITICAL drawdown ({current_drawdown_pct*100:.1f}%) - reduce to {self.drawdown_critical_multiplier*100:.0f}%",
             )
         elif current_drawdown_pct >= self.warning_drawdown_pct:
             return (
                 self.drawdown_warning_multiplier,
-                f"Warning drawdown ({current_drawdown_pct*100:.1f}%) - reduce to {self.drawdown_warning_multiplier*100:.0f}%"
+                f"Warning drawdown ({current_drawdown_pct*100:.1f}%) - reduce to {self.drawdown_warning_multiplier*100:.0f}%",
             )
 
         return 1.0, "Drawdown OK"
@@ -259,7 +256,7 @@ class DynamicPositionSizeAdjuster:
                 "volatility": vol_reason,
                 "performance": perf_reason,
                 "drawdown": dd_reason,
-            }
+            },
         }
 
         # Log the decision

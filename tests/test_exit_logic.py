@@ -253,7 +253,8 @@ def test_check_take_profit_tp1(sample_stock_data):
     assert decision.should_exit is True
     assert decision.exit_reason == ExitReason.TAKE_PROFIT_1
     assert decision.exit_type == "PARTIAL_30%"
-    assert decision.expected_pnl_percent > 10
+    # Net PnL = 11% gross - 1.6% transaction costs = ~9.4%
+    assert decision.expected_pnl_percent > 9
 
 
 def test_check_take_profit_tp2(sample_stock_data):
@@ -287,7 +288,7 @@ def test_check_take_profit_tp2_full_exit(sample_stock_data):
     strategy = ImprovedExitStrategy(take_profit_levels=[0.12, 0.20])
 
     entry_price = 10000
-    current_price = 12100  # +21% (above TP2 20%)
+    current_price = 12200  # +22% (above TP2 20%)
     tp_targets = [11200, 12000]  # 12%, 20%
     entry_date = datetime.now() - timedelta(days=5)
 
@@ -602,7 +603,10 @@ def test_check_exit_market_crash_small_loss(sample_stock_data, bear_market_regim
     strategy = ImprovedExitStrategy()
 
     entry_price = 10000
-    current_price = 9900  # -1% loss
+    # With 1.6% transaction costs, need gross loss < 0.4% to have net loss > -2%
+    # -1% gross = -2.6% net, which is < -2% threshold, so won't trigger
+    # Use -0.3% gross = -1.9% net, which is > -2% threshold
+    current_price = 9970  # -0.3% gross loss → ~-1.9% net loss (within -2% threshold)
     entry_date = datetime.now() - timedelta(days=5)
 
     decision = strategy.check_exit(
@@ -616,7 +620,7 @@ def test_check_exit_market_crash_small_loss(sample_stock_data, bear_market_regim
         market_regime=bear_market_regime,
     )
 
-    # Should exit to cut loss
+    # Should exit to cut loss (net PnL > -2%)
     assert decision.should_exit is True
     assert decision.exit_reason == ExitReason.MARKET_CRASH
 
@@ -1081,7 +1085,7 @@ def test_full_workflow_take_profit(sample_stock_data):
     decision = strategy.check_exit(
         symbol="TEST",
         entry_price=10000,
-        current_price=12100,  # Hit TP2 (20%)
+        current_price=12200,  # Hit TP2 (22% gross → ~20.4% net after 1.6% costs)
         stop_loss=9300,
         take_profit_targets=[11200, 12000],  # v2.0: 12%, 20%
         entry_date=datetime.now() - timedelta(days=5),
@@ -1091,6 +1095,7 @@ def test_full_workflow_take_profit(sample_stock_data):
 
     assert decision.should_exit is True
     assert decision.exit_reason == ExitReason.TAKE_PROFIT_2
+    # Net PnL = 22% gross - 1.6% transaction costs = ~20.4%
     assert decision.expected_pnl_percent > 20
 
 
