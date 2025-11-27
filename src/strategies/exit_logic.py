@@ -510,7 +510,9 @@ class ImprovedExitStrategy:
         # Medium trend (ADX 25-35) = normal
         # Weak trend (ADX < 25) = exit faster
         try:
-            adx = latest.get("adx", 0) if len(df) > 0 else 0
+            adx = 0
+            if len(df) > 0 and "adx" in df.columns:
+                adx = df.iloc[-1]["adx"] if pd.notna(df.iloc[-1]["adx"]) else 0
             if adx > 35:  # Strong trend
                 trend_adjustment = 1.5  # Increase holding by 50%
                 logger.debug(f"💪 Strong trend (ADX {adx:.1f}): Extending holding by 50%")
