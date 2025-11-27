@@ -139,6 +139,7 @@ class ImprovedEntryLogic:
         # IMPROVEMENT: Filter performance tracking
         try:
             from src.monitoring.filter_performance import get_filter_performance_tracker
+
             self.filter_tracker = get_filter_performance_tracker()
         except ImportError:
             self.filter_tracker = None
@@ -1491,7 +1492,9 @@ class ImprovedEntryLogic:
             # SIDEWAYS: No adjustment
 
         # Combine adjustments
-        base_threshold = max(0.25, min(0.75, base_threshold + liquidity_adjustment + regime_adjustment))
+        base_threshold = max(
+            0.25, min(0.75, base_threshold + liquidity_adjustment + regime_adjustment)
+        )
         logger.debug(
             f"Volume threshold: {base_threshold:.2f} "
             f"(liquidity: {liquidity_adjustment:+.2f}, regime: {regime_adjustment:+.2f})"

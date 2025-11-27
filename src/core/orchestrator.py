@@ -128,12 +128,12 @@ class TradingOrchestrator:
 
         # IMPROVEMENT: Track common failure patterns for debugging
         self._ml_failure_reasons = {
-            "data_quality": 0,      # Missing/invalid data
-            "vnindex_load_fail": 0, # VNINDEX loading errors
-            "model_error": 0,       # Model prediction errors
-            "feature_error": 0,     # Feature calculation errors
-            "timeout": 0,           # Timeout errors
-            "unknown": 0,           # Other errors
+            "data_quality": 0,  # Missing/invalid data
+            "vnindex_load_fail": 0,  # VNINDEX loading errors
+            "model_error": 0,  # Model prediction errors
+            "feature_error": 0,  # Feature calculation errors
+            "timeout": 0,  # Timeout errors
+            "unknown": 0,  # Other errors
         }
 
         # IMPROVEMENT: Cache VNINDEX data to reduce repeated loads and failures
@@ -865,36 +865,43 @@ class TradingOrchestrator:
 
                         # IMPROVEMENT: Pre-validate data before ML analysis
                         if df is None or len(df) < 50:
-                            raise ValueError(f"Insufficient data: {len(df) if df is not None else 0} rows")
+                            raise ValueError(
+                                f"Insufficient data: {len(df) if df is not None else 0} rows"
+                            )
 
                         if "close" not in df.columns or "volume" not in df.columns:
                             raise ValueError(f"Missing required columns: {list(df.columns)}")
 
                         # IMPROVEMENT: Add timeout to prevent hanging
                         import asyncio
+
                         ml_signal = await asyncio.wait_for(
                             asyncio.to_thread(
                                 self.ml_generator.analyze,
                                 df,
                                 index_df=cached_vnindex,
-                                symbol=symbol
+                                symbol=symbol,
                             ),
-                            timeout=10.0  # 10 second timeout
+                            timeout=10.0,  # 10 second timeout
                         )
 
                         # Track successful ML analysis
                         if ml_signal is not None:
                             self._ml_success_count += 1
                             if attempt > 0:
-                                logging.info(f"✅ ML analysis succeeded on retry {attempt} for {symbol}")
+                                logging.info(
+                                    f"✅ ML analysis succeeded on retry {attempt} for {symbol}"
+                                )
                             break  # Success - exit retry loop
 
                     except asyncio.TimeoutError:
                         error_type = "timeout"
                         error_msg = "ML analysis timed out after 10s"
                         if attempt < max_retries:
-                            logging.warning(f"⏰ ML timeout for {symbol}, retrying ({attempt+1}/{max_retries})...")
-                            await asyncio.sleep(retry_delay * (2 ** attempt))
+                            logging.warning(
+                                f"⏰ ML timeout for {symbol}, retrying ({attempt+1}/{max_retries})..."
+                            )
+                            await asyncio.sleep(retry_delay * (2**attempt))
                             continue
                     except ValueError as e:
                         error_type = "data_quality"
@@ -905,8 +912,10 @@ class TradingOrchestrator:
                         error_type = type(e).__name__
                         error_msg = str(e)
                         if attempt < max_retries and "VNINDEX" not in str(e):
-                            logging.warning(f"⚠️ ML error for {symbol}, retrying ({attempt+1}/{max_retries}): {e}")
-                            await asyncio.sleep(retry_delay * (2 ** attempt))
+                            logging.warning(
+                                f"⚠️ ML error for {symbol}, retrying ({attempt+1}/{max_retries}): {e}"
+                            )
+                            await asyncio.sleep(retry_delay * (2**attempt))
                             continue
 
                 # If we get here without ml_signal, track failure
@@ -1061,7 +1070,9 @@ class TradingOrchestrator:
                     original_value = position_size_info.value
 
                     # Reduce shares and value by 50%
-                    position_size_info.shares = max(1, int(position_size_info.shares * size_multiplier))
+                    position_size_info.shares = max(
+                        1, int(position_size_info.shares * size_multiplier)
+                    )
                     position_size_info.value = position_size_info.shares * entry_signal.entry_price
 
                     logging.info(
@@ -1143,9 +1154,7 @@ class TradingOrchestrator:
                                 symbol, entry_signal, position_size_info, news_sentiment
                             )
                         except Exception as e:
-                            logging.error(
-                                f"⚠️ Failed to send buy notification for {symbol}: {e}"
-                            )
+                            logging.error(f"⚠️ Failed to send buy notification for {symbol}: {e}")
                             # Continue - trade is still successful even if notification fails
 
                         return {"signal": True}
@@ -1278,7 +1287,11 @@ class TradingOrchestrator:
         error_msg = error_details.get("error_msg", "").lower()
         if "timeout" in error_type.lower() or "timeout" in error_msg:
             self._ml_failure_reasons["timeout"] += 1
-        elif "data_quality" in error_type.lower() or "insufficient" in error_msg or "missing" in error_msg:
+        elif (
+            "data_quality" in error_type.lower()
+            or "insufficient" in error_msg
+            or "missing" in error_msg
+        ):
             self._ml_failure_reasons["data_quality"] += 1
         elif "vnindex" in error_msg:
             self._ml_failure_reasons["vnindex_load_fail"] += 1

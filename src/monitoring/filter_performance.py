@@ -77,9 +77,7 @@ class FilterPerformanceTracker:
             try:
                 with open(self.stats_file, "r") as f:
                     data = json.load(f)
-                    self.filters = {
-                        name: FilterStats(**stats) for name, stats in data.items()
-                    }
+                    self.filters = {name: FilterStats(**stats) for name, stats in data.items()}
                 logger.info(f"✅ Loaded filter stats from {self.stats_file}")
             except Exception as e:
                 logger.error(f"Error loading filter stats: {e}")
@@ -166,9 +164,7 @@ class FilterPerformanceTracker:
                     stats.passed_that_lost += 1
 
                 # Update precision
-                total_passed_with_outcome = (
-                    stats.passed_that_won + stats.passed_that_lost
-                )
+                total_passed_with_outcome = stats.passed_that_won + stats.passed_that_lost
                 if total_passed_with_outcome > 0:
                     stats.precision = stats.passed_that_won / total_passed_with_outcome
 
@@ -184,13 +180,9 @@ class FilterPerformanceTracker:
                     stats.blocked_that_lost += 1  # True negative
 
                 # Update false negative rate
-                total_blocked_with_outcome = (
-                    stats.blocked_that_won + stats.blocked_that_lost
-                )
+                total_blocked_with_outcome = stats.blocked_that_won + stats.blocked_that_lost
                 if total_blocked_with_outcome > 0:
-                    stats.false_negative_rate = (
-                        stats.blocked_that_won / total_blocked_with_outcome
-                    )
+                    stats.false_negative_rate = stats.blocked_that_won / total_blocked_with_outcome
 
             # Recalculate effectiveness scores
             self._update_effectiveness_scores()

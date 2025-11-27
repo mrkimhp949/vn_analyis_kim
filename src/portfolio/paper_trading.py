@@ -535,9 +535,8 @@ class PaperTradingAccount:
 
             # Check if limit order should be filled OR timed out with fallback
             timed_out_with_fallback = order_dict.get("timed_out", False)
-            should_fill = (
-                order_dict["action"] == "BUY"
-                and (current_price <= limit_price or timed_out_with_fallback)
+            should_fill = order_dict["action"] == "BUY" and (
+                current_price <= limit_price or timed_out_with_fallback
             )
 
             if should_fill:
