@@ -135,6 +135,16 @@ class ImprovedEntryLogic:
         self.regime_aware_filtering = regime_aware_filtering
         self.portfolio_manager = portfolio_manager
         self.performance_monitor = performance_monitor or get_performance_monitor()
+
+        # IMPROVEMENT: Filter performance tracking
+        try:
+            from src.monitoring.filter_performance import get_filter_performance_tracker
+
+            self.filter_tracker = get_filter_performance_tracker()
+        except ImportError:
+            self.filter_tracker = None
+            logger.warning("Filter performance tracker not available")
+
         self.min_liquidity_value = min_liquidity_value
         self.min_avg_volume = min_avg_volume
         self.use_tiered_liquidity = use_tiered_liquidity
@@ -169,6 +179,24 @@ class ImprovedEntryLogic:
         self._correlation_cache_symbols = None
         self._correlation_cache_ttl = 300  # 5 minutes TTL (default)
         self._correlation_cache_portfolio_hash = None  # NEW: Track portfolio composition
+
+    def _track_filter(self, filter_name: str, passed: bool, symbol: str):
+        """
+        Track filter check result for performance monitoring
+
+        Args:
+            filter_name: Name of the filter
+            passed: Whether the filter passed (True) or blocked/warned (False)
+            symbol: Stock symbol being checked
+        """
+        if not self.filter_tracker:
+            return
+
+        try:
+            result = "PASSED" if passed else "BLOCKED"
+            self.filter_tracker.record_filter_check(filter_name, result, symbol)
+        except Exception as e:
+            logger.warning(f"Error tracking filter {filter_name}: {e}")
 
     def _validate_initial_signal(
         self, df: pd.DataFrame, ml_signal: Optional[Dict], symbol: Optional[str] = None
@@ -1334,26 +1362,60 @@ class ImprovedEntryLogic:
             "monthly_change": monthly_change,
         }
 
-    def _calculate_obv(self, df: pd.DataFrame) -> pd.Series:
+    def _calculate_obv(self, df: pd.DataFrame) -> Optional[pd.Series]:
         """
-        Calculate On-Balance Volume (OBV)
+        ROBUST: Calculate On-Balance Volume (OBV) with error handling
 
         OBV measures buying/selling pressure by adding volume on up days
         and subtracting on down days.
 
         Returns:
-            Series with OBV values
+            Series with OBV values, or None if calculation fails
         """
-        obv = [0]
-        for i in range(1, len(df)):
-            if df["close"].iloc[i] > df["close"].iloc[i - 1]:
-                obv.append(obv[-1] + df["volume"].iloc[i])
-            elif df["close"].iloc[i] < df["close"].iloc[i - 1]:
-                obv.append(obv[-1] - df["volume"].iloc[i])
-            else:
-                obv.append(obv[-1])
+        try:
+            # Validate required columns
+            if "close" not in df.columns or "volume" not in df.columns:
+                logger.warning("OBV calculation failed: missing close or volume columns")
+                return None
 
-        return pd.Series(obv, index=df.index)
+            # Check for NaN values
+            if df["close"].isna().any() or df["volume"].isna().any():
+                logger.warning("OBV calculation: NaN values detected, filling forward")
+                df = df.fillna(method="ffill")
+
+            # Check for sufficient data
+            if len(df) < 2:
+                logger.warning("OBV calculation failed: insufficient data")
+                return None
+
+            obv = [0]
+            for i in range(1, len(df)):
+                try:
+                    close_curr = df["close"].iloc[i]
+                    close_prev = df["close"].iloc[i - 1]
+                    volume_curr = df["volume"].iloc[i]
+
+                    # Validate values
+                    if pd.isna(close_curr) or pd.isna(close_prev) or pd.isna(volume_curr):
+                        obv.append(obv[-1])  # Keep previous OBV
+                        continue
+
+                    if close_curr > close_prev:
+                        obv.append(obv[-1] + volume_curr)
+                    elif close_curr < close_prev:
+                        obv.append(obv[-1] - volume_curr)
+                    else:
+                        obv.append(obv[-1])
+
+                except Exception as e:
+                    logger.warning(f"OBV calculation error at index {i}: {e}")
+                    obv.append(obv[-1] if obv else 0)
+
+            return pd.Series(obv, index=df.index)
+
+        except Exception as e:
+            logger.error(f"OBV calculation failed: {e}")
+            return None
 
     def _check_volume_confirmation(
         self, df: pd.DataFrame, market_regime: Optional[Dict] = None
@@ -1398,20 +1460,45 @@ class ImprovedEntryLogic:
             }
 
         # ============================================================
-        # ENHANCEMENT: Dynamic threshold based on market regime
+        # ENHANCEMENT: Tiered threshold based on liquidity + market regime
+        # Small caps need lower thresholds due to naturally lower volume
         # ============================================================
         base_threshold = 0.5  # Default threshold
+
+        # 1. Adjust for liquidity tier (market cap)
+        liquidity_adjustment = 0.0
+        avg_value = avg_volume_20 * safe_get_latest(df, "close", 100_000)
+
+        if avg_value < 1_000_000_000:  # Small cap (<1B VND daily value)
+            liquidity_adjustment = -0.15  # Much lower threshold
+            logger.debug(f"Small cap: Reducing volume threshold by 15%")
+        elif avg_value < 5_000_000_000:  # Mid cap (<5B VND daily value)
+            liquidity_adjustment = -0.10  # Lower threshold
+            logger.debug(f"Mid cap: Reducing volume threshold by 10%")
+        # Large cap: No adjustment
+
+        # 2. Adjust for market regime
+        regime_adjustment = 0.0
         if market_regime:
             regime = market_regime.get("regime", "SIDEWAYS")
             regime_confidence = market_regime.get("confidence", 50)
 
             if regime == "BULL" and regime_confidence >= 70:
                 # Bull market: Lower threshold to catch more opportunities
-                base_threshold = 0.4
+                regime_adjustment = -0.10
             elif regime == "BEAR" or regime == "HIGH_VOLATILITY":
                 # Bear/high vol: Higher threshold to be more selective
-                base_threshold = 0.6
-            # SIDEWAYS: Keep default 0.5
+                regime_adjustment = +0.10
+            # SIDEWAYS: No adjustment
+
+        # Combine adjustments
+        base_threshold = max(
+            0.25, min(0.75, base_threshold + liquidity_adjustment + regime_adjustment)
+        )
+        logger.debug(
+            f"Volume threshold: {base_threshold:.2f} "
+            f"(liquidity: {liquidity_adjustment:+.2f}, regime: {regime_adjustment:+.2f})"
+        )
 
         # ============================================================
         # 1. VOLUME RATIO (existing logic)
@@ -1425,22 +1512,40 @@ class ImprovedEntryLogic:
         volume_trending_up = avg_volume_5 > avg_volume_20
 
         # ============================================================
-        # 3. OBV - ACCUMULATION/DISTRIBUTION (NEW)
+        # 3. OBV - ACCUMULATION/DISTRIBUTION (ROBUST)
         # ============================================================
         obv = self._calculate_obv(df)
+        obv_bullish = True  # Default to neutral if OBV fails
+        obv_available = False
 
-        # Calculate OBV slope over last 5 days
-        if len(obv) >= 5:
-            obv_recent = obv.iloc[-5:]
-            obv_slope = (obv_recent.iloc[-1] - obv_recent.iloc[0]) / 5
+        if obv is not None and len(obv) >= 5:
+            try:
+                obv_recent = obv.iloc[-5:]
+                obv_slope = (obv_recent.iloc[-1] - obv_recent.iloc[0]) / 5
 
-            # Also check OBV moving average
-            obv_ma_5 = obv.rolling(5).mean().iloc[-1]
-            obv_ma_20 = obv.rolling(20).mean().iloc[-1]
+                # Also check OBV moving average
+                if len(obv) >= 20:
+                    obv_ma_5 = obv.rolling(5).mean().iloc[-1]
+                    obv_ma_20 = obv.rolling(20).mean().iloc[-1]
 
-            obv_bullish = (obv_slope > 0) and (obv_ma_5 > obv_ma_20)
+                    if not pd.isna(obv_ma_5) and not pd.isna(obv_ma_20):
+                        obv_bullish = (obv_slope > 0) and (obv_ma_5 > obv_ma_20)
+                        obv_available = True
+                    else:
+                        logger.debug("OBV MAs contain NaN, using slope only")
+                        obv_bullish = obv_slope > 0
+                        obv_available = True
+                else:
+                    # Not enough data for MA, use slope only
+                    obv_bullish = obv_slope > 0
+                    obv_available = True
+
+            except Exception as e:
+                logger.warning(f"OBV analysis failed: {e}, defaulting to neutral")
+                obv_bullish = True
+                obv_available = False
         else:
-            obv_bullish = True  # Default to True if not enough data
+            logger.debug("OBV calculation failed or insufficient data, skipping OBV factor")
 
         # ============================================================
         # 4. COMBINE ALL SIGNALS
@@ -2083,51 +2188,333 @@ class ImprovedEntryLogic:
 
     def _calculate_technical_confidence(self, df: pd.DataFrame) -> float:
         """
-        Calculate confidence from technical indicators when ML signal is unavailable
+        ENHANCED: Calculate confidence from technical indicators with weighted scoring
 
-        Uses multiple technical factors:
-        - RSI position
-        - MACD signal
-        - Moving average alignment
-        - Price action strength
+        Uses 7 weighted technical factors:
+        1. RSI position (15% weight) - Oversold/overbought detection
+        2. MACD signal (20% weight) - Momentum and trend
+        3. Bollinger Bands (15% weight) - Volatility and extremes
+        4. Stochastic (15% weight) - Additional momentum
+        5. Moving average alignment (20% weight) - Trend confirmation
+        6. Volume confirmation (10% weight) - Interest validation
+        7. Price action (5% weight) - Recent momentum
+
+        Returns:
+            Confidence score 0-100 (weighted average)
         """
         if len(df) < 50:
             return 0.0
 
         from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
-        confidence = 50.0  # Base confidence
+        scores = {}
+        weights = {
+            "rsi": 0.15,
+            "macd": 0.20,
+            "bollinger": 0.15,
+            "stochastic": 0.15,
+            "ema_alignment": 0.20,
+            "volume": 0.10,
+            "price_action": 0.05,
+        }
 
-        # RSI check
-        if "rsi" in df.columns:
-            rsi = safe_get_latest(df, "rsi", 50)
-            if not pd.isna(rsi):
-                if 30 <= rsi <= 60:  # Good range for entry
-                    confidence += 10
-                elif 60 < rsi <= 70:
-                    confidence += 5
+        # 1. RSI Score (0-100)
+        scores["rsi"] = self._score_rsi(df)
 
-        # Moving average alignment
-        if len(df) >= 50:
+        # 2. MACD Score (0-100)
+        scores["macd"] = self._score_macd(df)
+
+        # 3. Bollinger Bands Score (0-100)
+        scores["bollinger"] = self._score_bollinger_bands(df)
+
+        # 4. Stochastic Score (0-100)
+        scores["stochastic"] = self._score_stochastic(df)
+
+        # 5. EMA Alignment Score (0-100)
+        scores["ema_alignment"] = self._score_ema_alignment(df)
+
+        # 6. Volume Score (0-100)
+        scores["volume"] = self._score_volume(df)
+
+        # 7. Price Action Score (0-100)
+        scores["price_action"] = self._score_price_action(df)
+
+        # Calculate weighted average
+        total_score = 0.0
+        total_weight = 0.0
+
+        for factor, score in scores.items():
+            if score is not None:  # Only include available indicators
+                weight = weights.get(factor, 0.0)
+                total_score += score * weight
+                total_weight += weight
+
+        # Normalize to 0-100
+        if total_weight > 0:
+            confidence = (total_score / total_weight) * 100
+        else:
+            confidence = 50.0  # Neutral if no indicators available
+
+        return min(max(confidence, 0.0), 100.0)
+
+    def _score_rsi(self, df: pd.DataFrame) -> float:
+        """Score RSI indicator (0-100)"""
+        if "rsi" not in df.columns:
+            return None
+
+        rsi = safe_get_latest(df, "rsi", 50)
+        if pd.isna(rsi):
+            return None
+
+        # Scoring logic:
+        # RSI 30-40: 100 (oversold, strong buy)
+        # RSI 40-60: 80 (neutral, good)
+        # RSI 60-70: 50 (overbought warning)
+        # RSI >70: 20 (overbought, avoid)
+        # RSI <30: 60 (very oversold, risky but opportunity)
+        if rsi < 30:
+            return 0.60
+        elif 30 <= rsi <= 40:
+            return 1.00
+        elif 40 < rsi <= 60:
+            return 0.80
+        elif 60 < rsi <= 70:
+            return 0.50
+        else:  # RSI > 70
+            return 0.20
+
+    def _score_macd(self, df: pd.DataFrame) -> float:
+        """Score MACD indicator (0-100)"""
+        try:
+            if "macd" not in df.columns or "macd_signal" not in df.columns:
+                # Calculate MACD if not present
+                ema12 = df["close"].ewm(span=12).mean()
+                ema26 = df["close"].ewm(span=26).mean()
+                macd = ema12 - ema26
+                signal = macd.ewm(span=9).mean()
+            else:
+                macd = df["macd"]
+                signal = df["macd_signal"]
+
+            macd_latest = safe_get_latest(df, macd if isinstance(macd, str) else "macd", 0)
+            signal_latest = safe_get_latest(
+                df, signal if isinstance(signal, str) else "macd_signal", 0
+            )
+
+            if pd.isna(macd_latest) or pd.isna(signal_latest):
+                return None
+
+            # Scoring:
+            # MACD > Signal and both positive: 100 (strong bullish)
+            # MACD > Signal and MACD positive: 90 (bullish)
+            # MACD > Signal: 70 (turning bullish)
+            # MACD < Signal: 30 (bearish)
+            diff = macd_latest - signal_latest
+
+            if macd_latest > signal_latest:
+                if macd_latest > 0 and signal_latest > 0:
+                    return 1.00
+                elif macd_latest > 0:
+                    return 0.90
+                else:
+                    return 0.70
+            else:
+                return 0.30
+
+        except Exception as e:
+            logger.warning(f"Error scoring MACD: {e}")
+            return None
+
+    def _score_bollinger_bands(self, df: pd.DataFrame) -> float:
+        """Score Bollinger Bands indicator (0-100)"""
+        try:
+            if len(df) < 20:
+                return None
+
+            # Calculate Bollinger Bands if not present
+            sma20 = df["close"].rolling(window=20).mean()
+            std20 = df["close"].rolling(window=20).std()
+            upper_band = sma20 + (2 * std20)
+            lower_band = sma20 - (2 * std20)
+
+            current_price = safe_get_latest(df, "close", 0)
+            upper = upper_band.iloc[-1]
+            lower = lower_band.iloc[-1]
+            middle = sma20.iloc[-1]
+
+            if pd.isna(upper) or pd.isna(lower) or pd.isna(middle):
+                return None
+
+            # Calculate position in band (0 = lower, 0.5 = middle, 1 = upper)
+            band_width = upper - lower
+            if band_width <= 0:
+                return 0.50
+
+            position = (current_price - lower) / band_width
+
+            # Scoring:
+            # Near lower band (0-0.2): 100 (oversold)
+            # Lower quarter (0.2-0.4): 80 (good entry)
+            # Middle (0.4-0.6): 60 (neutral)
+            # Upper quarter (0.6-0.8): 40 (caution)
+            # Near upper band (0.8-1.0): 20 (overbought)
+            if position <= 0.2:
+                return 1.00
+            elif position <= 0.4:
+                return 0.80
+            elif position <= 0.6:
+                return 0.60
+            elif position <= 0.8:
+                return 0.40
+            else:
+                return 0.20
+
+        except Exception as e:
+            logger.warning(f"Error scoring Bollinger Bands: {e}")
+            return None
+
+    def _score_stochastic(self, df: pd.DataFrame) -> float:
+        """Score Stochastic indicator (0-100)"""
+        try:
+            if len(df) < 14:
+                return None
+
+            # Calculate Stochastic if not present
+            low_14 = df["low"].rolling(window=14).min()
+            high_14 = df["high"].rolling(window=14).max()
+            k_percent = 100 * ((df["close"] - low_14) / (high_14 - low_14))
+            d_percent = k_percent.rolling(window=3).mean()
+
+            k = k_percent.iloc[-1]
+            d = d_percent.iloc[-1]
+
+            if pd.isna(k) or pd.isna(d):
+                return None
+
+            # Scoring:
+            # K < 20 and K > D: 100 (oversold turning up)
+            # K < 30: 90 (oversold)
+            # K 30-70: 70 (neutral)
+            # K > 70 and K < D: 40 (overbought turning down)
+            # K > 80: 20 (overbought)
+            if k < 20 and k > d:
+                return 1.00
+            elif k < 30:
+                return 0.90
+            elif 30 <= k <= 70:
+                return 0.70
+            elif k > 70 and k < d:
+                return 0.40
+            else:  # k > 80
+                return 0.20
+
+        except Exception as e:
+            logger.warning(f"Error scoring Stochastic: {e}")
+            return None
+
+    def _score_ema_alignment(self, df: pd.DataFrame) -> float:
+        """Score EMA alignment (0-100)"""
+        try:
+            if len(df) < 50:
+                return None
+
             ema20 = df["close"].ewm(span=20).mean()
             ema50 = df["close"].ewm(span=50).mean()
             current_price = safe_get_latest(df, "close", 0)
             latest_ema20 = ema20.iloc[-1]
             latest_ema50 = ema50.iloc[-1]
 
-            if current_price > latest_ema20:
-                confidence += 10
-            if latest_ema20 > latest_ema50:
-                confidence += 10
+            if pd.isna(latest_ema20) or pd.isna(latest_ema50):
+                return None
 
-        # Volume confirmation
-        if len(df) >= 20:
+            # Scoring:
+            # Price > EMA20 > EMA50: 100 (strong uptrend)
+            # Price > EMA20: 70 (above short-term MA)
+            # EMA20 > EMA50: 60 (bullish alignment)
+            # Otherwise: 30 (weak/bearish)
+            score = 0.0
+
+            if current_price > latest_ema20:
+                score += 0.50
+            if latest_ema20 > latest_ema50:
+                score += 0.30
+            if current_price > latest_ema20 and latest_ema20 > latest_ema50:
+                score += 0.20  # Bonus for perfect alignment
+
+            return max(score, 0.30)  # Minimum 30% if no alignment
+
+        except Exception as e:
+            logger.warning(f"Error scoring EMA alignment: {e}")
+            return None
+
+    def _score_volume(self, df: pd.DataFrame) -> float:
+        """Score volume confirmation (0-100)"""
+        try:
+            if len(df) < 20:
+                return None
+
             current_volume = safe_get_latest(df, "volume", 0)
             avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
-            if avg_volume > 0 and current_volume > avg_volume * 1.2:
-                confidence += 10
 
-        return min(confidence, 100.0)
+            if avg_volume <= 0:
+                return None
+
+            volume_ratio = current_volume / avg_volume
+
+            # Scoring:
+            # Volume > 2x avg: 100 (very strong interest)
+            # Volume > 1.5x avg: 90 (strong interest)
+            # Volume > 1.2x avg: 80 (good interest)
+            # Volume 0.8-1.2x avg: 60 (normal)
+            # Volume < 0.8x avg: 40 (low interest)
+            if volume_ratio >= 2.0:
+                return 1.00
+            elif volume_ratio >= 1.5:
+                return 0.90
+            elif volume_ratio >= 1.2:
+                return 0.80
+            elif volume_ratio >= 0.8:
+                return 0.60
+            else:
+                return 0.40
+
+        except Exception as e:
+            logger.warning(f"Error scoring volume: {e}")
+            return None
+
+    def _score_price_action(self, df: pd.DataFrame) -> float:
+        """Score recent price action (0-100)"""
+        try:
+            if len(df) < 5:
+                return None
+
+            # Check last 3 candles for momentum
+            recent_closes = df["close"].tail(4).tolist()
+            if len(recent_closes) < 4:
+                return None
+
+            # Count up days
+            up_days = sum(
+                1 for i in range(1, len(recent_closes)) if recent_closes[i] > recent_closes[i - 1]
+            )
+
+            # Scoring:
+            # 3 up days: 100 (strong momentum)
+            # 2 up days: 70 (moderate momentum)
+            # 1 up day: 50 (weak momentum)
+            # 0 up days: 30 (no momentum)
+            if up_days == 3:
+                return 1.00
+            elif up_days == 2:
+                return 0.70
+            elif up_days == 1:
+                return 0.50
+            else:
+                return 0.30
+
+        except Exception as e:
+            logger.warning(f"Error scoring price action: {e}")
+            return None
 
     def _get_technical_signal(self, df: pd.DataFrame) -> str:
         """

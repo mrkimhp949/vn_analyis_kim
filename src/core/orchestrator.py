@@ -119,11 +119,22 @@ class TradingOrchestrator:
         self._ml_failures_by_symbol = {}  # {symbol: count}
 
         # ML CIRCUIT BREAKER: Auto-disable ML when failure rate too high
+        # IMPROVEMENT: Reduced threshold from 30% to 5% (production best practice)
         self._ml_enabled = True  # Can be disabled by circuit breaker
-        self._ml_circuit_breaker_threshold = 0.30  # Disable at 30% failure rate
-        self._ml_circuit_breaker_min_samples = 20  # Need 20 attempts before activating
-        self._ml_recovery_threshold = 0.10  # Re-enable at 10% failure rate
+        self._ml_circuit_breaker_threshold = 0.05  # Disable at 5% failure rate (was 30%)
+        self._ml_circuit_breaker_min_samples = 50  # Need 50 attempts for reliability (was 20)
+        self._ml_recovery_threshold = 0.02  # Re-enable at 2% failure rate (was 10%)
         self._ml_circuit_breaker_active = False
+
+        # IMPROVEMENT: Track common failure patterns for debugging
+        self._ml_failure_reasons = {
+            "data_quality": 0,  # Missing/invalid data
+            "vnindex_load_fail": 0,  # VNINDEX loading errors
+            "model_error": 0,  # Model prediction errors
+            "feature_error": 0,  # Feature calculation errors
+            "timeout": 0,  # Timeout errors
+            "unknown": 0,  # Other errors
+        }
 
         # IMPROVEMENT: Cache VNINDEX data to reduce repeated loads and failures
         self._cached_vnindex_df = None
@@ -840,31 +851,89 @@ class TradingOrchestrator:
                     "is_watchlist": False,
                 }
 
-            # Phân tích ML với enhanced error handling
+            # Phân tích ML với enhanced error handling and retries
             ml_signal = None
             if self._should_use_ml():
-                try:
-                    # IMPROVEMENT: Use cached VNINDEX to reduce load failures
-                    cached_vnindex = self._get_cached_vnindex()
-                    ml_signal = self.ml_generator.analyze(
-                        df, index_df=cached_vnindex, symbol=symbol
-                    )
-                    # Track successful ML analysis
-                    if ml_signal is not None:
-                        self._ml_success_count += 1
-                except Exception as e:
-                    # ENHANCEMENT: Detailed error logging with diagnostic info
+                # IMPROVEMENT: Retry logic with exponential backoff
+                max_retries = 2
+                retry_delay = 0.5  # seconds
+
+                for attempt in range(max_retries + 1):
+                    try:
+                        # IMPROVEMENT: Use cached VNINDEX to reduce load failures
+                        cached_vnindex = self._get_cached_vnindex()
+
+                        # IMPROVEMENT: Pre-validate data before ML analysis
+                        if df is None or len(df) < 50:
+                            raise ValueError(
+                                f"Insufficient data: {len(df) if df is not None else 0} rows"
+                            )
+
+                        if "close" not in df.columns or "volume" not in df.columns:
+                            raise ValueError(f"Missing required columns: {list(df.columns)}")
+
+                        # IMPROVEMENT: Add timeout to prevent hanging
+                        import asyncio
+
+                        ml_signal = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                self.ml_generator.analyze,
+                                df,
+                                index_df=cached_vnindex,
+                                symbol=symbol,
+                            ),
+                            timeout=10.0,  # 10 second timeout
+                        )
+
+                        # Track successful ML analysis
+                        if ml_signal is not None:
+                            self._ml_success_count += 1
+                            if attempt > 0:
+                                logging.info(
+                                    f"✅ ML analysis succeeded on retry {attempt} for {symbol}"
+                                )
+                            break  # Success - exit retry loop
+
+                    except asyncio.TimeoutError:
+                        error_type = "timeout"
+                        error_msg = "ML analysis timed out after 10s"
+                        if attempt < max_retries:
+                            logging.warning(
+                                f"⏰ ML timeout for {symbol}, retrying ({attempt+1}/{max_retries})..."
+                            )
+                            await asyncio.sleep(retry_delay * (2**attempt))
+                            continue
+                    except ValueError as e:
+                        error_type = "data_quality"
+                        error_msg = str(e)
+                        # Data quality errors shouldn't retry
+                        break
+                    except Exception as e:
+                        error_type = type(e).__name__
+                        error_msg = str(e)
+                        if attempt < max_retries and "VNINDEX" not in str(e):
+                            logging.warning(
+                                f"⚠️ ML error for {symbol}, retrying ({attempt+1}/{max_retries}): {e}"
+                            )
+                            await asyncio.sleep(retry_delay * (2**attempt))
+                            continue
+
+                # If we get here without ml_signal, track failure
+                if ml_signal is None:
                     import traceback
 
                     error_details = {
                         "symbol": symbol,
-                        "error_type": type(e).__name__,
-                        "error_msg": str(e),
+                        "error_type": error_type,
+                        "error_msg": error_msg,
                         "df_shape": df.shape if df is not None else None,
                         "df_columns": list(df.columns) if df is not None else None,
+                        "retries": attempt,
                     }
+
                     logging.error(
-                        f"❌ ML analysis failed for {symbol}: {type(e).__name__}: {str(e)}\n"
+                        f"❌ ML analysis failed for {symbol} after {attempt} retries: "
+                        f"{error_type}: {error_msg}\n"
                         f"   Details: df_shape={error_details['df_shape']}, "
                         f"df_columns={len(error_details['df_columns']) if error_details['df_columns'] else 0}"
                     )
@@ -877,6 +946,22 @@ class TradingOrchestrator:
                     await self._check_ml_circuit_breaker()
 
                     # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
+
+            # CIRCUIT BREAKER COORDINATION: If ML CB active, apply strict mode
+            # High ML failure rate indicates abnormal market conditions
+            ml_cb_strict_mode = False
+            if self._ml_circuit_breaker_active:
+                logging.warning(
+                    f"⚠️ [{symbol}] ML circuit breaker active - "
+                    "applying strict risk controls (reduced size, higher threshold)"
+                )
+                ml_cb_strict_mode = True
+
+                # Option 1: Block all technical-only entries (strictest)
+                # Uncomment to enable:
+                # if ml_signal is None:
+                #     logging.warning(f"🚫 [{symbol}] ML CB active - blocking technical-only entry")
+                #     return {"symbol": symbol, "warnings": ["ML circuit breaker active"], "is_watchlist": False}
 
             # 1. Entry Logic with validation
             if not self.entry_logic:
@@ -898,6 +983,24 @@ class TradingOrchestrator:
             if not entry_signal or not entry_signal.should_enter:
                 warnings = getattr(entry_signal, "warnings", ["Không rõ lý do"])
                 return {"symbol": symbol, "warnings": warnings, "is_watchlist": False}
+
+            # CIRCUIT BREAKER COORDINATION: Apply stricter confidence threshold
+            if ml_cb_strict_mode:
+                # Increase minimum confidence requirement by 15 points
+                strict_confidence_threshold = 70  # Normally 45-55
+                if entry_signal.confidence < strict_confidence_threshold:
+                    logging.warning(
+                        f"⚠️ [{symbol}] ML CB strict mode: Confidence {entry_signal.confidence}% "
+                        f"< threshold {strict_confidence_threshold}% - blocking entry"
+                    )
+                    return {
+                        "symbol": symbol,
+                        "warnings": [
+                            f"ML circuit breaker active - need confidence ≥{strict_confidence_threshold}% "
+                            f"(got {entry_signal.confidence}%)"
+                        ],
+                        "is_watchlist": False,
+                    }
 
             # Track signal generation (ML vs Technical)
             is_ml_signal = getattr(entry_signal, "telemetry", {}).get("signal_source") == "ml"
@@ -940,6 +1043,15 @@ class TradingOrchestrator:
                     else entry_signal.entry_price * 1.1  # Default 10% gain
                 )
 
+                # CIRCUIT BREAKER COORDINATION: Reduce position size if ML CB active
+                # Apply 50% size reduction in strict mode
+                size_multiplier = 0.5 if ml_cb_strict_mode else 1.0
+
+                if ml_cb_strict_mode:
+                    logging.warning(
+                        f"⚠️ [{symbol}] ML CB strict mode: Reducing position size by 50%"
+                    )
+
                 # Calculate position size using EnhancedPositionSizer
                 position_size_info = self.position_sizer.calculate_position_size(
                     symbol=symbol,
@@ -951,6 +1063,23 @@ class TradingOrchestrator:
                     market_regime=market_regime,
                     # Optional: portfolio_risk, win_rate, avg_win_loss_ratio
                 )
+
+                # CIRCUIT BREAKER COORDINATION: Apply size multiplier
+                if ml_cb_strict_mode and position_size_info:
+                    original_shares = position_size_info.shares
+                    original_value = position_size_info.value
+
+                    # Reduce shares and value by 50%
+                    position_size_info.shares = max(
+                        1, int(position_size_info.shares * size_multiplier)
+                    )
+                    position_size_info.value = position_size_info.shares * entry_signal.entry_price
+
+                    logging.info(
+                        f"📊 [{symbol}] ML CB strict mode: Position size reduced from "
+                        f"{original_shares} → {position_size_info.shares} shares "
+                        f"({original_value:,.0f} → {position_size_info.value:,.0f} VNĐ)"
+                    )
 
                 # 4. Paper Trade & Notification
                 # If symbol already has position, skip buying but still send notification
@@ -1019,10 +1148,15 @@ class TradingOrchestrator:
                         # Success - context manager will auto-confirm
                         logging.info(f"✅ Paper trade successful: {message}")
 
-                        # Gửi thông báo Telegram
-                        await self.send_buy_signal_notification(
-                            symbol, entry_signal, position_size_info, news_sentiment
-                        )
+                        # Gửi thông báo Telegram (non-blocking, failure won't affect trade)
+                        try:
+                            await self.send_buy_signal_notification(
+                                symbol, entry_signal, position_size_info, news_sentiment
+                            )
+                        except Exception as e:
+                            logging.error(f"⚠️ Failed to send buy notification for {symbol}: {e}")
+                            # Continue - trade is still successful even if notification fails
+
                         return {"signal": True}
 
             # 5. Watchlist Logic
@@ -1134,7 +1268,7 @@ class TradingOrchestrator:
 
     def _track_ml_failure(self, symbol: str, error_details: dict):
         """
-        Track ML analysis failures for monitoring and debugging
+        ENHANCED: Track ML analysis failures with categorization
 
         Args:
             symbol: Stock symbol that failed
@@ -1148,6 +1282,25 @@ class TradingOrchestrator:
 
         # Track by symbol
         self._ml_failures_by_symbol[symbol] = self._ml_failures_by_symbol.get(symbol, 0) + 1
+
+        # IMPROVEMENT: Categorize failure reasons for root cause analysis
+        error_msg = error_details.get("error_msg", "").lower()
+        if "timeout" in error_type.lower() or "timeout" in error_msg:
+            self._ml_failure_reasons["timeout"] += 1
+        elif (
+            "data_quality" in error_type.lower()
+            or "insufficient" in error_msg
+            or "missing" in error_msg
+        ):
+            self._ml_failure_reasons["data_quality"] += 1
+        elif "vnindex" in error_msg:
+            self._ml_failure_reasons["vnindex_load_fail"] += 1
+        elif "model" in error_msg or "prediction" in error_msg:
+            self._ml_failure_reasons["model_error"] += 1
+        elif "feature" in error_msg:
+            self._ml_failure_reasons["feature_error"] += 1
+        else:
+            self._ml_failure_reasons["unknown"] += 1
 
         # Log summary periodically (every 10 failures)
         if self._ml_failure_count % 10 == 0:

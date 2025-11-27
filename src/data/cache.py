@@ -26,9 +26,16 @@ class SmartCache:
     - Cache statistics
     """
 
-    def __init__(self):
+    def __init__(self, auto_cleanup: bool = True, cleanup_interval: int = 86400):
         self.memory_cache = {}
         self.cache_stats = {"hits": 0, "misses": 0, "saves": 0}
+        self.auto_cleanup = auto_cleanup
+        self.cleanup_interval = cleanup_interval  # Default: 24 hours
+        self.last_cleanup = time.time()
+
+        # Run initial cleanup if auto_cleanup enabled
+        if self.auto_cleanup:
+            self._maybe_cleanup()
 
     def get(self, key: str, ttl: int = 3600) -> Optional[Any]:
         """
@@ -41,6 +48,9 @@ class SmartCache:
         Returns:
             Cached value or None if expired/not found
         """
+        # Maybe run automatic cleanup
+        self._maybe_cleanup()
+
         # Check memory cache first
         if key in self.memory_cache:
             value, timestamp = self.memory_cache[key]
@@ -200,6 +210,18 @@ class SmartCache:
         """Get cache file path for key"""
         key_hash = hashlib.md5(key.encode()).hexdigest()
         return os.path.join(CACHE_DIR, f"{key_hash}.cache")
+
+    def _maybe_cleanup(self):
+        """Run cleanup if enough time has passed since last cleanup"""
+        if not self.auto_cleanup:
+            return
+
+        current_time = time.time()
+        if current_time - self.last_cleanup >= self.cleanup_interval:
+            logger.info("🧹 Running automatic cache cleanup...")
+            self.cleanup_expired(ttl=self.cleanup_interval)
+            self.last_cleanup = current_time
+            logger.info("✅ Cache cleanup completed")
 
 
 # Singleton instance

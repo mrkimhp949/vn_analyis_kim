@@ -14,14 +14,19 @@ from unittest.mock import Mock, patch
 class TestCircuitBreakerImprovements:
     """Test circuit breaker gradual response and configurable thresholds"""
 
-    def test_gradual_response_levels(self):
+    def test_gradual_response_levels(self, tmp_path):
         """Test warning -> caution -> trip progression"""
         from src.risk.circuit_breaker import CircuitBreaker
 
+        # Use temp stats file to avoid interference from existing state
+        temp_stats = tmp_path / "test_cb_stats.json"
         breaker = CircuitBreaker(
             vnindex_drop_threshold=-2.5,
             use_conservative_threshold=False,
+            stats_file=str(temp_stats),
         )
+        # Ensure clean state
+        breaker.reset()
 
         # Level 1: Warning at -1.5%
         result = breaker.check_and_update(
@@ -119,22 +124,22 @@ class TestEntryLogicImprovements:
     """Test simplified entry logic with soft filters"""
 
     def test_reduced_min_confidence(self):
-        """Test that min_confidence is lowered to 55%"""
+        """Test that min_confidence is lowered to 45% (v2.1 further relaxed)"""
         from src.strategies.entry_logic import ImprovedEntryLogic
 
         logic = ImprovedEntryLogic()
 
-        assert logic.min_confidence == 55, f"Expected 55, got {logic.min_confidence}"
-        assert logic.min_risk_reward == 1.8, f"Expected 1.8, got {logic.min_risk_reward}"
+        assert logic.min_confidence == 45, f"Expected 45, got {logic.min_confidence}"
+        assert logic.min_risk_reward == 1.5, f"Expected 1.5, got {logic.min_risk_reward}"
 
     def test_soft_filter_mode_enabled(self):
-        """Test that soft filter mode is enabled by default"""
+        """Test that soft filter mode is enabled by default (v2.1 further relaxed)"""
         from src.strategies.entry_logic import ImprovedEntryLogic
 
         logic = ImprovedEntryLogic()
 
         assert logic.soft_filter_mode is True
-        assert logic.max_warnings_allowed == 3
+        assert logic.max_warnings_allowed == 5  # Further relaxed from 3
         assert logic.require_volume_confirmation is False  # Now soft filter
 
 
