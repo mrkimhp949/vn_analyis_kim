@@ -38,11 +38,23 @@ EARLY_STOPPING_ROUNDS = 20  # ML early stopping rounds
 CORRELATION_LOOKBACK_DAYS = 60  # Correlation calculation lookback
 
 # Commission and Slippage (Vietnam Market)
-# Vietnam total transaction costs: brokerage (0.15%) + tax (0.10%) + fees (0.10%) = ~0.35%
-DEFAULT_COMMISSION_RATE = 0.0035  # 0.35% total transaction cost (commission + tax + fees)
-DEFAULT_SLIPPAGE = 0.001  # 0.1% average slippage
-TOTAL_TRANSACTION_COST = DEFAULT_COMMISSION_RATE + DEFAULT_SLIPPAGE  # 0.45% total per trade
-ROUND_TRIP_COST = TOTAL_TRANSACTION_COST * 2  # 0.9% round trip (buy + sell)
+# UPDATED: More realistic transaction costs for Vietnam market
+# Components:
+#   - Brokerage fee: 0.15-0.30% (depending on broker)
+#   - Stock transaction tax: 0.10% (sell only)
+#   - Exchange fees: 0.03%
+#   - Transfer fees: 0.02%
+#   - Slippage: 0.20-0.30% (market orders, especially large orders)
+# Total realistic per-trade cost: 0.50-0.65%
+DEFAULT_COMMISSION_RATE = 0.0055  # 0.55% total transaction cost (commission + tax + fees)
+DEFAULT_SLIPPAGE = 0.0025  # 0.25% realistic slippage for market orders
+TOTAL_TRANSACTION_COST = DEFAULT_COMMISSION_RATE + DEFAULT_SLIPPAGE  # 0.80% total per trade
+ROUND_TRIP_COST = TOTAL_TRANSACTION_COST * 2  # 1.6% round trip (buy + sell) - conservative estimate
+
+# Alternative costs for different scenarios
+OPTIMISTIC_ROUND_TRIP_COST = 0.012  # 1.2% with best execution and limit orders
+REALISTIC_ROUND_TRIP_COST = 0.016   # 1.6% with market orders (default)
+PESSIMISTIC_ROUND_TRIP_COST = 0.020  # 2.0% with poor execution and high slippage
 
 # Vietnam Market Specific Constants
 VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling)
@@ -127,6 +139,9 @@ __all__ = [
     "DEFAULT_SLIPPAGE",
     "TOTAL_TRANSACTION_COST",
     "ROUND_TRIP_COST",
+    "OPTIMISTIC_ROUND_TRIP_COST",
+    "REALISTIC_ROUND_TRIP_COST",
+    "PESSIMISTIC_ROUND_TRIP_COST",
     # Vietnam Market
     "VIETNAM_PRICE_LIMIT_PERCENT",
     "VIETNAM_LOT_SIZE",
