@@ -769,14 +769,35 @@ class ImprovedEntryLogic:
         self, df: pd.DataFrame, entry_price: float, sr_check: Dict
     ) -> tuple[bool, str, float, float, list, float]:
         """
-        Calculate entry price, stop loss, take profit targets, and risk/reward
+        Calculate stop loss, take profit targets, and risk/reward ratio
 
-        ENHANCEMENT: Includes transaction costs (0.45% per trade) and round-trip costs (0.9%)
-        for realistic risk/reward calculations in Vietnam market
+        CRITICAL IMPROVEMENT (2025-12-01):
+        Fixed transaction cost calculation to use actual exit prices instead of entry price.
+        Now properly accounts for:
+        - Entry costs: commission + slippage on entry_price
+        - Exit costs: commission + slippage on take_profit price (FIXED)
+        - Stop loss costs: commission + slippage if stopped out
+
+        Risk calculation:
+            Risk = (Entry - StopLoss) + Entry_Costs + StopLoss_Exit_Costs
+
+        Reward calculation:
+            Reward = (TakeProfit - Entry) - Entry_Costs - Exit_Costs
+
+        This provides realistic R:R accounting for all transaction costs in Vietnam market.
+
+        Args:
+            df: DataFrame with price data and indicators
+            entry_price: Proposed entry price
+            sr_check: Support/resistance levels
 
         Returns:
-            (success, error_msg, stop_loss, reward, take_profit_targets,
-             risk_reward)
+            (success, error_msg, stop_loss, reward, take_profit_targets, risk_reward)
+            - success: True if calculation valid
+            - stop_loss: Stop loss price
+            - reward: Net reward after all costs
+            - take_profit_targets: List of TP prices [TP1, TP2, TP3]
+            - risk_reward: Final R:R ratio
         """
         from src.config.constants import TOTAL_TRANSACTION_COST, ROUND_TRIP_COST, DEFAULT_SLIPPAGE
 
@@ -840,21 +861,7 @@ class ImprovedEntryLogic:
         # CRITICAL FIX: Account for Vietnam market transaction costs (0.9% round trip)
         # Real risk includes entry cost, real reward excludes exit cost
 
-        # Entry cost = entry slippage + commission
-        entry_cost = entry_price * TOTAL_TRANSACTION_COST
-        # Exit cost = exit slippage + commission
-        exit_cost = entry_price * TOTAL_TRANSACTION_COST  # Use entry_price as approximation
-
-        # Adjusted risk: includes entry cost and potential stop loss cost
-        risk = (entry_price - stop_loss) + entry_cost + (stop_loss * DEFAULT_SLIPPAGE)
-
-        if risk <= 0:
-            error_msg = (
-                f"Risk calculation error: risk={risk:.0f} "
-                f"(entry={entry_price:.0f}, sl={stop_loss:.0f}, costs={entry_cost:.0f})"
-            )
-            return (False, error_msg, 0, 0, [], 0)
-
+        # Validate take profit targets before calculation
         if len(take_profit_targets) < 2:
             return (
                 False,
@@ -865,14 +872,44 @@ class ImprovedEntryLogic:
                 0,
             )
 
-        # Adjusted reward: subtract exit costs
-        reward_before_costs = take_profit_targets[1] - entry_price  # Use TP2
-        reward = reward_before_costs - exit_cost
+        # Use TP2 (second target) for R:R calculation
+        take_profit = take_profit_targets[1]
+
+        # Entry cost = commission + slippage on entry
+        entry_cost_pct = TOTAL_TRANSACTION_COST + DEFAULT_SLIPPAGE
+        entry_cost = entry_price * entry_cost_pct
+
+        # Exit cost = commission + slippage on exit (FIXED: use take_profit price, not entry_price)
+        exit_cost_pct = TOTAL_TRANSACTION_COST + DEFAULT_SLIPPAGE
+        exit_cost = take_profit * exit_cost_pct
+
+        # Stop loss exit cost (if stopped out)
+        stop_loss_exit_cost = stop_loss * (TOTAL_TRANSACTION_COST + DEFAULT_SLIPPAGE)
+
+        # Adjusted risk: price risk + entry costs + exit costs if stopped
+        # Risk = (Entry - StopLoss) + Entry costs + Stop loss exit costs
+        price_risk = entry_price - stop_loss
+        risk = price_risk + entry_cost + stop_loss_exit_cost
+
+        if risk <= 0:
+            error_msg = (
+                f"Risk calculation error: risk={risk:.0f} "
+                f"(price_risk={price_risk:.0f}, entry_cost={entry_cost:.0f}, "
+                f"sl_exit_cost={stop_loss_exit_cost:.0f})"
+            )
+            return (False, error_msg, 0, 0, [], 0)
+
+        # Adjusted reward: profit minus all exit costs
+        # Reward = (TakeProfit - Entry) - Entry costs - Exit costs
+        reward_before_costs = take_profit - entry_price
+        reward = reward_before_costs - entry_cost - exit_cost
 
         if reward <= 0:
             return (
                 False,
-                f"Reward không hợp lệ sau khi trừ phí: {reward:.0f} (before costs: {reward_before_costs:.0f})",
+                f"Reward không hợp lệ sau khi trừ phí: {reward:.0f} "
+                f"(before costs: {reward_before_costs:.0f}, "
+                f"entry_cost: {entry_cost:.0f}, exit_cost: {exit_cost:.0f})",
                 0,
                 0,
                 [],
@@ -882,18 +919,21 @@ class ImprovedEntryLogic:
         # Calculate realistic R:R with transaction costs
         risk_reward = reward / risk
 
-        # IMPROVED: Enforce minimum R:R ratio accounting for Vietnam transaction costs (0.9% round trip)
-        # With 0.9% costs, need higher R:R for positive expectancy
+        # IMPROVED: Enforce minimum R:R ratio accounting for Vietnam transaction costs
+        # With realistic cost modeling (entry + exit costs), need positive expectancy
         if risk_reward < self.min_risk_reward:
             error_msg = (
                 f"R:R ratio thấp: {risk_reward:.2f} < {self.min_risk_reward:.2f} "
-                f"(after 0.9% transaction costs - need asymmetric upside for positive expectancy)"
+                f"(after full transaction costs - entry: {entry_cost:.0f}, exit: {exit_cost:.0f})"
             )
             return (False, error_msg, 0, 0, [], 0)
 
         logger.debug(
-            f"✅ R:R calculation: risk={risk:.0f} (incl. {entry_cost:.0f} entry cost), "
-            f"reward={reward:.0f} (after {exit_cost:.0f} exit cost), R:R={risk_reward:.2f}"
+            f"✅ R:R calculation (IMPROVED): "
+            f"price_risk={price_risk:.0f}, "
+            f"total_risk={risk:.0f} (incl. entry_cost={entry_cost:.0f}, sl_exit={stop_loss_exit_cost:.0f}), "
+            f"reward={reward:.0f} (TP={take_profit:.0f}, after entry+exit costs={entry_cost + exit_cost:.0f}), "
+            f"R:R={risk_reward:.2f}"
         )
 
         return (True, "", stop_loss, reward, take_profit_targets, risk_reward)
