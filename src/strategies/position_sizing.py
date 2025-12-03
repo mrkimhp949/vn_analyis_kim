@@ -1,22 +1,127 @@
 """
 Enhanced Position Sizing với Kelly Criterion và Portfolio Risk
-Cải thiện từ improved_position_sizing.py
+Version 4.0 - Refactored for production quality
+
+Features:
+- Kelly Criterion (half-Kelly for safety)
+- Portfolio-level risk limits
+- Correlation-based adjustments with LRU cache
+- Sector exposure limits
+- Market regime awareness
+- Circuit breaker integration
+- Vietnam market compliance (lot size 100)
 """
 
+from __future__ import annotations
+
 import logging
-from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+import threading
+import time
+from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import TYPE_CHECKING, Dict, List, Optional, Protocol, Tuple
 
 import pandas as pd
+
+from src.config.constants import (
+    CORRELATION_LOOKBACK_DAYS,
+    DEFAULT_MAX_POSITION_SIZE,
+    DEFAULT_MAX_SECTOR_EXPOSURE,
+    DEFAULT_MAX_TOTAL_EXPOSURE,
+    DEFAULT_MIN_POSITION_SIZE,
+    DEFAULT_RISK_PER_TRADE,
+    DEFAULT_TOTAL_CAPITAL,
+    MAX_CORRELATION,
+    VIETNAM_LOT_SIZE,
+)
 from src.config.exceptions import RiskManagementError
+
+if TYPE_CHECKING:
+    from src.risk.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# CONSTANTS - Position Sizing Specific
+# =============================================================================
+
+
+class PositionSizingConstants:
+    """Centralized constants for position sizing calculations."""
+
+    # Risk thresholds
+    MIN_RISK_PERCENT: float = 0.01  # 1% minimum risk per share
+    DEFAULT_RISK_PERCENT: float = 0.02  # 2% default risk if stop too tight
+
+    # Kelly Criterion
+    MAX_KELLY_PERCENT: float = 0.25  # Max 25% of capital via Kelly
+    DEFAULT_KELLY_FRACTION: float = 0.5  # Half-Kelly for safety
+    MIN_KELLY_FALLBACK: float = 0.01  # 1% fallback for negative Kelly
+
+    # Correlation
+    HIGH_CORRELATION_THRESHOLD: float = 0.70
+    MEDIUM_CORRELATION_THRESHOLD: float = 0.50
+    HIGH_CORRELATION_ADJUSTMENT: float = 0.50  # Reduce 50%
+    MEDIUM_CORRELATION_ADJUSTMENT: float = 0.75  # Reduce 25%
+
+    # Sector limits
+    SECTOR_HIGH_COUNT: int = 3  # 3+ positions = high concentration
+    SECTOR_MEDIUM_COUNT: int = 2  # 2 positions = medium concentration
+    SECTOR_HIGH_ADJUSTMENT: float = 0.70  # Reduce 30%
+    SECTOR_MEDIUM_ADJUSTMENT: float = 0.85  # Reduce 15%
+
+    # DCA levels
+    DCA_LEVEL_1_PERCENT: float = 0.50  # 50% at first level
+    DCA_LEVEL_2_PERCENT: float = 0.30  # 30% at second level
+    DCA_LEVEL_3_PERCENT: float = 0.20  # 20% at third level
+    DCA_LEVEL_1_DISCOUNT: float = 0.99  # 1% below entry
+    DCA_LEVEL_2_DISCOUNT: float = 0.98  # 2% below entry
+    DCA_LEVEL_3_DISCOUNT: float = 0.97  # 3% below entry
+
+    # Cache settings
+    CORRELATION_CACHE_TTL: int = 3600  # 1 hour
+    CORRELATION_CACHE_MAXSIZE: int = 500
+
+    # Risk multiplier bounds
+    MIN_RISK_MULTIPLIER: float = 0.5
+    MAX_RISK_MULTIPLIER: float = 1.2
+
+    # Circuit breaker
+    CAUTION_MODE_MULTIPLIER: float = 0.5  # Reduce 50% in caution mode
+
+
+# =============================================================================
+# PROTOCOLS - Dependency Injection Interfaces
+# =============================================================================
+
+
+class DataLoaderProtocol(Protocol):
+    """Protocol for data loading dependency."""
+
+    def __call__(self, symbol: str, lookback: int = 60) -> Optional[pd.DataFrame]: ...
+
+
+class RegimeDetectorProtocol(Protocol):
+    """Protocol for market regime detection."""
+
+    def __call__(self, df: pd.DataFrame) -> object: ...
+
+
+class CircuitBreakerProtocol(Protocol):
+    """Protocol for circuit breaker."""
+
+    def is_caution_mode(self) -> bool: ...
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+
 @dataclass
 class EnhancedPositionSize:
-    """Container cho kết quả position sizing với Kelly"""
+    """Container cho kết quả position sizing với Kelly."""
 
     shares: int
     value: float
@@ -24,10 +129,120 @@ class EnhancedPositionSize:
     risk_percent: float
     max_loss: float
     position_percent: float
-    kelly_percent: float  # Kelly percentage
-    recommended_entries: List[Dict]
-    warnings: List[str]
-    adjustments: Dict[str, float]  # Track all adjustments
+    kelly_percent: float
+    recommended_entries: List[Dict] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    adjustments: Dict[str, float] = field(default_factory=dict)
+
+    def is_valid(self) -> bool:
+        """Check if position is valid for trading."""
+        return self.shares > 0 and self.shares >= VIETNAM_LOT_SIZE
+
+
+@dataclass
+class MarketRegimeInfo:
+    """Structured market regime information."""
+
+    regime: str = "SIDEWAYS"
+    confidence: float = 50.0
+    tradeable: bool = True
+    description: str = ""
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict]) -> "MarketRegimeInfo":
+        """Create from dictionary."""
+        if not data:
+            return cls()
+        return cls(
+            regime=data.get("regime", "SIDEWAYS"),
+            confidence=data.get("confidence", 50.0),
+            tradeable=data.get("tradeable", True),
+            description=data.get("description", ""),
+        )
+
+
+# =============================================================================
+# CORRELATION CACHE - Thread-safe LRU Cache
+# =============================================================================
+
+
+class CorrelationCache:
+    """Thread-safe LRU cache for correlation values."""
+
+    def __init__(
+        self,
+        ttl: int = PositionSizingConstants.CORRELATION_CACHE_TTL,
+        maxsize: int = PositionSizingConstants.CORRELATION_CACHE_MAXSIZE,
+    ):
+        self._cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
+        self._lock = threading.RLock()
+        self._ttl = ttl
+        self._maxsize = maxsize
+        self._hits = 0
+        self._misses = 0
+
+    def _make_key(self, symbol1: str, symbol2: str) -> Tuple[str, str]:
+        """Create order-independent cache key."""
+        return tuple(sorted([symbol1, symbol2]))
+
+    def get(self, symbol1: str, symbol2: str) -> Optional[float]:
+        """Get cached correlation if valid."""
+        key = self._make_key(symbol1, symbol2)
+
+        with self._lock:
+            if key in self._cache:
+                corr, timestamp = self._cache[key]
+                if time.time() - timestamp < self._ttl:
+                    self._hits += 1
+                    return corr
+                # Expired - remove
+                del self._cache[key]
+
+            self._misses += 1
+            return None
+
+    def set(self, symbol1: str, symbol2: str, correlation: float) -> None:
+        """Store correlation in cache."""
+        key = self._make_key(symbol1, symbol2)
+
+        with self._lock:
+            self._cache[key] = (correlation, time.time())
+            self._prune_if_needed()
+
+    def _prune_if_needed(self) -> None:
+        """Prune cache if over maxsize (must hold lock)."""
+        if len(self._cache) <= self._maxsize:
+            return
+
+        current_time = time.time()
+
+        # Remove expired first
+        expired = [k for k, (_, ts) in self._cache.items() if current_time - ts > self._ttl]
+        for k in expired:
+            del self._cache[k]
+
+        # If still over, remove oldest
+        while len(self._cache) > self._maxsize:
+            oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][1])
+            del self._cache[oldest_key]
+
+    @property
+    def hit_rate(self) -> float:
+        """Calculate cache hit rate."""
+        total = self._hits + self._misses
+        return self._hits / total if total > 0 else 0.0
+
+    def clear(self) -> None:
+        """Clear all cached values."""
+        with self._lock:
+            self._cache.clear()
+            self._hits = 0
+            self._misses = 0
+
+
+# =============================================================================
+# MAIN CLASS - EnhancedPositionSizer
+# =============================================================================
 
 
 class EnhancedPositionSizer:
@@ -38,25 +253,29 @@ class EnhancedPositionSizer:
     3. Correlation-based adjustments
     4. Sector exposure limits
     5. Win rate based sizing
+    6. Market regime awareness
+    7. Circuit breaker integration
     """
 
     def __init__(
         self,
-        total_capital: float = 100_000_000,
-        max_risk_per_trade: float = 0.015,  # TIGHTENED: 1.5% max risk (was 2%)
-        max_position_size: float = 0.12,  # TIGHTENED: 12% max position (was 10%)
-        min_position_size: float = 0.03,  # TIGHTENED: 3% min position (was 5%)
-        max_total_exposure: float = 0.60,  # 60% max exposure (leaves 40% cash)
-        max_portfolio_risk: float = 0.15,  # TIGHTENED: 15% max portfolio risk (was 20%)
-        max_sector_exposure: float = 0.30,  # TIGHTENED: 30% max per sector (was 40%)
+        total_capital: float = DEFAULT_TOTAL_CAPITAL,
+        max_risk_per_trade: float = DEFAULT_RISK_PER_TRADE,
+        max_position_size: float = DEFAULT_MAX_POSITION_SIZE,
+        min_position_size: float = DEFAULT_MIN_POSITION_SIZE,
+        max_total_exposure: float = DEFAULT_MAX_TOTAL_EXPOSURE,
+        max_portfolio_risk: float = 0.15,
+        max_sector_exposure: float = DEFAULT_MAX_SECTOR_EXPOSURE,
         use_kelly: bool = True,
-        kelly_fraction: float = 0.5,  # Half-Kelly for safety
-        correlation_cache_ttl: int = 3600,  # Cache correlations for 1 hour
-        correlation_cache_maxsize: int = 500,  # Configurable cache size
-        # NEW v3.0: Additional parameters
-        max_correlation_threshold: float = 0.70,  # NEW: Max correlation with portfolio
-        volatility_adjustment: bool = True,  # NEW: Adjust size by volatility
+        kelly_fraction: float = PositionSizingConstants.DEFAULT_KELLY_FRACTION,
+        max_correlation_threshold: float = MAX_CORRELATION,
+        volatility_adjustment: bool = True,
+        # Dependency injection
+        data_loader: Optional[DataLoaderProtocol] = None,
+        regime_detector: Optional[RegimeDetectorProtocol] = None,
+        circuit_breaker: Optional[CircuitBreakerProtocol] = None,
     ):
+        # Configuration
         self.total_capital = total_capital
         self.max_risk_per_trade = max_risk_per_trade
         self.max_position_size = max_position_size
@@ -66,28 +285,78 @@ class EnhancedPositionSizer:
         self.max_sector_exposure = max_sector_exposure
         self.use_kelly = use_kelly
         self.kelly_fraction = kelly_fraction
-        self.correlation_cache_ttl = correlation_cache_ttl
-        self.correlation_cache_maxsize = correlation_cache_maxsize
-
-        # NEW v3.0: Additional parameters
         self.max_correlation_threshold = max_correlation_threshold
         self.volatility_adjustment = volatility_adjustment
 
-        # Tracking
-        self.current_positions = {}  # {symbol: position_data}
-        self.trade_history = []  # Track trades for win rate calculation
-        self.sector_exposure = {}  # Track sector exposure
+        # Dependencies (lazy-loaded if not provided)
+        self._data_loader = data_loader
+        self._regime_detector = regime_detector
+        self._circuit_breaker = circuit_breaker
 
-        # NEW v3.0: Performance tracking for Kelly
-        self._win_rate = 0.5  # Default 50%
-        self._avg_win = 0.08  # Default 8% avg win
-        self._avg_loss = 0.05  # Default 5% avg loss
+        # State tracking
+        self.current_positions: Dict[str, Dict] = {}
+        self.trade_history: List[Dict] = []
+        self.sector_exposure: Dict[str, float] = {}
 
-        # ENHANCEMENT: LRU cache for correlation performance
-        # OrderedDict maintains insertion order and allows efficient move_to_end()
-        self._correlation_cache = OrderedDict()  # {(symbol1, symbol2): (correlation, timestamp)}
-        self._cache_hits = 0
-        self._cache_misses = 0
+        # Cache
+        self._correlation_cache = CorrelationCache()
+
+    # =========================================================================
+    # DEPENDENCY GETTERS (Lazy Loading)
+    # =========================================================================
+
+    def _get_data_loader(self) -> DataLoaderProtocol:
+        """Get data loader, lazy-loading if needed."""
+        if self._data_loader is None:
+            from src.data.loader import load_data
+
+            self._data_loader = load_data
+        return self._data_loader
+
+    def _get_circuit_breaker(self) -> Optional[CircuitBreakerProtocol]:
+        """Get circuit breaker, lazy-loading if needed."""
+        if self._circuit_breaker is None:
+            try:
+                from src.risk.circuit_breaker import get_circuit_breaker
+
+                self._circuit_breaker = get_circuit_breaker()
+            except (ImportError, Exception) as e:
+                logger.debug(f"Circuit breaker not available: {e}")
+                return None
+        return self._circuit_breaker
+
+    def _detect_market_regime(self) -> Optional[MarketRegimeInfo]:
+        """Auto-detect market regime from VNINDEX."""
+        try:
+            from src.data.vnindex_cache import get_cached_vnindex
+            from src.market.regime_detector import detect_regime
+
+            vnindex_df = get_cached_vnindex(lookback=250)
+            if vnindex_df is None or vnindex_df.empty:
+                logger.warning("Could not load VNINDEX for regime detection")
+                return None
+
+            regime_obj = detect_regime(vnindex_df)
+            regime_info = MarketRegimeInfo(
+                regime=regime_obj.regime,
+                confidence=regime_obj.confidence,
+                tradeable=regime_obj.tradeable,
+                description=regime_obj.description,
+            )
+
+            logger.info(
+                f"🔍 Auto-detected regime: {regime_info.regime} "
+                f"(confidence: {regime_info.confidence:.1f}%)"
+            )
+            return regime_info
+
+        except Exception as e:
+            logger.warning(f"Auto regime detection failed: {e}")
+            return None
+
+    # =========================================================================
+    # MAIN CALCULATION METHOD
+    # =========================================================================
 
     def calculate_position_size(
         self,
@@ -105,183 +374,389 @@ class EnhancedPositionSizer:
         auto_detect_regime: bool = True,
     ) -> EnhancedPositionSize:
         """
-        Calculate position size với Kelly Criterion và portfolio context
+        Calculate position size với Kelly Criterion và portfolio context.
 
         Args:
             symbol: Stock symbol
             entry_price: Entry price
             stop_loss: Stop loss price
             take_profit: Take profit target
-            confidence: 0-100
-            signal_strength: Signal strength
-            market_regime: Market regime info (auto-detected if None and auto_detect_regime=True)
-            sector: Stock sector
+            confidence: Signal confidence (0-100)
+            signal_strength: VERY_STRONG, STRONG, MODERATE, WEAK, VERY_WEAK
+            market_regime: Market regime info (auto-detected if None)
+            sector: Stock sector for exposure tracking
             portfolio_risk: Current portfolio risk percentage
             win_rate: Historical win rate (0-1)
             avg_win_loss_ratio: Average win/loss ratio
-            auto_detect_regime: Auto-detect regime if market_regime not provided (default: True)
+            auto_detect_regime: Auto-detect regime if not provided
 
         Returns:
-            EnhancedPositionSize
+            EnhancedPositionSize with calculated values
         """
-        warnings = []
-        adjustments = {}
+        warnings: List[str] = []
+        adjustments: Dict[str, float] = {}
 
-        # =================================================================
-        # AUTO-DETECT MARKET REGIME (if not provided)
-        # =================================================================
-        if market_regime is None and auto_detect_regime:
-            try:
-                from src.data.vnindex_cache import get_cached_vnindex
-                from src.market.regime_detector import detect_regime
+        # Parse market regime
+        regime_info = self._resolve_market_regime(
+            market_regime, auto_detect_regime, adjustments, warnings
+        )
 
-                # IMPROVEMENT: Use cached VNINDEX to avoid repeated API calls
-                vnindex_df = get_cached_vnindex(lookback=250)
+        # Pre-trade validations
+        self._validate_portfolio_risk(portfolio_risk)
+        self._validate_sector_exposure(sector)
 
-                if vnindex_df is not None and not vnindex_df.empty:
-                    regime_obj = detect_regime(vnindex_df)
+        # Check available capital
+        available_capital = self._get_available_capital()
+        if available_capital <= 0:
+            return self._zero_position("Exposure limit reached", warnings)
 
-                    # Convert to dict format
-                    market_regime = {
-                        "regime": regime_obj.regime,
-                        "confidence": regime_obj.confidence,
-                        "tradeable": regime_obj.tradeable,
-                        "description": regime_obj.description,
-                    }
+        # Calculate risk per share with protection
+        risk_per_share = self._calculate_risk_per_share(entry_price, stop_loss, warnings)
+        if risk_per_share <= 0:
+            return self._zero_position("Invalid stop loss", warnings)
 
-                    logger.info(
-                        f"🔍 Auto-detected market regime: {regime_obj.regime} "
-                        f"(confidence: {regime_obj.confidence:.1f}%, tradeable: {regime_obj.tradeable})"
-                    )
+        # Calculate base shares using multiple methods
+        base_shares = self._calculate_base_shares(
+            entry_price=entry_price,
+            risk_per_share=risk_per_share,
+            confidence=confidence,
+            signal_strength=signal_strength,
+            regime_info=regime_info,
+            win_rate=win_rate,
+            avg_win_loss_ratio=avg_win_loss_ratio,
+            adjustments=adjustments,
+        )
 
-                    # Add to adjustments for tracking
-                    adjustments["regime_auto_detected"] = True
-                    adjustments["regime"] = regime_obj.regime
+        # Apply portfolio adjustments
+        adjusted_shares = self._apply_portfolio_adjustments(
+            base_shares=base_shares,
+            symbol=symbol,
+            sector=sector,
+            portfolio_risk=portfolio_risk,
+            adjustments=adjustments,
+            warnings=warnings,
+        )
 
-                    # WARNING: If not tradeable, reduce size significantly
-                    if not regime_obj.tradeable:
-                        warnings.append(
-                            f"⚠️ Market regime {regime_obj.regime} is NOT TRADEABLE. "
-                            "Consider skipping this trade."
-                        )
-                else:
-                    logger.warning("⚠️ Could not load VNINDEX for regime detection")
-            except Exception as e:
-                logger.warning(f"⚠️ Auto regime detection failed: {e}")
-                # Continue without regime info
+        # Enforce limits and round to lot size
+        final_shares = self._enforce_limits(
+            shares=adjusted_shares,
+            entry_price=entry_price,
+            available_capital=available_capital,
+            risk_per_share=risk_per_share,
+            warnings=warnings,
+        )
 
-        # =================================================================
-        # CHECK 1: Portfolio Risk Limit
-        # =================================================================
+        if final_shares <= 0:
+            return self._zero_position("Position size = 0 after calculations", warnings)
+
+        # Build result
+        return self._build_result(
+            shares=final_shares,
+            entry_price=entry_price,
+            risk_per_share=risk_per_share,
+            kelly_percent=adjustments.get("kelly", 0.0),
+            warnings=warnings,
+            adjustments=adjustments,
+        )
+
+    # =========================================================================
+    # PRIVATE HELPER METHODS - Validation
+    # =========================================================================
+
+    def _resolve_market_regime(
+        self,
+        market_regime: Optional[Dict],
+        auto_detect: bool,
+        adjustments: Dict[str, float],
+        warnings: List[str],
+    ) -> MarketRegimeInfo:
+        """Resolve market regime from input or auto-detection."""
+        if market_regime:
+            return MarketRegimeInfo.from_dict(market_regime)
+
+        if auto_detect:
+            detected = self._detect_market_regime()
+            if detected:
+                adjustments["regime_auto_detected"] = 1.0
+                adjustments["regime"] = hash(detected.regime) % 100  # For tracking
+
+                if not detected.tradeable:
+                    warnings.append(f"⚠️ Market regime {detected.regime} is NOT TRADEABLE")
+                return detected
+
+        return MarketRegimeInfo()
+
+    def _validate_portfolio_risk(self, portfolio_risk: Optional[float]) -> None:
+        """Validate portfolio risk is within limits."""
         if portfolio_risk is not None and portfolio_risk >= self.max_portfolio_risk:
             raise RiskManagementError(
-                f"Portfolio risk ({portfolio_risk*100:.1f}%) exceeds limit ({self.max_portfolio_risk*100:.1f}%)",
+                f"Portfolio risk ({portfolio_risk*100:.1f}%) exceeds limit "
+                f"({self.max_portfolio_risk*100:.1f}%)",
                 context={
                     "portfolio_risk": portfolio_risk,
                     "limit": self.max_portfolio_risk,
                 },
             )
 
-        # =================================================================
-        # CHECK 2: Sector Exposure
-        # =================================================================
-        if sector:
-            sector_exp = self._get_sector_exposure(sector)
-            if sector_exp >= self.max_sector_exposure:
-                raise RiskManagementError(
-                    f"Sector {sector} exposure ({sector_exp*100:.1f}%) exceeds limit ({self.max_sector_exposure*100:.1f}%)",
-                    context={
-                        "sector": sector,
-                        "exposure": sector_exp,
-                        "limit": self.max_sector_exposure,
-                    },
-                )
+    def _validate_sector_exposure(self, sector: Optional[str]) -> None:
+        """Validate sector exposure is within limits."""
+        if not sector:
+            return
 
-        # =================================================================
-        # CHECK 3: Available Capital
-        # =================================================================
-        current_exposure = self._calculate_current_exposure()
-        available_capital = self.total_capital * self.max_total_exposure - current_exposure
-
-        if available_capital <= 0:
-            return self._zero_position(
-                f"Exposure limit reached ({current_exposure:,.0f} VNĐ)", warnings
+        sector_exp = self._get_sector_exposure(sector)
+        if sector_exp >= self.max_sector_exposure:
+            raise RiskManagementError(
+                f"Sector {sector} exposure ({sector_exp*100:.1f}%) exceeds limit "
+                f"({self.max_sector_exposure*100:.1f}%)",
+                context={
+                    "sector": sector,
+                    "exposure": sector_exp,
+                    "limit": self.max_sector_exposure,
+                },
             )
 
-        # =================================================================
-        # CALCULATE BASE POSITION SIZE
-        # =================================================================
+    def _get_available_capital(self) -> float:
+        """Calculate available capital for new positions."""
+        current_exposure = self._calculate_current_exposure()
+        max_exposure_value = self.total_capital * self.max_total_exposure
+        return max_exposure_value - current_exposure
+
+    def _calculate_risk_per_share(
+        self,
+        entry_price: float,
+        stop_loss: float,
+        warnings: List[str],
+    ) -> float:
+        """Calculate risk per share with minimum enforcement."""
         risk_per_share = abs(entry_price - stop_loss)
-        reward_per_share = abs(take_profit - entry_price)
 
         if risk_per_share <= 0:
-            return self._zero_position("Invalid stop loss", warnings)
+            return 0.0
 
-        # CRITICAL FIX: Protect against division by very small risk_per_share
-        # If stop loss is too tight (< 1% of entry price), enforce minimum 2% risk
-        min_risk_per_share = entry_price * 0.01  # 1% minimum
-        if risk_per_share < min_risk_per_share:
+        # Enforce minimum risk (prevent division by tiny numbers)
+        min_risk = entry_price * PositionSizingConstants.MIN_RISK_PERCENT
+        if risk_per_share < min_risk:
+            enforced_risk = entry_price * PositionSizingConstants.DEFAULT_RISK_PERCENT
             logger.warning(
-                f"⚠️ Risk per share too small ({risk_per_share:.0f}, "
-                f"{(risk_per_share/entry_price*100):.2f}%). "
-                f"Enforcing minimum 2% risk: {entry_price * 0.02:.0f}"
+                f"⚠️ Risk per share too small ({risk_per_share:.0f}). "
+                f"Enforcing {PositionSizingConstants.DEFAULT_RISK_PERCENT*100:.0f}% "
+                f"minimum: {enforced_risk:.0f}"
             )
-            risk_per_share = entry_price * 0.02  # Enforce 2% minimum risk
             warnings.append(
-                f"Stop loss too tight, adjusted to 2% risk ({risk_per_share:.0f} VND/share)"
+                f"Stop loss too tight, adjusted to "
+                f"{PositionSizingConstants.DEFAULT_RISK_PERCENT*100:.0f}% risk"
             )
+            return enforced_risk
 
-        _risk_reward_ratio = (  # noqa: F841
-            reward_per_share / risk_per_share if risk_per_share > 0 else 0
-        )
+        return risk_per_share
 
-        # =================================================================
-        # METHOD 1: Kelly Criterion (if win rate available)
-        # =================================================================
-        kelly_percent = 0.0
-        if self.use_kelly and win_rate is not None and avg_win_loss_ratio is not None:
-            kelly_percent = self._calculate_kelly(
-                win_rate=win_rate, avg_win_loss_ratio=avg_win_loss_ratio
-            )
-            adjustments["kelly"] = kelly_percent
+    # =========================================================================
+    # PRIVATE HELPER METHODS - Position Calculation
+    # =========================================================================
 
-        # =================================================================
-        # METHOD 2: Risk-based (fallback or combine)
-        # =================================================================
+    def _calculate_base_shares(
+        self,
+        entry_price: float,
+        risk_per_share: float,
+        confidence: int,
+        signal_strength: str,
+        regime_info: MarketRegimeInfo,
+        win_rate: Optional[float],
+        avg_win_loss_ratio: Optional[float],
+        adjustments: Dict[str, float],
+    ) -> int:
+        """Calculate base shares using risk-based and Kelly methods."""
+
+        # Method 1: Risk-based sizing
         base_risk_amount = self.total_capital * self.max_risk_per_trade
-
-        # Adjust risk by confidence and signal strength
-        risk_multiplier = self._calculate_risk_multiplier(
-            confidence, signal_strength, market_regime
-        )
+        risk_multiplier = self._calculate_risk_multiplier(confidence, signal_strength, regime_info)
         adjustments["risk_multiplier"] = risk_multiplier
 
         adjusted_risk_amount = base_risk_amount * risk_multiplier
-
-        # Shares by risk (now protected from division by near-zero)
         shares_by_risk = int(adjusted_risk_amount / risk_per_share)
 
-        # =================================================================
-        # METHOD 3: Kelly-based (if available)
-        # =================================================================
+        # Method 2: Kelly Criterion (if data available)
         shares_by_kelly = 0
-        if kelly_percent > 0:
-            kelly_capital = self.total_capital * kelly_percent
-            shares_by_kelly = int(kelly_capital / entry_price)
-            adjustments["kelly_shares"] = shares_by_kelly
+        kelly_percent = 0.0
 
-        # =================================================================
-        # COMBINE METHODS
-        # =================================================================
+        if self.use_kelly and win_rate and avg_win_loss_ratio:
+            kelly_percent = self._calculate_kelly(win_rate, avg_win_loss_ratio)
+            adjustments["kelly"] = kelly_percent
+
+            if kelly_percent > 0:
+                kelly_capital = self.total_capital * kelly_percent
+                shares_by_kelly = int(kelly_capital / entry_price)
+                adjustments["kelly_shares"] = shares_by_kelly
+
+        # Combine: Use minimum of both methods (conservative)
         if shares_by_kelly > 0:
-            # Use minimum of Kelly and Risk-based (conservative)
-            base_shares = min(shares_by_risk, shares_by_kelly)
-        else:
-            base_shares = shares_by_risk
+            return min(shares_by_risk, shares_by_kelly)
+        return shares_by_risk
 
-        # =================================================================
-        # ADJUSTMENTS
-        # =================================================================
+    def _calculate_kelly(
+        self,
+        win_rate: float,
+        avg_win_loss_ratio: float,
+    ) -> float:
+        """
+        Calculate Kelly Criterion percentage.
+
+        Formula: K = W - (1-W)/R
+        Where: W = win rate, R = average win / average loss
+
+        Returns half-Kelly for safety, clamped to reasonable range.
+        """
+        # Validation
+        if avg_win_loss_ratio <= 0:
+            logger.warning(
+                f"⚠️ Invalid avg_win_loss_ratio: {avg_win_loss_ratio:.3f}. "
+                "Using conservative sizing."
+            )
+            return 0.0
+
+        if win_rate <= 0 or win_rate >= 1:
+            logger.warning(f"⚠️ Invalid win_rate: {win_rate:.3f}. Using conservative sizing.")
+            return 0.0
+
+        if win_rate < 0.3:
+            logger.warning(f"⚠️ Low win rate: {win_rate:.1%}. Review strategy.")
+
+        # Calculate Kelly
+        kelly = win_rate - ((1 - win_rate) / avg_win_loss_ratio)
+
+        logger.debug(
+            f"📊 Kelly: win_rate={win_rate:.1%}, " f"W/L={avg_win_loss_ratio:.2f}, raw={kelly:.1%}"
+        )
+
+        # Handle negative Kelly (strategy has negative expected value)
+        if kelly < 0:
+            logger.critical(
+                f"⚠️ NEGATIVE Kelly ({kelly:.1%})! Strategy has negative EV. "
+                f"Win rate: {win_rate:.1%}, W/L: {avg_win_loss_ratio:.2f}"
+            )
+            return PositionSizingConstants.MIN_KELLY_FALLBACK
+
+        # Apply half-Kelly for safety
+        half_kelly = kelly * self.kelly_fraction
+
+        if kelly > 0.5:
+            logger.warning(f"⚠️ Very high Kelly ({kelly:.1%}). Clamping to 25%.")
+
+        # Clamp to reasonable range
+        final_kelly = max(0.0, min(half_kelly, PositionSizingConstants.MAX_KELLY_PERCENT))
+
+        logger.info(
+            f"✅ Kelly sizing: {final_kelly:.1%} "
+            f"(win={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
+        )
+
+        return final_kelly
+
+    def _calculate_risk_multiplier(
+        self,
+        confidence: int,
+        signal_strength: str,
+        regime_info: MarketRegimeInfo,
+    ) -> float:
+        """Calculate risk multiplier based on confidence, signal, and regime."""
+
+        # Base multiplier from confidence
+        if confidence >= 80:
+            base = 1.1
+        elif confidence >= 70:
+            base = 1.0
+        elif confidence >= 60:
+            base = 0.8
+        else:
+            base = 0.6
+
+        # Signal strength multiplier
+        strength_multipliers = {
+            "VERY_STRONG": 1.1,
+            "STRONG": 1.0,
+            "MODERATE": 0.9,
+            "WEAK": 0.7,
+            "VERY_WEAK": 0.5,
+        }
+        strength_mult = strength_multipliers.get(signal_strength, 0.9)
+
+        # Market regime multiplier
+        regime_mult = self._get_regime_multiplier(regime_info, confidence)
+
+        # Combine and clamp
+        combined = base * strength_mult * regime_mult
+        return max(
+            PositionSizingConstants.MIN_RISK_MULTIPLIER,
+            min(combined, PositionSizingConstants.MAX_RISK_MULTIPLIER),
+        )
+
+    def _get_regime_multiplier(
+        self,
+        regime_info: Optional[MarketRegimeInfo],
+        confidence: int,
+    ) -> float:
+        """Get position multiplier based on market regime."""
+        # Handle None regime_info
+        if regime_info is None:
+            return 1.0  # Default multiplier when no regime info
+
+        # Handle dict input (for backward compatibility with tests)
+        if isinstance(regime_info, dict):
+            regime = regime_info.get("regime", "SIDEWAYS")
+            regime_confidence = regime_info.get("confidence", 50.0)
+        else:
+            regime = regime_info.regime
+            regime_confidence = regime_info.confidence
+
+        if regime == "BULL":
+            return 1.1
+
+        if regime == "BEAR":
+            # Variable bear multiplier based on regime confidence
+            if regime_confidence < 70:
+                # Weak bear - less defensive
+                bear_mult = 0.7
+                logger.info(
+                    f"📊 Weak bear ({regime_confidence:.0f}% conf) - "
+                    f"{bear_mult:.1f}x multiplier"
+                )
+            else:
+                # Strong bear - very defensive
+                bear_mult = 0.5
+                logger.warning(
+                    f"🐻 Strong bear ({regime_confidence:.0f}% conf) - "
+                    f"{bear_mult:.1f}x multiplier"
+                )
+
+            # High confidence signals get less reduction
+            if confidence >= 80:
+                bear_mult = min(bear_mult * 1.2, 0.8)
+                logger.info(
+                    f"✨ High confidence ({confidence}%) in bear - " f"adjusted to {bear_mult:.2f}x"
+                )
+
+            return bear_mult
+
+        if regime == "HIGH_VOLATILITY":
+            return 0.6
+
+        # SIDEWAYS or unknown
+        return 0.8
+
+    # =========================================================================
+    # PRIVATE HELPER METHODS - Portfolio Adjustments
+    # =========================================================================
+
+    def _apply_portfolio_adjustments(
+        self,
+        base_shares: int,
+        symbol: str,
+        sector: Optional[str],
+        portfolio_risk: Optional[float],
+        adjustments: Dict[str, float],
+        warnings: List[str],
+    ) -> int:
+        """Apply portfolio-level adjustments to position size."""
 
         # 1. Portfolio risk adjustment
         portfolio_adj = 1.0
@@ -298,108 +773,238 @@ class EnhancedPositionSizer:
             sector_adj = min(1.0, remaining_sector / self.max_sector_exposure)
             adjustments["sector_adj"] = sector_adj
 
-        # 3. Correlation adjustment (simplified - would need correlation matrix)
-        correlation_adj = 1.0
-        if len(self.current_positions) > 0:
-            # Reduce size if too many positions in similar sectors
-            correlation_adj = self._correlation_adjustment(symbol, sector)
-            adjustments["correlation_adj"] = correlation_adj
+        # 3. Correlation adjustment
+        correlation_adj = self._calculate_correlation_adjustment(symbol, sector)
+        adjustments["correlation_adj"] = correlation_adj
+
+        # 4. Circuit breaker adjustment
+        circuit_adj = self._apply_circuit_breaker_adjustment(adjustments, warnings)
 
         # Apply all adjustments
-        final_shares = int(base_shares * portfolio_adj * sector_adj * correlation_adj)
+        total_adj = portfolio_adj * sector_adj * correlation_adj * circuit_adj
+        return int(base_shares * total_adj)
 
-        # =================================================================
-        # NEW: Circuit Breaker Caution Mode Adjustment
-        # =================================================================
+    def _apply_circuit_breaker_adjustment(
+        self,
+        adjustments: Dict[str, float],
+        warnings: List[str],
+    ) -> float:
+        """Apply circuit breaker caution mode adjustment."""
+        circuit_breaker = self._get_circuit_breaker()
+
+        if circuit_breaker and circuit_breaker.is_caution_mode():
+            mult = PositionSizingConstants.CAUTION_MODE_MULTIPLIER
+            adjustments["caution_mode_adj"] = mult
+            warnings.append(
+                f"⚠️ Circuit breaker caution mode: " f"Position reduced by {(1-mult)*100:.0f}%"
+            )
+            logger.warning("🚨 Circuit breaker caution mode active")
+            return mult
+
+        return 1.0
+
+    def _calculate_correlation_adjustment(
+        self,
+        symbol: str,
+        sector: Optional[str],
+    ) -> float:
+        """
+        Calculate correlation-based position adjustment.
+
+        Uses actual price correlation with existing positions.
+        Falls back to sector-based if correlation calc fails.
+        """
+        if not self.current_positions:
+            return 1.0
+
+        # Try real correlation calculation
+        correlations = []
+        for pos_symbol in self.current_positions:
+            if pos_symbol == symbol:
+                continue
+
+            corr = self._calculate_correlation(symbol, pos_symbol)
+            if corr is not None:
+                correlations.append(abs(corr))
+
+        # Use correlation-based adjustment if we have data
+        if correlations:
+            avg_corr = sum(correlations) / len(correlations)
+            logger.info(
+                f"📊 Avg correlation for {symbol}: {avg_corr:.3f} "
+                f"({len(correlations)} positions)"
+            )
+
+            if avg_corr > PositionSizingConstants.HIGH_CORRELATION_THRESHOLD:
+                logger.warning(f"⚠️ High correlation ({avg_corr:.2f}) - reducing 50%")
+                return PositionSizingConstants.HIGH_CORRELATION_ADJUSTMENT
+
+            if avg_corr > PositionSizingConstants.MEDIUM_CORRELATION_THRESHOLD:
+                logger.info(f"Medium correlation ({avg_corr:.2f}) - reducing 25%")
+                return PositionSizingConstants.MEDIUM_CORRELATION_ADJUSTMENT
+
+            return 1.0
+
+        # Fallback: sector-based correlation
+        return self._sector_based_correlation_adjustment(sector)
+
+    def _sector_based_correlation_adjustment(self, sector: Optional[str]) -> float:
+        """Fallback sector-based correlation adjustment."""
+        if not sector:
+            return 1.0
+
+        same_sector_count = sum(
+            1 for pos in self.current_positions.values() if pos.get("sector") == sector
+        )
+
+        if same_sector_count >= PositionSizingConstants.SECTOR_HIGH_COUNT:
+            logger.warning(f"⚠️ {same_sector_count} positions in {sector} - reducing 30%")
+            return PositionSizingConstants.SECTOR_HIGH_ADJUSTMENT
+
+        if same_sector_count >= PositionSizingConstants.SECTOR_MEDIUM_COUNT:
+            logger.info(f"{same_sector_count} positions in {sector} - reducing 15%")
+            return PositionSizingConstants.SECTOR_MEDIUM_ADJUSTMENT
+
+        return 1.0
+
+    def _calculate_correlation(
+        self,
+        symbol1: str,
+        symbol2: str,
+        days: int = CORRELATION_LOOKBACK_DAYS,
+    ) -> Optional[float]:
+        """
+        Calculate correlation coefficient with caching.
+
+        Returns correlation (-1 to 1) or None if calculation fails.
+        """
+        # Check cache first
+        cached = self._correlation_cache.get(symbol1, symbol2)
+        if cached is not None:
+            logger.debug(f"📦 Cache hit: {symbol1}-{symbol2} = {cached:.3f}")
+            return cached
+
+        # Calculate correlation
         try:
-            from src.risk.circuit_breaker import get_circuit_breaker
+            load_data = self._get_data_loader()
 
-            circuit_breaker = get_circuit_breaker()
-            if circuit_breaker.is_caution_mode():
-                caution_multiplier = 0.5  # Reduce position by 50% in caution mode
-                final_shares = int(final_shares * caution_multiplier)
-                adjustments["caution_mode_adj"] = caution_multiplier
-                warnings.append(
-                    f"⚠️ Circuit breaker caution mode: Position reduced by {(1-caution_multiplier)*100:.0f}%"
-                )
-                logger.warning(
-                    f"🚨 Circuit breaker caution mode active - "
-                    f"reducing position from {int(final_shares/caution_multiplier)} to {final_shares} shares"
-                )
-        except ImportError:
-            pass  # Circuit breaker not available
+            df1 = load_data(symbol1, lookback=days)
+            df2 = load_data(symbol2, lookback=days)
+
+            if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
+                logger.warning(f"Insufficient data for correlation: {symbol1}-{symbol2}")
+                return None
+
+            # Merge on date
+            merged = pd.merge(
+                df1[["date", "close"]],
+                df2[["date", "close"]],
+                on="date",
+                suffixes=("_1", "_2"),
+            )
+
+            if len(merged) < 10:
+                logger.warning(f"Insufficient overlap for {symbol1}-{symbol2}: {len(merged)}")
+                return None
+
+            # Calculate and cache
+            corr = merged["close_1"].corr(merged["close_2"])
+
+            if pd.isna(corr):
+                return None
+
+            self._correlation_cache.set(symbol1, symbol2, corr)
+            logger.debug(f"📊 Calculated {symbol1}-{symbol2}: {corr:.3f}")
+
+            return corr
+
         except Exception as e:
-            logger.debug(f"Circuit breaker check failed: {e}")
+            logger.warning(f"Correlation calc failed {symbol1}-{symbol2}: {e}")
+            return None
 
-        # =================================================================
-        # ENFORCE LIMITS
-        # =================================================================
+    # =========================================================================
+    # PRIVATE HELPER METHODS - Limits & Finalization
+    # =========================================================================
 
-        # Max by capital
-        max_shares_by_capital = int((self.total_capital * self.max_position_size) / entry_price)
+    def _enforce_limits(
+        self,
+        shares: int,
+        entry_price: float,
+        available_capital: float,
+        risk_per_share: float,
+        warnings: List[str],
+    ) -> int:
+        """Enforce position limits and round to lot size."""
 
-        # Max by available
-        max_shares_by_available = int(available_capital / entry_price)
-
-        # Min position
+        # Calculate limits
+        max_by_capital = int((self.total_capital * self.max_position_size) / entry_price)
+        max_by_available = int(available_capital / entry_price)
         min_shares = int((self.total_capital * self.min_position_size) / entry_price)
 
-        # Final shares
-        shares = min(final_shares, max_shares_by_capital, max_shares_by_available)
-        shares = max(shares, min_shares) if shares > 0 else 0
+        # Apply limits
+        final_shares = min(shares, max_by_capital, max_by_available)
+        final_shares = max(final_shares, min_shares) if final_shares > 0 else 0
 
-        # VIETNAM MARKET: Round to lot size (100 shares minimum)
-        from src.config.constants import VIETNAM_LOT_SIZE
+        if final_shares <= 0:
+            return 0
 
-        if shares > 0:
-            # Round down to nearest lot
-            shares = (shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
+        # Round to Vietnam lot size
+        final_shares = (final_shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
 
-            # Enforce minimum lot size
-            if shares < VIETNAM_LOT_SIZE:
-                logger.warning(
-                    f"⚠️ Position size {shares} < minimum lot size {VIETNAM_LOT_SIZE}. "
-                    f"Adjusting to {VIETNAM_LOT_SIZE} shares (1 lot)."
-                )
-                shares = VIETNAM_LOT_SIZE
+        # Enforce minimum lot
+        if final_shares < VIETNAM_LOT_SIZE:
+            logger.warning(
+                f"⚠️ Position {final_shares} < lot size {VIETNAM_LOT_SIZE}. " f"Adjusting to 1 lot."
+            )
+            final_shares = VIETNAM_LOT_SIZE
 
-            # Validate shares is multiple of lot size
-            if shares % VIETNAM_LOT_SIZE != 0:
-                logger.error(
-                    f"🚨 Invalid lot size: {shares} shares is not multiple of {VIETNAM_LOT_SIZE}. "
-                    "This should not happen after rounding."
-                )
-                shares = (shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
+        # Validate risk limit
+        final_shares = self._validate_risk_limit(
+            final_shares, entry_price, risk_per_share, warnings
+        )
 
-            logger.debug(f"✅ Position size: {shares} shares ({shares // VIETNAM_LOT_SIZE} lots)")
-        else:
-            return self._zero_position("Position size = 0 after calculations", warnings)
+        logger.debug(
+            f"✅ Final: {final_shares} shares " f"({final_shares // VIETNAM_LOT_SIZE} lots)"
+        )
 
-        # =================================================================
-        # FINAL VALIDATION
-        # =================================================================
+        return final_shares
+
+    def _validate_risk_limit(
+        self,
+        shares: int,
+        entry_price: float,
+        risk_per_share: float,
+        warnings: List[str],
+    ) -> int:
+        """Ensure position doesn't exceed risk limit."""
+        max_loss = shares * risk_per_share
+        risk_percent = max_loss / self.total_capital
+
+        if risk_percent > self.max_risk_per_trade:
+            # Reduce to stay within limit
+            max_safe_shares = int((self.total_capital * self.max_risk_per_trade) / risk_per_share)
+            shares = min(shares, max_safe_shares)
+            shares = max((shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE, VIETNAM_LOT_SIZE)
+            warnings.append(f"Reduced shares to keep risk <= {self.max_risk_per_trade*100:.1f}%")
+
+        return shares
+
+    def _build_result(
+        self,
+        shares: int,
+        entry_price: float,
+        risk_per_share: float,
+        kelly_percent: float,
+        warnings: List[str],
+        adjustments: Dict[str, float],
+    ) -> EnhancedPositionSize:
+        """Build final result object."""
         position_value = shares * entry_price
         position_percent = (position_value / self.total_capital) * 100
         max_loss = shares * risk_per_share
         risk_percent = (max_loss / self.total_capital) * 100
 
-        # Check risk limit
-        if risk_percent > self.max_risk_per_trade * 100:
-            max_safe_shares = int((self.total_capital * self.max_risk_per_trade) / risk_per_share)
-            shares = min(shares, max_safe_shares)
-            shares = max((shares // 100) * 100, 100)
-
-            position_value = shares * entry_price
-            position_percent = (position_value / self.total_capital) * 100
-            max_loss = shares * risk_per_share
-            risk_percent = (max_loss / self.total_capital) * 100
-
-            warnings.append(f"Reduced shares to keep risk <= {self.max_risk_per_trade*100}%")
-
-        # DCA entries
-        recommended_entries = self._calculate_dca_entries(entry_price, shares)
-
-        # Warnings
+        # Add warnings for large positions
         if position_percent > self.max_position_size * 100 * 0.8:
             warnings.append(f"Large position: {position_percent:.1f}%")
 
@@ -414,454 +1019,73 @@ class EnhancedPositionSizer:
             max_loss=max_loss,
             position_percent=position_percent,
             kelly_percent=kelly_percent * 100,
-            recommended_entries=recommended_entries,
+            recommended_entries=self._calculate_dca_entries(entry_price, shares),
             warnings=warnings,
             adjustments=adjustments,
         )
 
-    def _calculate_kelly(self, win_rate: float, avg_win_loss_ratio: float) -> float:
-        """
-        Calculate Kelly Criterion percentage
-
-        Formula: K = W - (1-W)/R
-        Where:
-            W = win rate
-            R = average win / average loss
-
-        Returns:
-            Kelly percentage (0-1), using half-Kelly for safety
-        """
-        # VALIDATION: Check avg_win_loss_ratio
-        if avg_win_loss_ratio <= 0:
-            logger.warning(
-                f"⚠️ Invalid avg_win_loss_ratio: {avg_win_loss_ratio:.3f}. "
-                "Must be > 0. Using conservative sizing (Kelly = 0)."
-            )
-            return 0.0
-
-        # VALIDATION: Check win_rate range
-        if win_rate <= 0 or win_rate >= 1:
-            logger.warning(
-                f"⚠️ Invalid win_rate: {win_rate:.3f}. "
-                "Must be between 0 and 1. Using conservative sizing (Kelly = 0)."
-            )
-            return 0.0
-
-        # VALIDATION: Check if win_rate is suspiciously low
-        if win_rate < 0.3:
-            logger.warning(
-                f"⚠️ Low win rate detected: {win_rate:.1%}. "
-                "Consider reviewing strategy before trading."
-            )
-
-        # Calculate Kelly
-        kelly = win_rate - ((1 - win_rate) / avg_win_loss_ratio)
-
-        # Log raw Kelly before applying fraction
-        logger.debug(
-            f"📊 Kelly Calculation: win_rate={win_rate:.1%}, "
-            f"win/loss_ratio={avg_win_loss_ratio:.2f}, "
-            f"raw_kelly={kelly:.1%}"
-        )
-
-        # Use half-Kelly for safety
-        half_kelly = kelly * self.kelly_fraction
-
-        # IMPROVED: Warning + conservative fallback instead of exception for negative Kelly
-        # This allows trading to continue with minimal position size while alerting the issue
-        if kelly < 0:
-            logger.critical(
-                f"⚠️⚠️⚠️ NEGATIVE Kelly ({kelly:.1%}) detected! "
-                f"Strategy has NEGATIVE expected value. "
-                f"Win rate: {win_rate:.1%}, W/L ratio: {avg_win_loss_ratio:.2f}"
-            )
-            logger.warning(
-                "🔧 Using minimum position size (1%) as fallback. "
-                "STRONGLY recommend reviewing strategy parameters!"
-            )
-            # Return minimum position size instead of throwing exception
-            # This allows system to continue operating while flagging the issue
-            return 0.01  # 1% minimum - very conservative
-
-        if kelly > 0.5:
-            logger.warning(
-                f"⚠️ Very high Kelly ({kelly:.1%}) detected. " "Clamping to max 25% for safety."
-            )
-
-        # Clamp to reasonable range
-        final_kelly = max(0.0, min(half_kelly, 0.25))  # Max 25% of capital
-
-        logger.info(
-            f"✅ Kelly position sizing: {final_kelly:.1%} of capital "
-            f"(win_rate={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
-        )
-
-        return final_kelly
-
-    def _calculate_risk_multiplier(
-        self, confidence: int, signal_strength: str, market_regime: Optional[Dict]
-    ) -> float:
-        """Calculate risk multiplier"""
-        # Base from confidence
-        if confidence >= 80:
-            base = 1.1
-        elif confidence >= 70:
-            base = 1.0
-        elif confidence >= 60:
-            base = 0.8
-        else:
-            base = 0.6
-
-        # Signal strength
-        strength_mult = {
-            "VERY_STRONG": 1.1,
-            "STRONG": 1.0,
-            "MODERATE": 0.9,
-            "WEAK": 0.7,
-            "VERY_WEAK": 0.5,
-        }.get(signal_strength, 0.9)
-
-        # Market regime with IMPROVED bear market handling
-        regime_mult = 1.0
-        if market_regime:
-            regime = market_regime.get("regime", "SIDEWAYS")
-            regime_confidence = market_regime.get("confidence", 50)
-
-            if regime == "BULL":
-                regime_mult = 1.1
-            elif regime == "BEAR":
-                # IMPROVEMENT: Variable bear market multiplier based on:
-                # 1. Regime confidence (weak bear = less reduction)
-                # 2. Signal confidence (high confidence = allow larger position)
-                # This prevents over-aggressive position reduction in weak bear markets
-                # while still protecting capital in strong bear markets
-
-                # Base bear multiplier: 0.6 (balanced between protection and opportunity)
-                bear_mult = 0.6
-
-                # Adjust by regime confidence
-                # Weak bear (50-70% conf): Use 0.7x multiplier (less defensive)
-                # Strong bear (>70% conf): Use 0.5x multiplier (very defensive)
-                if regime_confidence < 70:
-                    bear_mult = 0.7  # Weak bear - be less defensive to capture opportunities
-                    logger.info(
-                        f"📊 Weak bear market ({regime_confidence:.0f}% conf) - "
-                        f"using {bear_mult:.1f}x position multiplier"
-                    )
-                else:
-                    bear_mult = 0.5  # Strong bear - be very defensive to preserve capital
-                    logger.warning(
-                        f"🐻 Strong bear market ({regime_confidence:.0f}% conf) - "
-                        f"using {bear_mult:.1f}x position multiplier"
-                    )
-
-                # Further adjust by signal confidence
-                # High confidence signals (>80%) get less reduction (but capped at 0.8x)
-                # This allows us to take advantage of high-quality opportunities even in bear markets
-                if confidence >= 80:
-                    bear_mult = min(bear_mult * 1.2, 0.8)  # Max 0.8x for very high confidence
-                    logger.info(
-                        f"✨ High confidence signal ({confidence}%) in bear market - "
-                        f"adjusted multiplier to {bear_mult:.2f}x"
-                    )
-
-                regime_mult = bear_mult
-
-            elif regime == "HIGH_VOLATILITY":
-                regime_mult = 0.6  # Reduce size in high volatility to manage risk
-            else:
-                regime_mult = 0.8  # Sideways market - slightly reduce from normal
-
-        return max(0.5, min(base * strength_mult * regime_mult, 1.2))
-
-    def _calculate_correlation(self, symbol1: str, symbol2: str, days: int = 60) -> float:
-        """
-        ENHANCED: Calculate correlation coefficient with caching
-
-        Args:
-            symbol1: First stock symbol
-            symbol2: Second stock symbol
-            days: Number of days to use for correlation calculation
-
-        Returns:
-            Correlation coefficient (-1 to 1), or 0 if calculation fails
-        """
-        import time
-
-        # Create cache key (order-independent)
-        cache_key = tuple(sorted([symbol1, symbol2]))
-
-        # Check cache first (LRU behavior)
-        if cache_key in self._correlation_cache:
-            corr, timestamp = self._correlation_cache[cache_key]
-            age = time.time() - timestamp
-
-            # Use cached value if still valid
-            if age < self.correlation_cache_ttl:
-                self._cache_hits += 1
-                # LRU: Move to end to mark as recently used
-                self._correlation_cache.move_to_end(cache_key)
-                logger.debug(
-                    f"📦 Cache HIT for {symbol1}-{symbol2} correlation "
-                    f"(age: {age:.0f}s, hits: {self._cache_hits})"
-                )
-                return corr
-            else:
-                # Cache expired
-                logger.debug(f"⏰ Cache EXPIRED for {symbol1}-{symbol2} (age: {age:.0f}s)")
-
-        # Cache miss - calculate correlation
-        self._cache_misses += 1
-        logger.debug(
-            f"📊 Cache MISS for {symbol1}-{symbol2} "
-            f"(misses: {self._cache_misses}, hit rate: {self._get_cache_hit_rate():.1%})"
-        )
-
-        try:
-            from src.data.loader import load_data
-
-            # Load data for both symbols
-            df1 = load_data(symbol1, lookback=days)
-            df2 = load_data(symbol2, lookback=days)
-
-            if df1 is None or df2 is None or len(df1) < 10 or len(df2) < 10:
-                logger.warning(f"Insufficient data for correlation: {symbol1}-{symbol2}")
-                return 0.0
-
-            # Merge on date to align time series
-            merged = pd.merge(
-                df1[["date", "close"]],
-                df2[["date", "close"]],
-                on="date",
-                suffixes=("_1", "_2"),
-            )
-
-            if len(merged) < 10:
-                logger.warning(
-                    f"Insufficient overlapping dates for {symbol1}-{symbol2}: {len(merged)}"
-                )
-                return 0.0
-
-            # Calculate correlation
-            corr = merged["close_1"].corr(merged["close_2"])
-
-            if pd.isna(corr):
-                corr = 0.0
-
-            # Store in cache
-            self._correlation_cache[cache_key] = (corr, time.time())
-
-            # LRU: Limit cache size (evict least recently used)
-            if len(self._correlation_cache) > self.correlation_cache_maxsize:
-                self._prune_cache_lru()
-
-            return corr
-
-        except Exception as e:
-            logger.warning(
-                f"Error calculating correlation {symbol1}-{symbol2}: "
-                f"{type(e).__name__}: {str(e)}"
-            )
-            return 0.0
-
-    def _get_cache_hit_rate(self) -> float:
-        """Calculate cache hit rate for monitoring"""
-        total = self._cache_hits + self._cache_misses
-        return self._cache_hits / total if total > 0 else 0.0
-
-    def _prune_cache_lru(self):
-        """
-        LRU cache eviction with TTL-based expiration
-
-        Strategy:
-        1. Remove expired entries (TTL-based) first
-        2. If still over limit, remove LRU entries from beginning of OrderedDict
-
-        Benefits over old approach:
-        - Removes least recently USED (not just oldest by creation time)
-        - Configurable max size (not hard-coded 100)
-        - More efficient with OrderedDict
-        """
-        if not self._correlation_cache:
-            return
-
-        import time
-
-        current_time = time.time()
-        initial_size = len(self._correlation_cache)
-
-        # Pass 1: Remove expired entries (TTL-based)
-        # Iterate over copy to safely delete during iteration
-        expired_keys = [
-            key
-            for key, (_, timestamp) in list(self._correlation_cache.items())
-            if current_time - timestamp > self.correlation_cache_ttl
-        ]
-
-        for key in expired_keys:
-            del self._correlation_cache[key]
-
-        expired_count = len(expired_keys)
-        if expired_count > 0:
-            logger.debug(
-                f"🗑️ Removed {expired_count} expired cache entries (TTL > {self.correlation_cache_ttl}s)"
-            )
-
-        # Pass 2: If still over limit, evict LRU entries
-        # OrderedDict: items at beginning = least recently used
-        if len(self._correlation_cache) > self.correlation_cache_maxsize:
-            # Calculate how many to remove
-            num_to_remove = len(self._correlation_cache) - self.correlation_cache_maxsize
-
-            # Remove from beginning (LRU)
-            for _ in range(num_to_remove):
-                self._correlation_cache.popitem(last=False)  # FIFO: remove first (LRU)
-
-            logger.info(
-                f"🧹 LRU eviction: {initial_size} → {len(self._correlation_cache)} entries "
-                f"(removed {num_to_remove} LRU, hit rate: {self._get_cache_hit_rate():.1%})"
-            )
-
-    def _correlation_adjustment(self, symbol: str, sector: Optional[str]) -> float:
-        """
-        ENHANCED: Adjust for correlation using real correlation matrix
-
-        Calculates actual price correlation between the new symbol and
-        existing positions, rather than just counting same-sector positions.
-
-        Logic:
-        1. Calculate correlation with each existing position
-        2. Use average absolute correlation
-        3. Higher correlation → smaller position size
-
-        Adjustment formula:
-        - avg_corr > 0.7 (high): 0.5x (reduce 50%)
-        - avg_corr > 0.5 (medium): 0.75x (reduce 25%)
-        - avg_corr <= 0.5 (low): 1.0x (no reduction)
-
-        Fallback to sector-based if correlation calc fails.
-        """
-        if not self.current_positions:
-            return 1.0
-
-        # Try to calculate real correlations
-        correlations = []
-        successful_calcs = 0
-
-        for pos_symbol, pos_data in self.current_positions.items():
-            if pos_symbol == symbol:
-                continue
-
-            try:
-                corr = self._calculate_correlation(symbol, pos_symbol, days=60)
-                correlations.append(abs(corr))  # Use absolute correlation
-                successful_calcs += 1
-
-                logger.debug(f"Correlation {symbol}-{pos_symbol}: {corr:.3f}")
-
-            except Exception:
-                logger.debug(f"Skipping correlation calc for {symbol}-{pos_symbol}")
-                continue
-
-        # If we successfully calculated at least one correlation, use it
-        if successful_calcs > 0:
-            avg_correlation = sum(correlations) / len(correlations)
-
-            logger.info(
-                f"📊 Average correlation for {symbol}: {avg_correlation:.3f} "
-                f"(calculated with {successful_calcs} positions)"
-            )
-
-            # Determine adjustment based on correlation
-            if avg_correlation > 0.7:
-                adjustment = 0.5  # High correlation - reduce 50%
-                logger.warning(
-                    f"⚠️ High correlation detected ({avg_correlation:.2f}) "
-                    f"for {symbol}. Reducing position size by 50%."
-                )
-            elif avg_correlation > 0.5:
-                adjustment = 0.75  # Medium correlation - reduce 25%
-                logger.info(
-                    f"Medium correlation ({avg_correlation:.2f}) for {symbol}. "
-                    "Reducing position size by 25%."
-                )
-            else:
-                adjustment = 1.0  # Low correlation - no reduction
-
-            return adjustment
-
-        # FALLBACK: Use sector-based correlation (original logic)
-        else:
-            logger.info(
-                f"Using sector-based correlation for {symbol} (data unavailable for real correlation)"
-            )
-
-            if not sector:
-                return 1.0
-
-            # Count positions in same sector
-            same_sector_count = sum(
-                1 for pos in self.current_positions.values() if pos.get("sector") == sector
-            )
-
-            # Reduce size if too many in same sector
-            if same_sector_count >= 3:
-                logger.warning(
-                    f"⚠️ {same_sector_count} positions in {sector} sector. "
-                    "Reducing position size by 30%."
-                )
-                return 0.7  # Reduce 30%
-            elif same_sector_count >= 2:
-                logger.info(
-                    f"{same_sector_count} positions in {sector} sector. "
-                    "Reducing position size by 15%."
-                )
-                return 0.85  # Reduce 15%
-
-            return 1.0
+    # =========================================================================
+    # PRIVATE HELPER METHODS - Utilities
+    # =========================================================================
 
     def _get_sector_exposure(self, sector: str) -> float:
-        """Get current sector exposure as percentage of capital"""
-        if not sector:
+        """Get current sector exposure as percentage of capital."""
+        if not sector or self.total_capital <= 0:
             return 0.0
 
         sector_value = sum(
-            pos["shares"] * pos["current_price"]
+            pos["shares"] * pos.get("current_price", 0)
             for pos in self.current_positions.values()
             if pos.get("sector") == sector
         )
 
-        return sector_value / self.total_capital if self.total_capital > 0 else 0.0
+        return sector_value / self.total_capital
 
     def _calculate_current_exposure(self) -> float:
-        """Calculate current total exposure"""
-        return sum(pos["shares"] * pos["current_price"] for pos in self.current_positions.values())
+        """Calculate current total exposure value."""
+        return sum(
+            pos["shares"] * pos.get("current_price", 0) for pos in self.current_positions.values()
+        )
 
-    def _calculate_dca_entries(self, base_price: float, total_shares: int) -> List[Dict]:
-        """Calculate DCA entry levels"""
+    def _calculate_dca_entries(
+        self,
+        base_price: float,
+        total_shares: int,
+    ) -> List[Dict]:
+        """Calculate DCA entry levels."""
+        c = PositionSizingConstants
+
+        def round_shares(pct: float) -> int:
+            shares = int((total_shares * pct // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE)
+            return max(shares, VIETNAM_LOT_SIZE) if shares > 0 else 0
+
         return [
             {
                 "level": 1,
-                "price": round(base_price * 0.99, -2),
-                "shares": int((total_shares * 0.5 // 100) * 100),
-                "percent": 50,
+                "price": round(base_price * c.DCA_LEVEL_1_DISCOUNT, -2),
+                "shares": round_shares(c.DCA_LEVEL_1_PERCENT),
+                "percent": int(c.DCA_LEVEL_1_PERCENT * 100),
             },
             {
                 "level": 2,
-                "price": round(base_price * 0.98, -2),
-                "shares": int((total_shares * 0.3 // 100) * 100),
-                "percent": 30,
+                "price": round(base_price * c.DCA_LEVEL_2_DISCOUNT, -2),
+                "shares": round_shares(c.DCA_LEVEL_2_PERCENT),
+                "percent": int(c.DCA_LEVEL_2_PERCENT * 100),
             },
             {
                 "level": 3,
-                "price": round(base_price * 0.97, -2),
-                "shares": int((total_shares * 0.2 // 100) * 100),
-                "percent": 20,
+                "price": round(base_price * c.DCA_LEVEL_3_DISCOUNT, -2),
+                "shares": round_shares(c.DCA_LEVEL_3_PERCENT),
+                "percent": int(c.DCA_LEVEL_3_PERCENT * 100),
             },
         ]
 
-    def _zero_position(self, reason: str, warnings: List[str]) -> EnhancedPositionSize:
-        """Return zero position"""
+    def _zero_position(
+        self,
+        reason: str,
+        warnings: List[str],
+    ) -> EnhancedPositionSize:
+        """Return zero position with reason."""
         warnings.append(reason)
         return EnhancedPositionSize(
             shares=0,
@@ -875,3 +1099,50 @@ class EnhancedPositionSizer:
             warnings=warnings,
             adjustments={},
         )
+
+    # =========================================================================
+    # PUBLIC METHODS - Position Management
+    # =========================================================================
+
+    def add_position(
+        self,
+        symbol: str,
+        shares: int,
+        entry_price: float,
+        current_price: float,
+        sector: Optional[str] = None,
+    ) -> None:
+        """Add a position to tracking."""
+        self.current_positions[symbol] = {
+            "shares": shares,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "sector": sector,
+        }
+
+    def remove_position(self, symbol: str) -> None:
+        """Remove a position from tracking."""
+        self.current_positions.pop(symbol, None)
+
+    def update_position_price(self, symbol: str, current_price: float) -> None:
+        """Update current price for a position."""
+        if symbol in self.current_positions:
+            self.current_positions[symbol]["current_price"] = current_price
+
+    def clear_positions(self) -> None:
+        """Clear all tracked positions."""
+        self.current_positions.clear()
+
+    def get_portfolio_summary(self) -> Dict:
+        """Get summary of current portfolio."""
+        total_value = self._calculate_current_exposure()
+        exposure_pct = (total_value / self.total_capital * 100) if self.total_capital > 0 else 0
+
+        return {
+            "total_capital": self.total_capital,
+            "total_exposure": total_value,
+            "exposure_percent": exposure_pct,
+            "position_count": len(self.current_positions),
+            "available_capital": self._get_available_capital(),
+            "correlation_cache_hit_rate": self._correlation_cache.hit_rate,
+        }

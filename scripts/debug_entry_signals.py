@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.DEBUG)
 from src.data.loader import load_data
 from src.strategies.entry_logic import ImprovedEntryLogic
 from src.ml.signals.enhanced import EnhancedMLSignalGenerator
-from src.market.regime import MarketRegimeAnalyzer
+from src.market.regime_detector import MarketRegimeDetector as MarketRegimeAnalyzer
 
 
 def debug_ticker(ticker: str):

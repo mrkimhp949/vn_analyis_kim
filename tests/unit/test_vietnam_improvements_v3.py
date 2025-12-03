@@ -254,18 +254,18 @@ class TestEnhancedPositionSizer:
 
         sizer = EnhancedPositionSizer(total_capital=100_000_000)
 
-        # Test bull market multiplier
+        # Test bull market multiplier (positional args: confidence, signal_strength, regime_info)
         bull_mult = sizer._calculate_risk_multiplier(
-            confidence=70,
-            signal_strength="MODERATE",
-            market_regime={"regime": "BULL", "confidence": 80},
+            70,  # confidence
+            "MODERATE",  # signal_strength
+            {"regime": "BULL", "confidence": 80},  # regime_info
         )
 
         # Test bear market multiplier
         bear_mult = sizer._calculate_risk_multiplier(
-            confidence=70,
-            signal_strength="MODERATE",
-            market_regime={"regime": "BEAR", "confidence": 80},
+            70,  # confidence
+            "MODERATE",  # signal_strength
+            {"regime": "BEAR", "confidence": 80},  # regime_info
         )
 
         # Bull market should have higher multiplier

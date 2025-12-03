@@ -217,9 +217,121 @@ class StopLossCalculator:
         return targets
 
 
+class BetaCalculator:
+    """
+    Calculate stock beta relative to market index (VNINDEX).
+
+    Beta measures volatility relative to market:
+    - Beta > 1: More volatile than market
+    - Beta < 1: Less volatile than market
+    - Beta = 1: Same volatility as market
+    """
+
+    @staticmethod
+    def calculate_beta(
+        stock_df: pd.DataFrame,
+        market_df: pd.DataFrame,
+        lookback: int = 60,
+    ) -> float:
+        """
+        Calculate beta of stock relative to market.
+
+        Args:
+            stock_df: Stock OHLCV DataFrame
+            market_df: Market index (VNINDEX) DataFrame
+            lookback: Number of days for calculation
+
+        Returns:
+            Beta value (default 1.0 if calculation fails)
+        """
+        try:
+            if stock_df is None or market_df is None:
+                return 1.0
+
+            if len(stock_df) < lookback or len(market_df) < lookback:
+                return 1.0
+
+            # Calculate returns
+            stock_returns = stock_df["close"].pct_change().tail(lookback).dropna()
+            market_returns = market_df["close"].pct_change().tail(lookback).dropna()
+
+            # Align data
+            min_len = min(len(stock_returns), len(market_returns))
+            if min_len < 20:
+                return 1.0
+
+            stock_returns = stock_returns.tail(min_len)
+            market_returns = market_returns.tail(min_len)
+
+            # Calculate beta = Cov(stock, market) / Var(market)
+            covariance = stock_returns.cov(market_returns)
+            market_variance = market_returns.var()
+
+            if market_variance <= 0:
+                return 1.0
+
+            beta = covariance / market_variance
+
+            # Clamp to reasonable range
+            beta = max(0.3, min(2.5, beta))
+
+            return float(beta)
+
+        except Exception as e:
+            logger.debug(f"Beta calculation failed: {e}")
+            return 1.0
+
+    @staticmethod
+    def get_beta_adjusted_stop_loss(
+        entry_price: float,
+        beta: float,
+        base_stop_pct: float = 0.06,
+        high_beta_stop_pct: float = 0.08,
+        low_beta_stop_pct: float = 0.05,
+        high_beta_threshold: float = 1.2,
+        low_beta_threshold: float = 0.8,
+    ) -> Tuple[float, str]:
+        """
+        Calculate beta-adjusted stop loss.
+
+        Higher beta stocks get wider stops to avoid premature exit.
+        Lower beta stocks get tighter stops for better risk management.
+
+        Args:
+            entry_price: Entry price
+            beta: Stock beta
+            base_stop_pct: Base stop loss percentage
+            high_beta_stop_pct: Stop for high beta stocks
+            low_beta_stop_pct: Stop for low beta stocks
+            high_beta_threshold: Beta threshold for wider stop
+            low_beta_threshold: Beta threshold for tighter stop
+
+        Returns:
+            (stop_loss_price, reason)
+        """
+        if beta >= high_beta_threshold:
+            stop_pct = high_beta_stop_pct
+            reason = f"High beta ({beta:.2f}) - wider stop {stop_pct*100:.0f}%"
+        elif beta <= low_beta_threshold:
+            stop_pct = low_beta_stop_pct
+            reason = f"Low beta ({beta:.2f}) - tighter stop {stop_pct*100:.0f}%"
+        else:
+            # Interpolate between low and high
+            beta_range = high_beta_threshold - low_beta_threshold
+            stop_range = high_beta_stop_pct - low_beta_stop_pct
+            beta_position = (beta - low_beta_threshold) / beta_range
+            stop_pct = low_beta_stop_pct + (stop_range * beta_position)
+            reason = f"Normal beta ({beta:.2f}) - stop {stop_pct*100:.1f}%"
+
+        stop_loss = entry_price * (1 - stop_pct)
+
+        return float(stop_loss), reason
+
+
 # Singleton instances for convenience
 indicator_utils = IndicatorUtils()
 stop_loss_calculator = StopLossCalculator()
+beta_calculator = BetaCalculator()
 
 
 if __name__ == "__main__":

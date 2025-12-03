@@ -46,7 +46,7 @@ IMPORT_MAPPINGS = {
     r"from src.risk.emergency_stop import": "from src.risk.emergency_stop import",
     r"from src.risk.metrics import": "from src.risk.metrics import",
     # Market
-    r"from src.market.regime import": "from src.market.regime import",
+    r"from src.market.regime import": "from src.market.regime_detector import",
     r"from src.market.regime_proxy import": "from src.market.regime_proxy import",
     r"from src.market.sector_analysis import": "from src.market.sector_analysis import",
     r"from src.market.schedule import": "from src.market.schedule import",

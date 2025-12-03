@@ -258,6 +258,12 @@ class VietnamMarketValidator:
         Returns:
             (is_liquid, warning_message)
         """
+        # Handle empty DataFrame
+        if df is None or df.empty:
+            warning = "Insufficient data to check liquidity"
+            logger.warning(f"[{symbol}] {warning}")
+            return (False, warning)
+
         if len(df) < 20:
             warning = "Insufficient data to check liquidity"
             logger.warning(f"[{symbol}] {warning}")

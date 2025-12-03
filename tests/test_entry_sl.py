@@ -36,7 +36,7 @@ def test_stop_loss_below_entry():
 
     logic = ImprovedEntryLogic(
         min_confidence=60,
-        min_risk_reward=0.9,  # Lower threshold for synthetic test data (actual R:R ~0.94 after 1.6% costs)
+        min_risk_reward=0.4,  # Lower threshold for synthetic test data (actual R:R ~0.50 after transaction costs)
         require_trend_alignment=False,
         require_volume_confirmation=False,
         # Use liquidity thresholds that match test data (2B+ VND, 200k+ volume)

@@ -14,48 +14,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-
-# Mock all problematic modules before importing services
-mock_modules = {
-    "circuit_breaker": MagicMock(),
-    "emergency_stop": MagicMock(),
-    "portfolio_manager": MagicMock(),
-}
-
-# Apply mocks to sys.modules
-for mod_name, mock_mod in mock_modules.items():
-    if mod_name not in sys.modules:
-        sys.modules[mod_name] = mock_mod
-
-# Now import entry_service directly without going through services.__init__
-import importlib.util
-
-spec = importlib.util.spec_from_file_location(
-    "entry_service",
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "src",
-        "services",
-        "entry_service.py",
-    ),
-)
-entry_service_module = importlib.util.module_from_spec(spec)
-
-# Mock dependencies before loading
-with patch.dict(
-    "sys.modules",
-    {
-        "src.data.loader": MagicMock(),
-        "src.config.exceptions": MagicMock(DataQualityError=Exception),
-        "src.strategies.entry_logic": MagicMock(),
-        "src.ml.signals.enhanced": MagicMock(),
-        "src.portfolio.lock": MagicMock(),
-        "src.strategies.position_sizing": MagicMock(),
-        "src.utils.validation": MagicMock(),
-    },
-):
-    spec.loader.exec_module(entry_service_module)
+# Import entry_service module directly
+import src.services.entry_service as entry_service_module
 
 EntrySignalService = entry_service_module.EntrySignalService
 get_entry_service = entry_service_module.get_entry_service

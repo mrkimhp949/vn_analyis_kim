@@ -16,34 +16,52 @@ from typing import Dict, List
 @dataclass
 class LiquidityTiers:
     """
-    Liquidity requirements for different market cap tiers - OPTIMIZED VERSION
+    Liquidity requirements for different market cap tiers - OPTIMIZED VERSION v4.0
 
     Rationale:
     - Large caps: High liquidity, strict requirements for better execution
     - Mid caps: Moderate liquidity, balanced requirements
-    - Small caps: Lower volume acceptable but higher risk premium
+    - Small caps: Lower volume acceptable but with position size reduction
 
-    IMPROVED v3.0: Tightened thresholds for better trade quality
+    IMPROVED v4.0:
+    - Added position_multiplier for risk-adjusted sizing
+    - Added max_position_pct to limit exposure in illiquid stocks
     """
 
     large_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 5_000_000_000,  # TIGHTENED: 5B VND minimum
-            "min_volume": 150_000,  # TIGHTENED: 150K shares for better execution
+            "min_value": 5_000_000_000,  # 5B VND minimum
+            "min_volume": 150_000,  # 150K shares for better execution
+            "position_multiplier": 1.0,  # Full position size
+            "max_position_pct": 0.15,  # Max 15% of portfolio
         }
     )
 
     mid_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 2_000_000_000,  # TIGHTENED: 2B VND minimum
-            "min_volume": 80_000,  # TIGHTENED: 80K shares
+            "min_value": 1_500_000_000,  # LOWERED: 1.5B VND minimum (was 2B)
+            "min_volume": 60_000,  # LOWERED: 60K shares (was 80K)
+            "position_multiplier": 0.85,  # 85% position size
+            "max_position_pct": 0.12,  # Max 12% of portfolio
         }
     )
 
     small_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 1_000_000_000,  # TIGHTENED: 1B VND minimum
-            "min_volume": 50_000,  # TIGHTENED: 50K shares
+            "min_value": 800_000_000,  # LOWERED: 800M VND minimum (was 1B)
+            "min_volume": 40_000,  # LOWERED: 40K shares (was 50K)
+            "position_multiplier": 0.70,  # 70% position size (higher risk)
+            "max_position_pct": 0.08,  # Max 8% of portfolio
+        }
+    )
+
+    # NEW: Micro cap tier for speculative plays
+    micro_cap: Dict[str, float] = field(
+        default_factory=lambda: {
+            "min_value": 500_000_000,  # 500M VND minimum
+            "min_volume": 25_000,  # 25K shares
+            "position_multiplier": 0.50,  # 50% position size (high risk)
+            "max_position_pct": 0.05,  # Max 5% of portfolio
         }
     )
 
@@ -93,7 +111,7 @@ class EntryConfig:
 @dataclass
 class ExitConfig:
     """
-    Exit logic configuration - OPTIMIZED VERSION v3.0
+    Exit logic configuration - OPTIMIZED VERSION v4.0
 
     All exit thresholds and parameters - Optimized for VN market characteristics
     """
@@ -104,12 +122,24 @@ class ExitConfig:
         default_factory=lambda: [0.08, 0.15, 0.25]
     )  # 8%, 15%, 25% - balanced between capturing gains and letting winners run
 
-    # Stop loss - TIGHTENED for capital preservation
-    # VN market has ±7% daily limit, so -5% stop is reasonable
-    default_stop_loss_pct: float = -5.0  # TIGHTENED: -5% stop loss
-    stop_loss_atr_multiplier: float = 1.5  # TIGHTENED: 1.5x ATR (was 2.0)
+    # Stop loss - BETA-ADJUSTED for different stock volatilities
+    # VN market has ±7% daily limit
+    default_stop_loss_pct: float = -6.0  # Base: -6% stop loss
+    stop_loss_atr_multiplier: float = 2.0  # IMPROVED: 2.0x ATR (was 1.5 - too tight)
     stop_loss_min_pct: float = -7.0  # Max 7% risk (matches VN price limit)
-    stop_loss_max_pct: float = -3.0  # Min 3% risk
+    stop_loss_max_pct: float = -4.0  # Min 4% risk (was 3% - too tight)
+
+    # NEW: Beta-adjusted stop loss thresholds
+    # Higher beta stocks need wider stops to avoid premature exit
+    high_beta_stop_loss_pct: float = -8.0  # 8% for beta > 1.2
+    low_beta_stop_loss_pct: float = -5.0  # 5% for beta < 0.8
+    high_beta_threshold: float = 1.2  # Beta threshold for wider stop
+    low_beta_threshold: float = 0.8  # Beta threshold for tighter stop
+    use_beta_adjusted_stops: bool = True  # Enable beta-adjusted stops
+
+    # NEW: Breakeven stop configuration
+    enable_breakeven_stop: bool = True  # Move stop to breakeven after 1R
+    breakeven_activation_r: float = 1.0  # Activate after 1R profit
 
     # Trailing stop - TIGHTENED to lock profits earlier
     enable_trailing_stop: bool = True
