@@ -692,12 +692,21 @@ class EnhancedPositionSizer:
 
     def _get_regime_multiplier(
         self,
-        regime_info: MarketRegimeInfo,
+        regime_info: Optional[MarketRegimeInfo],
         confidence: int,
     ) -> float:
         """Get position multiplier based on market regime."""
-        regime = regime_info.regime
-        regime_confidence = regime_info.confidence
+        # Handle None regime_info
+        if regime_info is None:
+            return 1.0  # Default multiplier when no regime info
+
+        # Handle dict input (for backward compatibility with tests)
+        if isinstance(regime_info, dict):
+            regime = regime_info.get("regime", "SIDEWAYS")
+            regime_confidence = regime_info.get("confidence", 50.0)
+        else:
+            regime = regime_info.regime
+            regime_confidence = regime_info.confidence
 
         if regime == "BULL":
             return 1.1

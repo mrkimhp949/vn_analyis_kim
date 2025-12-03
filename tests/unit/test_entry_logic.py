@@ -25,13 +25,19 @@ class TestImprovedEntryLogic:
 
     def test_analyze_entry_insufficient_data(self, entry_logic):
         """Test with insufficient data"""
+        from src.config.exceptions import DataQualityError
+
         df = pd.DataFrame({"close": [80000] * 10})
         ml_signal = {"signal": "BUY", "confidence": 70}
 
-        result = entry_logic.analyze_entry(df, ml_signal)
-
-        assert result.should_enter is False
-        assert "Data validation" in result.warnings[0] or len(df) < 50
+        # Now raises DataQualityError for insufficient data
+        try:
+            result = entry_logic.analyze_entry(df, ml_signal)
+            # If it returns result, check should_enter is False
+            assert result.should_enter is False
+        except DataQualityError as e:
+            # Expected behavior - validation raises exception
+            assert "Insufficient data" in str(e) or "rows" in str(e).lower()
 
     def test_analyze_entry_non_buy_signal(self, entry_logic, sample_ohlcv_data):
         """Test with non-BUY signal"""

@@ -678,6 +678,7 @@ class EntrySignalService:
         self, symbol: str, df: pd.DataFrame, vnindex_df: Optional[pd.DataFrame]
     ) -> Optional[Dict[str, Any]]:
         """Run ML analysis with error handling."""
+        ml_signal = None  # Default to None for error handling
         try:
             ml_signal = self.ml_generator.analyze(df, vnindex_df)
             if ml_signal is None:
@@ -685,7 +686,8 @@ class EntrySignalService:
             return ml_signal
         except Exception as e:
             logger.warning(f"⚠️ ML analysis error for {symbol}: {type(e).__name__}: {e}")
-            return None
+            ml_signal = None  # Explicitly set to None on error
+            return ml_signal
 
     def _validate_vietnam_market(self, symbol: str, df: pd.DataFrame, entry_signal: Any) -> bool:
         """Validate Vietnam market specific rules."""
