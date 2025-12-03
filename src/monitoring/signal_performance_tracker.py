@@ -343,6 +343,63 @@ class SignalPerformanceTracker:
         """Check if technical-only signals are enabled"""
         return self.technical_enabled
 
+    def log_comparison_report(self):
+        """Generate and log comparison report"""
+        report = self.get_comparison_report()
+        logger.info(f"\n{report}")
+        return report
+
+    def get_recommendation(self) -> str:
+        """
+        Get recommendation on which signal source to use
+
+        Returns:
+            Recommendation string with winner and reasoning
+        """
+        ml_perf = self.get_performance("ml")
+        tech_perf = self.get_performance("technical_only")
+
+        if not ml_perf and not tech_perf:
+            return "⚠️ No data yet - continue monitoring both sources"
+
+        if not ml_perf:
+            return "📈 Use TECHNICAL-ONLY signals (no ML data yet)"
+
+        if not tech_perf:
+            return "🤖 Use ML signals (no technical-only data yet)"
+
+        # Both have data - compare metrics
+        ml_score = (
+            ml_perf.win_rate * 0.4
+            + (ml_perf.win_loss_ratio / 5.0) * 0.3  # Normalize to 0-1 range
+            + (ml_perf.sharpe_ratio / 3.0) * 0.3
+        )
+
+        tech_score = (
+            tech_perf.win_rate * 0.4
+            + (tech_perf.win_loss_ratio / 5.0) * 0.3
+            + (tech_perf.sharpe_ratio / 3.0) * 0.3
+        )
+
+        if ml_score > tech_score * 1.1:  # ML needs to be 10% better
+            return (
+                f"🤖 Recommend ML signals\n"
+                f"   ML: WR={ml_perf.win_rate:.1%}, W/L={ml_perf.win_loss_ratio:.2f}, Sharpe={ml_perf.sharpe_ratio:.2f}\n"
+                f"   Tech: WR={tech_perf.win_rate:.1%}, W/L={tech_perf.win_loss_ratio:.2f}, Sharpe={tech_perf.sharpe_ratio:.2f}"
+            )
+        elif tech_score > ml_score * 1.1:
+            return (
+                f"📈 Recommend TECHNICAL-ONLY signals\n"
+                f"   Tech: WR={tech_perf.win_rate:.1%}, W/L={tech_perf.win_loss_ratio:.2f}, Sharpe={tech_perf.sharpe_ratio:.2f}\n"
+                f"   ML: WR={ml_perf.win_rate:.1%}, W/L={ml_perf.win_loss_ratio:.2f}, Sharpe={ml_perf.sharpe_ratio:.2f}"
+            )
+        else:
+            return (
+                f"🤝 Both sources performing similarly - use BOTH for diversification\n"
+                f"   ML: WR={ml_perf.win_rate:.1%}, W/L={ml_perf.win_loss_ratio:.2f}\n"
+                f"   Tech: WR={tech_perf.win_rate:.1%}, W/L={tech_perf.win_loss_ratio:.2f}"
+            )
+
     def reset(self):
         """Reset all stats (for testing)"""
         self.stats = {

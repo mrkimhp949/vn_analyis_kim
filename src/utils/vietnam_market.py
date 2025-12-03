@@ -4,12 +4,15 @@ Handles Vietnam stock market rules and constraints
 """
 
 import logging
-from datetime import datetime, time
+from datetime import datetime, time as datetime_time
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Import time as datetime_time to avoid shadowing builtin time
+time = datetime_time
 
 
 class VietnamMarketValidator:
@@ -245,6 +248,64 @@ class VietnamMarketValidator:
 
         return (True, None)
 
+    def check_ato_atc_session(
+        self, current_time: Optional[datetime] = None
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Check if current time is during ATO/ATC auction sessions
+
+        Vietnam market auction sessions:
+        - ATO (Opening): 09:00 - 09:15 (high volatility, price discovery)
+        - ATC (Closing): 14:30 - 14:45 (high volatility, manipulation risk)
+
+        Args:
+            current_time: Current datetime (default: now)
+
+        Returns:
+            (is_auction_session, session_type, warning_message)
+            - is_auction_session: True if in ATO/ATC
+            - session_type: 'ATO', 'ATC', or None
+            - warning_message: Warning if in auction session
+        """
+        from src.config.constants import (
+            VN_ATO_START,
+            VN_ATO_END,
+            VN_ATC_START,
+            VN_ATC_END,
+            VN_ALLOW_ATO_ATC_TRADING,
+        )
+
+        if current_time is None:
+            current_time = datetime.now()
+
+        current_time_only = current_time.time()
+
+        # Check ATO session (9:00-9:15)
+        ato_start = time(VN_ATO_START[0], VN_ATO_START[1])
+        ato_end = time(VN_ATO_END[0], VN_ATO_END[1])
+
+        if ato_start <= current_time_only <= ato_end:
+            warning = (
+                f"ATO session (9:00-9:15): High volatility during opening auction. "
+                f"{'BLOCKED' if not VN_ALLOW_ATO_ATC_TRADING else 'Proceed with caution'}."
+            )
+            logger.warning(f"⚠️ {warning}")
+            return (True, "ATO", warning)
+
+        # Check ATC session (14:30-14:45)
+        atc_start = time(VN_ATC_START[0], VN_ATC_START[1])
+        atc_end = time(VN_ATC_END[0], VN_ATC_END[1])
+
+        if atc_start <= current_time_only <= atc_end:
+            warning = (
+                f"ATC session (14:30-14:45): High volatility during closing auction. "
+                f"{'BLOCKED' if not VN_ALLOW_ATO_ATC_TRADING else 'Proceed with caution'}."
+            )
+            logger.warning(f"⚠️ {warning}")
+            return (True, "ATC", warning)
+
+        return (False, None, None)
+
     def check_liquidity_requirements(
         self, df: pd.DataFrame, symbol: str = None
     ) -> Tuple[bool, Optional[str]]:
@@ -336,3 +397,16 @@ def check_liquidity(df: pd.DataFrame, symbol: str = None) -> Tuple[bool, Optiona
     """Check liquidity requirements"""
     validator = get_vietnam_market_validator()
     return validator.check_liquidity_requirements(df, symbol)
+
+
+def check_ato_atc_session(
+    current_time: Optional[datetime] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Check if current time is during ATO/ATC auction session
+
+    Returns:
+        (is_auction_session, session_type, warning_message)
+    """
+    validator = get_vietnam_market_validator()
+    return validator.check_ato_atc_session(current_time)

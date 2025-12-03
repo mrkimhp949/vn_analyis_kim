@@ -57,7 +57,7 @@ class PositionSizingConstants:
     # Kelly Criterion
     MAX_KELLY_PERCENT: float = 0.25  # Max 25% of capital via Kelly
     DEFAULT_KELLY_FRACTION: float = 0.5  # Half-Kelly for safety
-    MIN_KELLY_FALLBACK: float = 0.01  # 1% fallback for negative Kelly
+    # REMOVED MIN_KELLY_FALLBACK: Returns 0 for negative Kelly (strategy has negative EV)
 
     # Correlation
     HIGH_CORRELATION_THRESHOLD: float = 0.70
@@ -632,9 +632,10 @@ class EnhancedPositionSizer:
         if kelly < 0:
             logger.critical(
                 f"⚠️ NEGATIVE Kelly ({kelly:.1%})! Strategy has negative EV. "
-                f"Win rate: {win_rate:.1%}, W/L: {avg_win_loss_ratio:.2f}"
+                f"Win rate: {win_rate:.1%}, W/L: {avg_win_loss_ratio:.2f}. "
+                f"CRITICAL: Returning 0 position size - strategy needs review!"
             )
-            return PositionSizingConstants.MIN_KELLY_FALLBACK
+            return 0.0  # FIXED: Return 0 instead of fallback for negative expectancy
 
         # Apply half-Kelly for safety
         half_kelly = kelly * self.kelly_fraction

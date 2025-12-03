@@ -35,6 +35,9 @@ try:
         DEFAULT_TRAILING_STOP_DISTANCE,
         DEFAULT_TIME_DECAY_THRESHOLD,
         MAX_HOLDING_DAYS,
+        MIN_TRADES_FOR_POOR_PERFORMER,
+        POOR_PERFORMER_CONSECUTIVE_LOSSES,
+        POOR_PERFORMER_WIN_RATE_THRESHOLD,
         ROUND_TRIP_COST,
         VOLUME_SURGE_THRESHOLD,
     )
@@ -44,6 +47,9 @@ except ImportError:
     DEFAULT_TRAILING_STOP_DISTANCE = 0.03
     DEFAULT_TIME_DECAY_THRESHOLD = 0.02
     MAX_HOLDING_DAYS = 20
+    MIN_TRADES_FOR_POOR_PERFORMER = 5
+    POOR_PERFORMER_CONSECUTIVE_LOSSES = 2
+    POOR_PERFORMER_WIN_RATE_THRESHOLD = 0.35
     ROUND_TRIP_COST = 0.016
     VOLUME_SURGE_THRESHOLD = 1.5
 
@@ -1252,10 +1258,11 @@ class ImprovedExitStrategy:
 
             win_rate_threshold = self.config.poor_performer_win_rate_threshold
             consec_loss_threshold = self.config.poor_performer_consecutive_losses
+            min_trades_threshold = MIN_TRADES_FOR_POOR_PERFORMER
 
-            if stats.total_trades >= 3 and stats.win_rate < win_rate_threshold:
+            if stats.total_trades >= min_trades_threshold and stats.win_rate < win_rate_threshold:
                 is_poor = True
-                reason = f"Low win rate: {stats.win_rate:.1%}"
+                reason = f"Low win rate: {stats.win_rate:.1%} (min {min_trades_threshold} trades)"
 
             if stats.consecutive_losses >= consec_loss_threshold:
                 is_poor = True
