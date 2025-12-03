@@ -115,7 +115,7 @@ VN_MAX_INTRADAY_RANGE = 5.0  # 5% max intraday range for entry
 VN_OPTIMAL_ENTRY_TIMES = [(9, 30, 10, 30), (13, 30, 14, 30)]  # Optimal entry windows
 
 # ATO/ATC Session Handling (Auction periods - high volatility)
-VN_ATO_START = (9, 0)   # ATO: 9:00-9:15 - Opening auction
+VN_ATO_START = (9, 0)  # ATO: 9:00-9:15 - Opening auction
 VN_ATO_END = (9, 15)
 VN_ATC_START = (14, 30)  # ATC: 14:30-14:45 - Closing auction
 VN_ATC_END = (14, 45)
@@ -166,7 +166,9 @@ TECH_SCORE_POOR = 0.2
 TECH_ONLY_MIN_CONFIDENCE = 55  # Min confidence for technical-only signals
 
 # Per-Symbol Performance Tracking
-MIN_TRADES_FOR_POOR_PERFORMER = 5  # Minimum trades before labeling poor performer (increased from 3)
+MIN_TRADES_FOR_POOR_PERFORMER = (
+    5  # Minimum trades before labeling poor performer (increased from 3)
+)
 POOR_PERFORMER_WIN_RATE_THRESHOLD = 0.35  # Below 35% win rate = poor performer
 POOR_PERFORMER_CONSECUTIVE_LOSSES = 2  # 2 consecutive losses threshold
 
