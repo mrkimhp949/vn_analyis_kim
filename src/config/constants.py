@@ -114,6 +114,14 @@ VN_MIN_VOLUME = 50_000  # 50K shares minimum
 VN_MAX_INTRADAY_RANGE = 5.0  # 5% max intraday range for entry
 VN_OPTIMAL_ENTRY_TIMES = [(9, 30, 10, 30), (13, 30, 14, 30)]  # Optimal entry windows
 
+# ATO/ATC Session Handling (Auction periods - high volatility)
+VN_ATO_START = (9, 0)  # ATO: 9:00-9:15 - Opening auction
+VN_ATO_END = (9, 15)
+VN_ATC_START = (14, 30)  # ATC: 14:30-14:45 - Closing auction
+VN_ATC_END = (14, 45)
+VN_ATO_ATC_PENALTY = -15  # Reduced penalty for trading during auction periods (was -25)
+VN_ALLOW_ATO_ATC_TRADING = True  # Allow trading during ATO/ATC (with confidence penalty)
+
 # NEW: Beta-adjusted stop loss thresholds
 # Higher beta stocks need wider stops to avoid premature exit
 VN_STOP_LOSS_BASE = 0.06  # 6% base stop loss
@@ -157,6 +165,19 @@ TECH_SCORE_POOR = 0.2
 # Technical Confidence Threshold
 TECH_ONLY_MIN_CONFIDENCE = 55  # Min confidence for technical-only signals
 
+# Per-Symbol Performance Tracking
+MIN_TRADES_FOR_POOR_PERFORMER = (
+    5  # Minimum trades before labeling poor performer (increased from 3)
+)
+POOR_PERFORMER_WIN_RATE_THRESHOLD = 0.35  # Below 35% win rate = poor performer
+POOR_PERFORMER_CONSECUTIVE_LOSSES = 2  # 2 consecutive losses threshold
+
+# Foreign Flow (Smart Money) Integration
+FOREIGN_FLOW_STRONG_BUY_BONUS = 10  # +10 confidence for strong foreign buying (score > 0.5)
+FOREIGN_FLOW_MODERATE_BUY_BONUS = 5  # +5 confidence for moderate foreign buying (score > 0)
+FOREIGN_FLOW_MODERATE_SELL_PENALTY = -5  # -5 confidence for moderate foreign selling (score < 0)
+FOREIGN_FLOW_STRONG_SELL_PENALTY = -15  # -15 confidence for strong foreign selling (score < -0.5)
+
 # Export all constants
 __all__ = [
     # Vietnam Market Extended
@@ -167,6 +188,13 @@ __all__ = [
     "VN_CEILING_DISTANCE_THRESHOLD",
     "VN_FLOOR_DISTANCE_THRESHOLD",
     "VN_FLOOR_PENALTY",
+    # ATO/ATC Session
+    "VN_ATO_START",
+    "VN_ATO_END",
+    "VN_ATC_START",
+    "VN_ATC_END",
+    "VN_ATO_ATC_PENALTY",
+    "VN_ALLOW_ATO_ATC_TRADING",
     # Beta-adjusted stop loss
     "VN_STOP_LOSS_BASE",
     "VN_STOP_LOSS_HIGH_BETA",

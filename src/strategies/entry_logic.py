@@ -526,6 +526,36 @@ class ImprovedEntryLogic:
                 )
                 return (False, "Near ceiling price limit")
 
+        # FILTER 3: ATO/ATC Auction Session Check
+        try:
+            from src.utils.vietnam_market import check_ato_atc_session
+            from src.config.constants import VN_ALLOW_ATO_ATC_TRADING, VN_ATO_ATC_PENALTY
+
+            is_auction, session_type, warning = check_ato_atc_session()
+            if is_auction:
+                if not VN_ALLOW_ATO_ATC_TRADING:
+                    # Block trading during auction sessions
+                    adjustment_breakdown.append(
+                        {
+                            "filter": "ato_atc_session",
+                            "delta": None,
+                            "note": f"Blocked during {session_type} session (high volatility)",
+                        }
+                    )
+                    return (False, f"Trading blocked during {session_type} auction session")
+                else:
+                    # Allow trading but record penalty (will be applied in core filters)
+                    adjustment_breakdown.append(
+                        {
+                            "filter": "ato_atc_session",
+                            "delta": VN_ATO_ATC_PENALTY,
+                            "note": f"⚠️ {session_type} auction session - higher volatility expected",
+                            "apply_penalty": True,  # Flag to apply in core filters
+                        }
+                    )
+        except Exception as e:
+            logger.debug(f"ATO/ATC check failed: {e}")
+
         return (True, None)
 
     def _run_core_filters(
@@ -540,6 +570,12 @@ class ImprovedEntryLogic:
         adjustment_breakdown: List[Dict],
     ) -> None:
         """Run core entry filters."""
+        # Apply ATO/ATC penalty if flagged from mandatory filters
+        for item in adjustment_breakdown:
+            if item.get("apply_penalty") and item.get("delta") is not None:
+                adjustments.append(item["delta"])
+                warnings.append(item["note"])
+
         # Vietnam price limits (floor warning)
         self._apply_price_limit_filter(
             df, current_price, warnings, adjustments, adjustment_breakdown
@@ -827,6 +863,9 @@ class ImprovedEntryLogic:
                 market_regime, reasons, warnings, adjustments, adjustment_breakdown
             )
 
+        # Foreign Flow (Smart Money)
+        self._apply_foreign_flow_filter(reasons, warnings, adjustments, adjustment_breakdown)
+
     def _apply_price_action_filter(
         self,
         df: pd.DataFrame,
@@ -928,6 +967,85 @@ class ImprovedEntryLogic:
             self._add_adjustment(
                 adjustments, adjustment_breakdown, "market_breadth", +5, "Strong breadth"
             )
+
+    def _apply_foreign_flow_filter(
+        self,
+        reasons: List[str],
+        warnings: List[str],
+        adjustments: List[int],
+        adjustment_breakdown: List[Dict],
+    ) -> None:
+        """
+        Apply foreign flow (smart money) filter.
+
+        Foreign investors are considered "smart money" in Vietnam market.
+        Net buying/selling patterns can indicate market sentiment.
+        """
+        from src.config.constants import (
+            FOREIGN_FLOW_STRONG_BUY_BONUS,
+            FOREIGN_FLOW_MODERATE_BUY_BONUS,
+            FOREIGN_FLOW_MODERATE_SELL_PENALTY,
+            FOREIGN_FLOW_STRONG_SELL_PENALTY,
+        )
+
+        try:
+            from src.market.foreign_flow import get_foreign_flow_analyzer
+
+            analyzer = get_foreign_flow_analyzer()
+            flow = analyzer.analyze()
+
+            score = flow.score
+            trend = flow.trend
+            strength = flow.strength
+
+            # Strong buying (score > 0.5)
+            if score > 0.5:
+                reason_msg = f"✅ Strong foreign buying ({strength} | score: {score:.2f})"
+                reasons.append(reason_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "foreign_flow",
+                    FOREIGN_FLOW_STRONG_BUY_BONUS,
+                    reason_msg,
+                )
+            # Moderate buying (0 < score <= 0.5)
+            elif 0 < score <= 0.5:
+                reason_msg = f"✅ Foreign buying ({strength} | score: {score:.2f})"
+                reasons.append(reason_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "foreign_flow",
+                    FOREIGN_FLOW_MODERATE_BUY_BONUS,
+                    reason_msg,
+                )
+            # Moderate selling (-0.5 <= score < 0)
+            elif -0.5 <= score < 0:
+                warning_msg = f"⚠️ Foreign selling ({strength} | score: {score:.2f})"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "foreign_flow",
+                    FOREIGN_FLOW_MODERATE_SELL_PENALTY,
+                    warning_msg,
+                )
+            # Strong selling (score < -0.5)
+            elif score < -0.5:
+                warning_msg = f"⚠️ Strong foreign selling ({strength} | score: {score:.2f})"
+                warnings.append(warning_msg)
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "foreign_flow",
+                    FOREIGN_FLOW_STRONG_SELL_PENALTY,
+                    warning_msg,
+                )
+
+        except Exception as e:
+            logger.debug(f"Foreign flow analysis failed: {e}")
+            # Not critical - just skip this filter if unavailable
 
     def _apply_adjustment_scaling(
         self,
