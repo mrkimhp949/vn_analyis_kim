@@ -4,8 +4,10 @@ Fallback to VCI source when TCBS is unavailable
 """
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional, Dict
-from datetime import datetime
+
+import pandas as pd
 
 try:
     from vnstock import Vnstock
@@ -188,7 +190,7 @@ class TCBSProvider(FundamentalDataProvider):
         logger.warning(f"⚠️ Earnings dates not available from {self.source} source")
         return None
 
-    def get_foreign_flow_data(self, lookback_days: int = 20) -> Optional["pd.DataFrame"]:
+    def get_foreign_flow_data(self, lookback_days: int = 20) -> Optional[pd.DataFrame]:
         """
         Get foreign investor flow data for the market.
 
@@ -200,9 +202,6 @@ class TCBSProvider(FundamentalDataProvider):
         Returns:
             DataFrame with columns: date, buy_value, sell_value, net_value
         """
-        import pandas as pd
-        from datetime import datetime, timedelta
-
         try:
             # Get VNINDEX data with foreign trading info
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -268,8 +267,6 @@ class TCBSProvider(FundamentalDataProvider):
             Dict with current_margin, market_cap, historical data
         """
         try:
-            from datetime import datetime, timedelta
-
             # Get VNINDEX for market cap estimation
             end_date = datetime.now().strftime("%Y-%m-%d")
             start_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
@@ -338,8 +335,6 @@ class TCBSProvider(FundamentalDataProvider):
             Dict with ex_date, dividend_yield, etc.
         """
         try:
-            from datetime import datetime, timedelta
-
             stock = self.vnstock.stock(symbol=symbol, source=self.source)
 
             # Try to get dividend data
