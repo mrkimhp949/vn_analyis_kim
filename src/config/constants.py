@@ -119,8 +119,8 @@ VN_ATO_START = (9, 0)  # ATO: 9:00-9:15 - Opening auction
 VN_ATO_END = (9, 15)
 VN_ATC_START = (14, 30)  # ATC: 14:30-14:45 - Closing auction
 VN_ATC_END = (14, 45)
-VN_ATO_ATC_PENALTY = -25  # Penalty for trading during volatile auction periods
-VN_ALLOW_ATO_ATC_TRADING = False  # Block trading during ATO/ATC by default
+VN_ATO_ATC_PENALTY = -15  # Reduced penalty for trading during auction periods (was -25)
+VN_ALLOW_ATO_ATC_TRADING = True  # Allow trading during ATO/ATC (with confidence penalty)
 
 # NEW: Beta-adjusted stop loss thresholds
 # Higher beta stocks need wider stops to avoid premature exit
