@@ -86,5 +86,27 @@
     "last_trade_date": "2025-11-26",
     "blocked": false,
     "blocked_reason": ""
+  },
+  "DDV": {
+    "symbol": "DDV",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-12-03",
+    "blocked": false,
+    "blocked_reason": ""
+  },
+  "HT1": {
+    "symbol": "HT1",
+    "consecutive_losses": 0,
+    "total_trades": 1,
+    "total_wins": 1,
+    "total_losses": 0,
+    "win_rate": 1.0,
+    "last_trade_date": "2025-12-03",
+    "blocked": false,
+    "blocked_reason": ""
   }
 }

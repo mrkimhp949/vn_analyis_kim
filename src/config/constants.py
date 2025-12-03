@@ -105,13 +105,97 @@ MAX_CORRELATION = 0.65  # TIGHTENED: Maximum 0.65 correlation between positions
 DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
 
 # NEW: Vietnam Market Specific Thresholds
-VN_MIN_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND minimum daily value
+# IMPROVED: Tiered liquidity for different market caps
+VN_MIN_LIQUIDITY_VALUE = 1_000_000_000  # LOWERED: 1B VND for small caps
+VN_MID_CAP_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for mid caps
+VN_LARGE_CAP_LIQUIDITY_VALUE = 5_000_000_000  # 5B VND for large caps
+VN_CRITICAL_LIQUIDITY_VALUE = 500_000_000  # 500M VND critical minimum
 VN_MIN_VOLUME = 50_000  # 50K shares minimum
 VN_MAX_INTRADAY_RANGE = 5.0  # 5% max intraday range for entry
 VN_OPTIMAL_ENTRY_TIMES = [(9, 30, 10, 30), (13, 30, 14, 30)]  # Optimal entry windows
 
+# NEW: Beta-adjusted stop loss thresholds
+# Higher beta stocks need wider stops to avoid premature exit
+VN_STOP_LOSS_BASE = 0.06  # 6% base stop loss
+VN_STOP_LOSS_HIGH_BETA = 0.08  # 8% for beta > 1.2
+VN_STOP_LOSS_LOW_BETA = 0.05  # 5% for beta < 0.8
+VN_HIGH_BETA_THRESHOLD = 1.2  # Beta threshold for wider stop
+VN_LOW_BETA_THRESHOLD = 0.8  # Beta threshold for tighter stop
+
+# NEW: Position size adjustments by liquidity tier
+VN_SMALL_CAP_POSITION_MULT = 0.7  # 70% position size for small caps
+VN_MID_CAP_POSITION_MULT = 0.85  # 85% position size for mid caps
+VN_LARGE_CAP_POSITION_MULT = 1.0  # 100% position size for large caps
+
+# Vietnam Price Limits
+VN_CEILING_DISTANCE_THRESHOLD = 0.5  # 0.5% from ceiling = near limit
+VN_FLOOR_DISTANCE_THRESHOLD = 0.5  # 0.5% from floor = near limit
+VN_FLOOR_PENALTY = -20  # Penalty for trading near floor
+
+# Entry Logic Thresholds
+ENTRY_PULLBACK_MAX_PCT = 5.0  # Max pullback % from high
+ENTRY_PULLBACK_MIN_PCT = 1.0  # Min pullback % to consider
+ENTRY_BREAKOUT_VOLUME_MULT = 1.2  # Volume multiplier for breakout
+ENTRY_LIMIT_ORDER_MIN_DIFF = 0.5  # Min price diff for limit order (%)
+
+# Support/Resistance
+SR_BOUNCE_THRESHOLD = 0.02  # 2% bounce from support
+SR_RESISTANCE_CLOSE_THRESHOLD = 2.0  # 2% from resistance = too close
+SR_SUPPORT_SUSTAINED_MOVE = 1.01  # 1% above 3-bar avg for sustained move
+SR_VOLUME_CONFIRMATION_MULT = 1.2  # Volume multiplier for bounce confirmation
+
+# Correlation Cache
+CORRELATION_CACHE_TTL = 300  # 5 minutes TTL
+
+# Technical Scoring (0-1 scale)
+TECH_SCORE_HIGH = 1.0
+TECH_SCORE_GOOD = 0.8
+TECH_SCORE_MODERATE = 0.6
+TECH_SCORE_LOW = 0.4
+TECH_SCORE_POOR = 0.2
+
+# Technical Confidence Threshold
+TECH_ONLY_MIN_CONFIDENCE = 55  # Min confidence for technical-only signals
+
 # Export all constants
 __all__ = [
+    # Vietnam Market Extended
+    "VN_MIN_LIQUIDITY_VALUE",
+    "VN_MID_CAP_LIQUIDITY_VALUE",
+    "VN_LARGE_CAP_LIQUIDITY_VALUE",
+    "VN_CRITICAL_LIQUIDITY_VALUE",
+    "VN_CEILING_DISTANCE_THRESHOLD",
+    "VN_FLOOR_DISTANCE_THRESHOLD",
+    "VN_FLOOR_PENALTY",
+    # Beta-adjusted stop loss
+    "VN_STOP_LOSS_BASE",
+    "VN_STOP_LOSS_HIGH_BETA",
+    "VN_STOP_LOSS_LOW_BETA",
+    "VN_HIGH_BETA_THRESHOLD",
+    "VN_LOW_BETA_THRESHOLD",
+    # Position size by liquidity
+    "VN_SMALL_CAP_POSITION_MULT",
+    "VN_MID_CAP_POSITION_MULT",
+    "VN_LARGE_CAP_POSITION_MULT",
+    # Entry Logic
+    "ENTRY_PULLBACK_MAX_PCT",
+    "ENTRY_PULLBACK_MIN_PCT",
+    "ENTRY_BREAKOUT_VOLUME_MULT",
+    "ENTRY_LIMIT_ORDER_MIN_DIFF",
+    # Support/Resistance
+    "SR_BOUNCE_THRESHOLD",
+    "SR_RESISTANCE_CLOSE_THRESHOLD",
+    "SR_SUPPORT_SUSTAINED_MOVE",
+    "SR_VOLUME_CONFIRMATION_MULT",
+    # Correlation
+    "CORRELATION_CACHE_TTL",
+    # Technical Scoring
+    "TECH_SCORE_HIGH",
+    "TECH_SCORE_GOOD",
+    "TECH_SCORE_MODERATE",
+    "TECH_SCORE_LOW",
+    "TECH_SCORE_POOR",
+    "TECH_ONLY_MIN_CONFIDENCE",
     # Risk Management
     "DEFAULT_RISK_PER_TRADE",
     "DEFAULT_MAX_POSITION_SIZE",

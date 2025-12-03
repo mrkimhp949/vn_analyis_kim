@@ -1,54 +1,541 @@
 # -*- coding: utf-8 -*-
 """
-Orchestrator for the trading bot.
-Tách logic điều phối ra khỏi bot_runner_improved.py
+Trading Orchestrator - Core coordination module for the trading bot.
+
+This module orchestrates the entire trading workflow including:
+- Market scanning for entry opportunities
+- Position management and exit monitoring
+- ML signal generation with circuit breaker protection
+- Risk management integration
+- Telegram notifications
+
+Architecture:
+    - Supports both legacy mode (bot_instance, chat_id) and modern DI mode
+    - Uses atomic operations for position management to prevent race conditions
+    - Implements ML circuit breaker for automatic fallback to technical analysis
+
+Author: Trading Bot Team
 """
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
+import time
+import traceback
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional, TypedDict
 
-import pandas as pd
 import numpy as np
-from src.risk.circuit_breaker import get_circuit_breaker
-from src.data.loader import load_data
+import pandas as pd
+from telegram import Bot
+
 from src.config.exceptions import DataLoadError
+from src.config.trading_config import get_config
+from src.data.loader import load_data
+from src.data.ticker_loader import get_ticker_loader
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
 from src.ml.monitor import get_ml_model_monitor
 from src.ml.signals.enhanced import EnhancedMLSignalGenerator
-from src.portfolio.paper_trading import get_paper_account
+from src.monitoring.signal_performance import get_signal_performance_tracker
 from src.portfolio.lock import get_portfolio_lock
 from src.portfolio.manager import get_portfolio_manager
+from src.portfolio.paper_trading import get_paper_account
 from src.portfolio.risk_manager import get_portfolio_risk_manager
+from src.risk.circuit_breaker import get_circuit_breaker
 from src.strategies.manager import get_strategy_manager
-from telegram import Bot
-from src.data.ticker_loader import get_ticker_loader
 
-# Import các thành phần cần thiết từ project
-# (Giả định các import này vẫn hoạt động sau khi tách file)
-from src.config.legacy_config import MAX_SCAN_UNIVERSE, MIN_VOLUME
-from src.monitoring.signal_performance import get_signal_performance_tracker
+# =============================================================================
+# TYPE DEFINITIONS
+# =============================================================================
 
-# Get LOOKBACK safely with fallback
-try:
-    from src.config.legacy_config import LOOKBACK
 
-    if LOOKBACK is None or not isinstance(LOOKBACK, int):
-        LOOKBACK = 200
-except Exception as e:
-    logging.warning(f"Failed to import LOOKBACK from config: {e}")
-    LOOKBACK = 200  # Fallback value
+class MarketRegime(TypedDict, total=False):
+    """Type definition for market regime data."""
 
-# Ensure LOOKBACK is valid
-if not isinstance(LOOKBACK, int) or LOOKBACK < 50:
-    logging.warning(f"Invalid LOOKBACK value: {LOOKBACK}, using 200")
-    LOOKBACK = 200
+    regime: str
+    confidence: int
+    tradeable: bool
+    volatility: Optional[float]
+    trend: Optional[str]
+
+
+class PendingExitData(TypedDict):
+    """Type definition for pending exit data."""
+
+    pos_data: Dict[str, Any]
+    exit_decision: Any
+    current_price: float
+    timestamp: str
+
+
+class ScanResult(TypedDict, total=False):
+    """Type definition for scan result."""
+
+    symbol: str
+    signal: bool
+    skipped_buy: bool
+    warnings: List[str]
+    is_watchlist: bool
+
+
+class MLFailureReason(Enum):
+    """Categorized ML failure reasons for monitoring."""
+
+    DATA_QUALITY = "data_quality"
+    VNINDEX_LOAD_FAIL = "vnindex_load_fail"
+    MODEL_ERROR = "model_error"
+    FEATURE_ERROR = "feature_error"
+    TIMEOUT = "timeout"
+    UNKNOWN = "unknown"
+
+
+# =============================================================================
+# CONFIGURATION DATACLASSES
+# =============================================================================
+
+
+@dataclass
+class MLCircuitBreakerConfig:
+    """Configuration for ML circuit breaker behavior."""
+
+    # Thresholds
+    failure_threshold: float = 0.05  # Disable ML at 5% failure rate
+    recovery_threshold: float = 0.02  # Re-enable at 2% failure rate
+    min_samples: int = 50  # Minimum attempts before activating
+
+    # Strict mode settings (when circuit breaker active)
+    strict_confidence_threshold: int = 70  # Higher confidence required
+    strict_size_multiplier: float = 0.5  # Reduce position size by 50%
+
+    @classmethod
+    def from_env(cls) -> "MLCircuitBreakerConfig":
+        """Load config from environment variables."""
+        return cls(
+            failure_threshold=float(os.getenv("ML_CB_FAILURE_THRESHOLD", 0.05)),
+            recovery_threshold=float(os.getenv("ML_CB_RECOVERY_THRESHOLD", 0.02)),
+            min_samples=int(os.getenv("ML_CB_MIN_SAMPLES", 50)),
+            strict_confidence_threshold=int(os.getenv("ML_CB_STRICT_CONFIDENCE", 70)),
+            strict_size_multiplier=float(os.getenv("ML_CB_STRICT_SIZE_MULT", 0.5)),
+        )
+
+
+@dataclass
+class VNIndexCacheConfig:
+    """Configuration for VNINDEX caching."""
+
+    ttl_seconds: int = 3600  # Cache for 1 hour
+    min_rows: int = 50  # Minimum rows required
+
+    @classmethod
+    def from_env(cls) -> "VNIndexCacheConfig":
+        """Load config from environment variables."""
+        return cls(
+            ttl_seconds=int(os.getenv("VNINDEX_CACHE_TTL", 3600)),
+            min_rows=int(os.getenv("VNINDEX_MIN_ROWS", 50)),
+        )
+
+
+@dataclass
+class MLAnalysisConfig:
+    """Configuration for ML analysis behavior."""
+
+    max_retries: int = 2
+    retry_delay_base: float = 0.5  # Base delay in seconds
+    timeout_seconds: float = 10.0
+
+    @classmethod
+    def from_env(cls) -> "MLAnalysisConfig":
+        """Load config from environment variables."""
+        return cls(
+            max_retries=int(os.getenv("ML_MAX_RETRIES", 2)),
+            retry_delay_base=float(os.getenv("ML_RETRY_DELAY", 0.5)),
+            timeout_seconds=float(os.getenv("ML_TIMEOUT", 10.0)),
+        )
+
+
+@dataclass
+class MLMetrics:
+    """Metrics tracking for ML analysis performance."""
+
+    failure_count: int = 0
+    success_count: int = 0
+    failures_by_error: Dict[str, int] = field(default_factory=dict)
+    failures_by_symbol: Dict[str, int] = field(default_factory=dict)
+    failure_reasons: Dict[str, int] = field(
+        default_factory=lambda: {reason.value: 0 for reason in MLFailureReason}
+    )
+
+    @property
+    def total_attempts(self) -> int:
+        """Total ML analysis attempts."""
+        return self.failure_count + self.success_count
+
+    @property
+    def failure_rate(self) -> float:
+        """Calculate current failure rate."""
+        if self.total_attempts == 0:
+            return 0.0
+        return self.failure_count / self.total_attempts
+
+    def record_success(self) -> None:
+        """Record a successful ML analysis."""
+        self.success_count += 1
+
+    def record_failure(
+        self,
+        symbol: str,
+        error_type: str,
+        error_msg: str,
+    ) -> None:
+        """Record an ML analysis failure with categorization."""
+        self.failure_count += 1
+
+        # Track by error type
+        self.failures_by_error[error_type] = self.failures_by_error.get(error_type, 0) + 1
+
+        # Track by symbol
+        self.failures_by_symbol[symbol] = self.failures_by_symbol.get(symbol, 0) + 1
+
+        # Categorize failure reason
+        reason = self._categorize_failure(error_type, error_msg)
+        self.failure_reasons[reason.value] += 1
+
+    def _categorize_failure(self, error_type: str, error_msg: str) -> MLFailureReason:
+        """Categorize failure for root cause analysis."""
+        error_msg_lower = error_msg.lower()
+        error_type_lower = error_type.lower()
+
+        if "timeout" in error_type_lower or "timeout" in error_msg_lower:
+            return MLFailureReason.TIMEOUT
+        if "data_quality" in error_type_lower or any(
+            kw in error_msg_lower for kw in ["insufficient", "missing", "invalid"]
+        ):
+            return MLFailureReason.DATA_QUALITY
+        if "vnindex" in error_msg_lower:
+            return MLFailureReason.VNINDEX_LOAD_FAIL
+        if any(kw in error_msg_lower for kw in ["model", "prediction"]):
+            return MLFailureReason.MODEL_ERROR
+        if "feature" in error_msg_lower:
+            return MLFailureReason.FEATURE_ERROR
+        return MLFailureReason.UNKNOWN
+
+    def get_summary(self) -> str:
+        """Get formatted summary of ML metrics."""
+        top_errors = sorted(self.failures_by_error.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_symbols = sorted(self.failures_by_symbol.items(), key=lambda x: x[1], reverse=True)[:3]
+
+        return (
+            f"📊 ML Metrics Summary:\n"
+            f"   Total: {self.total_attempts} (✅{self.success_count} / ❌{self.failure_count})\n"
+            f"   Failure rate: {self.failure_rate:.1%}\n"
+            f"   Top errors: {', '.join(f'{err}({cnt})' for err, cnt in top_errors)}\n"
+            f"   Top failing symbols: {', '.join(f'{sym}({cnt})' for sym, cnt in top_symbols)}"
+        )
+
+
+# =============================================================================
+# HELPER CLASSES
+# =============================================================================
+
+
+class TelegramMessageFormatter:
+    """Helper class for formatting Telegram messages with proper escaping."""
+
+    @staticmethod
+    def escape_html(text: Any) -> str:
+        """Escape HTML special characters for Telegram."""
+        if text is None:
+            return ""
+        result = str(text)
+        return result.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @staticmethod
+    def escape_markdown(text: Any) -> str:
+        """Escape Markdown special characters for Telegram."""
+        if text is None:
+            return ""
+        result = str(text)
+        special_chars = [
+            "_",
+            "*",
+            "[",
+            "]",
+            "(",
+            ")",
+            "~",
+            "`",
+            ">",
+            "#",
+            "+",
+            "-",
+            "=",
+            "|",
+            "{",
+            "}",
+            ".",
+            "!",
+        ]
+        for char in special_chars:
+            result = result.replace(char, f"\\{char}")
+        return result
+
+    @classmethod
+    def format_entry_recommendation(
+        cls,
+        symbol: str,
+        entry_signal: Any,
+        position: Any,
+        market_regime: MarketRegime,
+        news_context: Optional[Dict] = None,
+    ) -> str:
+        """Format entry recommendation message in HTML format."""
+        safe_symbol = cls.escape_html(symbol)
+
+        msg = f"🎯 <b>TÍN HIỆU VÀO LỆNH - {safe_symbol}</b>\n\n"
+
+        if market_regime:
+            regime = cls.escape_html(str(market_regime.get("regime", "N/A")))
+            msg += f"📊 <b>Market:</b> {regime} ({market_regime.get('confidence', 0)}%)\n\n"
+
+        msg += f"💪 <b>Signal:</b> {entry_signal.strength.name}\n"
+        msg += f"🎲 <b>Confidence:</b> {entry_signal.confidence}%\n"
+        msg += f"📈 <b>Shares:</b> {position.shares:,} ({position.shares // 100} lô)\n"
+        msg += f"💰 <b>Value:</b> {position.value:,.0f} VNĐ ({position.position_percent:.1f}%)\n\n"
+
+        if position.recommended_entries:
+            msg += "💵 <b>GIÁ VÀO (DCA):</b>\n"
+            for entry in position.recommended_entries[:2]:
+                msg += f"  L{entry['level']}: {entry['price']:,.0f} - "
+                msg += f"{entry['shares']:,} CP ({entry['percent']}%)\n"
+            msg += "\n"
+
+        msg += f"🛑 <b>Stop Loss:</b> {entry_signal.stop_loss:,.0f} VNĐ "
+        sl_pct = (
+            (entry_signal.stop_loss - entry_signal.entry_price) / entry_signal.entry_price * 100
+        )
+        msg += f"({sl_pct:+.1f}%)\n\n"
+
+        msg += "🎯 <b>Take Profit:</b>\n"
+        for i, tp in enumerate(entry_signal.take_profit_targets[:2], 1):
+            tp_pct = ((tp - entry_signal.entry_price) / entry_signal.entry_price) * 100
+            msg += f"  TP{i}: {tp:,.0f} (+{tp_pct:.1f}%)\n"
+
+        if entry_signal.reasons:
+            msg += "\n✅ <b>Lý do:</b>\n"
+            for reason in entry_signal.reasons[:2]:
+                safe_reason = cls.escape_html(str(reason))
+                msg += f"• {safe_reason}\n"
+
+        if entry_signal.warnings:
+            safe_warning = cls.escape_html(str(entry_signal.warnings[0]))
+            msg += f"\n⚠️ <b>Cảnh báo:</b> {safe_warning}\n"
+
+        msg += f"\n💸 <b>Risk:</b> {position.max_loss:,.0f} VNĐ ({position.risk_percent:.2f}%)"
+
+        if news_context and news_context.get("articles"):
+            sentiment_label = cls.escape_html(str(news_context.get("sentiment_label", "N/A")))
+            msg += f"\n\n📰 <b>News Sentiment:</b> {sentiment_label} ({news_context.get('sentiment_score', 0):+.2f})\n"
+            for article in news_context.get("top_headlines", [])[:2]:
+                published = article.get("published_at", "")[:16].replace("T", " ")
+                title = cls.escape_html(str(article.get("title", "")))
+                source = cls.escape_html(str(article.get("source", "")))
+                msg += f"  • {title} ({source}, {published})\n"
+                if article.get("url"):
+                    msg += f"    {article['url']}\n"
+
+        return msg
+
+    @classmethod
+    def format_exit_recommendation(
+        cls,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        exit_decision: Any,
+        current_price: float,
+    ) -> str:
+        """Format exit recommendation message in HTML format."""
+        entry_price = pos_data.get("avg_price", 0)
+        shares = pos_data.get("shares", 0)
+        pnl_percent = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        pnl_amount = (current_price - entry_price) * shares
+
+        pnl_emoji = "🟢" if pnl_percent >= 0 else "🔴"
+
+        exit_reason = exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
+        safe_reason = cls.escape_html(exit_reason)
+        safe_message = cls.escape_html(exit_decision.message)
+        safe_symbol = cls.escape_html(symbol)
+
+        msg = f"📊 <b>KHUYẾN NGHỊ THOÁT LỆNH - {safe_symbol}</b>\n\n"
+        msg += "⚠️ <b>Cần xác nhận của bạn để thực hiện</b>\n\n"
+
+        msg += "📈 <b>Thông tin vị thế:</b>\n"
+        msg += f"  • Số lượng: {shares:,} CP\n"
+        msg += f"  • Giá vào: {entry_price:,.0f} VNĐ\n"
+        msg += f"  • Giá hiện tại: {current_price:,.0f} VNĐ\n"
+        msg += f"  • {pnl_emoji} P&amp;L: {pnl_percent:+.2f}% ({pnl_amount:+,.0f} VNĐ)\n\n"
+
+        msg += f"🎯 <b>Lý do thoát:</b> {safe_reason}\n"
+        msg += f"📝 <b>Chi tiết:</b> {safe_message}\n"
+        msg += f"⚡ <b>Mức độ khẩn cấp:</b> {exit_decision.urgency}/5\n\n"
+
+        msg += "💡 <b>Hành động:</b>\n"
+        msg += f"  • Gửi <code>/sell {safe_symbol}</code> để xác nhận bán\n"
+        msg += f"  • Gửi <code>/hold {safe_symbol}</code> để giữ lại\n"
+        msg += f"  • Gửi <code>/sell {safe_symbol} 50%</code> để bán một phần\n\n"
+
+        msg += f"⏰ Khuyến nghị lúc: {datetime.now().strftime('%H:%M %d/%m/%Y')}"
+
+        return msg
+
+    @classmethod
+    def format_buy_signal(
+        cls,
+        symbol: str,
+        entry_signal: Any,
+        position_size_info: Any,
+    ) -> str:
+        """Format buy signal notification message."""
+        # Calculate R:R ratio
+        try:
+            if (
+                entry_signal.take_profit_targets
+                and entry_signal.entry_price != entry_signal.stop_loss
+            ):
+                risk_reward_ratio = (
+                    entry_signal.take_profit_targets[0] - entry_signal.entry_price
+                ) / (entry_signal.entry_price - entry_signal.stop_loss)
+            else:
+                risk_reward_ratio = 0
+        except (ZeroDivisionError, IndexError):
+            risk_reward_ratio = 0
+
+        tp1_target = entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else 0
+
+        confidence_emoji = (
+            "🟢"
+            if entry_signal.confidence >= 70
+            else "🟡" if entry_signal.confidence >= 50 else "🔴"
+        )
+
+        return (
+            "**🚀 TÍN HIỆU MUA MỚI 🚀**\n\n"
+            f"**Mã:** `{symbol}`\n"
+            f"**Độ tin cậy:** `{entry_signal.confidence}%` {confidence_emoji}\n"
+            f"**Giá vào:** `{entry_signal.entry_price:,.0f}`\n"
+            f"**Mục tiêu 1:** `{tp1_target:,.0f}`\n"
+            f"**Dừng lỗ:** `{entry_signal.stop_loss:,.0f}`\n"
+            f"**R:R (TP1):** `{risk_reward_ratio:.2f}`\n\n"
+            f"**Lý do:** {', '.join(entry_signal.reasons)}\n\n"
+            "**--- Quản lý vốn ---**\n"
+            f"**Số CP mua:** `{position_size_info.shares}`\n"
+            f"**Giá trị lệnh:** `{position_size_info.value:,.0f} VNĐ`\n"
+            f"**Rủi ro lệnh:** `{position_size_info.risk_amount:,.0f} VNĐ` "
+            f"({position_size_info.risk_percent:.2%})\n\n"
+        )
+
+
+class VNIndexCache:
+    """Cache manager for VNINDEX data with TTL support."""
+
+    def __init__(self, config: VNIndexCacheConfig, lookback: int = 200):
+        self._config = config
+        self._lookback = lookback
+        self._cached_df: Optional[pd.DataFrame] = None
+        self._cache_timestamp: Optional[float] = None
+        self._logger = logging.getLogger(__name__)
+
+    def get(self) -> Optional[pd.DataFrame]:
+        """
+        Get cached VNINDEX data or load fresh if cache expired.
+
+        Returns:
+            VNINDEX DataFrame or None if load fails
+        """
+        current_time = time.time()
+
+        # Check if cache is still valid
+        if self._is_cache_valid(current_time):
+            cache_age = current_time - self._cache_timestamp
+            self._logger.debug(f"✅ Using cached VNINDEX (age: {cache_age:.0f}s)")
+            return self._cached_df
+
+        # Load fresh VNINDEX
+        return self._load_fresh()
+
+    def _is_cache_valid(self, current_time: float) -> bool:
+        """Check if cache is still valid."""
+        if self._cached_df is None or self._cache_timestamp is None:
+            return False
+        cache_age = current_time - self._cache_timestamp
+        return cache_age < self._config.ttl_seconds
+
+    def _load_fresh(self) -> Optional[pd.DataFrame]:
+        """Load fresh VNINDEX data."""
+        try:
+            self._logger.info("📊 Loading VNINDEX for ML analysis...")
+            index_df = load_data("VNINDEX", lookback=self._lookback, is_index=True)
+
+            if self._validate_data(index_df):
+                self._cached_df = index_df
+                self._cache_timestamp = time.time()
+                self._logger.info(f"✅ VNINDEX loaded successfully ({len(index_df)} rows)")
+                return index_df
+
+            self._logger.warning("⚠️ VNINDEX data is empty or insufficient")
+            return self._get_stale_fallback()
+
+        except Exception as e:
+            self._logger.error(f"❌ Failed to load VNINDEX: {e}")
+            return self._get_stale_fallback()
+
+    def _validate_data(self, df: Optional[pd.DataFrame]) -> bool:
+        """Validate VNINDEX data."""
+        return df is not None and not df.empty and len(df) >= self._config.min_rows
+
+    def _get_stale_fallback(self) -> Optional[pd.DataFrame]:
+        """Return stale cache as fallback if available."""
+        if self._cached_df is not None:
+            self._logger.warning("⚠️ Using stale VNINDEX cache as fallback")
+            return self._cached_df
+        return None
+
+    def invalidate(self) -> None:
+        """Invalidate the cache."""
+        self._cached_df = None
+        self._cache_timestamp = None
+
+
+# =============================================================================
+# MAIN ORCHESTRATOR CLASS
+# =============================================================================
 
 
 class TradingOrchestrator:
     """
-    Lớp điều phối chính, quản lý toàn bộ luồng quét và giao dịch.
+    Core orchestrator for the trading bot.
+
+    Manages the entire trading workflow including:
+    - Market scanning for entry opportunities
+    - Position management and exit monitoring
+    - ML signal generation with circuit breaker protection
+    - Risk management integration
+    - Telegram notifications
+
+    Supports both legacy mode (bot_instance, chat_id) and modern DI mode.
+
+    Example:
+        # Legacy mode
+        orchestrator = TradingOrchestrator(bot, chat_id)
+
+        # Modern DI mode (via factory)
+        orchestrator = create_orchestrator()
+
+        # Run scan
+        await orchestrator.run_scan(market_regime)
     """
 
     def __init__(
@@ -56,7 +543,7 @@ class TradingOrchestrator:
         bot_instance: Optional[Bot] = None,
         chat_id: Optional[str] = None,
         vnindex_df: Optional[pd.DataFrame] = None,
-        # Dependency injection parameters (optional)
+        # Dependency injection parameters
         config: Optional[Any] = None,
         data_loader: Optional[Any] = None,
         ml_generator: Optional[Any] = None,
@@ -70,24 +557,86 @@ class TradingOrchestrator:
         paper_account: Optional[Any] = None,
     ):
         """
-        Initialize TradingOrchestrator with flexible constructor.
+        Initialize TradingOrchestrator.
 
-        Supports both legacy mode (bot_instance, chat_id) and
-        modern dependency injection mode.
-
-        Legacy usage:
-            orchestrator = TradingOrchestrator(bot, chat_id)
-
-        Modern usage (via factory):
-            orchestrator = create_orchestrator()
+        Args:
+            bot_instance: Telegram bot instance (legacy mode)
+            chat_id: Telegram chat ID (legacy mode)
+            vnindex_df: Pre-loaded VNINDEX data (optional)
+            config: Trading configuration
+            data_loader: Data loader service
+            ml_generator: ML signal generator
+            strategy_manager: Strategy manager
+            portfolio_manager: Portfolio manager
+            risk_service: Risk management service
+            entry_service: Entry logic service
+            exit_service: Exit logic service
+            notification_service: Notification service
+            circuit_breaker: Circuit breaker instance
+            paper_account: Paper trading account
         """
-        # Legacy telegram bot setup
+        self._logger = logging.getLogger(__name__)
+
+        # Telegram setup
         self.bot = bot_instance
         self.chat_id = chat_id
         self.vnindex_df = vnindex_df
 
-        # Use injected dependencies or create defaults
-        self.config = config
+        # Load configurations
+        self._trading_config = config or get_config(validate=False)
+        self._ml_cb_config = MLCircuitBreakerConfig.from_env()
+        self._vnindex_cache_config = VNIndexCacheConfig.from_env()
+        self._ml_analysis_config = MLAnalysisConfig.from_env()
+
+        # Get lookback from config
+        self._lookback = self._trading_config.data.lookback
+
+        # Initialize core services
+        self._init_services(
+            data_loader=data_loader,
+            ml_generator=ml_generator,
+            strategy_manager=strategy_manager,
+            portfolio_manager=portfolio_manager,
+            circuit_breaker=circuit_breaker,
+            paper_account=paper_account,
+        )
+
+        # Initialize optional services
+        self.risk_service = risk_service
+        self.entry_service = entry_service
+        self.exit_service = exit_service
+        self.notification_service = notification_service
+
+        # Strategy components (initialized via _setup_strategies)
+        self.entry_logic: Optional[Any] = None
+        self.position_sizer: Optional[Any] = None
+        self.exit_strategy: Optional[Any] = None
+
+        # Initialize ML tracking
+        self._ml_metrics = MLMetrics()
+        self._ml_enabled = True
+        self._ml_circuit_breaker_active = False
+
+        # Initialize VNINDEX cache
+        self._vnindex_cache = VNIndexCache(self._vnindex_cache_config, self._lookback)
+
+        # Initialize pending exits tracking
+        self._pending_exits: Dict[str, PendingExitData] = {}
+        self._pending_exits_ttl = 3600  # 1 hour
+
+        # Message formatter
+        self._formatter = TelegramMessageFormatter()
+
+    def _init_services(
+        self,
+        data_loader: Optional[Any],
+        ml_generator: Optional[Any],
+        strategy_manager: Optional[Any],
+        portfolio_manager: Optional[Any],
+        circuit_breaker: Optional[Any],
+        paper_account: Optional[Any],
+    ) -> None:
+        """Initialize core services with dependency injection or defaults."""
         self.data_loader = data_loader
         self.portfolio_manager = portfolio_manager or get_portfolio_manager()
         self.portfolio_risk_manager = get_portfolio_risk_manager(total_capital=100_000_000)
@@ -101,107 +650,804 @@ class TradingOrchestrator:
         self.circuit_breaker = circuit_breaker or get_circuit_breaker()
         self.signal_tracker = get_signal_performance_tracker()
 
-        # New injected services (optional)
-        self.risk_service = risk_service
-        self.entry_service = entry_service
-        self.exit_service = exit_service
-        self.notification_service = notification_service
+    # =========================================================================
+    # PUBLIC API
+    # =========================================================================
 
-        # Các thành phần chiến lược sẽ được lấy từ StrategyManager
-        self.entry_logic: Optional[Any] = None
-        self.position_sizer: Optional[Any] = None
-        self.exit_strategy: Optional[Any] = None
-
-        # ENHANCEMENT: ML failure tracking for monitoring and debugging
-        self._ml_failure_count = 0
-        self._ml_success_count = 0
-        self._ml_failures_by_error = {}  # {error_type: count}
-        self._ml_failures_by_symbol = {}  # {symbol: count}
-
-        # ML CIRCUIT BREAKER: Auto-disable ML when failure rate too high
-        # IMPROVEMENT: Reduced threshold from 30% to 5% (production best practice)
-        self._ml_enabled = True  # Can be disabled by circuit breaker
-        self._ml_circuit_breaker_threshold = 0.05  # Disable at 5% failure rate (was 30%)
-        self._ml_circuit_breaker_min_samples = 50  # Need 50 attempts for reliability (was 20)
-        self._ml_recovery_threshold = 0.02  # Re-enable at 2% failure rate (was 10%)
-        self._ml_circuit_breaker_active = False
-
-        # IMPROVEMENT: Track common failure patterns for debugging
-        self._ml_failure_reasons = {
-            "data_quality": 0,  # Missing/invalid data
-            "vnindex_load_fail": 0,  # VNINDEX loading errors
-            "model_error": 0,  # Model prediction errors
-            "feature_error": 0,  # Feature calculation errors
-            "timeout": 0,  # Timeout errors
-            "unknown": 0,  # Other errors
-        }
-
-        # IMPROVEMENT: Cache VNINDEX data to reduce repeated loads and failures
-        self._cached_vnindex_df = None
-        self._vnindex_cache_timestamp = None
-        self._vnindex_cache_ttl = 3600  # Cache for 1 hour (seconds)
-
-    def _get_cached_vnindex(self) -> Optional[pd.DataFrame]:
+    async def run_scan(self, market_regime: MarketRegime) -> None:
         """
-        Get cached VNINDEX data or load fresh if cache expired
+        Run comprehensive scan for trading opportunities.
 
-        IMPROVEMENT: Reduces repeated VNINDEX loads that cause ML failures
+        This is the main entry point for the scanning workflow:
+        1. Validate inputs and check circuit breaker
+        2. Setup strategies based on market regime
+        3. Check active positions for exit signals
+        4. Scan for new entry opportunities
+        5. Send summary report
+
+        Args:
+            market_regime: Current market regime data
+        """
+        # Validate and normalize market regime
+        market_regime = self._validate_market_regime(market_regime)
+
+        # Setup strategies based on market regime
+        self._setup_strategies(market_regime)
+
+        # Get current state
+        active_positions = self.portfolio_manager.get_positions()
+        existing_symbols = set(active_positions.keys())
+        self._sync_position_sizer(active_positions)
+
+        # Get scan universe
+        current_tickers = self._get_scan_universe()
+        self._logger.info(f"🔍 Quét {len(current_tickers)} mã...")
+
+        # Send scan start notification
+        await self._send_scan_start_message(current_tickers, market_regime)
+
+        # Check active positions for exits
+        await self._check_active_positions(market_regime)
+
+        # Scan for new entries
+        self._logger.info(f"\n🔍 Quét {len(current_tickers)} mã để tìm cơ hội mua mới")
+        self.portfolio_lock.clear_pending()
+
+        signal_count, watchlist_candidates = await self._scan_for_new_entries(
+            current_tickers, existing_symbols, market_regime
+        )
+
+        # Send summary report
+        await self._send_summary_report(signal_count, watchlist_candidates, market_regime)
+
+        # Cleanup stale pending exits
+        self._cleanup_stale_pending_exits()
+
+    async def confirm_exit(self, symbol: str, percent: float = 100.0) -> bool:
+        """
+        Confirm and execute exit after user confirmation.
+
+        Args:
+            symbol: Stock symbol
+            percent: Percentage to sell (default 100%)
 
         Returns:
-            VNINDEX DataFrame or None if load fails
+            True if successful
         """
-        import time
+        if symbol not in self._pending_exits:
+            await self._send_message(f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}")
+            return False
 
-        current_time = time.time()
+        pending = self._pending_exits[symbol]
 
-        # Check if cache is still valid
-        if self._cached_vnindex_df is not None and self._vnindex_cache_timestamp is not None:
-            cache_age = current_time - self._vnindex_cache_timestamp
-            if cache_age < self._vnindex_cache_ttl:
-                logging.debug(f"✅ Using cached VNINDEX (age: {cache_age:.0f}s)")
-                return self._cached_vnindex_df
+        # Update exit type if partial
+        if percent < 100:
+            pending["exit_decision"].exit_type = f"PARTIAL_{int(percent)}%"
 
-        # Load fresh VNINDEX
-        try:
-            logging.info("📊 Loading VNINDEX for ML analysis...")
-            index_df = load_data("VNINDEX", lookback=LOOKBACK, is_index=True)
+        # Execute the exit
+        await self._execute_exit(
+            symbol,
+            pending["pos_data"],
+            pending["exit_decision"],
+            pending["current_price"],
+        )
 
-            if index_df is not None and not index_df.empty and len(index_df) >= 50:
-                self._cached_vnindex_df = index_df
-                self._vnindex_cache_timestamp = current_time
-                logging.info(f"✅ VNINDEX loaded successfully ({len(index_df)} rows)")
-                return index_df
-            else:
-                logging.warning("⚠️ VNINDEX data is empty or insufficient")
-                return None
+        # Remove from pending
+        del self._pending_exits[symbol]
+        return True
 
-        except Exception as e:
-            logging.error(f"❌ Failed to load VNINDEX: {e}")
-            # Return stale cache if available as fallback
-            if self._cached_vnindex_df is not None:
-                logging.warning("⚠️ Using stale VNINDEX cache as fallback")
-                return self._cached_vnindex_df
-            return None
+    async def cancel_exit(self, symbol: str) -> bool:
+        """
+        Cancel exit recommendation (user chose to hold).
 
-    def _setup_strategies(self, market_regime: Dict):
-        """Lấy và gán các chiến lược từ StrategyManager và điều chỉnh theo thị trường."""
-        # Lấy các đối tượng chiến lược gốc
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            True if successful
+        """
+        if symbol not in self._pending_exits:
+            await self._send_message(f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}")
+            return False
+
+        del self._pending_exits[symbol]
+
+        await self._send_message(
+            f"✅ Đã hủy khuyến nghị thoát lệnh cho {symbol}. Tiếp tục giữ vị thế.",
+            parse_mode="Markdown",
+        )
+
+        self._logger.info(f"🔄 User chọn HOLD cho {symbol}, hủy khuyến nghị thoát lệnh")
+        return True
+
+    def get_pending_exits(self) -> Dict[str, PendingExitData]:
+        """Get list of pending exit recommendations."""
+        return self._pending_exits.copy()
+
+    def get_ml_metrics(self) -> MLMetrics:
+        """Get ML analysis metrics."""
+        return self._ml_metrics
+
+    def is_ml_circuit_breaker_active(self) -> bool:
+        """Check if ML circuit breaker is active."""
+        return self._ml_circuit_breaker_active
+
+    # =========================================================================
+    # MARKET REGIME & STRATEGY SETUP
+    # =========================================================================
+
+    def _validate_market_regime(self, market_regime: Optional[MarketRegime]) -> MarketRegime:
+        """Validate and normalize market regime data."""
+        if not market_regime or not isinstance(market_regime, dict):
+            self._logger.error("❌ Invalid market_regime provided to run_scan")
+            market_regime = {}
+
+        # Ensure required keys with defaults
+        return {
+            "regime": market_regime.get("regime", "SIDEWAYS"),
+            "confidence": market_regime.get("confidence", 50),
+            "tradeable": market_regime.get("tradeable", True),
+            "volatility": market_regime.get("volatility"),
+            "trend": market_regime.get("trend"),
+        }
+
+    def _setup_strategies(self, market_regime: MarketRegime) -> None:
+        """Setup and adjust strategies based on market regime."""
         strategies = self.strategy_manager.get_strategies()
         self.entry_logic = strategies["entry_logic"]
         self.position_sizer = strategies["position_sizer"]
         self.exit_strategy = strategies["exit_strategy"]
 
-        # Yêu cầu StrategyManager tự điều chỉnh dựa trên trạng thái thị trường
         self.strategy_manager.apply_market_adjustments(market_regime)
 
-        logging.info(
+        self._logger.info(
             f"🔧 Đã thiết lập và điều chỉnh chiến lược cho chế độ: {market_regime.get('regime', 'Sideways')}"
         )
 
-    def adjust_signal_with_news(self, entry_signal, news_context):
+    # =========================================================================
+    # SCAN UNIVERSE & POSITION SYNC
+    # =========================================================================
+
+    def _get_scan_universe(self) -> List[str]:
+        """Get list of tickers to scan."""
+        try:
+            return self.ticker_loader.get_validated_tickers(
+                force_validate=True,
+                min_volume=self._trading_config.data.min_volume,
+                max_tickers=1000,
+            )
+        except Exception:
+            self._logger.error("Lỗi khi lấy danh sách ticker", exc_info=True)
+            # Fallback to legacy config
+            from src.config.legacy_config import TICKERS, MAX_SCAN_UNIVERSE
+
+            return TICKERS[:MAX_SCAN_UNIVERSE]
+
+    def _sync_position_sizer(self, active_positions: Dict[str, Any]) -> None:
+        """Sync position sizer with active positions."""
+        if not self.position_sizer:
+            return
+
+        self.position_sizer.current_positions = {}
+        for symbol, pos in active_positions.items():
+            if pos.get("shares", 0) > 0:
+                entry_price = pos.get("avg_price", 0)
+                self.position_sizer.current_positions[symbol] = {
+                    "shares": pos.get("shares", 0),
+                    "entry_price": entry_price,
+                    "current_price": pos.get("metadata", {}).get("last_price", entry_price),
+                    "unrealized_pnl": 0,
+                }
+
+    # =========================================================================
+    # POSITION CHECKING & EXIT LOGIC
+    # =========================================================================
+
+    async def _check_active_positions(self, market_regime: MarketRegime) -> None:
+        """Check and process active positions for exit signals."""
+        positions = self.portfolio_manager.get_positions()
+        if not positions:
+            return
+
+        self._logger.info(f"\n📊 Kiểm tra {len(positions)} vị thế đang nắm giữ...")
+
+        tasks = [
+            self._check_single_position(symbol, pos_data, market_regime)
+            for symbol, pos_data in positions.items()
+        ]
+        await asyncio.gather(*tasks)
+
+    async def _check_single_position(
+        self,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        market_regime: MarketRegime,
+    ) -> None:
+        """Check a single position for exit signals."""
+        try:
+            df = load_data(symbol, lookback=self._lookback)
+            if df.empty:
+                return
+
+            current_price = df.iloc[-1]["close"]
+
+            # Update current price in portfolio
+            try:
+                self.portfolio_manager.update_position_price(symbol, float(current_price))
+            except Exception:
+                self._logger.debug(f"Không thể cập nhật last_price cho {symbol}")
+
+            # ML analysis for exit decision
+            ml_signal = await self._get_ml_signal(df, symbol, context="exit_check")
+
+            # Check exit conditions
+            exit_decision = self.exit_strategy.check_exit(
+                symbol=symbol,
+                entry_price=pos_data["avg_price"],
+                current_price=current_price,
+                stop_loss=pos_data.get("stop_loss"),
+                take_profit_targets=pos_data.get("take_profit_targets", []),
+                entry_date=datetime.fromisoformat(pos_data["entry_date"]),
+                df=df,
+                ml_signal=ml_signal,
+                market_regime=market_regime,
+                partial_exits=pos_data.get("partial_exits", []),
+            )
+
+            if exit_decision and exit_decision.should_exit:
+                await self._handle_exit_decision(symbol, pos_data, exit_decision, current_price)
+
+        except Exception:
+            self._logger.error(f"Lỗi khi kiểm tra vị thế {symbol}", exc_info=True)
+
+    async def _handle_exit_decision(
+        self,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        exit_decision: Any,
+        current_price: float,
+    ) -> None:
+        """Handle exit decision based on configuration."""
+        auto_sell = os.getenv("AUTO_SELL", "false").lower() == "true"
+        auto_sell_stop_loss = os.getenv("AUTO_SELL_STOP_LOSS", "true").lower() == "true"
+
+        from src.strategies.exit_logic import ExitReason
+
+        is_stop_loss = exit_decision.exit_reason == ExitReason.STOP_LOSS
+        is_emergency = exit_decision.exit_reason in [
+            ExitReason.MARKET_CRASH,
+            ExitReason.EMERGENCY_EXIT,
+        ]
+
+        should_auto_sell = auto_sell or (is_stop_loss and auto_sell_stop_loss) or is_emergency
+
+        if should_auto_sell:
+            await self._execute_exit(symbol, pos_data, exit_decision, current_price)
+        else:
+            await self._send_exit_recommendation(symbol, pos_data, exit_decision, current_price)
+
+    async def _execute_exit(
+        self,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        exit_decision: Any,
+        current_price: float,
+    ) -> None:
+        """Execute exit order."""
+        try:
+            # Send exit notification
+            msg = self.exit_strategy.format_exit_message(symbol, exit_decision, use_html=True)
+            await self._send_message(msg, parse_mode="HTML")
+
+            # Record trade result
+            pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
+            self.circuit_breaker.record_trade(pnl)
+
+            # Get exit reason
+            exit_reason_str = (
+                exit_decision.exit_reason.value
+                if exit_decision.exit_reason
+                else exit_decision.message
+            )
+
+            # Execute sell
+            success, sell_msg, _ = self.paper_account.execute_sell(
+                symbol=symbol,
+                price=current_price,
+                exit_type=exit_decision.exit_type,
+                reason=exit_reason_str,
+            )
+
+            if success:
+                self._logger.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
+                await self._post_exit_cleanup(symbol)
+            else:
+                self._logger.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
+                await self._send_message(f"❌ Lỗi bán {symbol}: {sell_msg}")
+
+        except Exception:
+            self._logger.error(f"Lỗi khi thực hiện thoát lệnh {symbol}", exc_info=True)
+
+    async def _post_exit_cleanup(self, symbol: str) -> None:
+        """Cleanup after successful exit."""
+        # Check if position still exists
+        updated_positions = self.portfolio_manager.get_positions()
+        position_still_exists = (
+            symbol in updated_positions and updated_positions[symbol].get("shares", 0) > 0
+        )
+
+        if not position_still_exists:
+            self.exit_strategy.clear_position_tracking(symbol)
+            self._logger.debug(f"🧹 Cleared tracking for {symbol} (position fully closed)")
+
+        # Record PnL and check circuit breaker
+        current_pnl = self.portfolio_manager.get_daily_pnl_pct()
+        self.circuit_breaker.record_pnl(current_pnl)
+
+        if self.circuit_breaker.is_active():
+            self._logger.warning(
+                f"⚠️ Circuit breaker đã kích hoạt sau khi thoát {symbol}. PnL: {current_pnl:.2%}"
+            )
+            await self._send_message(
+                "🚨 *CIRCUIT BREAKER KÍCH HOẠT*\n\n"
+                f"Sau khi thoát {symbol}\n"
+                f"PnL hiện tại: {current_pnl:.2%}\n"
+                f"Lý do: {self.circuit_breaker.tripped_reason}",
+                parse_mode="Markdown",
+            )
+
+    async def _send_exit_recommendation(
+        self,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        exit_decision: Any,
+        current_price: float,
+    ) -> None:
+        """Send exit recommendation and wait for user confirmation."""
+        try:
+            msg = self._formatter.format_exit_recommendation(
+                symbol, pos_data, exit_decision, current_price
+            )
+            await self._send_message(msg, parse_mode="HTML")
+
+            self._logger.info(
+                f"📤 Đã gửi khuyến nghị THOÁT LỆNH cho {symbol}, chờ xác nhận từ user"
+            )
+
+            # Store pending exit
+            self._pending_exits[symbol] = {
+                "pos_data": pos_data,
+                "exit_decision": exit_decision,
+                "current_price": current_price,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        except Exception:
+            self._logger.error(f"Lỗi khi gửi khuyến nghị thoát lệnh {symbol}", exc_info=True)
+
+    # =========================================================================
+    # ENTRY SCANNING
+    # =========================================================================
+
+    async def _scan_for_new_entries(
+        self,
+        current_tickers: List[str],
+        existing_symbols: set,
+        market_regime: MarketRegime,
+    ) -> tuple[int, List[Dict]]:
+        """Scan tickers in parallel for new entry signals."""
+        signal_count = 0
+        watchlist_candidates: List[Dict] = []
+        no_signal_symbols: List[str] = []
+        no_signal_reasons: Dict[str, List[str]] = {}
+        results_lock = asyncio.Lock()
+
+        async def scan_ticker(symbol: str) -> None:
+            nonlocal signal_count
+            try:
+                if self.portfolio_lock.is_pending(symbol):
+                    return
+
+                entry_result = await self._process_ticker_for_entry(symbol, market_regime)
+
+                if entry_result:
+                    async with results_lock:
+                        if entry_result.get("signal"):
+                            signal_count += 1
+                        elif entry_result.get("warnings"):
+                            no_signal_symbols.append(entry_result["symbol"])
+                            no_signal_reasons[entry_result["symbol"]] = entry_result["warnings"]
+                        elif entry_result.get("is_watchlist"):
+                            watchlist_candidates.append(entry_result)
+
+            except Exception as e:
+                self._logger.error(f"Lỗi nghiêm trọng khi quét mã {symbol}: {e}", exc_info=True)
+                async with results_lock:
+                    no_signal_symbols.append(symbol)
+                    no_signal_reasons[symbol] = [f"Lỗi khi quét: {str(e)}"]
+
+        tasks = [scan_ticker(symbol) for symbol in current_tickers]
+        await asyncio.gather(*tasks)
+
+        # Send summary if no signals found
+        if signal_count == 0 and no_signal_symbols:
+            await self._send_no_signal_summary(
+                current_tickers, no_signal_symbols, no_signal_reasons
+            )
+
+        return signal_count, watchlist_candidates
+
+    async def _process_ticker_for_entry(
+        self,
+        symbol: str,
+        market_regime: MarketRegime,
+    ) -> Optional[ScanResult]:
         """
-        Điều chỉnh tín hiệu entry dựa trên phân tích tin tức.
+        Process a single ticker for entry signal.
+
+        Returns:
+            ScanResult with signal info, warnings, or watchlist status
         """
+        try:
+            # Load data
+            df = load_data(symbol, lookback=self._lookback)
+            if df.empty or len(df) < 50:
+                return {
+                    "symbol": symbol,
+                    "warnings": ["Không đủ dữ liệu lịch sử"],
+                    "is_watchlist": False,
+                }
+
+            # Get ML signal
+            ml_signal = await self._get_ml_signal(df, symbol, context="entry_scan")
+
+            # Check ML circuit breaker strict mode
+            ml_cb_strict_mode = self._ml_circuit_breaker_active
+            if ml_cb_strict_mode:
+                self._logger.warning(
+                    f"⚠️ [{symbol}] ML circuit breaker active - applying strict risk controls"
+                )
+
+            # Validate entry logic
+            if not self.entry_logic:
+                self._logger.error("❌ Entry logic not initialized")
+                return {
+                    "symbol": symbol,
+                    "warnings": ["Lỗi: Entry logic chưa được khởi tạo"],
+                    "is_watchlist": False,
+                }
+
+            # Analyze entry
+            entry_signal = self.entry_logic.analyze_entry(
+                df=df,
+                ml_signal=ml_signal,
+                market_regime=market_regime,
+                symbol=symbol,
+            )
+
+            # Validate entry signal
+            if not entry_signal or not entry_signal.should_enter:
+                warnings = getattr(entry_signal, "warnings", ["Không rõ lý do"])
+                return {"symbol": symbol, "warnings": warnings, "is_watchlist": False}
+
+            # Apply strict mode confidence check
+            if ml_cb_strict_mode:
+                threshold = self._ml_cb_config.strict_confidence_threshold
+                if entry_signal.confidence < threshold:
+                    self._logger.warning(
+                        f"⚠️ [{symbol}] ML CB strict mode: Confidence {entry_signal.confidence}% < {threshold}%"
+                    )
+                    return {
+                        "symbol": symbol,
+                        "warnings": [
+                            f"ML circuit breaker active - need confidence ≥{threshold}% (got {entry_signal.confidence}%)"
+                        ],
+                        "is_watchlist": False,
+                    }
+
+            # Track signal source
+            is_ml_signal = getattr(entry_signal, "telemetry", {}).get("signal_source") == "ml"
+            self.signal_tracker.track_signal(is_ml_signal=is_ml_signal)
+
+            # Process entry if signal is valid
+            return await self._process_valid_entry(
+                symbol, df, entry_signal, market_regime, ml_cb_strict_mode, is_ml_signal
+            )
+
+        except DataLoadError:
+            return {"symbol": symbol, "warnings": ["Lỗi tải dữ liệu"], "is_watchlist": False}
+        except Exception as e:
+            self._logger.error(f"[{symbol}] Lỗi không xác định: {e}", exc_info=True)
+            return {
+                "symbol": symbol,
+                "warnings": [f"Lỗi không xác định: {str(e)}"],
+                "is_watchlist": False,
+            }
+
+    async def _process_valid_entry(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        entry_signal: Any,
+        market_regime: MarketRegime,
+        ml_cb_strict_mode: bool,
+        is_ml_signal: bool,
+    ) -> Optional[ScanResult]:
+        """Process a valid entry signal."""
+        # Get current positions
+        current_positions = self.portfolio_manager.get_positions()
+        active_positions = {
+            sym: pos for sym, pos in current_positions.items() if pos.get("shares", 0) > 0
+        }
+
+        # Check if already has position
+        if symbol in active_positions:
+            self._logger.info(f"ℹ️ [{symbol}] Đã có position active, chỉ gửi notification")
+
+        # Calculate position size
+        position_size_info = self._calculate_position_size(
+            symbol, entry_signal, market_regime, ml_cb_strict_mode
+        )
+
+        if not position_size_info or position_size_info.shares <= 0:
+            return None
+
+        # If already has position, just send notification
+        if symbol in active_positions:
+            await self._send_buy_notification(symbol, entry_signal, position_size_info)
+            return {"signal": True, "skipped_buy": True}
+
+        # Execute buy for new position
+        return await self._execute_buy(
+            symbol, entry_signal, position_size_info, active_positions, is_ml_signal
+        )
+
+    def _calculate_position_size(
+        self,
+        symbol: str,
+        entry_signal: Any,
+        market_regime: MarketRegime,
+        ml_cb_strict_mode: bool,
+    ) -> Optional[Any]:
+        """Calculate position size with optional strict mode reduction."""
+        take_profit_price = (
+            entry_signal.take_profit_targets[0]
+            if entry_signal.take_profit_targets
+            else entry_signal.entry_price * 1.1
+        )
+
+        position_size_info = self.position_sizer.calculate_position_size(
+            symbol=symbol,
+            entry_price=entry_signal.entry_price,
+            stop_loss=entry_signal.stop_loss,
+            take_profit=take_profit_price,
+            confidence=entry_signal.confidence,
+            signal_strength=entry_signal.strength.name,
+            market_regime=market_regime,
+        )
+
+        # Apply strict mode size reduction
+        if ml_cb_strict_mode and position_size_info:
+            multiplier = self._ml_cb_config.strict_size_multiplier
+            original_shares = position_size_info.shares
+            original_value = position_size_info.value
+
+            position_size_info.shares = max(1, int(position_size_info.shares * multiplier))
+            position_size_info.value = position_size_info.shares * entry_signal.entry_price
+
+            self._logger.info(
+                f"📊 [{symbol}] ML CB strict mode: Position size reduced from "
+                f"{original_shares} → {position_size_info.shares} shares"
+            )
+
+        return position_size_info
+
+    async def _execute_buy(
+        self,
+        symbol: str,
+        entry_signal: Any,
+        position_size_info: Any,
+        active_positions: Dict[str, Any],
+        is_ml_signal: bool,
+    ) -> Optional[ScanResult]:
+        """Execute buy order with atomic position management."""
+        total_capital = self._trading_config.trading.total_capital
+
+        with self.portfolio_lock.atomic_position_add(
+            symbol=symbol,
+            position_value=position_size_info.value,
+            total_capital=total_capital,
+            current_positions=active_positions,
+        ) as (can_add, reason):
+            if not can_add:
+                self._logger.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
+                return None
+
+            take_profit = (
+                entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else None
+            )
+
+            trade_metadata = {
+                "signal_source": "ml" if is_ml_signal else "technical",
+                "confidence": entry_signal.confidence,
+                "signal_reason": ", ".join(entry_signal.reasons),
+            }
+
+            success, message, trade = self.paper_account.execute_buy(
+                symbol=symbol,
+                shares=position_size_info.shares,
+                price=entry_signal.entry_price,
+                signal_confidence=entry_signal.confidence,
+                signal_reason=", ".join(entry_signal.reasons),
+                stop_loss=entry_signal.stop_loss,
+                take_profit=take_profit,
+                is_limit_order=getattr(entry_signal, "is_limit_order", False),
+                limit_price=getattr(entry_signal, "limit_price", None),
+                metadata=trade_metadata,
+            )
+
+            if not success:
+                self._logger.error(f"❌ Paper trade failed for {symbol}: {message}")
+                raise Exception(f"Paper trade failed: {message}")
+
+            self._logger.info(f"✅ Paper trade successful: {message}")
+
+            # Send notification (non-blocking)
+            try:
+                await self._send_buy_notification(symbol, entry_signal, position_size_info)
+            except Exception as e:
+                self._logger.error(f"⚠️ Failed to send buy notification for {symbol}: {e}")
+
+            return {"signal": True}
+
+    # =========================================================================
+    # ML SIGNAL GENERATION
+    # =========================================================================
+
+    async def _get_ml_signal(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        context: str = "unknown",
+    ) -> Optional[Any]:
+        """
+        Get ML signal with retry logic and circuit breaker protection.
+
+        Args:
+            df: Price data DataFrame
+            symbol: Stock symbol
+            context: Context for logging (e.g., "entry_scan", "exit_check")
+
+        Returns:
+            ML signal or None if failed/disabled
+        """
+        if not self._should_use_ml():
+            return None
+
+        config = self._ml_analysis_config
+        error_type = "unknown"
+        error_msg = ""
+
+        for attempt in range(config.max_retries + 1):
+            try:
+                # Validate data
+                if df is None or len(df) < 50:
+                    raise ValueError(f"Insufficient data: {len(df) if df is not None else 0} rows")
+
+                if "close" not in df.columns or "volume" not in df.columns:
+                    raise ValueError(f"Missing required columns: {list(df.columns)}")
+
+                # Get cached VNINDEX
+                cached_vnindex = self._vnindex_cache.get()
+
+                # Run ML analysis with timeout
+                ml_signal = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.ml_generator.analyze,
+                        df,
+                        index_df=cached_vnindex,
+                        symbol=symbol,
+                    ),
+                    timeout=config.timeout_seconds,
+                )
+
+                if ml_signal is not None:
+                    self._ml_metrics.record_success()
+                    if attempt > 0:
+                        self._logger.info(
+                            f"✅ ML analysis succeeded on retry {attempt} for {symbol}"
+                        )
+                    return ml_signal
+
+            except asyncio.TimeoutError:
+                error_type = "timeout"
+                error_msg = f"ML analysis timed out after {config.timeout_seconds}s"
+                if attempt < config.max_retries:
+                    self._logger.warning(
+                        f"⏰ ML timeout for {symbol}, retrying ({attempt + 1}/{config.max_retries})..."
+                    )
+                    await asyncio.sleep(config.retry_delay_base * (2**attempt))
+                    continue
+
+            except ValueError as e:
+                error_type = "data_quality"
+                error_msg = str(e)
+                break  # Don't retry data quality errors
+
+            except Exception as e:
+                error_type = type(e).__name__
+                error_msg = str(e)
+                if attempt < config.max_retries and "VNINDEX" not in str(e):
+                    self._logger.warning(
+                        f"⚠️ ML error for {symbol}, retrying ({attempt + 1}/{config.max_retries}): {e}"
+                    )
+                    await asyncio.sleep(config.retry_delay_base * (2**attempt))
+                    continue
+                break
+
+        # Track failure
+        self._logger.error(
+            f"❌ ML analysis failed ({context}) for {symbol} after {attempt} retries: {error_type}: {error_msg}"
+        )
+        self._logger.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
+
+        self._ml_metrics.record_failure(symbol, error_type, error_msg)
+        await self._check_ml_circuit_breaker()
+
+        return None
+
+    def _should_use_ml(self) -> bool:
+        """Check if ML analysis should be used."""
+        if not self._ml_enabled:
+            return False
+        return os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
+
+    async def _check_ml_circuit_breaker(self) -> None:
+        """Check and update ML circuit breaker status."""
+        metrics = self._ml_metrics
+        config = self._ml_cb_config
+
+        if metrics.total_attempts < config.min_samples:
+            return
+
+        failure_rate = metrics.failure_rate
+
+        # Check if should TRIP circuit breaker
+        if not self._ml_circuit_breaker_active and failure_rate >= config.failure_threshold:
+            self._ml_circuit_breaker_active = True
+            self._ml_enabled = False
+
+            alert_msg = (
+                f"🚨 ML CIRCUIT BREAKER ACTIVATED 🚨\n\n"
+                f"Failure rate: {failure_rate:.1%} (threshold: {config.failure_threshold:.1%})\n"
+                f"Total failures: {metrics.failure_count}/{metrics.total_attempts}\n\n"
+                f"🔧 Switching to TECHNICAL ANALYSIS only\n"
+                f"ML will auto-recover when failure rate drops below {config.recovery_threshold:.1%}"
+            )
+
+            self._logger.critical(alert_msg)
+            await self._send_message(alert_msg, parse_mode="Markdown")
+
+        # Check if should RECOVER
+        elif self._ml_circuit_breaker_active and failure_rate <= config.recovery_threshold:
+            self._ml_circuit_breaker_active = False
+            self._ml_enabled = True
+
+            recovery_msg = (
+                f"✅ ML CIRCUIT BREAKER RECOVERED\n\n"
+                f"Failure rate improved: {failure_rate:.1%}\n"
+                f"🤖 ML analysis RE-ENABLED"
+            )
+
+            self._logger.info(recovery_msg)
+            await self._send_message(recovery_msg, parse_mode="Markdown")
+
+    # =========================================================================
+    # NEWS ANALYSIS
+    # =========================================================================
+
+    def adjust_signal_with_news(self, entry_signal: Any, news_context: Optional[Dict]) -> Any:
+        """Adjust entry signal based on news analysis."""
         if not news_context or not news_context.get("articles"):
             return entry_signal
 
@@ -214,7 +1460,7 @@ class TradingOrchestrator:
             "dividend" in article.get("topics", []) for article in news_context.get("articles", [])
         )
 
-        # ENHANCED IMPACT
+        # Apply sentiment adjustments
         if news_sentiment >= 0.8:
             entry_signal.confidence = min(100, entry_signal.confidence + 15)
             entry_signal.reasons.append(f"📰 Tin tức RẤT tích cực ({news_sentiment:+.2f})")
@@ -236,6 +1482,7 @@ class TradingOrchestrator:
             entry_signal.confidence = min(100, entry_signal.confidence + 5)
             entry_signal.reasons.append("💰 Tin cổ tức")
 
+        # Check confidence threshold
         if (
             entry_signal.should_enter
             and self.entry_logic
@@ -248,569 +1495,85 @@ class TradingOrchestrator:
 
         return entry_signal
 
-    def format_entry_recommendation(
-        self, symbol, entry_signal, position, market_regime, news_context=None
-    ):
-        """Format entry recommendation message"""
+    # =========================================================================
+    # NOTIFICATIONS
+    # =========================================================================
 
-        msg = f"🎯 *TÍN HIỆU VÀO LỆNH - {symbol}*\n\n"
-
-        if market_regime:
-            msg += f"📊 *Market:* {market_regime['regime']} ({market_regime.get('confidence', 0)}%)\n\n"
-
-        msg += f"💪 *Signal:* {entry_signal.strength.name}\n"
-        msg += f"🎲 *Confidence:* {entry_signal.confidence}%\n"
-        msg += f"📈 *Shares:* {position.shares:,} ({position.shares//100} lô)\n"
-        msg += f"💰 *Value:* {position.value:,.0f} VNĐ ({position.position_percent:.1f}%)\n\n"
-
-        if position.recommended_entries:
-            msg += "💵 *GIÁ VÀO (DCA):*\n"
-            for entry in position.recommended_entries[:2]:
-                msg += f"  L{entry['level']}: {entry['price']:,.0f} - "
-                msg += f"{entry['shares']:,} CP ({entry['percent']}%)\n"
-            msg += "\n"
-
-        msg += f"🛑 *Stop Loss:* {entry_signal.stop_loss:,.0f} VNĐ "
-        sl_pct = (
-            (entry_signal.stop_loss - entry_signal.entry_price) / entry_signal.entry_price * 100
-        )
-        msg += f"({sl_pct:+.1f}%)\n\n"
-
-        msg += "🎯 *Take Profit:*\n"
-        for i, tp in enumerate(entry_signal.take_profit_targets[:2], 1):
-            tp_pct = ((tp - entry_signal.entry_price) / entry_signal.entry_price) * 100
-            msg += f"  TP{i}: {tp:,.0f} (+{tp_pct:.1f}%)\n"
-
-        if entry_signal.reasons:
-            msg += "\n✅ *Lý do:*\n"
-            for reason in entry_signal.reasons[:2]:
-                msg += f"• {reason}\n"
-
-        if entry_signal.warnings:
-            msg += f"\n⚠️ *Cảnh báo:* {entry_signal.warnings[0]}\n"
-
-        msg += f"\n💸 *Risk:* {position.max_loss:,.0f} VNĐ ({position.risk_percent:.2f}%)"
-
-        if news_context and news_context.get("articles"):
-            msg += f"\n\n📰 *News Sentiment:* {news_context['sentiment_label']} ({news_context['sentiment_score']:+.2f})\n"
-            for article in news_context.get("top_headlines", [])[:2]:
-                published = article.get("published_at", "")[:16].replace("T", " ")
-                msg += f"  • {article['title']} ({article['source']}, {published})\n"
-                if article.get("url"):
-                    msg += f"    {article['url']}\n"
-
-        return msg
-
-    async def run_scan(self, market_regime: Dict):
-        """
-        Chạy quá trình quét toàn diện để tìm kiếm cơ hội và quản lý vị thế.
-        """
-        # VALIDATION: Validate inputs
-        if not market_regime or not isinstance(market_regime, dict):
-            logging.error("❌ Invalid market_regime provided to run_scan")
-            market_regime = {"regime": "UNKNOWN", "confidence": 0, "tradeable": False}
-
-        # Ensure required keys exist
-        market_regime.setdefault("regime", "SIDEWAYS")
-        market_regime.setdefault("confidence", 50)
-        market_regime.setdefault("tradeable", True)
-
-        # 0. KIỂM TRA NGẮT MẠCH (CIRCUIT BREAKER)
-        vnindex_change = 0.0
-        try:
-            if (
-                self.vnindex_df is not None
-                and not self.vnindex_df.empty
-                and len(self.vnindex_df) > 1
-            ):
-                vnindex_change = self.vnindex_df["close"].pct_change().iloc[-1]
-                if pd.isna(vnindex_change):
-                    vnindex_change = 0.0
-            else:
-                logging.warning("⚠️ VNINDEX data unavailable for circuit breaker check")
-        except Exception as e:
-            logging.error(f"❌ Error calculating VNINDEX change: {e}")
-            vnindex_change = 0.0
-
-        # Lấy PNL thực tế từ portfolio manager nếu có
-        current_pnl_pct = 0.0
-        try:
-            current_pnl_pct = self.portfolio_manager.get_daily_pnl_pct()
-        except Exception as e:
-            logging.error(f"❌ Error getting daily PnL: {e}")
-            current_pnl_pct = 0.0
-
-        # if self.circuit_breaker.check_and_update(
-        #     portfolio_pnl_pct=current_pnl_pct, vnindex_change_pct=vnindex_change
-        # ):
-        #     reason = self.circuit_breaker.tripped_reason
-        #     logging.critical(f"🚨 NGẮT MẠCH ĐANG KÍCH HOẠT: {reason}. Dừng mọi lệnh mua mới.")
-        #     await self.bot.send_message(
-        #         self.chat_id,
-        #         f"🚨 *NGẮT MẠCH TỰ ĐỘNG*\n\nLý do: {reason}\n\nTạm dừng tất cả các lệnh mua mới.",
-        #         parse_mode="Markdown",
-        #     )
-        #     # Setup strategies before checking positions (exit_strategy needed)
-        #     self._setup_strategies(market_regime)
-        #     # Vẫn cho phép kiểm tra thoát lệnh
-        #     await self.check_active_positions(market_regime)
-        #     return
-
-        # 1. THIẾT LẬP CHIẾN LƯỢC DỰA TRÊN THỊ TRƯỜNG
-        self._setup_strategies(market_regime)
-
-        # 2. LẤY DANH SÁCH MÃ VÀ VỊ THẾ HIỆN TẠI
-        active_positions = self.portfolio_manager.get_positions()
-        existing_symbols = set(active_positions.keys())
-        self.sync_position_sizer_with_active_positions(active_positions)
-
-        current_tickers = self.get_scan_universe()
-        logging.info(f"🔍 Quét {len(current_tickers)} mã...")
-
-        # 3. Gửi thông báo bắt đầu quét
-        await self.send_scan_start_message(current_tickers, market_regime)
-
-        # 4. KIỂM TRA THOÁT LỆNH TRƯỚC
-        await self.check_active_positions(market_regime)
-
-        # 5. QUÉT TÌM LỆNH MUA MỚI (SONG SONG)
-        logging.info(f"\n🔍 Quét {len(current_tickers)} mã để tìm cơ hội mua mới")
-        self.portfolio_lock.clear_pending()
-
-        signal_count, watchlist_candidates = await self.scan_for_new_entries(
-            current_tickers, existing_symbols, market_regime
-        )
-
-        # 6. GỬI BÁO CÁO TÓM TẮT
-        await self.send_summary_report(signal_count, watchlist_candidates, market_regime)
-
-    def get_scan_universe(self) -> List[str]:
-        """Lấy danh sách các mã cổ phiếu cần quét."""
-        try:
-            return self.ticker_loader.get_validated_tickers(
-                force_validate=True,
-                min_volume=MIN_VOLUME,
-                max_tickers=1000,  # Force validate để áp dụng thiết lập mới
-            )
-        except Exception:
-            logging.error("Lỗi khi lấy danh sách ticker", exc_info=True)
-            # Fallback to a default list if loader fails
-            from src.config.legacy_config import TICKERS
-
-            return TICKERS[:MAX_SCAN_UNIVERSE]
-
-    def sync_position_sizer_with_active_positions(self, active_positions: Dict):
-        """Đồng bộ position_sizer với các vị thế đang hoạt động."""
-        if not self.position_sizer:
+    async def _send_message(
+        self,
+        text: str,
+        parse_mode: Optional[str] = None,
+    ) -> None:
+        """Send message via Telegram bot."""
+        if not self.bot or not self.chat_id:
+            self._logger.warning("⚠️ Telegram bot not configured, skipping message")
             return
-        self.position_sizer.current_positions = {}
-        for symbol, pos in active_positions.items():
-            if pos.get("shares", 0) > 0:
-                # Positions in DB use 'avg_price' as entry price
-                entry_price = pos.get("avg_price", 0)
-                self.position_sizer.current_positions[symbol] = {
-                    "shares": pos.get("shares", 0),
-                    "entry_price": entry_price,
-                    # Prefer last known price from metadata if available
-                    "current_price": pos.get("metadata", {}).get("last_price", entry_price),
-                    "unrealized_pnl": 0,
-                }
 
-    async def send_scan_start_message(self, current_tickers, market_regime):
-        """Gửi thông báo bắt đầu quét qua Telegram."""
         try:
-            regime_text = market_regime.get("regime", "UNKNOWN")
             await self.bot.send_message(
                 chat_id=self.chat_id,
-                text=f"🔍 Đang quét {len(current_tickers)} mã...\n"
+                text=text,
+                parse_mode=parse_mode,
+            )
+        except Exception as e:
+            self._logger.error(f"Failed to send Telegram message: {e}")
+
+    async def _send_scan_start_message(
+        self,
+        current_tickers: List[str],
+        market_regime: MarketRegime,
+    ) -> None:
+        """Send scan start notification."""
+        try:
+            regime_text = market_regime.get("regime", "UNKNOWN")
+            await self._send_message(
+                f"🔍 Đang quét {len(current_tickers)} mã...\n"
                 f"Chế độ thị trường: *{regime_text}* (Confidence: {market_regime.get('confidence', 50)}%)\n"
                 f"Số mã tiềm năng: *{len(current_tickers)}*",
                 parse_mode="Markdown",
             )
         except Exception:
-            logging.error("Lỗi gửi Telegram (scan start)", exc_info=True)
+            self._logger.error("Lỗi gửi Telegram (scan start)", exc_info=True)
 
-    async def check_active_positions(self, market_regime: Dict):
-        """Kiểm tra và xử lý các vị thế đang nắm giữ."""
-        positions = self.portfolio_manager.get_positions()
-        if not positions:
-            return
-
-        logging.info(f"\n📊 Kiểm tra {len(positions)} vị thế đang nắm giữ...")
-
-        tasks = [
-            self._check_single_position(symbol, pos_data, market_regime)
-            for symbol, pos_data in positions.items()
-        ]
-        await asyncio.gather(*tasks)
-
-    async def _check_single_position(
+    async def _send_buy_notification(
         self,
         symbol: str,
-        pos_data: Dict,
-        market_regime: Dict,
-    ):
-        """Logic kiểm tra cho một vị thế cụ thể."""
+        entry_signal: Any,
+        position_size_info: Any,
+    ) -> None:
+        """Send buy signal notification."""
+        message = self._formatter.format_buy_signal(symbol, entry_signal, position_size_info)
+        await self._send_message(message, parse_mode="Markdown")
+
+    async def _send_no_signal_summary(
+        self,
+        all_tickers: List[str],
+        no_signal_symbols: List[str],
+        no_signal_reasons: Dict[str, List[str]],
+    ) -> None:
+        """Send summary when no buy signals found."""
         try:
-            df = load_data(symbol, lookback=LOOKBACK)
-            if df.empty:
-                return
-
-            current_price = df.iloc[-1]["close"]
-
-            # Cập nhật giá hiện tại vào metadata để portfolio phản ánh P&L theo thời gian thực
-            try:
-                self.portfolio_manager.update_position_price(symbol, float(current_price))
-            except Exception:
-                logging.debug(f"Không thể cập nhật last_price cho {symbol}")
-
-            # ML analysis với enhanced error handling
-            ml_signal = None
-            if self._should_use_ml():
-                try:
-                    # IMPROVEMENT: Use cached VNINDEX to reduce load failures
-                    cached_vnindex = self._get_cached_vnindex()
-                    ml_signal = self.ml_generator.analyze(
-                        df, index_df=cached_vnindex, symbol=symbol
-                    )
-                    # Track successful ML analysis
-                    if ml_signal is not None:
-                        self._ml_success_count += 1
-                except Exception as e:
-                    # ENHANCEMENT: Detailed error logging with diagnostic info
-                    import traceback
-
-                    error_details = {
-                        "symbol": symbol,
-                        "error_type": type(e).__name__,
-                        "error_msg": str(e),
-                        "context": "exit_check",
-                    }
-                    logging.error(
-                        f"❌ ML analysis failed (exit check) for {symbol}: "
-                        f"{type(e).__name__}: {str(e)}"
-                    )
-                    logging.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
-
-                    # Track ML failure for monitoring
-                    self._track_ml_failure(symbol, error_details)
-
-                    # Check circuit breaker after tracking failure
-                    await self._check_ml_circuit_breaker()
-
-                    # Tiếp tục với ml_signal = None
-
-            exit_decision = self.exit_strategy.check_exit(
-                symbol=symbol,
-                # Positions stored in DB expose 'avg_price' as the effective entry price
-                entry_price=pos_data["avg_price"],
-                current_price=current_price,
-                stop_loss=pos_data.get("stop_loss"),
-                take_profit_targets=pos_data.get("take_profit_targets", []),
-                entry_date=datetime.fromisoformat(pos_data["entry_date"]),
-                df=df,
-                ml_signal=ml_signal,
-                market_regime=market_regime,
-                partial_exits=pos_data.get("partial_exits", []),
-            )
-
-            if exit_decision and exit_decision.should_exit:
-                # Check if auto-sell is enabled or if this is a stop loss (always auto)
-                auto_sell = os.getenv("AUTO_SELL", "false").lower() == "true"
-                auto_sell_stop_loss = os.getenv("AUTO_SELL_STOP_LOSS", "true").lower() == "true"
-
-                from src.strategies.exit_logic import ExitReason
-
-                is_stop_loss = exit_decision.exit_reason == ExitReason.STOP_LOSS
-                is_emergency = exit_decision.exit_reason in [
-                    ExitReason.MARKET_CRASH,
-                    ExitReason.EMERGENCY_EXIT,
-                ]
-
-                # Auto-sell if: AUTO_SELL=true OR (stop loss AND AUTO_SELL_STOP_LOSS=true) OR emergency
-                should_auto_sell = (
-                    auto_sell or (is_stop_loss and auto_sell_stop_loss) or is_emergency
-                )
-
-                if should_auto_sell:
-                    await self.execute_exit(symbol, pos_data, exit_decision, current_price)
-                else:
-                    # Send exit recommendation and wait for user confirmation
-                    await self.send_exit_recommendation(
-                        symbol, pos_data, exit_decision, current_price
-                    )
-
-        except Exception:
-            logging.error(f"Lỗi khi kiểm tra vị thế {symbol}", exc_info=True)
-
-    async def execute_exit(self, symbol, pos_data, exit_decision, current_price):
-        """Thực hiện thoát lệnh bán dựa trên quyết định thoát."""
-        try:
-            # Gửi thông báo thoát lệnh
-            msg = self.exit_strategy.format_exit_message(symbol, exit_decision)
-            await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
-
-            # Ghi nhận kết quả giao dịch vào Circuit Breaker
-            # Use avg_price from DB as entry price
-            pnl = (current_price - pos_data["avg_price"]) * pos_data["shares"]
-            self.circuit_breaker.record_trade(pnl)
-
-            # Get exit reason safely (can be None)
-            exit_reason_str = (
-                exit_decision.exit_reason.value
-                if exit_decision.exit_reason
-                else exit_decision.message
-            )
-
-            success, sell_msg, _ = self.paper_account.execute_sell(
-                symbol=symbol,
-                price=current_price,
-                exit_type=exit_decision.exit_type,
-                reason=exit_reason_str,
-            )
-            if success:
-                logging.info(f"✅ Giao dịch bán được thực thi: {sell_msg}")
-
-                # CRITICAL: Clear tracking if position no longer exists or shares = 0
-                # This handles:
-                # 1. FULL exits (obvious)
-                # 2. Multiple partial exits that reduce shares to 0 (memory leak fix)
-                # 3. Any edge cases where position is closed but exit_type != "FULL"
-                updated_positions = self.portfolio_manager.get_positions()
-                position_still_exists = (
-                    symbol in updated_positions and updated_positions[symbol].get("shares", 0) > 0
-                )
-
-                if not position_still_exists:
-                    self.exit_strategy.clear_position_tracking(symbol)
-                    logging.debug(f"🧹 Cleared tracking for {symbol} (position fully closed)")
-
-                # GHI NHẬN PNL NGAY LẬP TỨC sau khi thoát lệnh
-                current_pnl = self.portfolio_manager.get_daily_pnl_pct()
-                self.circuit_breaker.record_pnl(current_pnl)
-
-                # Kiểm tra xem circuit breaker có kích hoạt không
-                if self.circuit_breaker.is_active():
-                    logging.warning(
-                        f"⚠️ Circuit breaker đã kích hoạt sau khi thoát {symbol}. PnL: {current_pnl:.2%}"
-                    )
-                    await self.bot.send_message(
-                        self.chat_id,
-                        "🚨 *CIRCUIT BREAKER KÍCH HOẠT*\n\n"
-                        f"Sau khi thoát {symbol}\n"
-                        f"PnL hiện tại: {current_pnl:.2%}\n"
-                        f"Lý do: {self.circuit_breaker.tripped_reason}",
-                        parse_mode="Markdown",
-                    )
-            else:
-                logging.error(f"❌ Lỗi thực thi lệnh bán cho {symbol}: {sell_msg}")
-                await self.bot.send_message(self.chat_id, f"❌ Lỗi bán {symbol}: {sell_msg}")
-
-        except Exception:
-            logging.error(f"Lỗi khi thực hiện thoát lệnh {symbol}", exc_info=True)
-
-    async def send_exit_recommendation(self, symbol, pos_data, exit_decision, current_price):
-        """
-        Gửi khuyến nghị thoát lệnh và chờ xác nhận từ user.
-        Tương tự như entry recommendation.
-        """
-        try:
-            # Format exit recommendation message
-            msg = self._format_exit_recommendation(symbol, pos_data, exit_decision, current_price)
-
-            await self.bot.send_message(self.chat_id, msg, parse_mode="Markdown")
-
-            logging.info(f"📤 Đã gửi khuyến nghị THOÁT LỆNH cho {symbol}, chờ xác nhận từ user")
-
-            # Store pending exit for later confirmation
-            if not hasattr(self, "_pending_exits"):
-                self._pending_exits = {}
-
-            self._pending_exits[symbol] = {
-                "pos_data": pos_data,
-                "exit_decision": exit_decision,
-                "current_price": current_price,
-                "timestamp": datetime.now().isoformat(),
-            }
-
-        except Exception:
-            logging.error(f"Lỗi khi gửi khuyến nghị thoát lệnh {symbol}", exc_info=True)
-
-    def _format_exit_recommendation(self, symbol, pos_data, exit_decision, current_price) -> str:
-        """Format exit recommendation message"""
-        entry_price = pos_data.get("avg_price", 0)
-        shares = pos_data.get("shares", 0)
-        pnl_percent = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-        pnl_amount = (current_price - entry_price) * shares
-
-        # Emoji based on P&L
-        pnl_emoji = "🟢" if pnl_percent >= 0 else "🔴"
-
-        # Exit reason
-        exit_reason = exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
-
-        msg = f"📊 *KHUYẾN NGHỊ THOÁT LỆNH - {symbol}*\n\n"
-        msg += f"⚠️ *Cần xác nhận của bạn để thực hiện*\n\n"
-
-        msg += f"📈 *Thông tin vị thế:*\n"
-        msg += f"  • Số lượng: {shares:,} CP\n"
-        msg += f"  • Giá vào: {entry_price:,.0f} VNĐ\n"
-        msg += f"  • Giá hiện tại: {current_price:,.0f} VNĐ\n"
-        msg += f"  • {pnl_emoji} P&L: {pnl_percent:+.2f}% ({pnl_amount:+,.0f} VNĐ)\n\n"
-
-        msg += f"🎯 *Lý do thoát:* {exit_reason}\n"
-        msg += f"📝 *Chi tiết:* {exit_decision.message}\n"
-        msg += f"⚡ *Mức độ khẩn cấp:* {exit_decision.urgency}/5\n\n"
-
-        msg += f"💡 *Hành động:*\n"
-        msg += f"  • Gửi `/sell {symbol}` để xác nhận bán\n"
-        msg += f"  • Gửi `/hold {symbol}` để giữ lại\n"
-        msg += f"  • Gửi `/sell {symbol} 50%` để bán một phần\n\n"
-
-        msg += f"⏰ Khuyến nghị lúc: {datetime.now().strftime('%H:%M %d/%m/%Y')}"
-
-        return msg
-
-    async def confirm_exit(self, symbol: str, percent: float = 100.0) -> bool:
-        """
-        Xác nhận và thực hiện thoát lệnh sau khi user confirm.
-
-        Args:
-            symbol: Mã cổ phiếu
-            percent: Phần trăm muốn bán (default 100%)
-
-        Returns:
-            True nếu thành công
-        """
-        if not hasattr(self, "_pending_exits") or symbol not in self._pending_exits:
-            await self.bot.send_message(
-                self.chat_id, f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}"
-            )
-            return False
-
-        pending = self._pending_exits[symbol]
-        pos_data = pending["pos_data"]
-        exit_decision = pending["exit_decision"]
-        current_price = pending["current_price"]
-
-        # Update exit type if partial
-        if percent < 100:
-            exit_decision.exit_type = f"PARTIAL_{int(percent)}%"
-
-        # Execute the exit
-        await self.execute_exit(symbol, pos_data, exit_decision, current_price)
-
-        # Remove from pending
-        del self._pending_exits[symbol]
-
-        return True
-
-    async def cancel_exit(self, symbol: str) -> bool:
-        """
-        Hủy khuyến nghị thoát lệnh (user chọn hold).
-
-        Args:
-            symbol: Mã cổ phiếu
-
-        Returns:
-            True nếu thành công
-        """
-        if not hasattr(self, "_pending_exits") or symbol not in self._pending_exits:
-            await self.bot.send_message(
-                self.chat_id, f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}"
-            )
-            return False
-
-        del self._pending_exits[symbol]
-
-        await self.bot.send_message(
-            self.chat_id,
-            f"✅ Đã hủy khuyến nghị thoát lệnh cho {symbol}. Tiếp tục giữ vị thế.",
-            parse_mode="Markdown",
-        )
-
-        logging.info(f"🔄 User chọn HOLD cho {symbol}, hủy khuyến nghị thoát lệnh")
-
-        return True
-
-    def get_pending_exits(self) -> dict:
-        """Lấy danh sách các khuyến nghị thoát lệnh đang chờ xác nhận"""
-        if not hasattr(self, "_pending_exits"):
-            return {}
-        return self._pending_exits.copy()
-
-    async def scan_for_new_entries(self, current_tickers, existing_symbols, market_regime):
-        """Quét song song để tìm các tín hiệu vào lệnh mới."""
-        signal_count = 0
-        watchlist_candidates = []
-        no_signal_symbols = []
-        no_signal_reasons = {}
-        results_lock = asyncio.Lock()
-
-        async def _scan_ticker(symbol: str):
-            nonlocal signal_count
-            try:
-                # Skip only if pending (being processed)
-                if self.portfolio_lock.is_pending(symbol):
-                    return
-
-                entry_result = await self.process_single_ticker_for_entry(symbol, market_regime)
-
-                if entry_result:
-                    if entry_result.get("signal"):
-                        async with results_lock:
-                            signal_count += 1
-                    elif entry_result.get("warnings"):
-                        async with results_lock:
-                            no_signal_symbols.append(entry_result["symbol"])
-                            no_signal_reasons[entry_result["symbol"]] = entry_result["warnings"]
-                    elif entry_result.get("is_watchlist"):
-                        async with results_lock:
-                            watchlist_candidates.append(entry_result)
-
-            except Exception as e:
-                logging.error(f"Lỗi nghiêm trọng khi quét mã {symbol}: {str(e)}", exc_info=True)
-                async with results_lock:
-                    no_signal_symbols.append(symbol)
-                    no_signal_reasons[symbol] = [f"Lỗi khi quét: {str(e)}"]
-
-        tasks = [_scan_ticker(symbol) for symbol in current_tickers]
-        await asyncio.gather(*tasks)
-
-        # Gửi thông báo tổng hợp nếu không có tín hiệu nào
-        if signal_count == 0 and no_signal_symbols:
-            await self._send_no_signal_summary(
-                current_tickers, no_signal_symbols, no_signal_reasons
-            )
-
-        return signal_count, watchlist_candidates
-
-    async def _send_no_signal_summary(self, all_tickers, no_signal_symbols, no_signal_reasons):
-        """Gửi thông báo tổng hợp khi không tìm thấy tín hiệu mua nào."""
-        try:
-            # Nhóm các lý do tương tự lại với nhau
-            reason_counts = {}
+            # Group similar reasons
+            reason_counts: Dict[str, int] = {}
             for symbol, reasons in no_signal_reasons.items():
                 for reason in reasons:
-                    # Làm sạch lý do để nhóm các lý do tương tự
                     clean_reason = reason.split("(")[0].strip() if "(" in reason else reason
                     clean_reason = (
                         clean_reason.split(":")[0].strip() if ":" in clean_reason else clean_reason
                     )
                     reason_counts[clean_reason] = reason_counts.get(clean_reason, 0) + 1
 
-            # Tạo thông báo tổng hợp
+            # Build summary message
             summary = "🔍 *TỔNG HỢP KHÔNG TÌM THẤY TÍN HIỆU MUA*\n"
             summary += f"📊 Đã quét: {len(all_tickers)} mã\n"
             summary += f"📉 Không tìm thấy tín hiệu: {len(no_signal_symbols)} mã\n\n"
 
-            # Thêm chi tiết theo nguyên nhân
             summary += "*CHI TIẾT THEO NGUYÊN NHÂN:*\n"
             for reason, count in sorted(reason_counts.items(), key=lambda x: x[1], reverse=True):
                 percentage = (count / len(no_signal_symbols)) * 100
                 summary += f"• {reason}: {count} mã ({percentage:.1f}%)\n"
 
-            # Thêm ví dụ cho các lý do phổ biến
+            # Add examples
             top_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
             if top_reasons:
                 summary += "\n*VÍ DỤ:*\n"
@@ -825,428 +1588,19 @@ class TradingOrchestrator:
 
             summary += f"\n⏰ {datetime.now().strftime('%H:%M %d/%m/%Y')}"
 
-            # Gửi thông báo qua Telegram bot
-            if self.bot and self.chat_id:
-                await self.bot.send_message(self.chat_id, summary, parse_mode="Markdown")
-                logging.info("✅ Đã gửi thông báo tổng hợp không tìm thấy tín hiệu")
-            else:
-                logging.warning("⚠️ Không thể gửi thông báo: bot hoặc chat_id không khả dụng")
+            await self._send_message(summary, parse_mode="Markdown")
+            self._logger.info("✅ Đã gửi thông báo tổng hợp không tìm thấy tín hiệu")
 
         except Exception as e:
-            logging.error(f"Lỗi khi gửi thông báo tổng hợp không tín hiệu: {str(e)}", exc_info=True)
+            self._logger.error(f"Lỗi khi gửi thông báo tổng hợp: {e}", exc_info=True)
 
-    async def process_single_ticker_for_entry(self, symbol: str, market_regime: dict):
-        """
-        Xử lý logic để tìm tín hiệu vào lệnh cho một mã cổ phiếu.
-        Bao gồm: Lấy dữ liệu, phân tích ML, kiểm tra entry logic, phân tích tin tức,
-                 tính toán position size và gửi thông báo.
-        Returns:
-            - dict: Chứa 'signal': True nếu có tín hiệu, hoặc 'warnings' nếu không có tín hiệu
-        """
-        try:
-            # Lấy dữ liệu
-            df = load_data(symbol, lookback=LOOKBACK)
-            if df.empty or len(df) < 50:  # Cần đủ dữ liệu để phân tích
-                return {
-                    "symbol": symbol,
-                    "warnings": ["Không đủ dữ liệu lịch sử"],
-                    "is_watchlist": False,
-                }
-
-            # Phân tích ML với enhanced error handling and retries
-            ml_signal = None
-            if self._should_use_ml():
-                # IMPROVEMENT: Retry logic with exponential backoff
-                max_retries = 2
-                retry_delay = 0.5  # seconds
-
-                for attempt in range(max_retries + 1):
-                    try:
-                        # IMPROVEMENT: Use cached VNINDEX to reduce load failures
-                        cached_vnindex = self._get_cached_vnindex()
-
-                        # IMPROVEMENT: Pre-validate data before ML analysis
-                        if df is None or len(df) < 50:
-                            raise ValueError(
-                                f"Insufficient data: {len(df) if df is not None else 0} rows"
-                            )
-
-                        if "close" not in df.columns or "volume" not in df.columns:
-                            raise ValueError(f"Missing required columns: {list(df.columns)}")
-
-                        # IMPROVEMENT: Add timeout to prevent hanging
-                        import asyncio
-
-                        ml_signal = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                self.ml_generator.analyze,
-                                df,
-                                index_df=cached_vnindex,
-                                symbol=symbol,
-                            ),
-                            timeout=10.0,  # 10 second timeout
-                        )
-
-                        # Track successful ML analysis
-                        if ml_signal is not None:
-                            self._ml_success_count += 1
-                            if attempt > 0:
-                                logging.info(
-                                    f"✅ ML analysis succeeded on retry {attempt} for {symbol}"
-                                )
-                            break  # Success - exit retry loop
-
-                    except asyncio.TimeoutError:
-                        error_type = "timeout"
-                        error_msg = "ML analysis timed out after 10s"
-                        if attempt < max_retries:
-                            logging.warning(
-                                f"⏰ ML timeout for {symbol}, retrying ({attempt+1}/{max_retries})..."
-                            )
-                            await asyncio.sleep(retry_delay * (2**attempt))
-                            continue
-                    except ValueError as e:
-                        error_type = "data_quality"
-                        error_msg = str(e)
-                        # Data quality errors shouldn't retry
-                        break
-                    except Exception as e:
-                        error_type = type(e).__name__
-                        error_msg = str(e)
-                        if attempt < max_retries and "VNINDEX" not in str(e):
-                            logging.warning(
-                                f"⚠️ ML error for {symbol}, retrying ({attempt+1}/{max_retries}): {e}"
-                            )
-                            await asyncio.sleep(retry_delay * (2**attempt))
-                            continue
-
-                # If we get here without ml_signal, track failure
-                if ml_signal is None:
-                    import traceback
-
-                    error_details = {
-                        "symbol": symbol,
-                        "error_type": error_type,
-                        "error_msg": error_msg,
-                        "df_shape": df.shape if df is not None else None,
-                        "df_columns": list(df.columns) if df is not None else None,
-                        "retries": attempt,
-                    }
-
-                    logging.error(
-                        f"❌ ML analysis failed for {symbol} after {attempt} retries: "
-                        f"{error_type}: {error_msg}\n"
-                        f"   Details: df_shape={error_details['df_shape']}, "
-                        f"df_columns={len(error_details['df_columns']) if error_details['df_columns'] else 0}"
-                    )
-                    logging.debug(f"ML error traceback for {symbol}:\n{traceback.format_exc()}")
-
-                    # Track ML failure for monitoring
-                    self._track_ml_failure(symbol, error_details)
-
-                    # Check circuit breaker after tracking failure
-                    await self._check_ml_circuit_breaker()
-
-                    # Tiếp tục với ml_signal = None, entry_logic sẽ xử lý technical fallback
-
-            # CIRCUIT BREAKER COORDINATION: If ML CB active, apply strict mode
-            # High ML failure rate indicates abnormal market conditions
-            ml_cb_strict_mode = False
-            if self._ml_circuit_breaker_active:
-                logging.warning(
-                    f"⚠️ [{symbol}] ML circuit breaker active - "
-                    "applying strict risk controls (reduced size, higher threshold)"
-                )
-                ml_cb_strict_mode = True
-
-                # Option 1: Block all technical-only entries (strictest)
-                # Uncomment to enable:
-                # if ml_signal is None:
-                #     logging.warning(f"🚫 [{symbol}] ML CB active - blocking technical-only entry")
-                #     return {"symbol": symbol, "warnings": ["ML circuit breaker active"], "is_watchlist": False}
-
-            # 1. Entry Logic with validation
-            if not self.entry_logic:
-                logging.error("❌ Entry logic not initialized")
-                return {
-                    "symbol": symbol,
-                    "warnings": ["Lỗi: Entry logic chưa được khởi tạo"],
-                    "is_watchlist": False,
-                }
-
-            entry_signal = self.entry_logic.analyze_entry(
-                df=df,
-                ml_signal=ml_signal,
-                market_regime=market_regime,
-                symbol=symbol,
-            )
-
-            # Validate entry signal
-            if not entry_signal or not entry_signal.should_enter:
-                warnings = getattr(entry_signal, "warnings", ["Không rõ lý do"])
-                return {"symbol": symbol, "warnings": warnings, "is_watchlist": False}
-
-            # CIRCUIT BREAKER COORDINATION: Apply stricter confidence threshold
-            if ml_cb_strict_mode:
-                # Increase minimum confidence requirement by 15 points
-                strict_confidence_threshold = 70  # Normally 45-55
-                if entry_signal.confidence < strict_confidence_threshold:
-                    logging.warning(
-                        f"⚠️ [{symbol}] ML CB strict mode: Confidence {entry_signal.confidence}% "
-                        f"< threshold {strict_confidence_threshold}% - blocking entry"
-                    )
-                    return {
-                        "symbol": symbol,
-                        "warnings": [
-                            f"ML circuit breaker active - need confidence ≥{strict_confidence_threshold}% "
-                            f"(got {entry_signal.confidence}%)"
-                        ],
-                        "is_watchlist": False,
-                    }
-
-            # Track signal generation (ML vs Technical)
-            is_ml_signal = getattr(entry_signal, "telemetry", {}).get("signal_source") == "ml"
-            self.signal_tracker.track_signal(is_ml_signal=is_ml_signal)
-
-            # 2. News Analysis (nếu có tín hiệu)
-            news_sentiment = {"score": 0.5, "comment": "Neutral"}
-            if entry_signal.should_enter:
-                # news_sentiment = self.news_analyzer.analyze(symbol)
-                pass  # Tạm thời bỏ qua
-
-            # 3. Position Sizing
-            if entry_signal.should_enter:
-                # Get current positions (read once)
-                current_positions = self.portfolio_manager.get_positions()
-
-                # Filter out positions with invalid shares
-                active_positions = {
-                    sym: pos for sym, pos in current_positions.items() if pos.get("shares", 0) > 0
-                }
-
-                # Check if symbol already has an active position
-                if symbol in active_positions:
-                    logging.info(
-                        f"ℹ️ [{symbol}] Đã có position active trong portfolio, "
-                        f"vẫn gửi notification nhưng không mua thêm."
-                    )
-                    # Skip to notification section below (symbol_has_position will be True)
-
-                # Get config for capital calculation
-                from src.config.trading_config import get_config
-
-                config = get_config(validate=False)
-                max_positions = config.trading.max_positions
-
-                # Get take_profit from entry signal (use first target if available)
-                take_profit_price = (
-                    entry_signal.take_profit_targets[0]
-                    if entry_signal.take_profit_targets
-                    else entry_signal.entry_price * 1.1  # Default 10% gain
-                )
-
-                # CIRCUIT BREAKER COORDINATION: Reduce position size if ML CB active
-                # Apply 50% size reduction in strict mode
-                size_multiplier = 0.5 if ml_cb_strict_mode else 1.0
-
-                if ml_cb_strict_mode:
-                    logging.warning(
-                        f"⚠️ [{symbol}] ML CB strict mode: Reducing position size by 50%"
-                    )
-
-                # Calculate position size using EnhancedPositionSizer
-                position_size_info = self.position_sizer.calculate_position_size(
-                    symbol=symbol,
-                    entry_price=entry_signal.entry_price,
-                    stop_loss=entry_signal.stop_loss,  # Fixed: was stop_loss_price
-                    take_profit=take_profit_price,
-                    confidence=entry_signal.confidence,
-                    signal_strength=entry_signal.strength.name,
-                    market_regime=market_regime,
-                    # Optional: portfolio_risk, win_rate, avg_win_loss_ratio
-                )
-
-                # CIRCUIT BREAKER COORDINATION: Apply size multiplier
-                if ml_cb_strict_mode and position_size_info:
-                    original_shares = position_size_info.shares
-                    original_value = position_size_info.value
-
-                    # Reduce shares and value by 50%
-                    position_size_info.shares = max(
-                        1, int(position_size_info.shares * size_multiplier)
-                    )
-                    position_size_info.value = position_size_info.shares * entry_signal.entry_price
-
-                    logging.info(
-                        f"📊 [{symbol}] ML CB strict mode: Position size reduced from "
-                        f"{original_shares} → {position_size_info.shares} shares "
-                        f"({original_value:,.0f} → {position_size_info.value:,.0f} VNĐ)"
-                    )
-
-                # 4. Paper Trade & Notification
-                # If symbol already has position, skip buying but still send notification
-                if symbol in active_positions:
-                    # Đã có position - chỉ gửi notification, không mua thêm
-                    logging.info(
-                        f"📢 [{symbol}] Gửi notification tín hiệu mua "
-                        f"(đã có position, không mua thêm)"
-                    )
-
-                    # Gửi thông báo Telegram
-                    await self.send_buy_signal_notification(
-                        symbol, entry_signal, position_size_info, news_sentiment
-                    )
-                    return {"signal": True, "skipped_buy": True}
-
-                # Normal flow: Execute buy for new positions
-                # CRITICAL FIX: Use atomic context manager to prevent race conditions
-                if position_size_info and position_size_info.shares > 0:
-                    total_capital = config.trading.total_capital
-
-                    # ATOMIC POSITION ADD: Automatically handles reserve → confirm/cancel
-                    with self.portfolio_lock.atomic_position_add(
-                        symbol=symbol,
-                        position_value=position_size_info.value,
-                        total_capital=total_capital,
-                        current_positions=active_positions,
-                    ) as (can_add, reason):
-                        if not can_add:
-                            logging.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
-                            return None
-
-                        # Thực hiện paper trade (BUY)
-                        take_profit = (
-                            entry_signal.take_profit_targets[0]
-                            if entry_signal.take_profit_targets
-                            else None
-                        )
-
-                        # Prepare metadata with signal source for performance tracking
-                        trade_metadata = {
-                            "signal_source": "ml" if is_ml_signal else "technical",
-                            "confidence": entry_signal.confidence,
-                            "signal_reason": ", ".join(entry_signal.reasons),
-                        }
-
-                        # ENHANCEMENT: Pass limit order info if applicable
-                        success, message, trade = self.paper_account.execute_buy(
-                            symbol=symbol,
-                            shares=position_size_info.shares,
-                            price=entry_signal.entry_price,
-                            signal_confidence=entry_signal.confidence,
-                            signal_reason=", ".join(entry_signal.reasons),
-                            stop_loss=entry_signal.stop_loss,
-                            take_profit=take_profit,
-                            is_limit_order=getattr(entry_signal, "is_limit_order", False),
-                            limit_price=getattr(entry_signal, "limit_price", None),
-                            metadata=trade_metadata,
-                        )
-
-                        if not success:
-                            logging.error(f"❌ Paper trade failed for {symbol}: {message}")
-                            # Raise exception to auto-cancel reservation via context manager
-                            raise Exception(f"Paper trade failed: {message}")
-
-                        # Success - context manager will auto-confirm
-                        logging.info(f"✅ Paper trade successful: {message}")
-
-                        # Gửi thông báo Telegram (non-blocking, failure won't affect trade)
-                        try:
-                            await self.send_buy_signal_notification(
-                                symbol, entry_signal, position_size_info, news_sentiment
-                            )
-                        except Exception as e:
-                            logging.error(f"⚠️ Failed to send buy notification for {symbol}: {e}")
-                            # Continue - trade is still successful even if notification fails
-
-                        return {"signal": True}
-
-            # 5. Watchlist Logic
-            # ... (logic để thêm vào watchlist nếu không phải tín hiệu mua)
-            return None
-
-        except DataLoadError:
-            return {"symbol": symbol, "warnings": ["Lỗi tải dữ liệu"], "is_watchlist": False}
-        except Exception as e:
-            error_msg = f"Lỗi không xác định: {str(e)}"
-            logging.error(f"[{symbol}] {error_msg}", exc_info=True)
-            return {"symbol": symbol, "warnings": [error_msg], "is_watchlist": False}
-
-    async def send_buy_signal_notification(
-        self, symbol, entry_signal, position_size_info, news_sentiment
-    ):
-        """Gửi thông báo tín hiệu mua qua Telegram."""
-        # Tính toán R:R cho mục tiêu đầu tiên
-        try:
-            # Đảm bảo take_profit_targets không rỗng và stop_loss khác entry_price
-            if (
-                entry_signal.take_profit_targets
-                and entry_signal.entry_price != entry_signal.stop_loss
-            ):
-                risk_reward_ratio = (
-                    entry_signal.take_profit_targets[0] - entry_signal.entry_price
-                ) / (entry_signal.entry_price - entry_signal.stop_loss)
-            else:
-                risk_reward_ratio = 0
-        except (ZeroDivisionError, IndexError):
-            risk_reward_ratio = 0
-
-        tp1_target = entry_signal.take_profit_targets[0] if entry_signal.take_profit_targets else 0
-
-        # Format confidence với emoji dựa trên mức độ
-        confidence_emoji = (
-            "🟢"
-            if entry_signal.confidence >= 70
-            else "🟡" if entry_signal.confidence >= 50 else "🔴"
-        )
-
-        message = (
-            "**🚀 TÍN HIỆU MUA MỚI 🚀**\n\n"
-            f"**Mã:** `{symbol}`\n"
-            f"**Độ tin cậy:** `{entry_signal.confidence}%` {confidence_emoji}\n"
-            f"**Giá vào:** `{entry_signal.entry_price:,.0f}`\n"
-            f"**Mục tiêu 1:** `{tp1_target:,.0f}`\n"
-            f"**Dừng lỗ:** `{entry_signal.stop_loss:,.0f}`\n"
-            f"**R:R (TP1):** `{risk_reward_ratio:.2f}`\n\n"
-            f"**Lý do:** {', '.join(entry_signal.reasons)}\n\n"
-            "**--- Quản lý vốn ---**\n"
-            f"**Số CP mua:** `{position_size_info.shares}`\n"  # Fixed: was position_size_info['shares_to_buy']
-            f"**Giá trị lệnh:** `{position_size_info.value:,.0f} VNĐ`\n"  # Fixed: was position_size_info['trade_value']
-            f"**Rủi ro lệnh:** `{position_size_info.risk_amount:,.0f} VNĐ` "  # Fixed: was position_size_info['risk_per_trade']
-            f"({position_size_info.risk_percent:.2%})\n\n"  # Fixed: was position_size_info['risk_pct_of_capital']
-            # "**--- Tin tức ---**\n"
-            # f"**Sentiment:** {news_sentiment['comment']} ({news_sentiment['score']:.2f})\n"
-        )
-        await self.bot.send_message(self.chat_id, message, parse_mode="Markdown")
-
-    async def perform_post_scan_risk_analysis(self):
-        """Thực hiện phân tích rủi ro sau khi quét."""
-        active_positions = self.portfolio_manager.get_positions()
-        if not self.portfolio_risk_manager or not active_positions:
-            return
-        try:
-            risk_positions = {
-                sym: {
-                    "shares": pos.get("shares", 0),
-                    "avg_price": pos.get("avg_price", 0),
-                    "current_price": pos.get("current_price", pos.get("avg_price", 0)),
-                    "stop_loss": pos.get("stop_loss", pos.get("avg_price", 0) * 0.93),
-                }
-                for sym, pos in active_positions.items()
-            }
-            risk_metrics = self.portfolio_risk_manager.calculate_portfolio_risk(risk_positions)
-            if risk_metrics.risk_status in ["HIGH", "CRITICAL"]:
-                risk_summary = self.portfolio_risk_manager.get_risk_summary(risk_positions)
-                await self.bot.send_message(
-                    self.chat_id,
-                    f"⚠️ *PORTFOLIO RISK ALERT*\n\n{risk_summary}",
-                    parse_mode="Markdown",
-                )
-        except Exception:
-            logging.error("Lỗi portfolio risk analysis", exc_info=True)
-
-    async def send_summary_report(self, signal_count, watchlist_candidates, market_regime: Dict):
-        """Gửi báo cáo tóm tắt cuối phiên quét."""
+    async def _send_summary_report(
+        self,
+        signal_count: int,
+        watchlist_candidates: List[Dict],
+        market_regime: MarketRegime,
+    ) -> None:
+        """Send end-of-scan summary report."""
         try:
             portfolio_summary = self.portfolio_manager.get_detailed_analysis()
 
@@ -1263,158 +1617,275 @@ class TradingOrchestrator:
 
             summary_msg += "\n" + portfolio_summary
 
-            await self.bot.send_message(self.chat_id, summary_msg, parse_mode="Markdown")
+            await self._send_message(summary_msg, parse_mode="Markdown")
         except Exception:
-            logging.error("Lỗi gửi báo cáo tóm tắt", exc_info=True)
-            await self.bot.send_message(self.chat_id, "Lỗi khi tạo báo cáo")
+            self._logger.error("Lỗi gửi báo cáo tóm tắt", exc_info=True)
+            await self._send_message("Lỗi khi tạo báo cáo")
 
-    def _track_ml_failure(self, symbol: str, error_details: dict):
-        """
-        ENHANCED: Track ML analysis failures with categorization
+    # =========================================================================
+    # RISK ANALYSIS
+    # =========================================================================
 
-        Args:
-            symbol: Stock symbol that failed
-            error_details: Dict with error information
-        """
-        self._ml_failure_count += 1
-
-        # Track by error type
-        error_type = error_details.get("error_type", "Unknown")
-        self._ml_failures_by_error[error_type] = self._ml_failures_by_error.get(error_type, 0) + 1
-
-        # Track by symbol
-        self._ml_failures_by_symbol[symbol] = self._ml_failures_by_symbol.get(symbol, 0) + 1
-
-        # IMPROVEMENT: Categorize failure reasons for root cause analysis
-        error_msg = error_details.get("error_msg", "").lower()
-        if "timeout" in error_type.lower() or "timeout" in error_msg:
-            self._ml_failure_reasons["timeout"] += 1
-        elif (
-            "data_quality" in error_type.lower()
-            or "insufficient" in error_msg
-            or "missing" in error_msg
-        ):
-            self._ml_failure_reasons["data_quality"] += 1
-        elif "vnindex" in error_msg:
-            self._ml_failure_reasons["vnindex_load_fail"] += 1
-        elif "model" in error_msg or "prediction" in error_msg:
-            self._ml_failure_reasons["model_error"] += 1
-        elif "feature" in error_msg:
-            self._ml_failure_reasons["feature_error"] += 1
-        else:
-            self._ml_failure_reasons["unknown"] += 1
-
-        # Log summary periodically (every 10 failures)
-        if self._ml_failure_count % 10 == 0:
-            failure_rate = self._get_ml_failure_rate()
-            top_errors = sorted(
-                self._ml_failures_by_error.items(), key=lambda x: x[1], reverse=True
-            )[:3]
-            top_symbols = sorted(
-                self._ml_failures_by_symbol.items(), key=lambda x: x[1], reverse=True
-            )[:3]
-
-            logging.warning(
-                f"📊 ML Failure Summary:\n"
-                f"   Total failures: {self._ml_failure_count}\n"
-                f"   Total successes: {self._ml_success_count}\n"
-                f"   Failure rate: {failure_rate:.1%}\n"
-                f"   Top errors: {', '.join(f'{err}({cnt})' for err, cnt in top_errors)}\n"
-                f"   Top failing symbols: {', '.join(f'{sym}({cnt})' for sym, cnt in top_symbols)}"
-            )
-
-    def _get_ml_failure_rate(self) -> float:
-        """Calculate ML failure rate for monitoring"""
-        total = self._ml_failure_count + self._ml_success_count
-        return self._ml_failure_count / total if total > 0 else 0.0
-
-    async def _check_ml_circuit_breaker(self):
-        """
-        Check and update ML circuit breaker status.
-
-        CRITICAL FIX: Made async to properly await Telegram notifications.
-
-        Logic:
-        1. If failure rate > threshold AND min_samples met → DISABLE ML
-        2. If failure rate < recovery threshold AND circuit active → RE-ENABLE ML
-        3. Send alerts on status change
-        """
-        total_attempts = self._ml_failure_count + self._ml_success_count
-
-        # Need minimum samples before activating circuit breaker
-        if total_attempts < self._ml_circuit_breaker_min_samples:
+    async def perform_post_scan_risk_analysis(self) -> None:
+        """Perform portfolio risk analysis after scan."""
+        active_positions = self.portfolio_manager.get_positions()
+        if not self.portfolio_risk_manager or not active_positions:
             return
 
-        failure_rate = self._get_ml_failure_rate()
+        try:
+            risk_positions = {
+                sym: {
+                    "shares": pos.get("shares", 0),
+                    "avg_price": pos.get("avg_price", 0),
+                    "current_price": pos.get("current_price", pos.get("avg_price", 0)),
+                    "stop_loss": pos.get("stop_loss", pos.get("avg_price", 0) * 0.93),
+                }
+                for sym, pos in active_positions.items()
+            }
 
-        # Check if should TRIP circuit breaker (disable ML)
-        if (
-            not self._ml_circuit_breaker_active
-            and failure_rate >= self._ml_circuit_breaker_threshold
-        ):
-            self._ml_circuit_breaker_active = True
-            self._ml_enabled = False
+            risk_metrics = self.portfolio_risk_manager.calculate_portfolio_risk(risk_positions)
 
-            alert_msg = (
-                f"🚨 ML CIRCUIT BREAKER ACTIVATED 🚨\n\n"
-                f"Failure rate: {failure_rate:.1%} (threshold: {self._ml_circuit_breaker_threshold:.1%})\n"
-                f"Total failures: {self._ml_failure_count}/{total_attempts}\n\n"
-                f"🔧 Switching to TECHNICAL ANALYSIS only\n"
-                f"ML will auto-recover when failure rate drops below {self._ml_recovery_threshold:.1%}"
-            )
+            if risk_metrics.risk_status in ["HIGH", "CRITICAL"]:
+                risk_summary = self.portfolio_risk_manager.get_risk_summary(risk_positions)
+                await self._send_message(
+                    f"⚠️ *PORTFOLIO RISK ALERT*\n\n{risk_summary}",
+                    parse_mode="Markdown",
+                )
+        except Exception:
+            self._logger.error("Lỗi portfolio risk analysis", exc_info=True)
 
-            logging.critical(alert_msg)
+    # =========================================================================
+    # UTILITY METHODS
+    # =========================================================================
 
-            # CRITICAL FIX: Await notification instead of fire-and-forget
-            # Send alert via Telegram if available
-            if self.bot and self.chat_id:
-                try:
-                    await self.bot.send_message(self.chat_id, alert_msg, parse_mode="Markdown")
-                    logging.info("✅ ML circuit breaker alert sent to Telegram")
-                except Exception as e:
-                    logging.error(f"Failed to send ML circuit breaker alert: {e}")
-                    # Write to file as fallback
-                    try:
-                        with open("ml_circuit_breaker_alerts.log", "a", encoding="utf-8") as f:
-                            from datetime import datetime
+    def _cleanup_stale_pending_exits(self) -> None:
+        """Remove pending exits older than TTL."""
+        now = datetime.now()
+        stale_symbols = []
 
-                            f.write(f"{datetime.now().isoformat()} - {alert_msg}\n")
-                    except Exception:
-                        pass
+        for symbol, data in self._pending_exits.items():
+            try:
+                timestamp = datetime.fromisoformat(data["timestamp"])
+                age_seconds = (now - timestamp).total_seconds()
+                if age_seconds > self._pending_exits_ttl:
+                    stale_symbols.append(symbol)
+            except (KeyError, ValueError):
+                stale_symbols.append(symbol)
 
-        # Check if should RECOVER (re-enable ML)
-        elif self._ml_circuit_breaker_active and failure_rate <= self._ml_recovery_threshold:
-            self._ml_circuit_breaker_active = False
-            self._ml_enabled = True
+        for symbol in stale_symbols:
+            del self._pending_exits[symbol]
+            self._logger.debug(f"🧹 Cleaned up stale pending exit for {symbol}")
 
-            recovery_msg = (
-                f"✅ ML CIRCUIT BREAKER RECOVERED\n\n"
-                f"Failure rate improved: {failure_rate:.1%} (recovery threshold: {self._ml_recovery_threshold:.1%})\n"
-                f"Total failures: {self._ml_failure_count}/{total_attempts}\n\n"
-                f"🤖 ML analysis RE-ENABLED"
-            )
+        if stale_symbols:
+            self._logger.info(f"🧹 Cleaned up {len(stale_symbols)} stale pending exits")
 
-            logging.info(recovery_msg)
+    # =========================================================================
+    # LEGACY COMPATIBILITY METHODS & PROPERTIES
+    # =========================================================================
 
-            # CRITICAL FIX: Await notification instead of fire-and-forget
-            # Send recovery alert
-            if self.bot and self.chat_id:
-                try:
-                    await self.bot.send_message(self.chat_id, recovery_msg, parse_mode="Markdown")
-                    logging.info("✅ ML recovery alert sent to Telegram")
-                except Exception as e:
-                    logging.error(f"Failed to send ML recovery alert: {e}")
+    # Legacy property accessors for ML tracking (backward compatibility)
+    @property
+    def _ml_failure_count(self) -> int:
+        """Legacy accessor for ML failure count."""
+        return self._ml_metrics.failure_count
 
-    def _should_use_ml(self) -> bool:
-        """
-        Determine if ML analysis should be used.
+    @_ml_failure_count.setter
+    def _ml_failure_count(self, value: int) -> None:
+        """Legacy setter for ML failure count."""
+        self._ml_metrics.failure_count = value
 
-        Returns False if:
-        1. ML circuit breaker is active (too many failures)
-        2. USE_ML_ANALYSIS env var is false
-        """
-        if not self._ml_enabled:
-            return False
+    @property
+    def _ml_success_count(self) -> int:
+        """Legacy accessor for ML success count."""
+        return self._ml_metrics.success_count
 
-        use_ml_env = os.getenv("USE_ML_ANALYSIS", "true").lower() == "true"
-        return use_ml_env
+    @_ml_success_count.setter
+    def _ml_success_count(self, value: int) -> None:
+        """Legacy setter for ML success count."""
+        self._ml_metrics.success_count = value
+
+    @property
+    def _ml_failures_by_error(self) -> Dict[str, int]:
+        """Legacy accessor for ML failures by error type."""
+        return self._ml_metrics.failures_by_error
+
+    @property
+    def _ml_failures_by_symbol(self) -> Dict[str, int]:
+        """Legacy accessor for ML failures by symbol."""
+        return self._ml_metrics.failures_by_symbol
+
+    @property
+    def _ml_failure_reasons(self) -> Dict[str, int]:
+        """Legacy accessor for ML failure reasons."""
+        return self._ml_metrics.failure_reasons
+
+    def _get_cached_vnindex(self) -> Optional[pd.DataFrame]:
+        """Legacy method for getting cached VNINDEX (backward compatibility)."""
+        return self._vnindex_cache.get()
+
+    @property
+    def _cached_vnindex_df(self) -> Optional[pd.DataFrame]:
+        """Legacy accessor for cached VNINDEX DataFrame."""
+        return self._vnindex_cache._cached_df
+
+    @_cached_vnindex_df.setter
+    def _cached_vnindex_df(self, value: Optional[pd.DataFrame]) -> None:
+        """Legacy setter for cached VNINDEX DataFrame."""
+        self._vnindex_cache._cached_df = value
+
+    @property
+    def _vnindex_cache_timestamp(self) -> Optional[float]:
+        """Legacy accessor for VNINDEX cache timestamp."""
+        return self._vnindex_cache._cache_timestamp
+
+    @_vnindex_cache_timestamp.setter
+    def _vnindex_cache_timestamp(self, value: Optional[float]) -> None:
+        """Legacy setter for VNINDEX cache timestamp."""
+        self._vnindex_cache._cache_timestamp = value
+
+    def _track_ml_failure(self, symbol: str, error_details: Dict[str, Any]) -> None:
+        """Legacy method for tracking ML failures (backward compatibility)."""
+        self._ml_metrics.record_failure(
+            symbol=symbol,
+            error_type=error_details.get("error_type", "unknown"),
+            error_msg=error_details.get("error_msg", ""),
+        )
+
+    def _get_ml_failure_rate(self) -> float:
+        """Legacy method for getting ML failure rate (backward compatibility)."""
+        return self._ml_metrics.failure_rate
+
+    async def check_active_positions(self, market_regime: MarketRegime) -> None:
+        """Legacy method for checking active positions (backward compatibility)."""
+        await self._check_active_positions(market_regime)
+
+    async def execute_exit(
+        self,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        exit_decision: Any,
+        current_price: float,
+    ) -> None:
+        """Legacy method for executing exit (backward compatibility)."""
+        await self._execute_exit(symbol, pos_data, exit_decision, current_price)
+
+    def get_scan_universe(self) -> List[str]:
+        """Legacy method for getting scan universe (backward compatibility)."""
+        return self._get_scan_universe()
+
+    def sync_position_sizer_with_active_positions(self, active_positions: Dict[str, Any]) -> None:
+        """Legacy method for syncing position sizer (backward compatibility)."""
+        self._sync_position_sizer(active_positions)
+
+    async def scan_for_new_entries(
+        self,
+        current_tickers: List[str],
+        existing_symbols: set,
+        market_regime: MarketRegime,
+    ) -> tuple[int, List[Dict]]:
+        """Legacy method for scanning new entries (backward compatibility)."""
+        return await self._scan_for_new_entries(current_tickers, existing_symbols, market_regime)
+
+    async def send_scan_start_message(
+        self,
+        current_tickers: List[str],
+        market_regime: MarketRegime,
+    ) -> None:
+        """Legacy method for sending scan start message (backward compatibility)."""
+        await self._send_scan_start_message(current_tickers, market_regime)
+
+    async def send_summary_report(
+        self,
+        signal_count: int,
+        watchlist_candidates: List[Dict],
+        market_regime: MarketRegime,
+    ) -> None:
+        """Legacy method for sending summary report (backward compatibility)."""
+        await self._send_summary_report(signal_count, watchlist_candidates, market_regime)
+
+    async def send_buy_signal_notification(
+        self,
+        symbol: str,
+        entry_signal: Any,
+        position_size_info: Any,
+        news_sentiment: Optional[Dict] = None,
+    ) -> None:
+        """Legacy method for sending buy notification (backward compatibility)."""
+        await self._send_buy_notification(symbol, entry_signal, position_size_info)
+
+    async def process_single_ticker_for_entry(
+        self,
+        symbol: str,
+        market_regime: MarketRegime,
+    ) -> Optional[ScanResult]:
+        """Legacy method for processing ticker entry (backward compatibility)."""
+        return await self._process_ticker_for_entry(symbol, market_regime)
+
+    def format_entry_recommendation(
+        self,
+        symbol: str,
+        entry_signal: Any,
+        position: Any,
+        market_regime: MarketRegime,
+        news_context: Optional[Dict] = None,
+    ) -> str:
+        """Format entry recommendation message (legacy compatibility)."""
+        return self._formatter.format_entry_recommendation(
+            symbol, entry_signal, position, market_regime, news_context
+        )
+
+    def _escape_html(self, text: str) -> str:
+        """Escape HTML special characters (legacy compatibility)."""
+        return self._formatter.escape_html(text)
+
+    def _format_exit_recommendation(
+        self,
+        symbol: str,
+        pos_data: Dict[str, Any],
+        exit_decision: Any,
+        current_price: float,
+        use_html: bool = True,
+    ) -> str:
+        """Format exit recommendation message (legacy compatibility)."""
+        return self._formatter.format_exit_recommendation(
+            symbol, pos_data, exit_decision, current_price
+        )
+
+
+# =============================================================================
+# FACTORY FUNCTION
+# =============================================================================
+
+
+def create_orchestrator(
+    bot_instance: Optional[Bot] = None,
+    chat_id: Optional[str] = None,
+    **kwargs,
+) -> TradingOrchestrator:
+    """
+    Factory function to create TradingOrchestrator with proper configuration.
+
+    Args:
+        bot_instance: Telegram bot instance
+        chat_id: Telegram chat ID
+        **kwargs: Additional arguments passed to TradingOrchestrator
+
+    Returns:
+        Configured TradingOrchestrator instance
+
+    Example:
+        # Basic usage
+        orchestrator = create_orchestrator(bot, chat_id)
+
+        # With custom services
+        orchestrator = create_orchestrator(
+            bot, chat_id,
+            ml_generator=custom_ml_generator,
+            portfolio_manager=custom_portfolio_manager,
+        )
+    """
+    return TradingOrchestrator(
+        bot_instance=bot_instance,
+        chat_id=chat_id,
+        **kwargs,
+    )

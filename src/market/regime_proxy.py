@@ -52,11 +52,10 @@ class ProxyMarketRegimeAnalyzer:
                 self.analyzer = analyzer_class(**kwargs)
             else:
                 # Fallback to default if not provided
-                from src.market.regime import MarketRegimeAnalyzer
+                from src.market.regime_detector import MarketRegimeDetector
 
-                # MarketRegimeAnalyzer hiện tại không cần ticker_list, nó tự load VNINDEX
-                self.analyzer = MarketRegimeAnalyzer()
-                logging.info("📊 Khởi tạo Market Regime Analyzer.")
+                self.analyzer = MarketRegimeDetector()
+                logging.info("📊 Khởi tạo Market Regime Detector.")
 
             # Initialize cache
             self.cache = SimpleCache()

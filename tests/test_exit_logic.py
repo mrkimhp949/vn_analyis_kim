@@ -102,16 +102,16 @@ def sell_ml_signal():
 
 
 def test_exit_strategy_init_default():
-    """Test default initialization (v2.0 - simplified TP levels)"""
+    """Test default initialization (v3.0 - refactored with ExitConfig)"""
     strategy = ImprovedExitStrategy()
 
-    # v2.0: Simplified from 3 to 2 TP levels
-    assert strategy.tp_levels == [0.12, 0.20]  # Changed from [0.10, 0.15, 0.25]
-    assert strategy.trailing_activation == 0.08
-    assert strategy.trailing_distance == 0.05
-    assert strategy.max_holding_days == 25  # Reduced from 30
-    assert strategy.time_decay_threshold == 0.03  # Increased from 0.02
-    assert strategy.default_stop_loss_pct == -7.0
+    # v3.0: Uses ExitConfig with new defaults
+    assert strategy.tp_levels == [0.12, 0.20]  # 2 TP levels
+    assert strategy.trailing_activation == 0.05  # v3.0: Changed from 0.08 to 0.05
+    assert strategy.trailing_distance == 0.03  # v3.0: Changed from 0.05 to 0.03
+    assert strategy.max_holding_days == 20  # v3.0: Changed from 25 to 20
+    assert strategy.time_decay_threshold == 0.02  # v3.0: Changed from 0.03 to 0.02
+    assert strategy.default_stop_loss_pct == 0.07  # v3.0: Now positive (7%)
 
 
 def test_exit_strategy_init_custom():
@@ -231,7 +231,7 @@ def test_ensure_stop_loss_zero_fallback(sample_stock_data):
 
 
 def test_check_take_profit_tp1(sample_stock_data):
-    """Test TP1 trigger (partial exit 30%)"""
+    """Test TP1 trigger (partial exit 50% - v3.0 simplified)"""
     strategy = ImprovedExitStrategy(take_profit_levels=[0.10, 0.15, 0.25])
 
     entry_price = 10000
@@ -252,7 +252,7 @@ def test_check_take_profit_tp1(sample_stock_data):
 
     assert decision.should_exit is True
     assert decision.exit_reason == ExitReason.TAKE_PROFIT_1
-    assert decision.exit_type == "PARTIAL_30%"
+    assert decision.exit_type == "PARTIAL_50%"  # v3.0: Changed from 30% to 50%
     # Net PnL = 11% gross - 1.6% transaction costs = ~9.4%
     assert decision.expected_pnl_percent > 9
 
@@ -312,22 +312,19 @@ def test_check_take_profit_levels_skip_taken(sample_stock_data):
     """Test that already-taken TP levels are skipped"""
     strategy = ImprovedExitStrategy()
 
-    # Price at TP1, but TP1 already taken
-    current_price = 11100
-    partial_exits = [11100]  # TP1 taken
+    # v3.0: _check_take_profit now uses ctx dict
+    ctx = {
+        "current_price": 11100,
+        "take_profit_targets": [11000, 11500, 12500],
+        "partial_exits": [11100],  # TP1 taken
+        "pnl_percent": 11.0,
+        "pnl_amount": 1100,
+    }
 
-    result = strategy._check_take_profit_levels(
-        current_price=current_price,
-        tp_targets=[11000, 11500, 12500],
-        partial_exits=partial_exits,
-        pnl_percent=11.0,
-        pnl_amount=1100,
-    )
+    result = strategy._check_take_profit(ctx)
 
-    # Should not exit for TP1 again
-    assert (
-        result["should_exit"] is False or result["decision"].exit_reason != ExitReason.TAKE_PROFIT_1
-    )
+    # Should not exit for TP1 again (returns None or different reason)
+    assert result is None or result.exit_reason != ExitReason.TAKE_PROFIT_1
 
 
 # ============================================================================
@@ -339,20 +336,19 @@ def test_trailing_stop_not_activated_yet(sample_stock_data):
     """Test trailing stop not activated (profit < activation threshold)"""
     strategy = ImprovedExitStrategy(trailing_stop_activation=0.08)  # 8%
 
-    entry_price = 10000
-    current_price = 10500  # +5% (below 8% activation)
-    highest_price = 10500
+    # v3.0: _check_trailing_stop now uses ctx dict
+    ctx = {
+        "entry_price": 10000,
+        "current_price": 10500,  # +5% (below 8% activation)
+        "highest_price": 10500,
+        "pnl_percent": 5.0,
+        "pnl_amount": 500,
+        "df": sample_stock_data,
+    }
 
-    result = strategy._check_trailing_stop(
-        entry_price=entry_price,
-        current_price=current_price,
-        highest_price=highest_price,
-        pnl_percent=5.0,
-        pnl_amount=500,
-        df=sample_stock_data,
-    )
+    result = strategy._check_trailing_stop(ctx)
 
-    assert result["should_exit"] is False
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 def test_trailing_stop_activated_not_hit(sample_stock_data):
@@ -363,21 +359,20 @@ def test_trailing_stop_activated_not_hit(sample_stock_data):
         use_dynamic_trailing=False,  # Use fixed %
     )
 
-    entry_price = 10000
-    current_price = 11000  # +10% (above 8% activation)
-    highest_price = 11000  # Peak
+    # v3.0: _check_trailing_stop now uses ctx dict
+    ctx = {
+        "entry_price": 10000,
+        "current_price": 11000,  # +10% (above 8% activation)
+        "highest_price": 11000,  # Peak
+        "pnl_percent": 10.0,
+        "pnl_amount": 1000,
+        "df": sample_stock_data,
+    }
 
-    result = strategy._check_trailing_stop(
-        entry_price=entry_price,
-        current_price=current_price,
-        highest_price=highest_price,
-        pnl_percent=10.0,
-        pnl_amount=1000,
-        df=sample_stock_data,
-    )
+    result = strategy._check_trailing_stop(ctx)
 
     # At peak, should not exit yet
-    assert result["should_exit"] is False
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 def test_trailing_stop_hit(sample_stock_data):
@@ -388,22 +383,21 @@ def test_trailing_stop_hit(sample_stock_data):
         use_dynamic_trailing=False,
     )
 
-    entry_price = 10000
-    highest_price = 11500  # Peak was +15%
-    current_price = 10900  # Dropped 5.2% from peak (11500 * 0.95 = 10925)
+    # v3.0: _check_trailing_stop now uses ctx dict
+    ctx = {
+        "entry_price": 10000,
+        "highest_price": 11500,  # Peak was +15%
+        "current_price": 10900,  # Dropped 5.2% from peak (11500 * 0.95 = 10925)
+        "pnl_percent": 9.0,
+        "pnl_amount": 900,
+        "df": sample_stock_data,
+    }
 
-    result = strategy._check_trailing_stop(
-        entry_price=entry_price,
-        current_price=current_price,
-        highest_price=highest_price,
-        pnl_percent=9.0,
-        pnl_amount=900,
-        df=sample_stock_data,
-    )
+    result = strategy._check_trailing_stop(ctx)
 
     # Should trigger trailing stop
-    assert result["should_exit"] is True
-    assert result["decision"].exit_reason == ExitReason.TRAILING_STOP
+    assert result is not None
+    assert result.exit_reason == ExitReason.TRAILING_STOP
 
 
 def test_trailing_stop_atr_based(sample_stock_data):
@@ -417,23 +411,22 @@ def test_trailing_stop_atr_based(sample_stock_data):
     # Ensure ATR exists
     sample_stock_data["atr"] = 100
 
-    entry_price = 10000
-    highest_price = 11500
-    current_price = 11000  # May or may not trigger depending on ATR
+    # v3.0: _check_trailing_stop now uses ctx dict
+    ctx = {
+        "entry_price": 10000,
+        "highest_price": 11500,
+        "current_price": 11000,  # May or may not trigger depending on ATR
+        "pnl_percent": 10.0,
+        "pnl_amount": 1000,
+        "df": sample_stock_data,
+    }
 
-    result = strategy._check_trailing_stop(
-        entry_price=entry_price,
-        current_price=current_price,
-        highest_price=highest_price,
-        pnl_percent=10.0,
-        pnl_amount=1000,
-        df=sample_stock_data,
-    )
+    result = strategy._check_trailing_stop(ctx)
 
     # Should use ATR-based trailing
     # Trailing stop = highest - 2*ATR = 11500 - 200 = 11300
     # Current = 11000 < 11300 → should exit
-    assert isinstance(result, dict)
+    assert result is not None  # v3.0: Returns ExitDecision or None
 
 
 # ============================================================================
@@ -445,15 +438,18 @@ def test_profit_protection_not_activated(sample_stock_data):
     """Test profit protection not activated (profit below threshold)"""
     strategy = ImprovedExitStrategy(profit_protection_activation=0.05)  # 5%
 
-    result = strategy._check_profit_protection(
-        entry_price=10000,
-        current_price=10300,  # +3% (below 5% activation)
-        highest_price=10300,
-        pnl_percent=3.0,
-        pnl_amount=300,
-    )
+    # v3.0: _check_profit_protection now uses ctx dict
+    ctx = {
+        "entry_price": 10000,
+        "current_price": 10300,  # +3% (below 5% activation)
+        "highest_price": 10300,
+        "pnl_percent": 3.0,
+        "pnl_amount": 300,
+    }
 
-    assert result["should_exit"] is False
+    result = strategy._check_profit_protection(ctx)
+
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 def test_profit_protection_activated_safe(sample_stock_data):
@@ -461,22 +457,22 @@ def test_profit_protection_activated_safe(sample_stock_data):
     strategy = ImprovedExitStrategy(
         profit_protection_activation=0.05,
         profit_protection_percent=0.50,  # Protect 50% of max profit
+        trailing_stop_activation=0.10,  # Set higher to test profit protection range
     )
 
-    entry_price = 10000
-    highest_price = 11000  # Max profit was +10%
-    current_price = 10800  # Still at +8% (above 50% of 10% = 5%)
+    # v3.0: _check_profit_protection now uses ctx dict
+    ctx = {
+        "entry_price": 10000,
+        "highest_price": 11000,  # Max profit was +10%
+        "current_price": 10800,  # Still at +8% (above 50% of 10% = 5%)
+        "pnl_percent": 8.0,
+        "pnl_amount": 800,
+    }
 
-    result = strategy._check_profit_protection(
-        entry_price=entry_price,
-        current_price=current_price,
-        highest_price=highest_price,
-        pnl_percent=8.0,
-        pnl_amount=800,
-    )
+    result = strategy._check_profit_protection(ctx)
 
     # Should not exit yet (protecting 50% of 10% = 5%, current is 8%)
-    assert result["should_exit"] is False
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 def test_check_exit_time_decay_triggered(sample_stock_data):
@@ -751,45 +747,52 @@ def test_check_reversal_pattern_bearish_engulfing(sample_stock_data):
         9900  # Bearish engulfing
     )
 
-    result = strategy._check_reversal_pattern(
-        sample_stock_data,
-        pnl_percent=5.0,
-        pnl_amount=500,
-    )
+    # v3.0: _check_reversal_pattern now uses ctx dict
+    ctx = {
+        "df": sample_stock_data,
+        "pnl_percent": 5.0,
+        "pnl_amount": 500,
+    }
+
+    result = strategy._check_reversal_pattern(ctx)
 
     # Should detect bearish engulfing
-    assert result["should_exit"] is True
-    assert result["decision"].exit_reason == ExitReason.REVERSAL_PATTERN
+    assert result is not None
+    assert result.exit_reason == ExitReason.REVERSAL_PATTERN
 
 
 def test_check_reversal_pattern_no_pattern(sample_stock_data):
     """Test when no reversal pattern present"""
     strategy = ImprovedExitStrategy()
 
-    # Normal candles
-    result = strategy._check_reversal_pattern(
-        sample_stock_data,
-        pnl_percent=5.0,
-        pnl_amount=500,
-    )
+    # v3.0: _check_reversal_pattern now uses ctx dict
+    ctx = {
+        "df": sample_stock_data,
+        "pnl_percent": 5.0,
+        "pnl_amount": 500,
+    }
+
+    result = strategy._check_reversal_pattern(ctx)
 
     # Should not detect pattern
-    assert result["should_exit"] is False
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 def test_check_reversal_pattern_in_loss(sample_stock_data):
     """Test reversal pattern when in loss (should not exit)"""
     strategy = ImprovedExitStrategy()
 
-    # Even with pattern, don't exit if in loss
-    result = strategy._check_reversal_pattern(
-        sample_stock_data,
-        pnl_percent=-2.0,
-        pnl_amount=-200,
-    )
+    # v3.0: _check_reversal_pattern now uses ctx dict
+    ctx = {
+        "df": sample_stock_data,
+        "pnl_percent": -2.0,
+        "pnl_amount": -200,
+    }
+
+    result = strategy._check_reversal_pattern(ctx)
 
     # Should not exit on pattern when in loss
-    assert result["should_exit"] is False
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 # ============================================================================
@@ -808,17 +811,20 @@ def test_check_support_breakdown_triggered(sample_stock_data):
     # Set high volume
     sample_stock_data.loc[sample_stock_data.index[-1], "volume"] = 500_000  # High
 
-    result = strategy._check_support_breakdown(
-        sample_stock_data,
-        current_price,
-        entry_price=10000,
-        pnl_percent=2.0,
-        pnl_amount=200,
-    )
+    # v3.0: _check_support_breakdown now uses ctx dict
+    ctx = {
+        "df": sample_stock_data,
+        "current_price": current_price,
+        "entry_price": 10000,
+        "pnl_percent": 2.0,
+        "pnl_amount": 200,
+    }
+
+    result = strategy._check_support_breakdown(ctx)
 
     # Should trigger breakdown
-    assert result["should_exit"] is True
-    assert result["decision"].exit_reason == ExitReason.BREAKDOWN
+    assert result is not None
+    assert result.exit_reason == ExitReason.BREAKDOWN
 
 
 def test_check_support_breakdown_no_volume(sample_stock_data):
@@ -831,16 +837,19 @@ def test_check_support_breakdown_no_volume(sample_stock_data):
     # Low volume (no confirmation)
     sample_stock_data.loc[sample_stock_data.index[-1], "volume"] = 100_000
 
-    result = strategy._check_support_breakdown(
-        sample_stock_data,
-        current_price,
-        entry_price=10000,
-        pnl_percent=2.0,
-        pnl_amount=200,
-    )
+    # v3.0: _check_support_breakdown now uses ctx dict
+    ctx = {
+        "df": sample_stock_data,
+        "current_price": current_price,
+        "entry_price": 10000,
+        "pnl_percent": 2.0,
+        "pnl_amount": 200,
+    }
+
+    result = strategy._check_support_breakdown(ctx)
 
     # Should not trigger without volume
-    assert result["should_exit"] is False
+    assert result is None  # v3.0: Returns None instead of dict
 
 
 # ============================================================================

@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config.trading_config import get_config
 from src.data.loader import load_data
 from src.ml.signals.enhanced import EnhancedMLSignalGenerator
-from src.market.regime import MarketRegimeAnalyzer
+from src.market.regime_detector import MarketRegimeDetector as MarketRegimeAnalyzer
 from src.strategies.entry_logic import ImprovedEntryLogic
 from src.strategies.exit_logic import ImprovedExitStrategy
 from src.strategies.position_sizing import EnhancedPositionSizer

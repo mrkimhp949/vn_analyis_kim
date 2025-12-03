@@ -1,67 +1,245 @@
 # -*- coding: utf-8 -*-
 """
-improved_exit_logic.py - Smart Exit Strategy
-Chiến lược thoát lệnh chuyên nghiệp với trailing stop, take profit bậc thang
+exit_logic.py - Smart Exit Strategy v3.0 (Refactored)
+
+Chiến lược thoát lệnh chuyên nghiệp với:
+- Trailing stop động (ATR-based)
+- Take profit 2 bậc (simplified từ 3 bậc)
+- Profit protection
+- Per-symbol performance tracking
+- Full transaction cost integration
+
+Changes v3.0:
+- Fixed inconsistency giữa config và implementation
+- Removed magic numbers - tất cả configurable
+- Added proper error handling
+- Memory leak prevention với history limits
+- Safe DataFrame access utilities
+- Improved documentation
 """
 
+from __future__ import annotations
+
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+# Import constants at module level for better error handling
+try:
+    from src.config.constants import (
+        DEFAULT_TRAILING_STOP_ACTIVATION,
+        DEFAULT_TRAILING_STOP_DISTANCE,
+        DEFAULT_TIME_DECAY_THRESHOLD,
+        MAX_HOLDING_DAYS,
+        ROUND_TRIP_COST,
+        VOLUME_SURGE_THRESHOLD,
+    )
+except ImportError:
+    # Fallback defaults if constants not available
+    DEFAULT_TRAILING_STOP_ACTIVATION = 0.05
+    DEFAULT_TRAILING_STOP_DISTANCE = 0.03
+    DEFAULT_TIME_DECAY_THRESHOLD = 0.02
+    MAX_HOLDING_DAYS = 20
+    ROUND_TRIP_COST = 0.016
+    VOLUME_SURGE_THRESHOLD = 1.5
+
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
-# IMPROVEMENT #10: Trading hours check
+# Optional imports with graceful fallback
 try:
-    from src.market.schedule import is_trading_hour, is_trading_day
+    from src.market.schedule import is_trading_hour, is_trading_day, is_near_session_boundary
 
     TRADING_SCHEDULE_AVAILABLE = True
 except ImportError:
     TRADING_SCHEDULE_AVAILABLE = False
+    is_trading_hour = lambda: True
+    is_trading_day = lambda: True
+    is_near_session_boundary = lambda minutes=5: (False, None)
 
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# ENUMS & DATA CLASSES
+# =============================================================================
+
+
 class ExitReason(Enum):
-    """Lý do thoát lệnh"""
+    """Lý do thoát lệnh - đầy đủ các trường hợp"""
 
     STOP_LOSS = "Stop Loss Hit"
     TRAILING_STOP = "Trailing Stop"
-    TAKE_PROFIT_1 = "Take Profit 1 (Partial 50%)"  # SIMPLIFIED
-    TAKE_PROFIT_2 = "Take Profit 2 (Full Exit)"  # SIMPLIFIED
-    TAKE_PROFIT_3 = "Take Profit 3 (Legacy - Full Exit)"  # BACKWARD COMPATIBLE
+    TAKE_PROFIT_1 = "Take Profit 1 (Partial)"
+    TAKE_PROFIT_2 = "Take Profit 2 (Full Exit)"
+    TAKE_PROFIT_3 = "Take Profit 3 (Legacy - Full Exit)"  # Backward compatible
     ML_SIGNAL_SELL = "ML Signal SELL"
     TIME_DECAY = "Time Decay (Sideway quá lâu)"
     MARKET_CRASH = "Market Crash Protection"
     EMERGENCY_EXIT = "Emergency Exit (Portfolio protection)"
     REVERSAL_PATTERN = "Bearish Reversal Pattern"
     BREAKDOWN = "Support Breakdown"
+    SESSION_END = "Session End Protection"
+    PROFIT_PROTECTION = "Profit Protection"
+
+
+@dataclass
+class ExitDecision:
+    """Decision kết quả thoát lệnh với đầy đủ thông tin"""
+
+    should_exit: bool
+    exit_reason: Optional[ExitReason]
+    exit_type: str  # 'FULL', 'PARTIAL_50%', 'HOLD'
+    exit_price: float
+    expected_pnl: float
+    expected_pnl_percent: float
+    message: str
+    urgency: int  # 1-5 (5 = exit ngay lập tức)
+    metadata: Dict[str, Any] = field(default_factory=dict)  # Extra info for debugging
+
+
+@dataclass
+class ExitConfig:
+    """
+    Centralized exit configuration - loại bỏ magic numbers.
+    Tất cả thresholds có thể config được.
+    """
+
+    # Take Profit levels (as percentage, e.g., 0.12 = 12%)
+    take_profit_levels: Tuple[float, float] = (0.12, 0.20)
+
+    # Stop Loss
+    stop_loss_atr_multiplier: float = 2.0
+    default_stop_loss_pct: float = 0.07  # 7% below entry
+    min_stop_loss_pct: float = 0.03  # Min 3% risk
+    max_stop_loss_pct: float = 0.10  # Max 10% risk
+
+    # Trailing Stop
+    trailing_stop_activation: float = DEFAULT_TRAILING_STOP_ACTIVATION
+    trailing_stop_distance: float = DEFAULT_TRAILING_STOP_DISTANCE
+    trailing_stop_atr_multiplier: float = 2.0
+    use_dynamic_trailing: bool = True
+
+    # Time Decay
+    max_holding_days: int = MAX_HOLDING_DAYS
+    time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
+
+    # Profit Protection
+    profit_protection_activation: float = 0.05  # Activate at 5% profit
+    profit_protection_percent: float = 0.50  # Protect 50% of max profit
+
+    # Partial Exit
+    partial_exit_percent: float = 0.50  # Exit 50% at TP1
+
+    # ML Signal
+    ml_confidence_threshold: float = 60.0  # Min confidence for ML sell
+    ml_min_pnl_for_exit: float = -3.0  # Min P&L to consider ML exit
+
+    # Market Crash
+    market_crash_profit_threshold: float = 3.0  # Exit if profit > 3% in crash
+    market_crash_loss_threshold: float = -2.0  # Exit if loss < 2% in crash
+
+    # Volume
+    volume_surge_ratio: float = VOLUME_SURGE_THRESHOLD
+
+    # Transaction Costs
+    include_transaction_costs: bool = True
+    round_trip_cost: float = ROUND_TRIP_COST
+
+    # Per-Symbol Performance
+    use_per_symbol_performance: bool = True
+    poor_performer_max_holding_days: int = 15
+    poor_performer_tighter_stop_pct: float = 0.03
+    poor_performer_win_rate_threshold: float = 0.35
+    poor_performer_consecutive_losses: int = 2
+
+
+# =============================================================================
+# UTILITY FUNCTIONS - Safe DataFrame Access
+# =============================================================================
+
+
+def safe_iloc(df: pd.DataFrame, index: int, column: Optional[str] = None) -> Optional[Any]:
+    """
+    Safely access DataFrame by iloc index.
+
+    Args:
+        df: DataFrame to access
+        index: Index position (can be negative)
+        column: Optional column name
+
+    Returns:
+        Value at position or None if invalid
+    """
+    try:
+        if df is None or df.empty:
+            return None
+        if abs(index) > len(df):
+            return None
+        row = df.iloc[index]
+        if column is not None:
+            return row[column] if column in df.columns else None
+        return row
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def safe_division(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """Safe division with zero check."""
+    if denominator == 0 or pd.isna(denominator):
+        return default
+    return numerator / denominator
+
+
+def calculate_trading_days(start_date: datetime, end_date: datetime) -> int:
+    """
+    Calculate number of trading days between two dates.
+    Uses pandas business day frequency.
+    """
+    try:
+        from pandas.tseries.offsets import BDay
+
+        return len(pd.date_range(start_date, end_date, freq=BDay()))
+    except Exception:
+        # Fallback to calendar days
+        return (end_date - start_date).days
+
+
+# =============================================================================
+# PARTIAL EXIT TRACKER
+# =============================================================================
 
 
 class PartialExitTracker:
     """
-    SIMPLIFIED partial exit tracking.
+    Simplified partial exit tracking with memory management.
 
-    Replaces complex list-based tracking with simple state machine:
+    State machine:
     - State 0: No partial exits yet
-    - State 1: TP1 hit (50% exited)
+    - State 1: TP1 hit (partial exited)
     - State 2: TP2 hit (100% exited) - position closed
     """
 
+    MAX_HISTORY_PER_SYMBOL = 100  # Prevent memory leak
+
     def __init__(self):
-        self._states = {}  # {symbol: exit_state}
-        self._exit_history = {}  # {symbol: [exit_records]}
+        self._states: Dict[str, int] = {}
+        self._exit_history: Dict[str, List[Dict]] = {}
 
     def get_state(self, symbol: str) -> int:
         """Get current exit state for symbol (0, 1, or 2)"""
         return self._states.get(symbol, 0)
 
-    def record_partial_exit(self, symbol: str, exit_type: str, price: float, shares: int):
-        """Record a partial exit"""
+    def record_partial_exit(
+        self, symbol: str, exit_type: str, price: float, shares: int, reason: Optional[str] = None
+    ) -> None:
+        """Record a partial exit with history management."""
         current_state = self.get_state(symbol)
 
+        # Update state
         if exit_type == "PARTIAL_50%":
             self._states[symbol] = 1
         elif exit_type == "FULL":
@@ -79,8 +257,13 @@ class PartialExitTracker:
                 "timestamp": datetime.now().isoformat(),
                 "state_before": current_state,
                 "state_after": self._states[symbol],
+                "reason": reason,
             }
         )
+
+        # Prevent memory leak - trim old history
+        if len(self._exit_history[symbol]) > self.MAX_HISTORY_PER_SYMBOL:
+            self._exit_history[symbol] = self._exit_history[symbol][-self.MAX_HISTORY_PER_SYMBOL :]
 
         logger.info(
             f"📊 {symbol} partial exit recorded: {exit_type} @ {price:,.0f} "
@@ -95,17 +278,16 @@ class PartialExitTracker:
         """Check if symbol is fully exited"""
         return self.get_state(symbol) >= 2
 
-    def clear_position(self, symbol: str):
+    def clear_position(self, symbol: str) -> None:
         """Clear tracking for a symbol (after full exit)"""
-        if symbol in self._states:
-            del self._states[symbol]
+        self._states.pop(symbol, None)
         # Keep history for analysis
 
     def get_exit_history(self, symbol: str) -> List[Dict]:
         """Get exit history for a symbol"""
         return self._exit_history.get(symbol, [])
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> Dict[str, int]:
         """Get summary of all tracked positions"""
         return {
             "active_positions": len([s for s, state in self._states.items() if state < 2]),
@@ -114,91 +296,69 @@ class PartialExitTracker:
             "total_tracked": len(self._states),
         }
 
+    def clear_all(self) -> int:
+        """Clear all tracking data. Returns count of cleared items."""
+        count = len(self._states)
+        self._states.clear()
+        return count
 
-@dataclass
-class ExitDecision:
-    """Decision kết quả thoát lệnh"""
 
-    should_exit: bool
-    exit_reason: Optional[ExitReason]
-    exit_type: str  # 'FULL', 'PARTIAL_50%', 'PARTIAL_30%'
-    exit_price: float
-    expected_pnl: float
-    expected_pnl_percent: float
-    message: str
-    urgency: int  # 1-5 (5 = exit ngay lập tức)
+# =============================================================================
+# MAIN EXIT STRATEGY CLASS
+# =============================================================================
 
 
 class ImprovedExitStrategy:
     """
-    Chiến lược thoát lệnh nâng cao v2.0
+    Chiến lược thoát lệnh nâng cao v3.0
 
-    Tính năng:
-    1. Trailing Stop - Bảo vệ lợi nhuận (ATR-based)
-    2. Take Profit SIMPLIFIED - 2 levels thay vì 3 (giảm complexity)
-    3. Time-based exit - Thoát nếu sideway quá lâu
-    4. Market protection - Thoát khi thị trường đảo chiều
-    5. Pattern recognition - Thoát khi xuất hiện pattern đảo chiều
-    6. Portfolio protection - Thoát khi portfolio loss quá nhiều
-    7. NEW: Per-Symbol Performance - Thoát sớm symbols có track record xấu
+    Features:
+    1. Trailing Stop - ATR-based dynamic protection
+    2. Take Profit - 2 levels (simplified)
+    3. Profit Protection - Protect gains before trailing activates
+    4. Time-based exit - Exit if sideway too long
+    5. Market protection - Exit on market regime change
+    6. Pattern recognition - Exit on reversal patterns
+    7. Portfolio protection - Emergency exit
+    8. Per-Symbol Performance - Tighter rules for poor performers
+    9. Session boundary awareness
 
-    IMPROVEMENTS v2.0:
-    - Simplified from 3 TP levels to 2 (TP1: partial, TP2: full)
-    - Cleaner partial exit tracking with PartialExitTracker
-    - Transaction costs included in all P&L calculations
-    - Better logging for debugging
-
-    IMPROVEMENT #6 (v2.1):
-    - Per-symbol performance integration
-    - Exit decisions consider historical win rate and avg holding time
-    - Tighter stops for symbols with poor track record
+    All thresholds are configurable via ExitConfig.
     """
 
-    def __init__(
-        self,
-        take_profit_levels: List[float] = [0.12, 0.20],  # SIMPLIFIED: 2 levels (12%, 20%)
-        stop_loss_atr_multiplier: float = 2.0,
-        trailing_stop_activation: float = 0.08,  # Kích hoạt trailing khi lời 8%
-        trailing_stop_distance: float = 0.05,  # Trailing 5% from high (fallback)
-        trailing_stop_atr_multiplier: float = 2.0,  # Dynamic: use 2×ATR instead of fixed %
-        use_dynamic_trailing: bool = True,  # Use ATR-based trailing stop
-        max_holding_days: int = 25,  # REDUCED from 30 to 25 for faster rotation
-        time_decay_threshold: float = 0.03,  # INCREASED from 2% to 3%
-        default_stop_loss_pct: float = -7.0,
-        # SIMPLIFIED PROFIT PROTECTION
-        profit_protection_activation: float = 0.05,  # Activate at 5% profit
-        profit_protection_percent: float = 0.50,  # Protect 50% of max profit
-        # Transaction costs
-        include_transaction_costs: bool = True,
-        # NEW: Simplified partial exit config
-        partial_exit_percent: float = 0.50,  # Exit 50% at TP1 (simpler than 30%)
-    ):
-        self.tp_levels = take_profit_levels
-        self.sl_atr_mult = stop_loss_atr_multiplier
-        self.trailing_activation = trailing_stop_activation
-        self.trailing_distance = trailing_stop_distance
-        self.trailing_atr_mult = trailing_stop_atr_multiplier
-        self.use_dynamic_trailing = use_dynamic_trailing
-        self.max_holding_days = max_holding_days
-        self.time_decay_threshold = time_decay_threshold
-        self.default_stop_loss_pct = default_stop_loss_pct
+    def __init__(self, config: Optional[ExitConfig] = None, **kwargs):
+        """
+        Initialize exit strategy.
 
-        # SIMPLIFIED: Profit protection config
-        self.profit_protection_activation = profit_protection_activation
-        self.profit_protection_percent = profit_protection_percent
-        self.include_transaction_costs = include_transaction_costs
+        Args:
+            config: ExitConfig object with all settings
+            **kwargs: Override individual config values
+        """
+        # Use provided config or create default
+        self.config = config or ExitConfig()
 
-        # NEW: Simplified partial exit
-        self.partial_exit_percent = partial_exit_percent
+        # Allow kwargs to override config values
+        for key, value in kwargs.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
 
-        # Tracking with improved structure
-        self.position_highs = {}  # {symbol: highest_price_since_entry}
-        self.partial_exit_tracker = PartialExitTracker()  # NEW: Cleaner tracking
+        # Tracking state
+        self.position_highs: Dict[str, float] = {}
+        self.partial_exit_tracker = PartialExitTracker()
 
-        # IMPROVEMENT #6: Per-symbol performance integration
-        self.use_per_symbol_performance = True
-        self.poor_performer_max_holding_days = 15  # Shorter holding for poor performers
-        self.poor_performer_tighter_stop_pct = 0.03  # 3% tighter stop for poor performers
+        # Legacy compatibility aliases
+        self.tp_levels = list(self.config.take_profit_levels)
+        self.sl_atr_mult = self.config.stop_loss_atr_multiplier
+        self.trailing_activation = self.config.trailing_stop_activation
+        self.trailing_distance = self.config.trailing_stop_distance
+        self.trailing_atr_mult = self.config.trailing_stop_atr_multiplier
+        self.use_dynamic_trailing = self.config.use_dynamic_trailing
+        self.max_holding_days = self.config.max_holding_days
+        self.time_decay_threshold = self.config.time_decay_threshold
+        self.default_stop_loss_pct = self.config.default_stop_loss_pct
+        self.include_transaction_costs = self.config.include_transaction_costs
+        self.partial_exit_percent = self.config.partial_exit_percent
+        self.use_per_symbol_performance = self.config.use_per_symbol_performance
 
     def check_exit(
         self,
@@ -211,353 +371,100 @@ class ImprovedExitStrategy:
         df: pd.DataFrame,
         ml_signal: Optional[Dict] = None,
         market_regime: Optional[Dict] = None,
-        partial_exits: List[float] = None,
+        partial_exits: Optional[List[float]] = None,
         check_trading_hours: bool = False,
     ) -> ExitDecision:
         """
-        Kiểm tra xem có nên thoát lệnh không
+        Kiểm tra xem có nên thoát lệnh không.
 
         Args:
             symbol: Mã cổ phiếu
             entry_price: Giá vào
             current_price: Giá hiện tại
-            stop_loss: Stop loss ban đầu (có thể None, sẽ dùng fallback 7% dưới entry)
-            take_profit_targets: List [TP1, TP2, TP3]
+            stop_loss: Stop loss ban đầu (có thể None)
+            take_profit_targets: List [TP1, TP2] hoặc [TP1, TP2, TP3]
             entry_date: Ngày vào lệnh
             df: DataFrame với OHLCV + indicators
             ml_signal: Signal từ ML (optional)
             market_regime: Market regime info (optional)
             partial_exits: List các lần đã chốt lời 1 phần (optional)
-            check_trading_hours: Kiểm tra giờ giao dịch (default: False để backward compatible)
+            check_trading_hours: Kiểm tra giờ giao dịch
 
         Returns:
-            ExitDecision
+            ExitDecision with full details
         """
+        partial_exits = partial_exits or []
 
-        if partial_exits is None:
-            partial_exits = []
+        # Calculate P&L
+        pnl_percent, pnl_amount = self._calculate_pnl(entry_price, current_price)
 
-        # IMPROVEMENT #10: Check trading hours
-        # Note: For exits, we still check stop loss even outside trading hours
-        # but skip other exit signals to avoid false signals
+        # Calculate holding days (trading days)
+        days_held = calculate_trading_days(entry_date, datetime.now())
+
+        # Update highest price tracking
+        self._update_position_high(symbol, current_price)
+        highest_price = self.position_highs[symbol]
+
+        # Ensure valid stop loss
+        effective_stop_loss = self._ensure_stop_loss(symbol, entry_price, stop_loss, df)
+
+        # Get per-symbol performance
+        symbol_perf = self._get_symbol_performance(symbol)
+        is_poor_performer = symbol_perf.get("is_poor_performer", False)
+
+        # Check trading hours
         is_outside_trading_hours = False
         if check_trading_hours and TRADING_SCHEDULE_AVAILABLE:
             if not is_trading_day() or not is_trading_hour():
                 is_outside_trading_hours = True
                 logger.debug(f"[{symbol}] Outside trading hours - only checking stop loss")
 
-        # Ensure stop loss is valid even if missing from stored position
-        # Pass df for ATR-based calculation if needed
-        stop_loss = self._ensure_stop_loss(symbol, entry_price, stop_loss, df)
+        # Build context for checks
+        ctx = {
+            "symbol": symbol,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "stop_loss": effective_stop_loss,
+            "take_profit_targets": take_profit_targets,
+            "entry_date": entry_date,
+            "df": df,
+            "ml_signal": ml_signal,
+            "market_regime": market_regime,
+            "partial_exits": partial_exits,
+            "pnl_percent": pnl_percent,
+            "pnl_amount": pnl_amount,
+            "days_held": days_held,
+            "highest_price": highest_price,
+            "is_poor_performer": is_poor_performer,
+            "symbol_perf": symbol_perf,
+            "is_outside_trading_hours": is_outside_trading_hours,
+        }
 
-        # Calculate P&L with transaction costs
-        if self.include_transaction_costs:
-            from src.config.constants import ROUND_TRIP_COST
+        # Run exit checks in priority order
+        checks = [
+            self._check_stop_loss,
+            self._check_breakeven_stop,  # NEW: Check breakeven stop after 1R profit
+            self._check_session_boundary,
+            self._check_market_crash,
+            self._check_take_profit,
+            self._check_profit_protection,
+            self._check_trailing_stop,
+            self._check_ml_signal,
+            self._check_reversal_pattern,
+            self._check_support_breakdown,
+            self._check_time_decay,
+        ]
 
-            # Realistic P&L = price change - round trip costs (0.9%)
-            gross_pnl_percent = ((current_price - entry_price) / entry_price) * 100
-            transaction_cost_percent = ROUND_TRIP_COST * 100
-            pnl_percent = gross_pnl_percent - transaction_cost_percent
+        for check_fn in checks:
+            try:
+                result = check_fn(ctx)
+                if result and result.should_exit:
+                    return result
+            except Exception as e:
+                logger.warning(f"⚠️ Error in {check_fn.__name__}: {e}")
+                continue
 
-            # Per share: price change - (entry cost + exit cost)
-            pnl_amount = (current_price - entry_price) - (entry_price * ROUND_TRIP_COST)
-
-            logger.debug(
-                f"📊 {symbol} P&L: Gross {gross_pnl_percent:+.2f}% - "
-                f"Costs {transaction_cost_percent:.2f}% = Net {pnl_percent:+.2f}%"
-            )
-        else:
-            # Legacy: P&L without costs
-            pnl_percent = ((current_price - entry_price) / entry_price) * 100
-            pnl_amount = current_price - entry_price  # Per share
-
-        # CRITICAL FIX: Use trading days instead of calendar days
-        # to account for weekends and holidays
-        try:
-            import pandas as pd
-            from pandas.tseries.offsets import BDay
-
-            # Count business days (trading days) between entry and now
-            trading_days_held = len(pd.date_range(entry_date, datetime.now(), freq=BDay()))
-
-            # Use trading days for time decay logic
-            days_held = trading_days_held
-            logger.debug(
-                f"📅 {symbol} held for {trading_days_held} trading days "
-                f"(calendar: {(datetime.now() - entry_date).days} days)"
-            )
-        except Exception as e:
-            # Fallback to calendar days if business day calculation fails
-            logger.warning(f"Failed to calculate trading days: {e}, using calendar days")
-            days_held = (datetime.now() - entry_date).days
-
-        # Update highest price
-        if symbol not in self.position_highs:
-            self.position_highs[symbol] = current_price
-        else:
-            self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
-
-        highest_price = self.position_highs[symbol]
-
-        # ====================================================================
-        # IMPROVEMENT #6: Get Per-Symbol Performance for exit decisions
-        # ====================================================================
-        symbol_performance = self._get_symbol_performance(symbol)
-        is_poor_performer = symbol_performance.get("is_poor_performer", False)
-        symbol_win_rate = symbol_performance.get("win_rate", 0.5)
-        symbol_avg_holding = symbol_performance.get("avg_holding_days", self.max_holding_days)
-
-        if is_poor_performer:
-            logger.info(
-                f"⚠️ {symbol} is a POOR PERFORMER (win_rate: {symbol_win_rate:.1%}, "
-                f"avg_holding: {symbol_avg_holding:.0f} days) - applying tighter exit rules"
-            )
-
-        # ====================================================================
-        # CHECK 1: STOP LOSS (Ưu tiên cao nhất)
-        # ====================================================================
-        # Use stop_loss if available, otherwise fallback to 7% below entry
-        effective_stop_loss = stop_loss
-        if effective_stop_loss is None or effective_stop_loss <= 0:
-            effective_stop_loss = entry_price * 0.93  # 7% below entry as fallback
-
-        # IMPROVEMENT #6: Tighter stop loss for poor performers
-        if is_poor_performer and self.use_per_symbol_performance:
-            tighter_stop = entry_price * (1 - self.poor_performer_tighter_stop_pct)
-            if tighter_stop > effective_stop_loss:
-                logger.debug(
-                    f"📉 {symbol}: Tightening stop from {effective_stop_loss:,.0f} "
-                    f"to {tighter_stop:,.0f} (poor performer)"
-                )
-                effective_stop_loss = max(effective_stop_loss, tighter_stop)
-
-        if current_price <= effective_stop_loss:
-            return ExitDecision(
-                should_exit=True,
-                exit_reason=ExitReason.STOP_LOSS,
-                exit_type="FULL",
-                exit_price=current_price,
-                expected_pnl=pnl_amount,
-                expected_pnl_percent=pnl_percent,
-                message=f"⛔ STOP LOSS: {pnl_percent:+.2f}%",
-                urgency=5,
-            )
-
-        # ====================================================================
-        # CHECK 1.5: SESSION BOUNDARY - Tighten exits near session end
-        # ====================================================================
-        session_boundary_urgency_boost = 0
-        try:
-            from src.market.schedule import is_near_session_boundary
-
-            is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
-            if is_near_boundary:
-                session_boundary_urgency_boost = 1  # Increase urgency for all exits
-                # If profitable near session end, consider early exit
-                if pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
-                    return ExitDecision(
-                        should_exit=True,
-                        exit_reason=ExitReason.TRAILING_STOP,
-                        exit_type="FULL",
-                        exit_price=current_price,
-                        expected_pnl=pnl_amount,
-                        expected_pnl_percent=pnl_percent,
-                        message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
-                        urgency=4,
-                    )
-        except ImportError:
-            pass  # Schedule module not available
-
-        # ====================================================================
-        # CHECK 2: MARKET CRASH PROTECTION
-        # ====================================================================
-        if market_regime and market_regime.get("regime") == "BEAR":
-            # Nếu thị trường chuyển Bear, thoát ngay kể cả khi đang lời
-            if pnl_percent > 3:  # Có lời thì chốt
-                return ExitDecision(
-                    should_exit=True,
-                    exit_reason=ExitReason.MARKET_CRASH,
-                    exit_type="FULL",
-                    exit_price=current_price,
-                    expected_pnl=pnl_amount,
-                    expected_pnl_percent=pnl_percent,
-                    message=f"🚨 THỊ TRƯỜNG GIẢM ĐIỂM - Chốt lời sớm: {pnl_percent:+.2f}%",
-                    urgency=4 + session_boundary_urgency_boost,
-                )
-            elif pnl_percent > -2:  # Lỗ ít thì cũng thoát
-                return ExitDecision(
-                    should_exit=True,
-                    exit_reason=ExitReason.MARKET_CRASH,
-                    exit_type="FULL",
-                    exit_price=current_price,
-                    expected_pnl=pnl_amount,
-                    expected_pnl_percent=pnl_percent,
-                    message=f"🚨 THỊ TRƯỜNG GIẢM ĐIỂM - Cắt lỗ sớm: {pnl_percent:+.2f}%",
-                    urgency=4 + session_boundary_urgency_boost,
-                )
-
-        # ====================================================================
-        # CHECK 3: TAKE PROFIT BẬC THANG
-        # ====================================================================
-        tp_check = self._check_take_profit_levels(
-            current_price, take_profit_targets, partial_exits, pnl_percent, pnl_amount
-        )
-
-        if tp_check["should_exit"]:
-            return tp_check["decision"]
-
-        # ====================================================================
-        # CHECK 4: PROFIT PROTECTION (3-8% profit range)
-        # ====================================================================
-        # NEW: Protect profit before trailing stop activation
-        profit_protection_check = self._check_profit_protection(
-            entry_price,
-            current_price,
-            highest_price,
-            pnl_percent,
-            pnl_amount,
-        )
-
-        if profit_protection_check["should_exit"]:
-            return profit_protection_check["decision"]
-
-        # ====================================================================
-        # CHECK 5: TRAILING STOP (>= 8% profit) - Dynamic ATR-based
-        # ====================================================================
-        trailing_check = self._check_trailing_stop(
-            entry_price,
-            current_price,
-            highest_price,
-            pnl_percent,
-            pnl_amount,
-            df,  # Pass df for ATR calculation
-        )
-
-        if trailing_check["should_exit"]:
-            return trailing_check["decision"]
-
-        # ====================================================================
-        # CHECK 6: ML SIGNAL SELL (with volume confirmation)
-        # ====================================================================
-        if ml_signal and ml_signal.get("signal") == "SELL":
-            confidence = ml_signal.get("confidence", 0)
-
-            # ENHANCEMENT: Add volume confirmation for ML sell signal
-            volume_confirmation = self._check_volume_for_exit(df)
-
-            # Chỉ thoát nếu confidence >= 60 và đang lời (hoặc lỗ ít)
-            if confidence >= 60 and pnl_percent > -3:
-                # If volume confirms (high volume on sell), increase urgency
-                urgency = 4 if volume_confirmation else 3
-                message = f"📉 ML SIGNAL SELL (Conf: {confidence}%): {pnl_percent:+.2f}%"
-                if volume_confirmation:
-                    message += " | Volume confirmed ⚠️"
-
-                return ExitDecision(
-                    should_exit=True,
-                    exit_reason=ExitReason.ML_SIGNAL_SELL,
-                    exit_type="FULL",
-                    exit_price=current_price,
-                    expected_pnl=pnl_amount,
-                    expected_pnl_percent=pnl_percent,
-                    message=message,
-                    urgency=urgency,
-                )
-
-        # ====================================================================
-        # CHECK 7: BEARISH REVERSAL PATTERN
-        # ====================================================================
-        if len(df) >= 3:
-            pattern_check = self._check_reversal_pattern(df, pnl_percent, pnl_amount)
-
-            if pattern_check["should_exit"]:
-                return pattern_check["decision"]
-
-        # ====================================================================
-        # CHECK 8: SUPPORT BREAKDOWN
-        # ====================================================================
-        breakdown_check = self._check_support_breakdown(
-            df, current_price, entry_price, pnl_percent, pnl_amount
-        )
-
-        if breakdown_check["should_exit"]:
-            return breakdown_check["decision"]
-
-        # ====================================================================
-        # CHECK 9: TIME DECAY (ADAPTIVE BY MARKET REGIME + TREND STRENGTH + PER-SYMBOL PERFORMANCE)
-        # ====================================================================
-        # IMPROVEMENT v2: Adapt holding period based on:
-        # 1. Market regime (BULL/SIDEWAYS/BEAR)
-        # 2. Trend strength (ADX) - NEW
-        # 3. Per-symbol performance
-        adaptive_max_days = self.max_holding_days  # Default: 25
-
-        # Step 1: Adjust by market regime
-        if market_regime:
-            regime = market_regime.get("regime", "SIDEWAYS")
-            if regime == "BULL":
-                adaptive_max_days = 30  # Hold longer in bull market
-                logger.debug(f"📈 BULL market: Using {adaptive_max_days} day holding limit")
-            elif regime == "SIDEWAYS":
-                adaptive_max_days = 20  # Standard for sideways
-                logger.debug(f"➡️ SIDEWAYS market: Using {adaptive_max_days} day holding limit")
-            elif regime == "BEAR":
-                adaptive_max_days = 15  # Exit faster in bear market
-                logger.debug(f"📉 BEAR market: Using {adaptive_max_days} day holding limit")
-
-        # Step 2: IMPROVEMENT - Adjust by trend strength (ADX)
-        # Strong trend (ADX > 35) = hold longer
-        # Medium trend (ADX 25-35) = normal
-        # Weak trend (ADX < 25) = exit faster
-        try:
-            adx = 0
-            if len(df) > 0 and "adx" in df.columns:
-                adx = df.iloc[-1]["adx"] if pd.notna(df.iloc[-1]["adx"]) else 0
-            if adx > 35:  # Strong trend
-                trend_adjustment = 1.5  # Increase holding by 50%
-                logger.debug(f"💪 Strong trend (ADX {adx:.1f}): Extending holding by 50%")
-            elif adx > 25:  # Medium trend
-                trend_adjustment = 1.2  # Increase holding by 20%
-                logger.debug(f"📊 Medium trend (ADX {adx:.1f}): Extending holding by 20%")
-            elif adx > 15:  # Weak trend
-                trend_adjustment = 1.0  # No adjustment
-                logger.debug(f"➡️ Weak trend (ADX {adx:.1f}): No adjustment")
-            else:  # Very weak/no trend
-                trend_adjustment = 0.8  # Reduce holding by 20%
-                logger.debug(f"📉 No trend (ADX {adx:.1f}): Reducing holding by 20%")
-
-            adaptive_max_days = int(adaptive_max_days * trend_adjustment)
-        except Exception as e:
-            logger.warning(f"⚠️ Error calculating ADX-based adjustment: {e}")
-            # Continue with regime-based adjustment only
-
-        # Step 3: Shorter holding for poor performers
-        if is_poor_performer and self.use_per_symbol_performance:
-            adaptive_max_days = min(adaptive_max_days, self.poor_performer_max_holding_days)
-            logger.debug(
-                f"⚠️ {symbol}: Reducing max holding to {adaptive_max_days} days (poor performer)"
-            )
-
-        if days_held >= adaptive_max_days:
-            # Nếu giữ quá lâu mà lời < threshold → thoát
-            if pnl_percent < self.time_decay_threshold * 100:
-                regime_note = (
-                    f" ({market_regime.get('regime', 'UNKNOWN')} market)" if market_regime else ""
-                )
-                return ExitDecision(
-                    should_exit=True,
-                    exit_reason=ExitReason.TIME_DECAY,
-                    exit_type="FULL",
-                    exit_price=current_price,
-                    expected_pnl=pnl_amount,
-                    expected_pnl_percent=pnl_percent,
-                    message=f"⏰ SIDEWAY QUÁ LÂU ({days_held} ngày, limit: {adaptive_max_days}){regime_note}: {pnl_percent:+.2f}%",
-                    urgency=2,
-                )
-
-        # ====================================================================
-        # NO EXIT - HOLD
-        # ====================================================================
+        # No exit - HOLD
         return ExitDecision(
             should_exit=False,
             exit_reason=None,
@@ -567,335 +474,504 @@ class ImprovedExitStrategy:
             expected_pnl_percent=pnl_percent,
             message=f"✅ HOLD - P&L: {pnl_percent:+.2f}% | Days: {days_held}",
             urgency=0,
+            metadata={"days_held": days_held, "highest_price": highest_price},
         )
 
-    # ========================================================================
-    # HELPER METHODS
-    # ========================================================================
+    # =========================================================================
+    # P&L CALCULATION
+    # =========================================================================
 
-    def _check_take_profit_levels(
-        self,
-        current_price: float,
-        tp_targets: List[float],
-        partial_exits: List[float],
-        pnl_percent: float,
-        pnl_amount: float,
-    ) -> Dict:
+    def _calculate_pnl(self, entry_price: float, current_price: float) -> Tuple[float, float]:
         """
-        Check take profit bậc thang
-
-        Strategy:
-        - TP1 (10%): Chốt 30% position
-        - TP2 (15%): Chốt 50% còn lại
-        - TP3 (25%): Chốt 100% còn lại
-        """
-
-        # TP3 - Full exit
-        if len(tp_targets) >= 3 and current_price >= tp_targets[2]:
-            if len(partial_exits) < 3:
-                return {
-                    "should_exit": True,
-                    "decision": ExitDecision(
-                        should_exit=True,
-                        exit_reason=ExitReason.TAKE_PROFIT_3,
-                        exit_type="FULL",
-                        exit_price=current_price,
-                        expected_pnl=pnl_amount,
-                        expected_pnl_percent=pnl_percent,
-                        message=f"🎯 TP3 - FULL EXIT: {pnl_percent:+.2f}%",
-                        urgency=3,
-                    ),
-                }
-
-        # TP2 - Full exit if only 2 targets, Partial 50% if 3 targets
-        if len(tp_targets) >= 2 and current_price >= tp_targets[1]:
-            if len(partial_exits) < 2:
-                # v2.0: If only 2 TP levels, TP2 is FULL exit
-                # If 3 TP levels (legacy), TP2 is PARTIAL_50%
-                is_full_exit = len(tp_targets) == 2
-                return {
-                    "should_exit": True,
-                    "decision": ExitDecision(
-                        should_exit=True,
-                        exit_reason=ExitReason.TAKE_PROFIT_2,
-                        exit_type="FULL" if is_full_exit else "PARTIAL_50%",
-                        exit_price=current_price,
-                        expected_pnl=pnl_amount,
-                        expected_pnl_percent=pnl_percent,
-                        message=f"🎯 TP2 - {'FULL EXIT' if is_full_exit else 'CHỐT 50% position'}: {pnl_percent:+.2f}%",
-                        urgency=2 if not is_full_exit else 3,
-                    ),
-                }
-
-        # TP1 - Partial 30%
-        if len(tp_targets) >= 1 and current_price >= tp_targets[0]:
-            if len(partial_exits) < 1:
-                return {
-                    "should_exit": True,
-                    "decision": ExitDecision(
-                        should_exit=True,
-                        exit_reason=ExitReason.TAKE_PROFIT_1,
-                        exit_type="PARTIAL_30%",
-                        exit_price=current_price,
-                        expected_pnl=pnl_amount,
-                        expected_pnl_percent=pnl_percent,
-                        message=f"🎯 TP1 - CHỐT 30% position: {pnl_percent:+.2f}%",
-                        urgency=1,
-                    ),
-                }
-
-        return {"should_exit": False}
-
-    def _ensure_stop_loss(
-        self, symbol: str, entry_price: float, stop_loss: Optional[float], df: pd.DataFrame = None
-    ) -> float:
-        """
-        Ensure stop loss is a valid float. Fallback to ATR-based calculation if missing.
-
-        CRITICAL FIX: Stop loss should NEVER be None after portfolio manager validation.
-        This is a safety fallback only.
-
-        Priority:
-        1. Use provided stop_loss if valid
-        2. Calculate from ATR if df available
-        3. Use default percentage as last resort
-        """
-        if isinstance(stop_loss, (int, float)) and stop_loss > 0:
-            return float(stop_loss)
-
-        # CRITICAL: This should NEVER happen after portfolio manager fix
-        fallback = self._calculate_atr_based_stop_loss(entry_price, df)
-        logger.error(
-            f"[{symbol}] 🚨 CRITICAL: Stop loss missing/invalid ({stop_loss}). "
-            f"Using ATR-based fallback {fallback:,.2f} (-{((entry_price - fallback) / entry_price * 100):.1f}%)"
-        )
-        return fallback
-
-    def _calculate_atr_based_stop_loss(self, entry_price: float, df: pd.DataFrame = None) -> float:
-        """
-        Calculate stop loss using ATR (Average True Range) for dynamic risk management.
-
-        Logic:
-        1. If df available and has ATR: Use entry_price - (ATR * 2.0)
-        2. If df available but no ATR: Calculate ATR from high/low/close
-        3. If no df: Fallback to default percentage (-7%)
+        Calculate P&L with optional transaction costs.
 
         Returns:
-            Stop loss price (always below entry_price)
+            Tuple of (pnl_percent, pnl_amount_per_share)
         """
-        if df is not None and not df.empty:
-            try:
-                # Try to get ATR from dataframe
-                if "atr" in df.columns:
-                    atr = safe_get_latest(df, "atr", 0)
-                    if atr > 0:
-                        stop_loss = entry_price - (atr * 2.0)
-                        # Ensure stop loss is reasonable (3% to 10% below entry)
-                        min_sl = entry_price * 0.90  # Max 10% risk
-                        max_sl = entry_price * 0.97  # Min 3% risk
-                        stop_loss = max(min(stop_loss, max_sl), min_sl)
-                        logger.info(
-                            f"✅ Calculated ATR-based stop loss: {stop_loss:,.2f} "
-                            f"(ATR: {atr:.2f}, Risk: {((entry_price - stop_loss) / entry_price * 100):.1f}%)"
-                        )
-                        return float(stop_loss)
+        if entry_price <= 0:
+            return 0.0, 0.0
 
-                # Calculate ATR manually if not in dataframe
-                if len(df) >= 14 and all(col in df.columns for col in ["high", "low", "close"]):
-                    from src.utils.indicators import IndicatorUtils
+        gross_pnl_percent = ((current_price - entry_price) / entry_price) * 100
 
-                    atr = IndicatorUtils.get_atr(df)
-                    if atr > 0:
-                        stop_loss = entry_price - (atr * 2.0)
-                        min_sl = entry_price * 0.90
-                        max_sl = entry_price * 0.97
-                        stop_loss = max(min(stop_loss, max_sl), min_sl)
-                        logger.info(
-                            f"✅ Calculated manual ATR-based stop loss: {stop_loss:,.2f} "
-                            f"(ATR: {atr:.2f}, Risk: {((entry_price - stop_loss) / entry_price * 100):.1f}%)"
-                        )
-                        return float(stop_loss)
-            except Exception as e:
-                logger.warning(
-                    f"⚠️ Error calculating ATR-based stop loss: {e}, using percentage fallback"
+        if self.config.include_transaction_costs:
+            transaction_cost_percent = self.config.round_trip_cost * 100
+            pnl_percent = gross_pnl_percent - transaction_cost_percent
+            pnl_amount = (current_price - entry_price) - (entry_price * self.config.round_trip_cost)
+
+            logger.debug(
+                f"📊 P&L: Gross {gross_pnl_percent:+.2f}% - "
+                f"Costs {transaction_cost_percent:.2f}% = Net {pnl_percent:+.2f}%"
+            )
+        else:
+            pnl_percent = gross_pnl_percent
+            pnl_amount = current_price - entry_price
+
+        return pnl_percent, pnl_amount
+
+    def _update_position_high(self, symbol: str, current_price: float) -> None:
+        """Update highest price tracking for a symbol."""
+        if symbol not in self.position_highs:
+            self.position_highs[symbol] = current_price
+        else:
+            self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
+
+    # =========================================================================
+    # EXIT CHECK #1: STOP LOSS
+    # =========================================================================
+
+    def _check_stop_loss(self, ctx: Dict) -> Optional[ExitDecision]:
+        """Check stop loss - highest priority."""
+        current_price = ctx["current_price"]
+        stop_loss = ctx["stop_loss"]
+        entry_price = ctx["entry_price"]
+        symbol = ctx["symbol"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        is_poor_performer = ctx["is_poor_performer"]
+
+        effective_stop = stop_loss
+
+        # Tighter stop for poor performers
+        if is_poor_performer and self.config.use_per_symbol_performance:
+            tighter_stop = entry_price * (1 - self.config.poor_performer_tighter_stop_pct)
+            if tighter_stop > effective_stop:
+                logger.debug(
+                    f"📉 {symbol}: Tightening stop from {effective_stop:,.0f} "
+                    f"to {tighter_stop:,.0f} (poor performer)"
                 )
+                effective_stop = tighter_stop
 
-        # Last resort: Use default percentage
-        return self._calculate_percentage_stop_loss(entry_price)
+        if current_price <= effective_stop:
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.STOP_LOSS,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=f"⛔ STOP LOSS: {pnl_percent:+.2f}%",
+                urgency=5,
+                metadata={"stop_loss": effective_stop, "is_poor_performer": is_poor_performer},
+            )
 
-    def _calculate_percentage_stop_loss(self, entry_price: float) -> float:
-        """
-        Calculate fallback stop loss using configured default percentage.
-        """
-        pct = self.default_stop_loss_pct if self.default_stop_loss_pct != 0 else -7.0
-        if pct >= 0:
-            pct = -abs(pct) if pct else -7.0
-        multiplier = 1 + (pct / 100.0)
-        # Ensure multiplier keeps stop loss below entry and positive
-        multiplier = min(multiplier, 0.99)
-        multiplier = max(multiplier, 0.01)
-        fallback = entry_price * multiplier if entry_price > 0 else entry_price
-        return float(fallback) if fallback and fallback > 0 else max(entry_price * 0.9, 0.01)
+        return None
 
-    def _check_profit_protection(
-        self,
-        entry_price: float,
-        current_price: float,
-        highest_price: float,
-        pnl_percent: float,
-        pnl_amount: float,
-    ) -> Dict:
-        """
-        SIMPLIFIED: Protect profit before trailing stop activates.
+    # =========================================================================
+    # EXIT CHECK #2: SESSION BOUNDARY
+    # =========================================================================
 
-        Logic (simplified from previous 3-tier system):
-        - Activates when profit >= activation threshold (default 5%)
-        - Protects a percentage of maximum profit achieved (default 50%)
-        - Simpler than previous 3%→50%, 5%→60%, 8%→trailing logic
-        - Exits if price drops below protection level
+    def _check_session_boundary(self, ctx: Dict) -> Optional[ExitDecision]:
+        """Check session boundary - protect profits near session end."""
+        if not TRADING_SCHEDULE_AVAILABLE:
+            return None
 
-        Configurable via:
-        - profit_protection_activation: When to activate (default 5%)
-        - profit_protection_percent: How much of max profit to protect (default 50%)
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
 
-        Returns:
-            Dict with should_exit flag and decision
-        """
-        # Only activate if profit >= activation threshold AND below trailing activation
-        activation_threshold = self.profit_protection_activation * 100
-        trailing_threshold = self.trailing_activation * 100
-
-        if pnl_percent < activation_threshold or pnl_percent >= trailing_threshold:
-            return {"should_exit": False}
-
-        # Calculate maximum profit achieved
-        max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
-
-        # SIMPLIFIED: Single protection percentage instead of tiered approach
-        stop_price = entry_price * (1 + (max_profit_pct / 100) * self.profit_protection_percent)
-
-        # Check if current price dropped below protection level
-        if current_price <= stop_price:
-            profit_given_back = max_profit_pct - pnl_percent
-            return {
-                "should_exit": True,
-                "decision": ExitDecision(
+        try:
+            is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
+            if is_near_boundary and pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
+                return ExitDecision(
                     should_exit=True,
-                    exit_reason=ExitReason.TRAILING_STOP,  # Use same reason for consistency
+                    exit_reason=ExitReason.SESSION_END,
                     exit_type="FULL",
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
-                    message=f"💰 PROFIT PROTECTION: Bảo vệ {self.profit_protection_percent*100:.0f}% lợi nhuận | "
-                    f"Max profit: {max_profit_pct:.1f}% → Current: {pnl_percent:.1f}% "
-                    f"(Gave back {profit_given_back:.1f}%)",
+                    message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
                     urgency=4,
+                    metadata={"boundary_type": boundary_type},
+                )
+        except Exception as e:
+            logger.debug(f"Session boundary check failed: {e}")
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #3: MARKET CRASH
+    # =========================================================================
+
+    def _check_market_crash(self, ctx: Dict) -> Optional[ExitDecision]:
+        """Check market crash protection."""
+        market_regime = ctx.get("market_regime")
+        if not market_regime or market_regime.get("regime") != "BEAR":
+            return None
+
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+
+        profit_threshold = self.config.market_crash_profit_threshold
+        loss_threshold = self.config.market_crash_loss_threshold
+
+        if pnl_percent > profit_threshold:
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.MARKET_CRASH,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=f"🚨 THỊ TRƯỜNG GIẢM ĐIỂM - Chốt lời sớm: {pnl_percent:+.2f}%",
+                urgency=4,
+            )
+        elif pnl_percent > loss_threshold:
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.MARKET_CRASH,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=f"🚨 THỊ TRƯỜNG GIẢM ĐIỂM - Cắt lỗ sớm: {pnl_percent:+.2f}%",
+                urgency=4,
+            )
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #4: TAKE PROFIT
+    # =========================================================================
+
+    def _check_take_profit(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check take profit levels.
+
+        Strategy (simplified to 2 levels):
+        - TP1: Partial exit (default 50%)
+        - TP2: Full exit
+        - TP3: Legacy support for 3-level systems
+        """
+        current_price = ctx["current_price"]
+        tp_targets = ctx["take_profit_targets"]
+        partial_exits = ctx["partial_exits"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+
+        if not tp_targets:
+            return None
+
+        num_targets = len(tp_targets)
+        num_partial_exits = len(partial_exits)
+
+        # TP3 - Full exit (legacy 3-level support)
+        if num_targets >= 3 and current_price >= tp_targets[2] and num_partial_exits < 3:
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.TAKE_PROFIT_3,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=f"🎯 TP3 - FULL EXIT: {pnl_percent:+.2f}%",
+                urgency=3,
+            )
+
+        # TP2 - Full exit (or partial if 3 targets)
+        if num_targets >= 2 and current_price >= tp_targets[1] and num_partial_exits < 2:
+            is_full_exit = num_targets == 2
+            exit_type = "FULL" if is_full_exit else "PARTIAL_50%"
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.TAKE_PROFIT_2,
+                exit_type=exit_type,
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=f"🎯 TP2 - {'FULL EXIT' if is_full_exit else f'CHỐT {int(self.config.partial_exit_percent*100)}%'}: {pnl_percent:+.2f}%",
+                urgency=3 if is_full_exit else 2,
+            )
+
+        # TP1 - Partial exit
+        if num_targets >= 1 and current_price >= tp_targets[0] and num_partial_exits < 1:
+            partial_pct = int(self.config.partial_exit_percent * 100)
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.TAKE_PROFIT_1,
+                exit_type="PARTIAL_50%",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=f"🎯 TP1 - CHỐT {partial_pct}% position: {pnl_percent:+.2f}%",
+                urgency=1,
+            )
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #4.5: BREAKEVEN STOP (NEW)
+    # =========================================================================
+
+    def _check_breakeven_stop(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Move stop to breakeven after achieving 1R profit.
+
+        This protects capital by ensuring no loss after reaching 1R.
+        Breakeven = entry_price + transaction_costs (to cover round trip)
+
+        Logic:
+        - If max profit reached >= 1R (risk amount), move stop to breakeven
+        - Breakeven = entry_price * (1 + round_trip_cost)
+        - Exit if price falls back to breakeven level
+        """
+        entry_price = ctx["entry_price"]
+        current_price = ctx["current_price"]
+        stop_loss = ctx["stop_loss"]
+        highest_price = ctx["highest_price"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        symbol = ctx["symbol"]
+
+        # Calculate 1R (risk amount as percentage)
+        risk_percent = abs((entry_price - stop_loss) / entry_price) * 100
+
+        # Calculate max profit achieved
+        max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
+
+        # Only activate if we've achieved at least 1R profit at some point
+        if max_profit_pct < risk_percent:
+            return None
+
+        # Calculate breakeven price (entry + transaction costs)
+        breakeven_price = entry_price * (1 + self.config.round_trip_cost)
+
+        # Check if price has fallen back to breakeven
+        if current_price <= breakeven_price and pnl_percent <= 0.5:  # Small buffer
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.PROFIT_PROTECTION,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=(
+                    f"🔒 BREAKEVEN STOP: Đã đạt {max_profit_pct:.1f}% (1R={risk_percent:.1f}%) "
+                    f"nhưng giá quay về breakeven | P&L: {pnl_percent:+.2f}%"
                 ),
-            }
+                urgency=4,
+                metadata={
+                    "breakeven_price": breakeven_price,
+                    "max_profit_pct": max_profit_pct,
+                    "risk_percent": risk_percent,
+                    "trigger": "breakeven_after_1R",
+                },
+            )
 
-        return {"should_exit": False}
+        # Log that breakeven stop is active
+        if max_profit_pct >= risk_percent:
+            logger.debug(
+                f"🔒 {symbol}: Breakeven stop active @ {breakeven_price:,.0f} "
+                f"(1R achieved: {max_profit_pct:.1f}% >= {risk_percent:.1f}%)"
+            )
 
-    def _check_trailing_stop(
-        self,
-        entry_price: float,
-        current_price: float,
-        highest_price: float,
-        pnl_percent: float,
-        pnl_amount: float,
-        df: Optional[pd.DataFrame] = None,
-    ) -> Dict:
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #5: PROFIT PROTECTION
+    # =========================================================================
+
+    def _check_profit_protection(self, ctx: Dict) -> Optional[ExitDecision]:
         """
-        ENHANCED: Check trailing stop with dynamic ATR-based distance.
+        Protect profit before trailing stop activates.
 
-        Kích hoạt khi lời >= 8%
-        Trailing stop:
-        - Dynamic mode: 2×ATR below high (adapts to volatility)
-        - Fallback mode: Fixed 5% below high
+        Activates when profit >= activation threshold but < trailing threshold.
+        Protects a percentage of maximum profit achieved.
         """
+        entry_price = ctx["entry_price"]
+        current_price = ctx["current_price"]
+        highest_price = ctx["highest_price"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
 
-        # Check if trailing should be activated
-        profit_from_entry = (current_price - entry_price) / entry_price
+        activation_threshold = self.config.profit_protection_activation * 100
+        trailing_threshold = self.config.trailing_stop_activation * 100
 
-        if profit_from_entry < self.trailing_activation:
-            # Chưa đủ lời để kích hoạt trailing
-            return {"should_exit": False}
+        # Only activate in the gap between profit protection and trailing
+        if pnl_percent < activation_threshold or pnl_percent >= trailing_threshold:
+            return None
 
-        # Calculate trailing stop distance
-        if self.use_dynamic_trailing and df is not None and len(df) >= 14:
-            # Dynamic ATR-based trailing stop
-            try:
-                atr = safe_get_latest(df, "atr", 0)
-                if atr > 0:
-                    # Trailing stop = highest_price - (2 × ATR)
-                    trailing_stop_price = highest_price - (self.trailing_atr_mult * atr)
-                    distance_type = f"{self.trailing_atr_mult}×ATR"
-                else:
-                    # Fallback if ATR invalid
-                    trailing_stop_price = highest_price * (1 - self.trailing_distance)
-                    distance_type = f"{self.trailing_distance*100:.0f}% (ATR unavailable)"
-            except Exception as e:
-                logger.warning(f"⚠️ Error calculating ATR trailing stop: {e}, using fixed %")
-                trailing_stop_price = highest_price * (1 - self.trailing_distance)
-                distance_type = f"{self.trailing_distance*100:.0f}% (fallback)"
-        else:
-            # Fixed percentage trailing stop (fallback)
-            trailing_stop_price = highest_price * (1 - self.trailing_distance)
-            distance_type = f"{self.trailing_distance*100:.0f}% (fixed)"
+        # Calculate max profit and protection level
+        max_profit_pct = ((highest_price - entry_price) / entry_price) * 100
+        protection_level = self.config.profit_protection_percent
+        stop_price = entry_price * (1 + (max_profit_pct / 100) * protection_level)
+
+        if current_price <= stop_price:
+            profit_given_back = max_profit_pct - pnl_percent
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.PROFIT_PROTECTION,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=(
+                    f"💰 PROFIT PROTECTION: Bảo vệ {protection_level*100:.0f}% lợi nhuận | "
+                    f"Max: {max_profit_pct:.1f}% → Current: {pnl_percent:.1f}% "
+                    f"(Gave back {profit_given_back:.1f}%)"
+                ),
+                urgency=4,
+                metadata={"max_profit": max_profit_pct, "stop_price": stop_price},
+            )
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #6: TRAILING STOP
+    # =========================================================================
+
+    def _check_trailing_stop(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check trailing stop with dynamic ATR-based distance.
+
+        Activates when profit >= trailing_activation threshold.
+        Uses ATR-based distance if available, otherwise fixed percentage.
+        """
+        entry_price = ctx["entry_price"]
+        current_price = ctx["current_price"]
+        highest_price = ctx["highest_price"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        df = ctx["df"]
+
+        # Check activation
+        profit_from_entry = safe_division(current_price - entry_price, entry_price, 0)
+        if profit_from_entry < self.config.trailing_stop_activation:
+            return None
+
+        # Calculate trailing stop price
+        trailing_stop_price, distance_type = self._calculate_trailing_stop_price(highest_price, df)
 
         if current_price <= trailing_stop_price:
             drawdown_from_high = ((highest_price - current_price) / highest_price) * 100
-            return {
-                "should_exit": True,
-                "decision": ExitDecision(
-                    should_exit=True,
-                    exit_reason=ExitReason.TRAILING_STOP,
-                    exit_type="FULL",
-                    exit_price=current_price,
-                    expected_pnl=pnl_amount,
-                    expected_pnl_percent=pnl_percent,
-                    message=f"📉 TRAILING STOP ({distance_type}): Giảm {drawdown_from_high:.1f}% từ đỉnh | "
-                    f"P&L: {pnl_percent:+.2f}%",
-                    urgency=4,
+            return ExitDecision(
+                should_exit=True,
+                exit_reason=ExitReason.TRAILING_STOP,
+                exit_type="FULL",
+                exit_price=current_price,
+                expected_pnl=pnl_amount,
+                expected_pnl_percent=pnl_percent,
+                message=(
+                    f"📉 TRAILING STOP ({distance_type}): "
+                    f"Giảm {drawdown_from_high:.1f}% từ đỉnh | P&L: {pnl_percent:+.2f}%"
                 ),
-            }
+                urgency=4,
+                metadata={
+                    "trailing_stop": trailing_stop_price,
+                    "highest_price": highest_price,
+                    "drawdown": drawdown_from_high,
+                },
+            )
 
-        return {"should_exit": False}
+        return None
 
-    def _check_reversal_pattern(
-        self, df: pd.DataFrame, pnl_percent: float, pnl_amount: float
-    ) -> Dict:
-        """
-        Check bearish reversal patterns
+    def _calculate_trailing_stop_price(
+        self, highest_price: float, df: Optional[pd.DataFrame]
+    ) -> Tuple[float, str]:
+        """Calculate trailing stop price using ATR or fixed percentage."""
+        if self.config.use_dynamic_trailing and df is not None and len(df) >= 14:
+            try:
+                atr = safe_get_latest(df, "atr", 0)
+                if atr > 0:
+                    stop_price = highest_price - (self.config.trailing_stop_atr_multiplier * atr)
+                    return stop_price, f"{self.config.trailing_stop_atr_multiplier}×ATR"
+            except Exception as e:
+                logger.debug(f"ATR trailing calculation failed: {e}")
 
-        - Bearish engulfing
-        - Evening star
-        - Shooting star
-        """
+        # Fallback to fixed percentage
+        stop_price = highest_price * (1 - self.config.trailing_stop_distance)
+        return stop_price, f"{self.config.trailing_stop_distance*100:.0f}%"
 
-        if len(df) < 3:
-            return {"should_exit": False}
+    # =========================================================================
+    # EXIT CHECK #7: ML SIGNAL
+    # =========================================================================
 
-        # Use safe access instead of df.iloc[-1]
-        if len(df) < 2:
-            return {"should_exit": False}
+    def _check_ml_signal(self, ctx: Dict) -> Optional[ExitDecision]:
+        """Check ML sell signal with volume confirmation."""
+        ml_signal = ctx.get("ml_signal")
+        if not ml_signal or ml_signal.get("signal") != "SELL":
+            return None
 
-        latest = df.iloc[-1]
-        prev = df.iloc[-2]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        df = ctx["df"]
 
-        # Chỉ check pattern nếu đang lời
-        if pnl_percent <= 0:
-            return {"should_exit": False}
+        confidence = ml_signal.get("confidence", 0)
 
-        # Bearish Engulfing
-        if (
-            prev["close"] > prev["open"]  # Prev bullish
-            and latest["close"] < latest["open"]  # Current bearish
-            and latest["close"] < prev["open"]
-            and latest["open"] > prev["close"]
-        ):
-            return {
-                "should_exit": True,
-                "decision": ExitDecision(
+        # Check thresholds
+        if confidence < self.config.ml_confidence_threshold:
+            return None
+        if pnl_percent <= self.config.ml_min_pnl_for_exit:
+            return None
+
+        # Volume confirmation
+        volume_confirmed = self._check_volume_for_exit(df)
+        urgency = 4 if volume_confirmed else 3
+
+        message = f"📉 ML SIGNAL SELL (Conf: {confidence}%): {pnl_percent:+.2f}%"
+        if volume_confirmed:
+            message += " | Volume confirmed ⚠️"
+
+        return ExitDecision(
+            should_exit=True,
+            exit_reason=ExitReason.ML_SIGNAL_SELL,
+            exit_type="FULL",
+            exit_price=current_price,
+            expected_pnl=pnl_amount,
+            expected_pnl_percent=pnl_percent,
+            message=message,
+            urgency=urgency,
+            metadata={"ml_confidence": confidence, "volume_confirmed": volume_confirmed},
+        )
+
+    def _check_volume_for_exit(self, df: pd.DataFrame) -> bool:
+        """Check if volume confirms exit signal (high volume on down day)."""
+        if df is None or len(df) < 20:
+            return False
+
+        try:
+            current_volume = safe_get_latest(df, "volume", 0)
+            avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
+
+            volume_ratio = safe_division(current_volume, avg_volume, 0)
+
+            # Check if down day
+            latest_close = safe_get_latest(df, "close", 0)
+            prev_close = safe_iloc(df, -2, "close")
+            if prev_close is None:
+                prev_close = latest_close
+
+            is_down_day = latest_close < prev_close
+
+            return volume_ratio >= self.config.volume_surge_ratio and is_down_day
+        except Exception:
+            return False
+
+    # =========================================================================
+    # EXIT CHECK #8: REVERSAL PATTERN
+    # =========================================================================
+
+    def _check_reversal_pattern(self, ctx: Dict) -> Optional[ExitDecision]:
+        """Check bearish reversal patterns (engulfing, shooting star)."""
+        df = ctx["df"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+
+        # Only check if profitable
+        if pnl_percent <= 0 or df is None or len(df) < 3:
+            return None
+
+        latest = safe_iloc(df, -1)
+        prev = safe_iloc(df, -2)
+
+        if latest is None or prev is None:
+            return None
+
+        try:
+            # Bearish Engulfing
+            if self._is_bearish_engulfing(prev, latest):
+                return ExitDecision(
                     should_exit=True,
                     exit_reason=ExitReason.REVERSAL_PATTERN,
                     exit_type="FULL",
@@ -904,18 +980,12 @@ class ImprovedExitStrategy:
                     expected_pnl_percent=pnl_percent,
                     message=f"🔴 BEARISH ENGULFING: Chốt lời sớm {pnl_percent:+.2f}%",
                     urgency=3,
-                ),
-            }
+                    metadata={"pattern": "bearish_engulfing"},
+                )
 
-        # Shooting Star (at resistance)
-        body = abs(latest["close"] - latest["open"])
-        upper_shadow = latest["high"] - max(latest["close"], latest["open"])
-        lower_shadow = min(latest["close"], latest["open"]) - latest["low"]
-
-        if upper_shadow > body * 2 and lower_shadow < body * 0.5:
-            return {
-                "should_exit": True,
-                "decision": ExitDecision(
+            # Shooting Star
+            if self._is_shooting_star(latest):
+                return ExitDecision(
                     should_exit=True,
                     exit_reason=ExitReason.REVERSAL_PATTERN,
                     exit_type="PARTIAL_50%",
@@ -924,152 +994,61 @@ class ImprovedExitStrategy:
                     expected_pnl_percent=pnl_percent,
                     message=f"⭐ SHOOTING STAR: Chốt 50% {pnl_percent:+.2f}%",
                     urgency=2,
-                ),
-            }
-
-        return {"should_exit": False}
-
-    def _get_symbol_performance(self, symbol: str) -> Dict:
-        """
-        IMPROVEMENT #6: Get historical performance for a symbol
-
-        Integrates with per_symbol_circuit_breaker to get:
-        - Win rate
-        - Total trades
-        - Consecutive losses
-        - Average holding time (if available)
-
-        Returns:
-            Dict with performance metrics and is_poor_performer flag
-        """
-        try:
-            from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
-
-            cb = get_per_symbol_circuit_breaker()
-            stats = cb.get_symbol_stats(symbol)
-
-            if stats is None:
-                # No history for this symbol
-                return {
-                    "is_poor_performer": False,
-                    "win_rate": 0.5,  # Assume neutral
-                    "total_trades": 0,
-                    "consecutive_losses": 0,
-                    "avg_holding_days": self.max_holding_days,
-                    "reason": "No trading history",
-                }
-
-            # Determine if poor performer
-            # Criteria:
-            # 1. Win rate < 35% after at least 3 trades
-            # 2. OR 2+ consecutive losses
-            is_poor = False
-            reason = ""
-
-            if stats.total_trades >= 3 and stats.win_rate < 0.35:
-                is_poor = True
-                reason = (
-                    f"Low win rate: {stats.win_rate:.1%} ({stats.total_wins}/{stats.total_trades})"
+                    metadata={"pattern": "shooting_star"},
                 )
+        except (KeyError, TypeError):
+            pass
 
-            if stats.consecutive_losses >= 2:
-                is_poor = True
-                reason = f"Consecutive losses: {stats.consecutive_losses}"
+        return None
 
-            # If blocked by circuit breaker, definitely poor performer
-            if stats.blocked:
-                is_poor = True
-                reason = stats.blocked_reason
-
-            return {
-                "is_poor_performer": is_poor,
-                "win_rate": stats.win_rate,
-                "total_trades": stats.total_trades,
-                "total_wins": stats.total_wins,
-                "total_losses": stats.total_losses,
-                "consecutive_losses": stats.consecutive_losses,
-                "blocked": stats.blocked,
-                "avg_holding_days": self.max_holding_days,  # TODO: Track actual holding time
-                "reason": reason,
-            }
-
-        except ImportError:
-            logger.debug("Per-symbol circuit breaker not available")
-            return {
-                "is_poor_performer": False,
-                "win_rate": 0.5,
-                "total_trades": 0,
-                "reason": "Circuit breaker not available",
-            }
-        except Exception as e:
-            logger.warning(f"Error getting symbol performance for {symbol}: {e}")
-            return {
-                "is_poor_performer": False,
-                "win_rate": 0.5,
-                "total_trades": 0,
-                "reason": f"Error: {e}",
-            }
-
-    def _check_volume_for_exit(self, df: pd.DataFrame) -> bool:
-        """
-        ENHANCEMENT: Check if volume confirms exit signal
-
-        Returns:
-            True if high volume confirms selling pressure
-        """
-        if len(df) < 20:
+    def _is_bearish_engulfing(self, prev: pd.Series, latest: pd.Series) -> bool:
+        """Check for bearish engulfing pattern."""
+        try:
+            prev_bullish = prev["close"] > prev["open"]
+            latest_bearish = latest["close"] < latest["open"]
+            engulfs = latest["close"] < prev["open"] and latest["open"] > prev["close"]
+            return prev_bullish and latest_bearish and engulfs
+        except (KeyError, TypeError):
             return False
+
+    def _is_shooting_star(self, candle: pd.Series) -> bool:
+        """Check for shooting star pattern."""
+        try:
+            body = abs(candle["close"] - candle["open"])
+            if body == 0:
+                return False
+            upper_shadow = candle["high"] - max(candle["close"], candle["open"])
+            lower_shadow = min(candle["close"], candle["open"]) - candle["low"]
+            return upper_shadow > body * 2 and lower_shadow < body * 0.5
+        except (KeyError, TypeError):
+            return False
+
+    # =========================================================================
+    # EXIT CHECK #9: SUPPORT BREAKDOWN
+    # =========================================================================
+
+    def _check_support_breakdown(self, ctx: Dict) -> Optional[ExitDecision]:
+        """Check if price breaks support with volume confirmation."""
+        df = ctx["df"]
+        current_price = ctx["current_price"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+
+        if df is None or len(df) < 20:
+            return None
 
         try:
-            current_volume = safe_get_latest(df, "volume", 0)
-            avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
+            # Support = low of last 20 days (excluding today)
+            support = df["low"].iloc[-20:-1].min()
 
-            if avg_volume == 0:
-                return False
+            if current_price < support:
+                # Check volume surge
+                current_volume = safe_get_latest(df, "volume", 0)
+                avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 0)
+                volume_surge = current_volume > avg_volume * self.config.volume_surge_ratio
 
-            # Check if volume is significantly higher (selling pressure)
-            volume_ratio = current_volume / avg_volume
-
-            # High volume on down day suggests strong selling
-            latest_close = safe_get_latest(df, "close", 0)
-            prev_close = df["close"].iloc[-2] if len(df) >= 2 else latest_close
-            is_down_day = latest_close < prev_close
-
-            return volume_ratio >= 1.5 and is_down_day
-
-        except Exception:
-            logger.warning("⚠️ Error checking volume for exit")
-            return False
-
-    def _check_support_breakdown(
-        self,
-        df: pd.DataFrame,
-        current_price: float,
-        entry_price: float,
-        pnl_percent: float,
-        pnl_amount: float,
-    ) -> Dict:
-        """
-        Check nếu giá break support quan trọng
-        """
-
-        if len(df) < 20:
-            return {"should_exit": False}
-
-        # Support = low của 20 ngày trước
-        support = df["low"].iloc[-20:-1].min()
-
-        # Nếu giá break support với volume cao
-        if current_price < support:
-            volume_surge = (
-                safe_get_latest(df, "volume", 0)
-                > safe_rolling_operation(df, "volume", 20, "mean", 0) * 1.5
-            )
-
-            if volume_surge:
-                return {
-                    "should_exit": True,
-                    "decision": ExitDecision(
+                if volume_surge:
+                    return ExitDecision(
                         should_exit=True,
                         exit_reason=ExitReason.BREAKDOWN,
                         exit_type="FULL",
@@ -1078,110 +1057,432 @@ class ImprovedExitStrategy:
                         expected_pnl_percent=pnl_percent,
                         message=f"📉 SUPPORT BREAKDOWN (Volume confirmed): {pnl_percent:+.2f}%",
                         urgency=4,
+                        metadata={"support": support, "volume_surge": True},
+                    )
+        except Exception:
+            pass
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #10: TIME DECAY
+    # =========================================================================
+
+    def _check_time_decay(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check time decay - exit if holding too long with low profit.
+
+        Adaptive holding period based on:
+        1. Market regime (BULL/SIDEWAYS/BEAR)
+        2. Trend strength (ADX)
+        3. Per-symbol performance
+        """
+        days_held = ctx["days_held"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        market_regime = ctx.get("market_regime")
+        df = ctx["df"]
+        is_poor_performer = ctx["is_poor_performer"]
+        symbol = ctx["symbol"]
+
+        # Calculate adaptive max holding days
+        adaptive_max_days = self._calculate_adaptive_holding_days(
+            market_regime, df, is_poor_performer
+        )
+
+        if days_held >= adaptive_max_days:
+            threshold_pct = self.config.time_decay_threshold * 100
+            if pnl_percent < threshold_pct:
+                regime_note = ""
+                if market_regime:
+                    regime_note = f" ({market_regime.get('regime', 'UNKNOWN')} market)"
+
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.TIME_DECAY,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"⏰ SIDEWAY QUÁ LÂU ({days_held} ngày, limit: {adaptive_max_days})"
+                        f"{regime_note}: {pnl_percent:+.2f}%"
                     ),
-                }
+                    urgency=2,
+                    metadata={
+                        "days_held": days_held,
+                        "adaptive_max_days": adaptive_max_days,
+                        "is_poor_performer": is_poor_performer,
+                    },
+                )
 
-        return {"should_exit": False}
+        return None
 
-    def clear_position_tracking(self, symbol: str):
+    def _calculate_adaptive_holding_days(
+        self,
+        market_regime: Optional[Dict],
+        df: Optional[pd.DataFrame],
+        is_poor_performer: bool,
+    ) -> int:
+        """Calculate adaptive max holding days based on conditions."""
+        adaptive_max_days = self.config.max_holding_days
+
+        # Step 1: Adjust by market regime
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
+            if regime == "BULL":
+                adaptive_max_days = 30
+            elif regime == "SIDEWAYS":
+                adaptive_max_days = 20
+            elif regime == "BEAR":
+                adaptive_max_days = 15
+
+        # Step 2: Adjust by trend strength (ADX)
+        if df is not None and len(df) > 0 and "adx" in df.columns:
+            try:
+                adx = safe_get_latest(df, "adx", 0)
+                if adx > 35:
+                    trend_adjustment = 1.5
+                elif adx > 25:
+                    trend_adjustment = 1.2
+                elif adx > 15:
+                    trend_adjustment = 1.0
+                else:
+                    trend_adjustment = 0.8
+                adaptive_max_days = int(adaptive_max_days * trend_adjustment)
+            except Exception:
+                pass
+
+        # Step 3: Shorter holding for poor performers
+        if is_poor_performer and self.config.use_per_symbol_performance:
+            adaptive_max_days = min(adaptive_max_days, self.config.poor_performer_max_holding_days)
+
+        return adaptive_max_days
+
+    # =========================================================================
+    # STOP LOSS HELPERS
+    # =========================================================================
+
+    def _ensure_stop_loss(
+        self,
+        symbol: str,
+        entry_price: float,
+        stop_loss: Optional[float],
+        df: Optional[pd.DataFrame] = None,
+    ) -> float:
         """
-        Dọn dẹp tracking khi đóng vị thế để tránh memory leak
-
-        Args:
-            symbol: Mã cổ phiếu cần xóa tracking
+        Ensure stop loss is valid. Fallback to ATR-based or percentage if missing.
         """
-        if symbol in self.position_highs:
-            del self.position_highs[symbol]
+        if isinstance(stop_loss, (int, float)) and stop_loss > 0:
+            return float(stop_loss)
+
+        # Calculate fallback
+        fallback = self._calculate_atr_based_stop_loss(entry_price, df)
+        logger.warning(
+            f"[{symbol}] ⚠️ Stop loss missing/invalid ({stop_loss}). "
+            f"Using fallback {fallback:,.2f} "
+            f"(-{((entry_price - fallback) / entry_price * 100):.1f}%)"
+        )
+        return fallback
+
+    def _calculate_atr_based_stop_loss(
+        self, entry_price: float, df: Optional[pd.DataFrame] = None
+    ) -> float:
+        """Calculate stop loss using ATR or fallback to percentage."""
+        if df is not None and not df.empty:
+            try:
+                if "atr" in df.columns:
+                    atr = safe_get_latest(df, "atr", 0)
+                    if atr > 0:
+                        stop_loss = entry_price - (atr * self.config.stop_loss_atr_multiplier)
+                        # Clamp to reasonable range
+                        min_sl = entry_price * (1 - self.config.max_stop_loss_pct)
+                        max_sl = entry_price * (1 - self.config.min_stop_loss_pct)
+                        return max(min(stop_loss, max_sl), min_sl)
+
+                # Try manual ATR calculation
+                if len(df) >= 14 and all(col in df.columns for col in ["high", "low", "close"]):
+                    try:
+                        from src.utils.indicators import IndicatorUtils
+
+                        atr = IndicatorUtils.get_atr(df)
+                        if atr > 0:
+                            stop_loss = entry_price - (atr * self.config.stop_loss_atr_multiplier)
+                            min_sl = entry_price * (1 - self.config.max_stop_loss_pct)
+                            max_sl = entry_price * (1 - self.config.min_stop_loss_pct)
+                            return max(min(stop_loss, max_sl), min_sl)
+                    except ImportError:
+                        pass
+            except Exception as e:
+                logger.debug(f"ATR stop loss calculation failed: {e}")
+
+        # Fallback to percentage
+        return entry_price * (1 - self.config.default_stop_loss_pct)
+
+    # =========================================================================
+    # PER-SYMBOL PERFORMANCE
+    # =========================================================================
+
+    def _get_symbol_performance(self, symbol: str) -> Dict[str, Any]:
+        """Get historical performance for a symbol from circuit breaker."""
+        default_result = {
+            "is_poor_performer": False,
+            "win_rate": 0.5,
+            "total_trades": 0,
+            "consecutive_losses": 0,
+            "reason": "No data",
+        }
+
+        if not self.config.use_per_symbol_performance:
+            return default_result
+
+        try:
+            from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
+
+            cb = get_per_symbol_circuit_breaker()
+            stats = cb.get_symbol_stats(symbol)
+
+            if stats is None:
+                return default_result
+
+            # Determine if poor performer
+            is_poor = False
+            reason = ""
+
+            win_rate_threshold = self.config.poor_performer_win_rate_threshold
+            consec_loss_threshold = self.config.poor_performer_consecutive_losses
+
+            if stats.total_trades >= 3 and stats.win_rate < win_rate_threshold:
+                is_poor = True
+                reason = f"Low win rate: {stats.win_rate:.1%}"
+
+            if stats.consecutive_losses >= consec_loss_threshold:
+                is_poor = True
+                reason = f"Consecutive losses: {stats.consecutive_losses}"
+
+            if getattr(stats, "blocked", False):
+                is_poor = True
+                reason = getattr(stats, "blocked_reason", "Blocked")
+
+            return {
+                "is_poor_performer": is_poor,
+                "win_rate": stats.win_rate,
+                "total_trades": stats.total_trades,
+                "total_wins": getattr(stats, "total_wins", 0),
+                "total_losses": getattr(stats, "total_losses", 0),
+                "consecutive_losses": stats.consecutive_losses,
+                "blocked": getattr(stats, "blocked", False),
+                "reason": reason,
+            }
+        except ImportError:
+            logger.debug("Per-symbol circuit breaker not available")
+            return default_result
+        except Exception as e:
+            logger.debug(f"Error getting symbol performance: {e}")
+            return default_result
+
+    # =========================================================================
+    # POSITION TRACKING MANAGEMENT
+    # =========================================================================
+
+    def clear_position_tracking(self, symbol: str) -> None:
+        """Clear tracking for a symbol after position closed."""
+        removed = self.position_highs.pop(symbol, None)
+        self.partial_exit_tracker.clear_position(symbol)
+        if removed is not None:
             logger.debug(f"✅ Cleared position tracking for {symbol}")
-        else:
-            logger.debug(f"⚠️ No tracking found for {symbol}")
 
     def get_tracked_positions(self) -> List[str]:
-        """
-        Lấy danh sách các vị thế đang được track
-
-        Returns:
-            List các symbol đang được track
-        """
+        """Get list of symbols being tracked."""
         return list(self.position_highs.keys())
 
-    def clear_all_tracking(self):
-        """Xóa toàn bộ tracking (dùng khi reset hoặc end of day)"""
+    def clear_all_tracking(self) -> int:
+        """Clear all tracking data. Returns count of cleared items."""
         count = len(self.position_highs)
         self.position_highs.clear()
+        self.partial_exit_tracker.clear_all()
         logger.info(f"🧹 Cleared tracking for {count} positions")
+        return count
 
-    def format_exit_message(self, symbol: str, decision: ExitDecision) -> str:
-        """Format exit decision thành message"""
+    # =========================================================================
+    # MESSAGE FORMATTING
+    # =========================================================================
 
+    def format_exit_message(
+        self, symbol: str, decision: ExitDecision, use_html: bool = True
+    ) -> str:
+        """
+        Format exit decision for Telegram notification.
+
+        Args:
+            symbol: Stock symbol
+            decision: Exit decision object
+            use_html: Use HTML formatting (safer) instead of Markdown
+
+        Returns:
+            Formatted message string
+        """
         urgency_emoji = {5: "🚨🚨🚨", 4: "🚨🚨", 3: "⚠️", 2: "💡", 1: "ℹ️", 0: "✅"}
 
+        if use_html:
+            return self._format_exit_message_html(symbol, decision, urgency_emoji)
+        return self._format_exit_message_markdown(symbol, decision, urgency_emoji)
+
+    def _escape_html(self, text: str) -> str:
+        """Escape HTML special characters."""
+        if not text:
+            return ""
+        result = str(text)
+        result = result.replace("&", "&amp;")
+        result = result.replace("<", "&lt;")
+        result = result.replace(">", "&gt;")
+        return result
+
+    def _format_exit_message_html(
+        self, symbol: str, decision: ExitDecision, urgency_emoji: Dict[int, str]
+    ) -> str:
+        """Format exit message using HTML."""
+        safe_message = self._escape_html(decision.message)
+        safe_symbol = self._escape_html(symbol)
+
         if not decision.should_exit:
-            return f"✅ **{symbol}** - HOLD\n" f"{decision.message}"
+            return f"✅ <b>{safe_symbol}</b> - HOLD\n{safe_message}"
 
         emoji = urgency_emoji.get(decision.urgency, "⚠️")
+        exit_reason_text = self._escape_html(
+            decision.exit_reason.value if decision.exit_reason else "Unknown"
+        )
+        safe_exit_type = self._escape_html(str(decision.exit_type))
 
-        msg = f"{emoji} **{symbol}** - EXIT SIGNAL\n\n"
-        msg += f"📍 **Exit Type:** {decision.exit_type}\n"
-        msg += f"🎯 **Reason:** {decision.exit_reason.value}\n"
-        msg += f"💰 **Exit Price:** {decision.exit_price:,.0f} VNĐ\n"
-        msg += f"📊 **P&L:** {decision.expected_pnl_percent:+.2f}%\n"
-        msg += f"⚡ **Urgency:** {decision.urgency}/5\n\n"
-        msg += f"💬 {decision.message}"
+        msg = f"{emoji} <b>{safe_symbol}</b> - EXIT SIGNAL\n\n"
+        msg += f"📍 <b>Exit Type:</b> {safe_exit_type}\n"
+        msg += f"🎯 <b>Reason:</b> {exit_reason_text}\n"
+        msg += f"💰 <b>Exit Price:</b> {decision.exit_price:,.0f} VNĐ\n"
+        msg += f"📊 <b>P&amp;L:</b> {decision.expected_pnl_percent:+.2f}%\n"
+        msg += f"⚡ <b>Urgency:</b> {decision.urgency}/5\n\n"
+        msg += f"💬 {safe_message}"
+
+        return msg
+
+    def _format_exit_message_markdown(
+        self, symbol: str, decision: ExitDecision, urgency_emoji: Dict[int, str]
+    ) -> str:
+        """Format exit message using Markdown v1 (legacy)."""
+        safe_message = decision.message.replace("_", "\\_") if decision.message else ""
+        safe_symbol = symbol.replace("_", "\\_")
+
+        if not decision.should_exit:
+            return f"✅ *{safe_symbol}* - HOLD\n{safe_message}"
+
+        emoji = urgency_emoji.get(decision.urgency, "⚠️")
+        exit_reason_text = (
+            decision.exit_reason.value.replace("_", "\\_") if decision.exit_reason else "Unknown"
+        )
+        safe_exit_type = str(decision.exit_type).replace("_", "\\_")
+
+        msg = f"{emoji} *{safe_symbol}* - EXIT SIGNAL\n\n"
+        msg += f"📍 *Exit Type:* {safe_exit_type}\n"
+        msg += f"🎯 *Reason:* {exit_reason_text}\n"
+        msg += f"💰 *Exit Price:* {decision.exit_price:,.0f} VNĐ\n"
+        msg += f"📊 *P&L:* {decision.expected_pnl_percent:+.2f}%\n"
+        msg += f"⚡ *Urgency:* {decision.urgency}/5\n\n"
+        msg += f"💬 {safe_message}"
 
         return msg
 
 
-# ============================================================================
+# =============================================================================
+# FACTORY FUNCTION
+# =============================================================================
+
+
+def create_exit_strategy(config: Optional[ExitConfig] = None, **kwargs) -> ImprovedExitStrategy:
+    """
+    Factory function to create exit strategy with optional config.
+
+    Args:
+        config: ExitConfig object
+        **kwargs: Override individual config values
+
+    Returns:
+        Configured ImprovedExitStrategy instance
+    """
+    return ImprovedExitStrategy(config=config, **kwargs)
+
+
+# =============================================================================
 # TESTING
-# ============================================================================
+# =============================================================================
 
 if __name__ == "__main__":
-    from src.data.loader import load_data
-    from src.ml.features.technical import add_ml_features
-    from src.ml.signals.generator import MLSignalGenerator
-    from utils.dataframe_utils import safe_get_latest
-
     print("\n" + "=" * 70)
-    print("🧪 TESTING IMPROVED EXIT STRATEGY")
+    print("🧪 TESTING IMPROVED EXIT STRATEGY v3.0")
     print("=" * 70 + "\n")
 
-    # Test với 1 mã
-    symbol = "VNM"
-    df = load_data(symbol, 200)
-    df = add_ml_features(df)
+    # Test with mock data
+    import numpy as np
 
-    # Giả lập position
-    entry_price = 80_000
-    entry_date = datetime.now() - timedelta(days=10)
-    current_price = 88_000  # +10% lời
-    stop_loss = 76_000  # -5%
-    take_profit_targets = [
-        84_000,  # TP1: +5%
-        86_000,  # TP2: +7.5%
-        88_000,  # TP3: +10%
-    ]
-
-    # Get ML signal
-    ml_gen = MLSignalGenerator()
-    ml_signal = ml_gen.analyze(df)
-
-    # Initialize exit strategy
-    exit_strategy = ImprovedExitStrategy()
-
-    # Check exit
-    decision = exit_strategy.check_exit(
-        symbol=symbol,
-        entry_price=entry_price,
-        current_price=current_price,
-        stop_loss=stop_loss,
-        take_profit_targets=take_profit_targets,
-        entry_date=entry_date,
-        df=df,
-        ml_signal=ml_signal,
-        market_regime={"regime": "BULL", "tradeable": True},
+    # Create mock DataFrame
+    dates = pd.date_range(start="2024-01-01", periods=100, freq="D")
+    df = pd.DataFrame(
+        {
+            "open": np.random.uniform(80000, 90000, 100),
+            "high": np.random.uniform(85000, 95000, 100),
+            "low": np.random.uniform(75000, 85000, 100),
+            "close": np.random.uniform(80000, 90000, 100),
+            "volume": np.random.uniform(100000, 500000, 100),
+            "atr": np.random.uniform(1000, 3000, 100),
+            "adx": np.random.uniform(15, 40, 100),
+        },
+        index=dates,
     )
 
-    # Print result
-    print(exit_strategy.format_exit_message(symbol, decision))
+    # Test scenarios
+    test_cases = [
+        {
+            "name": "Stop Loss Hit",
+            "entry_price": 85000,
+            "current_price": 78000,
+            "stop_loss": 80000,
+        },
+        {
+            "name": "Take Profit 1",
+            "entry_price": 80000,
+            "current_price": 90000,
+            "stop_loss": 76000,
+        },
+        {
+            "name": "Hold Position",
+            "entry_price": 80000,
+            "current_price": 82000,
+            "stop_loss": 76000,
+        },
+    ]
+
+    # Create strategy
+    strategy = create_exit_strategy()
+
+    for tc in test_cases:
+        print(f"\n📋 Test: {tc['name']}")
+        print("-" * 40)
+
+        decision = strategy.check_exit(
+            symbol="TEST",
+            entry_price=tc["entry_price"],
+            current_price=tc["current_price"],
+            stop_loss=tc["stop_loss"],
+            take_profit_targets=[tc["entry_price"] * 1.12, tc["entry_price"] * 1.20],
+            entry_date=datetime.now() - timedelta(days=5),
+            df=df,
+        )
+
+        print(f"Should Exit: {decision.should_exit}")
+        print(f"Reason: {decision.exit_reason}")
+        print(f"Type: {decision.exit_type}")
+        print(f"P&L: {decision.expected_pnl_percent:+.2f}%")
+        print(f"Message: {decision.message}")
+
     print("\n" + "=" * 70)
+    print("✅ All tests completed!")
+    print("=" * 70)

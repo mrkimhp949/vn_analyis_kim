@@ -44,7 +44,11 @@ class TestImprovedExitStrategy:
         assert decision.urgency == 5
 
     def test_take_profit_1(self, exit_strategy, sample_ohlcv_data):
-        """Test TP1 trigger"""
+        """Test TP1 trigger
+
+        UPDATED v3.0: Changed from PARTIAL_30% to PARTIAL_50% for simplified
+        2-level take profit system.
+        """
         entry_price = 80000
         current_price = 88000  # +10%
 
@@ -61,7 +65,7 @@ class TestImprovedExitStrategy:
 
         assert decision.should_exit is True
         assert decision.exit_reason == ExitReason.TAKE_PROFIT_1
-        assert decision.exit_type == "PARTIAL_30%"
+        assert decision.exit_type == "PARTIAL_50%"  # v3.0: Simplified to 50%
 
     def test_trailing_stop_activation(self, exit_strategy, sample_ohlcv_data):
         """Test trailing stop activation and trigger"""
