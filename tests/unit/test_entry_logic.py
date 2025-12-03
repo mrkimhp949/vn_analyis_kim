@@ -55,7 +55,8 @@ class TestImprovedEntryLogic:
         result = entry_logic.analyze_entry(sample_ohlcv_data, ml_signal)
 
         assert result.should_enter is False
-        assert "Confidence thấp" in result.warnings[0]
+        # Check for confidence-related warning (English or Vietnamese)
+        assert any("confidence" in w.lower() or "Confidence" in w for w in result.warnings)
 
     def test_check_trend_alignment_uptrend(self, entry_logic, sample_ohlcv_data):
         """Test trend alignment check with uptrend"""

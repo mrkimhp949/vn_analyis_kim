@@ -397,7 +397,7 @@ def test_correlation_adjustment_high_correlation(mock_calc_corr, sizer_with_posi
     # Mock high correlation
     mock_calc_corr.return_value = 0.85
 
-    adj = sizer_with_positions._correlation_adjustment("VIC", "Real Estate")
+    adj = sizer_with_positions._calculate_correlation_adjustment("VIC", "Real Estate")
     # High correlation -> 0.5x
     assert adj == pytest.approx(0.5, abs=0.01)
 
@@ -408,7 +408,7 @@ def test_correlation_adjustment_medium_correlation(mock_calc_corr, sizer_with_po
     # Mock medium correlation
     mock_calc_corr.return_value = 0.6
 
-    adj = sizer_with_positions._correlation_adjustment("HPG", "Steel")
+    adj = sizer_with_positions._calculate_correlation_adjustment("HPG", "Steel")
     # Medium correlation -> 0.75x
     assert adj == pytest.approx(0.75, abs=0.01)
 
@@ -419,7 +419,7 @@ def test_correlation_adjustment_low_correlation(mock_calc_corr, sizer_with_posit
     # Mock low correlation
     mock_calc_corr.return_value = 0.3
 
-    adj = sizer_with_positions._correlation_adjustment("FPT", "Technology")
+    adj = sizer_with_positions._calculate_correlation_adjustment("FPT", "Technology")
     # Low correlation -> 1.0x
     assert adj == pytest.approx(1.0, abs=0.01)
 
