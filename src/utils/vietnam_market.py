@@ -51,9 +51,9 @@ class VietnamMarketValidator:
             self.daily_price_limit_pct = 7.0
             self.check_price_limits = True
             self.avoid_floor_ceiling_pct = 2.0
-            self.settlement_days = 2
+            self.settlement_days = 2  # T+2 settlement
             self.reserve_t2_cash = True
-            self.t2_cash_buffer_pct = 0.10
+            self.t2_cash_buffer_pct = 0.10  # 10% buffer for T+2
             self.min_daily_value = 2_000_000_000
             self.max_position_pct_of_volume = 0.05
             self.avoid_session_boundaries = True

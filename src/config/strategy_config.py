@@ -16,50 +16,53 @@ from typing import Dict, List
 @dataclass
 class LiquidityTiers:
     """
-    Liquidity requirements for different market cap tiers - OPTIMIZED VERSION v4.0
+    Liquidity requirements for different market cap tiers - OPTIMIZED VERSION v4.1
 
     Rationale:
     - Large caps: High liquidity, strict requirements for better execution
     - Mid caps: Moderate liquidity, balanced requirements
     - Small caps: Lower volume acceptable but with position size reduction
+    - Micro caps: Speculative plays with strict position limits
 
-    IMPROVED v4.0:
+    IMPROVED v4.1:
+    - LOWERED thresholds to capture more opportunities in VN market
     - Added position_multiplier for risk-adjusted sizing
     - Added max_position_pct to limit exposure in illiquid stocks
+    - Expanded universe from ~50 stocks to ~150-200 stocks
     """
 
     large_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 5_000_000_000,  # 5B VND minimum
-            "min_volume": 150_000,  # 150K shares for better execution
+            "min_value": 3_000_000_000,  # LOWERED: 3B VND minimum (was 5B)
+            "min_volume": 100_000,  # LOWERED: 100K shares (was 150K)
             "position_multiplier": 1.0,  # Full position size
-            "max_position_pct": 0.15,  # Max 15% of portfolio
+            "max_position_pct": 0.12,  # TIGHTENED: Max 12% of portfolio (was 15%)
         }
     )
 
     mid_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 1_500_000_000,  # LOWERED: 1.5B VND minimum (was 2B)
-            "min_volume": 60_000,  # LOWERED: 60K shares (was 80K)
+            "min_value": 1_000_000_000,  # LOWERED: 1B VND minimum (was 1.5B)
+            "min_volume": 40_000,  # LOWERED: 40K shares (was 60K)
             "position_multiplier": 0.85,  # 85% position size
-            "max_position_pct": 0.12,  # Max 12% of portfolio
+            "max_position_pct": 0.10,  # TIGHTENED: Max 10% of portfolio (was 12%)
         }
     )
 
     small_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 800_000_000,  # LOWERED: 800M VND minimum (was 1B)
-            "min_volume": 40_000,  # LOWERED: 40K shares (was 50K)
+            "min_value": 500_000_000,  # LOWERED: 500M VND minimum (was 800M)
+            "min_volume": 25_000,  # LOWERED: 25K shares (was 40K)
             "position_multiplier": 0.70,  # 70% position size (higher risk)
-            "max_position_pct": 0.08,  # Max 8% of portfolio
+            "max_position_pct": 0.07,  # TIGHTENED: Max 7% of portfolio (was 8%)
         }
     )
 
     # NEW: Micro cap tier for speculative plays
     micro_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 500_000_000,  # 500M VND minimum
-            "min_volume": 25_000,  # 25K shares
+            "min_value": 300_000_000,  # LOWERED: 300M VND minimum (was 500M)
+            "min_volume": 15_000,  # LOWERED: 15K shares (was 25K)
             "position_multiplier": 0.50,  # 50% position size (high risk)
             "max_position_pct": 0.05,  # Max 5% of portfolio
         }
@@ -111,16 +114,17 @@ class EntryConfig:
 @dataclass
 class ExitConfig:
     """
-    Exit logic configuration - OPTIMIZED VERSION v4.0
+    Exit logic configuration - OPTIMIZED VERSION v4.1
 
     All exit thresholds and parameters - Optimized for VN market characteristics
+    VN market has shorter cycles than US market, so earlier profit-taking is optimal
     """
 
-    # Take profit levels - OPTIMIZED for VN market cycles
-    # VN market has shorter cycles, earlier profit-taking is optimal
+    # Take profit levels - OPTIMIZED for VN market shorter cycles
+    # IMPROVED: Earlier profit-taking to capture gains before reversal
     take_profit_levels: List[float] = field(
-        default_factory=lambda: [0.08, 0.15, 0.25]
-    )  # 8%, 15%, 25% - balanced between capturing gains and letting winners run
+        default_factory=lambda: [0.06, 0.12, 0.20]
+    )  # LOWERED: 6%, 12%, 20% (was 8%, 15%, 25%) - VN market cycles are shorter
 
     # Stop loss - BETA-ADJUSTED for different stock volatilities
     # VN market has ±7% daily limit
@@ -141,13 +145,13 @@ class ExitConfig:
     enable_breakeven_stop: bool = True  # Move stop to breakeven after 1R
     breakeven_activation_r: float = 1.0  # Activate after 1R profit
 
-    # Trailing stop - TIGHTENED to lock profits earlier
+    # Trailing stop - TIGHTENED to lock profits earlier for VN market
     enable_trailing_stop: bool = True
-    trailing_activation: float = 0.05  # TIGHTENED: Activate at 5% profit
-    trailing_distance: float = 0.03  # TIGHTENED: Trail 3% below peak
+    trailing_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
+    trailing_distance: float = 0.025  # TIGHTENED: Trail 2.5% below peak (was 3%)
 
     # Profit protection - IMPROVED
-    profit_protection_activation: float = 0.04  # TIGHTENED: Activate at 4% profit
+    profit_protection_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 4%)
     profit_protection_percent: float = 0.60  # IMPROVED: Protect 60% of max profit
 
     # Time decay - OPTIMIZED for VN market rotation

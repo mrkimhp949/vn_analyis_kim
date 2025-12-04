@@ -201,7 +201,7 @@ class ImprovedEntryLogic:
         min_avg_volume: int = 50_000,
         use_tiered_liquidity: bool = True,
         use_price_action_filter: bool = False,
-        use_sector_strength_filter: bool = False,
+        use_sector_strength_filter: bool = True,  # ENABLED: Sector rotation analysis
         use_market_breadth_filter: bool = False,
         use_monthly_timeframe: bool = False,
         soft_filter_mode: bool = True,
@@ -899,21 +899,64 @@ class ImprovedEntryLogic:
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
     ) -> None:
-        """Apply sector strength filter."""
+        """
+        Apply sector strength filter with rotation analysis.
+
+        IMPROVED v4.0:
+        - Uses SectorRotationAnalyzer for sector leadership detection
+        - Considers market rotation phase (EARLY, MID, LATE, RECESSION)
+        - Adjusts confidence based on sector alignment with rotation phase
+        """
         sector_check = self._check_sector_strength(df, market_regime)
 
+        sector_id = sector_check.get("sector_id", "unknown")
+        rotation_phase = sector_check.get("rotation_phase", "UNKNOWN")
+
         if sector_check["is_leading"]:
-            reason_msg = f"Leading sector ({sector_check['sector_perf']:.1f}%)"
+            reason_msg = f"Leading sector: {sector_id} ({sector_check['sector_perf']:.1f}%)"
             reasons.append(f"✅ {reason_msg}")
             self._add_adjustment(
                 adjustments, adjustment_breakdown, "sector_strength", +10, reason_msg
             )
+
+            # Bonus if sector aligns with rotation phase
+            # EARLY: Banking, Retail, Securities
+            # MID: Technology, Real Estate, Manufacturing
+            # LATE: Materials, Energy
+            # RECESSION: Utilities, Food & Beverage, Healthcare, Agriculture
+            phase_aligned_sectors = {
+                "EARLY": ["banking", "retail", "securities"],
+                "MID": ["technology", "real_estate", "manufacturing"],
+                "LATE": ["materials", "energy"],
+                "RECESSION": ["utilities", "food_beverage", "healthcare", "agriculture"],
+            }
+
+            if rotation_phase in phase_aligned_sectors:
+                if sector_id in phase_aligned_sectors[rotation_phase]:
+                    bonus_msg = f"Sector aligned with {rotation_phase} phase"
+                    reasons.append(f"✅ {bonus_msg}")
+                    self._add_adjustment(
+                        adjustments, adjustment_breakdown, "sector_rotation", +5, bonus_msg
+                    )
+
         elif sector_check["is_lagging"]:
-            warning_msg = f"⚠️ Weak sector ({sector_check['sector_perf']:.1f}%)"
+            warning_msg = f"⚠️ Lagging sector: {sector_id} ({sector_check['sector_perf']:.1f}%)"
             warnings.append(warning_msg)
             self._add_adjustment(
                 adjustments, adjustment_breakdown, "sector_strength", -15, warning_msg
             )
+
+            # Extra penalty if sector is counter-cyclical to current phase
+            if rotation_phase == "RECESSION" and sector_id in [
+                "materials",
+                "energy",
+                "real_estate",
+            ]:
+                extra_warning = "Cyclical sector in defensive phase"
+                warnings.append(f"⚠️ {extra_warning}")
+                self._add_adjustment(
+                    adjustments, adjustment_breakdown, "sector_rotation", -5, extra_warning
+                )
 
     def _apply_mtf_filter(
         self,
@@ -2195,10 +2238,62 @@ class ImprovedEntryLogic:
     def _check_sector_strength(self, df: pd.DataFrame, market_regime: Optional[Dict]) -> Dict:
         """
         Kiểm tra sức mạnh của ngành so với thị trường chung (VNINDEX).
-        Sử dụng RS (Relative Strength)
+
+        IMPROVED v4.0: Sử dụng SectorRotationAnalyzer để xác định:
+        - Ngành đang dẫn dắt (leading) hay tụt hậu (lagging)
+        - Giai đoạn thị trường (EARLY, MID, LATE, RECESSION)
+        - Điều chỉnh confidence dựa trên sector rotation
+
+        Returns:
+            Dict with is_leading, is_lagging, sector_perf, sector_id, rotation_phase
         """
+        # Default result
+        result = {
+            "is_leading": False,
+            "is_lagging": False,
+            "sector_perf": 0.0,
+            "sector_id": "unknown",
+            "rotation_phase": "UNKNOWN",
+        }
+
+        # Try to use SectorRotationAnalyzer first
+        try:
+            from src.market.sector_rotation import get_sector_analyzer
+
+            analyzer = get_sector_analyzer()
+
+            # Get sector for current symbol
+            if self._current_symbol:
+                sector_info = analyzer.get_symbol_sector_info(self._current_symbol)
+                result["sector_id"] = sector_info.get("sector_id", "unknown")
+                result["is_leading"] = sector_info.get("is_leading", False)
+                result["is_lagging"] = sector_info.get("is_lagging", False)
+
+                # Get rotation analysis
+                rotation = analyzer.analyze()
+                result["rotation_phase"] = rotation.phase
+
+                # Get sector performance if available
+                if result["sector_id"] in rotation.sector_performances:
+                    perf = rotation.sector_performances[result["sector_id"]]
+                    result["sector_perf"] = perf.return_1m * 100  # Convert to percentage
+
+                logger.debug(
+                    f"📊 Sector check for {self._current_symbol}: "
+                    f"sector={result['sector_id']}, leading={result['is_leading']}, "
+                    f"lagging={result['is_lagging']}, phase={result['rotation_phase']}"
+                )
+
+                return result
+
+        except ImportError:
+            logger.debug("SectorRotationAnalyzer not available, falling back to RS")
+        except Exception as e:
+            logger.debug(f"Sector rotation check failed: {e}")
+
+        # Fallback to RS (Relative Strength) if sector rotation not available
         if "rs" not in df.columns or df["rs"].isnull().all():
-            return {"is_leading": False, "is_lagging": False, "sector_per": 0}
+            return result
 
         # RS > 1: Cổ phiếu/ngành mạnh hơn thị trường
         # RS dốc lên: Sức mạnh đang tăng
@@ -2207,21 +2302,15 @@ class ImprovedEntryLogic:
             df, "rs", 30, "mean", 0
         )
 
-        is_leading = latest_rs > 1.0 and rs_trend
-        is_lagging = latest_rs < 0.95
+        result["is_leading"] = latest_rs > 1.0 and rs_trend
+        result["is_lagging"] = latest_rs < 0.95
 
         # Lấy performance từ market_regime nếu có
-        sector_perf = 0
         if market_regime and "sector_performance" in market_regime:
-            # Giả sử df có cột 'sector'
             sector = safe_get_latest(df, "sector", 0) if "sector" in df.columns else "UNKNOWN"
-            sector_perf = market_regime["sector_performance"].get(sector, 0)
+            result["sector_perf"] = market_regime["sector_performance"].get(sector, 0)
 
-        return {
-            "is_leading": is_leading,
-            "is_lagging": is_lagging,
-            "sector_perf": sector_perf,
-        }
+        return result
 
     def _check_portfolio_correlation(self, df: pd.DataFrame, symbol: Optional[str]) -> Dict:
         """

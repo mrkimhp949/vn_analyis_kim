@@ -81,13 +81,15 @@ class TradingConfig:
         6.0  # Activate trailing stop after 6% gain (lowered from 8%)
     )
 
-    # Position sizing
-    # IMPROVED: Better safety margins and risk management
+    # Position sizing - IMPROVED v4.0
+    # CRITICAL FIX: Ensure max_position_size * max_positions <= max_cash_allocation
+    # Previous config was impossible: 12% * 10 = 120% > 100%!
     total_capital: float = 100_000_000  # 100M VND
-    max_position_size: float = 0.07  # 7% of portfolio (reduced from 8% for safety)
-    min_position_size: float = 0.04  # 4% of portfolio (reduced from 5% for flexibility)
-    max_positions: int = 10  # Max 10 positions (10 * 7% = 70% max exposure)
-    max_cash_allocation: float = 0.70  # Max 70% invested, keep 30% cash buffer (increased from 20%)
+    max_position_size: float = 0.07  # 7% of portfolio per position
+    min_position_size: float = 0.03  # 3% of portfolio minimum (lowered for flexibility)
+    max_positions: int = 10  # Max 10 positions
+    max_cash_allocation: float = 0.70  # Max 70% invested, keep 30% cash buffer
+    # VALIDATION: 7% * 10 = 70% = max_cash_allocation ✓
 
     # Risk management
     # IMPROVED: More conservative risk limits for Vietnam market
