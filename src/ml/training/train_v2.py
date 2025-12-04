@@ -119,7 +119,9 @@ class MLTrainerV2:
 
                 # Load index
                 try:
-                    index_df = load_data("VNINDEX", lookback=lookback, is_index=True, required_bars=20)
+                    index_df = load_data(
+                        "VNINDEX", lookback=lookback, is_index=True, required_bars=20
+                    )
                 except:
                     index_df = None
 
@@ -261,10 +263,12 @@ class MLTrainerV2:
         rf_selector.fit(X_scaled, y)
 
         # Get feature importance
-        importance = pd.DataFrame({
-            "feature": feature_cols,
-            "importance": rf_selector.feature_importances_,
-        }).sort_values("importance", ascending=False)
+        importance = pd.DataFrame(
+            {
+                "feature": feature_cols,
+                "importance": rf_selector.feature_importances_,
+            }
+        ).sort_values("importance", ascending=False)
 
         # Select top N features
         top_features = importance.head(self.n_top_features)["feature"].tolist()
@@ -332,9 +336,7 @@ class MLTrainerV2:
             X_test_scaled = scaler.transform(X_test)
 
             # Balance classes on training data only
-            X_train_balanced, y_train_balanced = self._balance_classes(
-                X_train_scaled, y_train
-            )
+            X_train_balanced, y_train_balanced = self._balance_classes(X_train_scaled, y_train)
 
             for name, model in base_models.items():
                 try:
@@ -544,7 +546,9 @@ class MLTrainerV2:
             "feature_columns": feature_cols,
             "selected_features": self.selected_features or feature_cols,
             "n_features": len(feature_cols),
-            "n_selected_features": len(self.selected_features) if self.selected_features else len(feature_cols),
+            "n_selected_features": (
+                len(self.selected_features) if self.selected_features else len(feature_cols)
+            ),
             "models": list(self.models.keys()),
             "use_feature_selection": self.use_feature_selection,
             "use_class_balancing": self.use_class_balancing,
@@ -559,8 +563,12 @@ class MLTrainerV2:
                         ),
                         "f1_mean": float(np.mean(metrics["f1"])) if metrics["f1"] else 0,
                         "auc_mean": float(np.mean(metrics["auc"])) if metrics["auc"] else 0,
-                        "precision_mean": float(np.mean(metrics["precision"])) if metrics["precision"] else 0,
-                        "recall_mean": float(np.mean(metrics["recall"])) if metrics["recall"] else 0,
+                        "precision_mean": (
+                            float(np.mean(metrics["precision"])) if metrics["precision"] else 0
+                        ),
+                        "recall_mean": (
+                            float(np.mean(metrics["recall"])) if metrics["recall"] else 0
+                        ),
                     }
                     for name, metrics in self.cv_results.items()
                 }
@@ -659,10 +667,37 @@ def main():
     # VN30 symbols for training (expanded for more data)
     symbols = [
         # VN30 core
-        "VNM", "FPT", "VIC", "VHM", "HPG", "MWG", "MSN", "VCB", "TCB", "VPB",
-        "BID", "CTG", "MBB", "ACB", "STB", "SSI", "VND", "HCM", "GAS", "PLX",
+        "VNM",
+        "FPT",
+        "VIC",
+        "VHM",
+        "HPG",
+        "MWG",
+        "MSN",
+        "VCB",
+        "TCB",
+        "VPB",
+        "BID",
+        "CTG",
+        "MBB",
+        "ACB",
+        "STB",
+        "SSI",
+        "VND",
+        "HCM",
+        "GAS",
+        "PLX",
         # Additional liquid stocks
-        "VRE", "NVL", "POW", "VJC", "SAB", "REE", "PNJ", "DGC", "GMD", "VCI",
+        "VRE",
+        "NVL",
+        "POW",
+        "VJC",
+        "SAB",
+        "REE",
+        "PNJ",
+        "DGC",
+        "GMD",
+        "VCI",
     ]
 
     print("\n" + "=" * 70)

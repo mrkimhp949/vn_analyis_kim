@@ -79,6 +79,7 @@ class MLSignalGeneratorV2:
             # Load model info to get selected features
             if os.path.exists(MODEL_INFO_PATH):
                 import json
+
                 with open(MODEL_INFO_PATH, "r") as f:
                     model_info = json.load(f)
                     self.selected_features = model_info.get("selected_features")
@@ -88,7 +89,7 @@ class MLSignalGeneratorV2:
             from src.ml.features.enhanced_v2 import get_feature_columns_v2
 
             # Priority: scaler's feature_names_in_ > model_info selected_features > all features
-            if hasattr(self.scaler, 'feature_names_in_'):
+            if hasattr(self.scaler, "feature_names_in_"):
                 self.feature_cols = list(self.scaler.feature_names_in_)
                 logger.info(f"  Using {len(self.feature_cols)} features from scaler")
             elif self.selected_features:
@@ -165,7 +166,7 @@ class MLSignalGeneratorV2:
             X = X.replace([np.inf, -np.inf], 0)
 
             # Scale - use feature names from scaler to ensure correct order
-            if hasattr(self.scaler, 'feature_names_in_'):
+            if hasattr(self.scaler, "feature_names_in_"):
                 scaler_features = list(self.scaler.feature_names_in_)
                 # Reorder columns to match scaler's expected order
                 missing_in_scaler = [f for f in scaler_features if f not in X.columns]

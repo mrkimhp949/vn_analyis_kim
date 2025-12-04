@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import logging
 import warnings
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Suppress warnings
@@ -44,13 +44,58 @@ def main():
     # Popular tickers for training
     tickers = [
         # Blue chips (VN30)
-        "VNM", "VCB", "VIC", "VHM", "HPG", "FPT", "MWG", "MSN", "GAS", "SAB",
-        "TCB", "MBB", "ACB", "VPB", "CTG", "BID", "STB", "TPB", "HDB", "VIB",
+        "VNM",
+        "VCB",
+        "VIC",
+        "VHM",
+        "HPG",
+        "FPT",
+        "MWG",
+        "MSN",
+        "GAS",
+        "SAB",
+        "TCB",
+        "MBB",
+        "ACB",
+        "VPB",
+        "CTG",
+        "BID",
+        "STB",
+        "TPB",
+        "HDB",
+        "VIB",
         # Mid caps
-        "REE", "DGC", "PNJ", "MPC", "DPM", "DCM", "GVR", "PHR", "HSG", "NKG",
-        "VRE", "KDH", "NLG", "DXG", "PDR", "KBC", "IJC", "SZC", "BCM", "IDC",
+        "REE",
+        "DGC",
+        "PNJ",
+        "MPC",
+        "DPM",
+        "DCM",
+        "GVR",
+        "PHR",
+        "HSG",
+        "NKG",
+        "VRE",
+        "KDH",
+        "NLG",
+        "DXG",
+        "PDR",
+        "KBC",
+        "IJC",
+        "SZC",
+        "BCM",
+        "IDC",
         # Others
-        "PLX", "POW", "PPC", "NT2", "GEX", "PC1", "VGC", "HCM", "SSI", "VND",
+        "PLX",
+        "POW",
+        "PPC",
+        "NT2",
+        "GEX",
+        "PC1",
+        "VGC",
+        "HCM",
+        "SSI",
+        "VND",
     ]
 
     # Initialize trainer
@@ -72,7 +117,7 @@ def main():
     print(f"📋 Features: {results['n_features']}")
     print(f"📋 Samples: {results['n_samples']}")
 
-    if results['edge_vs_random'] >= 8:
+    if results["edge_vs_random"] >= 8:
         print("\n✅ TARGET ACHIEVED: Edge >= 8%")
     else:
         print(f"\n⚠️ Target not achieved. Current edge: {results['edge_vs_random']:.2f}%")
@@ -103,6 +148,7 @@ def main_legacy():
     # Try import optional libraries
     try:
         import xgboost as xgb
+
         XGBOOST_AVAILABLE = True
     except ImportError:
         XGBOOST_AVAILABLE = False
@@ -110,6 +156,7 @@ def main_legacy():
 
     try:
         import lightgbm as lgb
+
         LIGHTGBM_AVAILABLE = True
     except ImportError:
         LIGHTGBM_AVAILABLE = False
@@ -131,7 +178,9 @@ def main_legacy():
                     continue
 
                 df_enhanced = add_enhanced_features(df)
-                df_enhanced["target"] = (df_enhanced["close"].shift(-5) > df_enhanced["close"]).astype(int)
+                df_enhanced["target"] = (
+                    df_enhanced["close"].shift(-5) > df_enhanced["close"]
+                ).astype(int)
                 df_enhanced = df_enhanced.dropna()
 
                 if len(df_enhanced) < 50:
@@ -166,9 +215,36 @@ def main_legacy():
 
     # Tickers
     tickers = [
-        "VNM", "VCB", "VIC", "VHM", "HPG", "FPT", "MWG", "MSN", "GAS", "SAB",
-        "TCB", "MBB", "ACB", "VPB", "CTG", "BID", "STB", "TPB", "HDB", "VIB",
-        "REE", "DGC", "PNJ", "MPC", "DPM", "DCM", "GVR", "PHR", "HSG", "NKG",
+        "VNM",
+        "VCB",
+        "VIC",
+        "VHM",
+        "HPG",
+        "FPT",
+        "MWG",
+        "MSN",
+        "GAS",
+        "SAB",
+        "TCB",
+        "MBB",
+        "ACB",
+        "VPB",
+        "CTG",
+        "BID",
+        "STB",
+        "TPB",
+        "HDB",
+        "VIB",
+        "REE",
+        "DGC",
+        "PNJ",
+        "MPC",
+        "DPM",
+        "DCM",
+        "GVR",
+        "PHR",
+        "HSG",
+        "NKG",
     ]
 
     # Load and prepare
@@ -176,7 +252,9 @@ def main_legacy():
     X, y, feature_names = prepare_features(df)
 
     # Split
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
 
     # Scale
     scaler = StandardScaler()
@@ -187,21 +265,27 @@ def main_legacy():
     models = {}
 
     # RF
-    rf = RandomForestClassifier(n_estimators=200, max_depth=10, class_weight="balanced", random_state=42, n_jobs=-1)
+    rf = RandomForestClassifier(
+        n_estimators=200, max_depth=10, class_weight="balanced", random_state=42, n_jobs=-1
+    )
     rf.fit(X_train_scaled, y_train)
     models["rf"] = rf
     logger.info(f"RF Accuracy: {accuracy_score(y_val, rf.predict(X_val_scaled)):.4f}")
 
     # XGB
     if XGBOOST_AVAILABLE:
-        xgb_model = xgb.XGBClassifier(n_estimators=200, max_depth=6, learning_rate=0.05, random_state=42, verbosity=0)
+        xgb_model = xgb.XGBClassifier(
+            n_estimators=200, max_depth=6, learning_rate=0.05, random_state=42, verbosity=0
+        )
         xgb_model.fit(X_train_scaled, y_train)
         models["xgb"] = xgb_model
         logger.info(f"XGB Accuracy: {accuracy_score(y_val, xgb_model.predict(X_val_scaled)):.4f}")
 
     # LGB
     if LIGHTGBM_AVAILABLE:
-        lgb_model = lgb.LGBMClassifier(n_estimators=200, max_depth=6, learning_rate=0.05, random_state=42, verbose=-1)
+        lgb_model = lgb.LGBMClassifier(
+            n_estimators=200, max_depth=6, learning_rate=0.05, random_state=42, verbose=-1
+        )
         lgb_model.fit(X_train_scaled, y_train)
         models["lgb"] = lgb_model
         logger.info(f"LGB Accuracy: {accuracy_score(y_val, lgb_model.predict(X_val_scaled)):.4f}")

@@ -283,7 +283,9 @@ def add_predictive_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Volume-weighted price stability
     typical_price = (df["high"] + df["low"] + df["close"]) / 3
-    df["vwap_20"] = (typical_price * df["volume"]).rolling(20).sum() / df["volume"].rolling(20).sum()
+    df["vwap_20"] = (typical_price * df["volume"]).rolling(20).sum() / df["volume"].rolling(
+        20
+    ).sum()
     df["price_vs_vwap"] = (df["close"] - df["vwap_20"]) / df["vwap_20"]
 
     # Liquidity score (volume * price range)
@@ -311,7 +313,9 @@ def add_predictive_features(df: pd.DataFrame) -> pd.DataFrame:
     # Smart money indicator (volume on up vs down days)
     up_vol = df["volume"].where(df["close"] > df["close"].shift(1), 0)
     down_vol = df["volume"].where(df["close"] <= df["close"].shift(1), 0)
-    df["smart_money"] = up_vol.rolling(10).sum() / (up_vol.rolling(10).sum() + down_vol.rolling(10).sum() + 1)
+    df["smart_money"] = up_vol.rolling(10).sum() / (
+        up_vol.rolling(10).sum() + down_vol.rolling(10).sum() + 1
+    )
 
     # =========================================================================
     # 11. PATTERN RECOGNITION FEATURES (NEW)
