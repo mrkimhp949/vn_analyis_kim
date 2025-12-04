@@ -40,7 +40,14 @@ try:
         POOR_PERFORMER_WIN_RATE_THRESHOLD,
         ROUND_TRIP_COST,
         VOLUME_SURGE_THRESHOLD,
+        # Adaptive holding days
+        get_adaptive_holding_days,
+        HOLDING_DAYS_DEFAULT,
+        ADX_STRONG_TREND_THRESHOLD,
+        ADX_WEAK_TREND_THRESHOLD,
     )
+
+    ADAPTIVE_HOLDING_AVAILABLE = True
 except ImportError:
     # Fallback defaults if constants not available
     DEFAULT_TRAILING_STOP_ACTIVATION = 0.05
@@ -52,6 +59,23 @@ except ImportError:
     POOR_PERFORMER_WIN_RATE_THRESHOLD = 0.35
     ROUND_TRIP_COST = 0.016
     VOLUME_SURGE_THRESHOLD = 1.5
+    HOLDING_DAYS_DEFAULT = 15
+    ADX_STRONG_TREND_THRESHOLD = 25
+    ADX_WEAK_TREND_THRESHOLD = 20
+    ADAPTIVE_HOLDING_AVAILABLE = False
+
+    def get_adaptive_holding_days(regime: str, adx: float = 20) -> int:
+        """Fallback adaptive holding days function."""
+        if regime == "BULL":
+            return 20 if adx > 25 else 15
+        elif regime == "SIDEWAYS":
+            return 12 if adx > 20 else 10
+        elif regime == "BEAR":
+            return 8 if adx > 25 else 6
+        elif regime == "HIGH_VOLATILITY":
+            return 5
+        return 15
+
 
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
@@ -257,28 +281,52 @@ def calculate_trading_days(start_date: datetime, end_date: datetime) -> int:
 
 class PartialExitTracker:
     """
-    Simplified partial exit tracking with memory management.
+    Simplified partial exit tracking with LRU cache for memory management.
 
     State machine:
     - State 0: No partial exits yet
     - State 1: TP1 hit (partial exited)
     - State 2: TP2 hit (100% exited) - position closed
+
+    Memory Management:
+    - Uses OrderedDict for LRU eviction of old symbols
+    - MAX_TRACKED_SYMBOLS limits total tracked symbols
+    - MAX_HISTORY_PER_SYMBOL limits history per symbol
     """
 
-    MAX_HISTORY_PER_SYMBOL = 100  # Prevent memory leak
+    MAX_HISTORY_PER_SYMBOL = 50  # Reduced from 100 for memory efficiency
+    MAX_TRACKED_SYMBOLS = 200  # Max symbols to track (LRU eviction)
 
     def __init__(self):
-        self._states: Dict[str, int] = {}
+        from collections import OrderedDict
+
+        self._states: OrderedDict[str, int] = OrderedDict()
         self._exit_history: Dict[str, List[Dict]] = {}
+
+    def _touch_symbol(self, symbol: str) -> None:
+        """Move symbol to end of OrderedDict (most recently used)."""
+        if symbol in self._states:
+            self._states.move_to_end(symbol)
+
+    def _evict_if_needed(self) -> None:
+        """Evict oldest symbols if over limit (LRU eviction)."""
+        while len(self._states) > self.MAX_TRACKED_SYMBOLS:
+            # Remove oldest (first) item
+            oldest_symbol, _ = self._states.popitem(last=False)
+            # Also remove its history
+            self._exit_history.pop(oldest_symbol, None)
+            logger.debug(f"🗑️ LRU evicted symbol: {oldest_symbol}")
 
     def get_state(self, symbol: str) -> int:
         """Get current exit state for symbol (0, 1, or 2)"""
+        if symbol in self._states:
+            self._touch_symbol(symbol)  # Mark as recently used
         return self._states.get(symbol, 0)
 
     def record_partial_exit(
         self, symbol: str, exit_type: str, price: float, shares: int, reason: Optional[str] = None
     ) -> None:
-        """Record a partial exit with history management."""
+        """Record a partial exit with LRU cache management."""
         current_state = self.get_state(symbol)
 
         # Update state
@@ -286,6 +334,12 @@ class PartialExitTracker:
             self._states[symbol] = 1
         elif exit_type == "FULL":
             self._states[symbol] = 2
+
+        # Touch symbol to mark as recently used
+        self._touch_symbol(symbol)
+
+        # Evict old symbols if over limit
+        self._evict_if_needed()
 
         # Record history
         if symbol not in self._exit_history:
@@ -303,7 +357,7 @@ class PartialExitTracker:
             }
         )
 
-        # Prevent memory leak - trim old history
+        # Prevent memory leak - trim old history per symbol
         if len(self._exit_history[symbol]) > self.MAX_HISTORY_PER_SYMBOL:
             self._exit_history[symbol] = self._exit_history[symbol][-self.MAX_HISTORY_PER_SYMBOL :]
 
@@ -342,7 +396,52 @@ class PartialExitTracker:
         """Clear all tracking data. Returns count of cleared items."""
         count = len(self._states)
         self._states.clear()
+        self._exit_history.clear()
         return count
+
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """
+        Get memory usage statistics for monitoring.
+
+        Returns:
+            Dict with memory stats for debugging/monitoring
+        """
+        total_history_entries = sum(len(h) for h in self._exit_history.values())
+        return {
+            "tracked_symbols": len(self._states),
+            "max_tracked_symbols": self.MAX_TRACKED_SYMBOLS,
+            "utilization_pct": len(self._states) / self.MAX_TRACKED_SYMBOLS * 100,
+            "total_history_entries": total_history_entries,
+            "avg_history_per_symbol": (
+                total_history_entries / len(self._exit_history) if self._exit_history else 0
+            ),
+            "max_history_per_symbol": self.MAX_HISTORY_PER_SYMBOL,
+            "symbols_with_history": len(self._exit_history),
+        }
+
+    def cleanup_fully_exited(self, keep_recent: int = 50) -> int:
+        """
+        Clean up fully exited positions to free memory.
+
+        Args:
+            keep_recent: Number of recent fully exited symbols to keep
+
+        Returns:
+            Number of symbols cleaned up
+        """
+        fully_exited = [s for s, state in self._states.items() if state >= 2]
+
+        # Keep only the most recent ones
+        to_remove = fully_exited[:-keep_recent] if len(fully_exited) > keep_recent else []
+
+        for symbol in to_remove:
+            self._states.pop(symbol, None)
+            self._exit_history.pop(symbol, None)
+
+        if to_remove:
+            logger.info(f"🧹 Cleaned up {len(to_remove)} fully exited positions")
+
+        return len(to_remove)
 
 
 # =============================================================================
@@ -1480,38 +1579,42 @@ class ImprovedExitStrategy:
         df: Optional[pd.DataFrame],
         is_poor_performer: bool,
     ) -> int:
-        """Calculate adaptive max holding days based on conditions."""
-        adaptive_max_days = self.config.max_holding_days
+        """
+        Calculate adaptive max holding days based on conditions.
 
-        # Step 1: Adjust by market regime
+        Uses centralized get_adaptive_holding_days() from constants.py
+        for consistent behavior across the codebase.
+
+        Vietnam market characteristics:
+        - BULL: 15-20 days (can hold longer in strong trends)
+        - SIDEWAYS: 10-12 days (shorter cycles)
+        - BEAR: 6-8 days (exit fast)
+        - HIGH_VOLATILITY: 5 days (very short)
+        """
+        # Get regime and ADX
+        regime = "SIDEWAYS"  # Default
+        adx = 20.0  # Default ADX
+
         if market_regime:
             regime = market_regime.get("regime", "SIDEWAYS")
-            if regime == "BULL":
-                adaptive_max_days = 30
-            elif regime == "SIDEWAYS":
-                adaptive_max_days = 20
-            elif regime == "BEAR":
-                adaptive_max_days = 15
 
-        # Step 2: Adjust by trend strength (ADX)
         if df is not None and len(df) > 0 and "adx" in df.columns:
             try:
-                adx = safe_get_latest(df, "adx", 0)
-                if adx > 35:
-                    trend_adjustment = 1.5
-                elif adx > 25:
-                    trend_adjustment = 1.2
-                elif adx > 15:
-                    trend_adjustment = 1.0
-                else:
-                    trend_adjustment = 0.8
-                adaptive_max_days = int(adaptive_max_days * trend_adjustment)
+                adx = safe_get_latest(df, "adx", 20.0)
             except Exception:
                 pass
 
-        # Step 3: Shorter holding for poor performers
+        # Use centralized function from constants.py
+        adaptive_max_days = get_adaptive_holding_days(regime, adx)
+
+        # Shorter holding for poor performers
         if is_poor_performer and self.config.use_per_symbol_performance:
             adaptive_max_days = min(adaptive_max_days, self.config.poor_performer_max_holding_days)
+
+        logger.debug(
+            f"📅 Adaptive holding: {adaptive_max_days} days "
+            f"(regime={regime}, ADX={adx:.1f}, poor_performer={is_poor_performer})"
+        )
 
         return adaptive_max_days
 

@@ -15,7 +15,7 @@ Version: 1.0.0
 
 import logging
 from datetime import datetime, time, timedelta
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -296,38 +296,160 @@ def validate_price(price: float) -> Tuple[bool, str]:
 # EXCHANGE FUNCTIONS
 # =============================================================================
 
+# Exchange reference database (loaded from List.csv)
+_EXCHANGE_DATABASE: Dict[str, str] = {}
+_EXCHANGE_DB_LOADED: bool = False
+
+
+def _load_exchange_database() -> None:
+    """
+    Load exchange reference database from List.csv.
+
+    File format: Symbol,Name,Exchange
+    Exchange values: HSX (HOSE), HNX, Upcom, OTC
+
+    This provides accurate exchange detection instead of heuristics.
+    """
+    global _EXCHANGE_DATABASE, _EXCHANGE_DB_LOADED
+
+    if _EXCHANGE_DB_LOADED:
+        return
+
+    import csv
+    import os
+
+    csv_path = "List.csv"
+
+    # Try multiple paths
+    possible_paths = [
+        csv_path,
+        os.path.join(os.path.dirname(__file__), "..", "..", csv_path),
+        os.path.join(os.getcwd(), csv_path),
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if len(row) >= 3:
+                            symbol = row[0].upper().strip()
+                            exchange_raw = row[2].upper().strip()
+
+                            # Normalize exchange names
+                            if exchange_raw in ("HSX", "HOSE"):
+                                exchange = "HOSE"
+                            elif exchange_raw == "HNX":
+                                exchange = "HNX"
+                            elif exchange_raw in ("UPCOM", "UPC"):
+                                exchange = "UPCOM"
+                            elif exchange_raw == "OTC":
+                                exchange = "OTC"
+                            else:
+                                exchange = "HOSE"  # Default
+
+                            _EXCHANGE_DATABASE[symbol] = exchange
+
+                _EXCHANGE_DB_LOADED = True
+                logger.info(
+                    f"✅ Loaded exchange database: {len(_EXCHANGE_DATABASE)} symbols from {path}"
+                )
+                return
+
+            except Exception as e:
+                logger.warning(f"Failed to load exchange database from {path}: {e}")
+
+    logger.warning("Exchange database not found, using heuristic detection")
+    _EXCHANGE_DB_LOADED = True  # Mark as loaded to avoid repeated attempts
+
 
 def get_exchange(symbol: str) -> str:
     """
-    Detect exchange from symbol.
+    Detect exchange from symbol using reference database.
 
-    Logic:
-    - VN30 symbols → HOSE
-    - HNX30 symbols → HNX
-    - 3-letter symbols → likely HOSE
-    - Default → HOSE (most liquid)
+    IMPROVED v4.2: Uses List.csv reference database for accurate detection.
+    Falls back to heuristics if database not available.
 
-    Note: For production, this should use a reference database.
+    Priority:
+    1. Reference database (List.csv) - most accurate
+    2. VN30/HNX30 known symbols
+    3. Heuristic (3-letter = HOSE)
+    4. Default HOSE
 
     Args:
         symbol: Stock symbol
 
     Returns:
-        Exchange name: "HOSE", "HNX", or "UPCOM"
+        Exchange name: "HOSE", "HNX", "UPCOM", or "OTC"
     """
+    # Load database on first call
+    _load_exchange_database()
+
     symbol = symbol.upper().strip()
 
+    # Priority 1: Reference database
+    if symbol in _EXCHANGE_DATABASE:
+        return _EXCHANGE_DATABASE[symbol]
+
+    # Priority 2: Known index symbols
     if symbol in VN30_SYMBOLS:
         return "HOSE"
     if symbol in HNX30_SYMBOLS:
         return "HNX"
 
-    # Heuristic: 3-letter symbols are typically HOSE
+    # Priority 3: Heuristic - 3-letter symbols are typically HOSE
+    # Note: This is not 100% accurate but covers most cases
     if len(symbol) == 3:
+        logger.debug(f"⚠️ Using heuristic for {symbol}: assuming HOSE (3-letter symbol)")
         return "HOSE"
 
-    # Default to HOSE
+    # Priority 4: Default to HOSE (most liquid exchange)
+    logger.debug(f"⚠️ Unknown symbol {symbol}: defaulting to HOSE")
     return "HOSE"
+
+
+def get_exchange_info(symbol: str) -> Dict[str, Any]:
+    """
+    Get detailed exchange information for a symbol.
+
+    Returns:
+        Dict with exchange, price_limit, is_known, detection_method
+    """
+    _load_exchange_database()
+    symbol = symbol.upper().strip()
+
+    # Determine detection method
+    if symbol in _EXCHANGE_DATABASE:
+        exchange = _EXCHANGE_DATABASE[symbol]
+        detection_method = "database"
+        is_known = True
+    elif symbol in VN30_SYMBOLS:
+        exchange = "HOSE"
+        detection_method = "vn30_index"
+        is_known = True
+    elif symbol in HNX30_SYMBOLS:
+        exchange = "HNX"
+        detection_method = "hnx30_index"
+        is_known = True
+    elif len(symbol) == 3:
+        exchange = "HOSE"
+        detection_method = "heuristic_3letter"
+        is_known = False
+    else:
+        exchange = "HOSE"
+        detection_method = "default"
+        is_known = False
+
+    return {
+        "symbol": symbol,
+        "exchange": exchange,
+        "price_limit": EXCHANGE_PRICE_LIMITS.get(exchange, 0.07),
+        "is_known": is_known,
+        "detection_method": detection_method,
+        "is_vn30": symbol in VN30_SYMBOLS,
+        "is_hnx30": symbol in HNX30_SYMBOLS,
+    }
 
 
 def get_price_limit(symbol: str) -> float:
@@ -921,6 +1043,162 @@ def check_foreign_room(
         return True, f"⚠️ Limited foreign room: {remaining_room:.1%} remaining"
 
     return True, f"✅ Foreign room available: {remaining_room:.1%}"
+
+
+def get_foreign_flow_signal(
+    symbol: str,
+    foreign_net_buy: float = 0.0,
+    foreign_net_buy_5d: float = 0.0,
+    current_foreign_pct: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Get foreign flow signal for entry filter integration.
+
+    IMPROVED v4.2: Comprehensive foreign flow analysis for entry decisions.
+
+    Foreign investors (smart money) often have better information.
+    Their buying/selling patterns can be predictive signals.
+
+    Args:
+        symbol: Stock symbol
+        foreign_net_buy: Today's net foreign buy value (VND)
+        foreign_net_buy_5d: 5-day cumulative net foreign buy (VND)
+        current_foreign_pct: Current foreign ownership percentage (0-1)
+
+    Returns:
+        Dict with signal, confidence_adjustment, and details
+    """
+    from src.config.constants import (
+        FOREIGN_FLOW_STRONG_BUY_BONUS,
+        FOREIGN_FLOW_MODERATE_BUY_BONUS,
+        FOREIGN_FLOW_MODERATE_SELL_PENALTY,
+        FOREIGN_FLOW_STRONG_SELL_PENALTY,
+    )
+
+    result = {
+        "symbol": symbol,
+        "signal": "NEUTRAL",
+        "confidence_adjustment": 0,
+        "has_room": True,
+        "room_message": "",
+        "reasons": [],
+        "warnings": [],
+    }
+
+    # Check foreign room availability
+    has_room, room_msg = check_foreign_room(symbol, current_foreign_pct)
+    result["has_room"] = has_room
+    result["room_message"] = room_msg
+
+    if not has_room:
+        result["warnings"].append(room_msg)
+        result["confidence_adjustment"] = -5  # Small penalty for full room
+
+    # Analyze foreign flow direction
+    # Thresholds in VND (adjust based on stock liquidity)
+    strong_threshold = 5_000_000_000  # 5B VND
+    moderate_threshold = 1_000_000_000  # 1B VND
+
+    # Today's flow
+    if foreign_net_buy > strong_threshold:
+        result["signal"] = "STRONG_BUY"
+        result["confidence_adjustment"] += FOREIGN_FLOW_STRONG_BUY_BONUS
+        result["reasons"].append(f"✅ Strong foreign buying: {foreign_net_buy/1e9:.1f}B VND today")
+    elif foreign_net_buy > moderate_threshold:
+        result["signal"] = "MODERATE_BUY"
+        result["confidence_adjustment"] += FOREIGN_FLOW_MODERATE_BUY_BONUS
+        result["reasons"].append(f"✅ Foreign net buying: {foreign_net_buy/1e9:.1f}B VND today")
+    elif foreign_net_buy < -strong_threshold:
+        result["signal"] = "STRONG_SELL"
+        result["confidence_adjustment"] += FOREIGN_FLOW_STRONG_SELL_PENALTY
+        result["warnings"].append(
+            f"⚠️ Strong foreign selling: {abs(foreign_net_buy)/1e9:.1f}B VND today"
+        )
+    elif foreign_net_buy < -moderate_threshold:
+        result["signal"] = "MODERATE_SELL"
+        result["confidence_adjustment"] += FOREIGN_FLOW_MODERATE_SELL_PENALTY
+        result["warnings"].append(
+            f"⚠️ Foreign net selling: {abs(foreign_net_buy)/1e9:.1f}B VND today"
+        )
+
+    # 5-day trend (more significant)
+    if foreign_net_buy_5d > strong_threshold * 3:  # 15B over 5 days
+        result["confidence_adjustment"] += 5
+        result["reasons"].append(
+            f"✅ Sustained foreign buying (5d): {foreign_net_buy_5d/1e9:.1f}B VND"
+        )
+    elif foreign_net_buy_5d < -strong_threshold * 3:
+        result["confidence_adjustment"] -= 8
+        result["warnings"].append(
+            f"⚠️ Sustained foreign selling (5d): {abs(foreign_net_buy_5d)/1e9:.1f}B VND"
+        )
+
+    # Clamp adjustment
+    result["confidence_adjustment"] = max(-20, min(15, result["confidence_adjustment"]))
+
+    return result
+
+
+def check_foreign_flow_for_entry(
+    symbol: str,
+    df: Optional[pd.DataFrame] = None,
+) -> Tuple[bool, int, str]:
+    """
+    Check foreign flow conditions for entry filter.
+
+    This function is designed to be called from entry_logic.py
+    as part of the entry filter pipeline.
+
+    Args:
+        symbol: Stock symbol
+        df: DataFrame with foreign flow data (optional)
+
+    Returns:
+        Tuple of (should_proceed, confidence_adjustment, message)
+    """
+    try:
+        # Try to get foreign flow data
+        foreign_net_buy = 0.0
+        foreign_net_buy_5d = 0.0
+        current_foreign_pct = 0.0
+
+        if df is not None and len(df) > 0:
+            # Extract foreign flow from DataFrame if available
+            if "foreign_net_buy" in df.columns:
+                foreign_net_buy = df["foreign_net_buy"].iloc[-1]
+            if "foreign_net_buy_5d" in df.columns:
+                foreign_net_buy_5d = df["foreign_net_buy_5d"].iloc[-1]
+            elif "foreign_net_buy" in df.columns and len(df) >= 5:
+                foreign_net_buy_5d = df["foreign_net_buy"].tail(5).sum()
+            if "foreign_pct" in df.columns:
+                current_foreign_pct = df["foreign_pct"].iloc[-1]
+
+        # Get signal
+        signal = get_foreign_flow_signal(
+            symbol=symbol,
+            foreign_net_buy=foreign_net_buy,
+            foreign_net_buy_5d=foreign_net_buy_5d,
+            current_foreign_pct=current_foreign_pct,
+        )
+
+        # Determine if we should proceed
+        # Block entry only on strong foreign selling
+        if signal["signal"] == "STRONG_SELL" and not signal["has_room"]:
+            return (
+                False,
+                signal["confidence_adjustment"],
+                f"🚫 Foreign flow negative: {'; '.join(signal['warnings'])}",
+            )
+
+        # Build message
+        messages = signal["reasons"] + signal["warnings"]
+        message = "; ".join(messages) if messages else "Foreign flow: neutral"
+
+        return (True, signal["confidence_adjustment"], message)
+
+    except Exception as e:
+        logger.debug(f"Foreign flow check failed for {symbol}: {e}")
+        return (True, 0, "Foreign flow data unavailable")
 
 
 # =============================================================================

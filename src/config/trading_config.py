@@ -66,8 +66,9 @@ class TradingConfig:
 
     # Entry logic
     # IMPROVED: Raised thresholds for better signal quality
-    min_confidence: int = 50  # Raised from 40 for better quality signals
-    min_risk_reward: float = 2.2  # Raised from 1.8 for better risk-adjusted returns
+    # NOTE: Should be >= TECH_ONLY_MIN_CONFIDENCE (55) from constants.py
+    min_confidence: int = 55  # Aligned with constants.TECH_ONLY_MIN_CONFIDENCE
+    min_risk_reward: float = 2.0  # Aligned with constants.DEFAULT_MIN_RISK_REWARD
     support_distance_percent: float = (
         4.0  # Max distance to support (%) - widened from 3% for more opportunities
     )
@@ -83,13 +84,14 @@ class TradingConfig:
 
     # Position sizing - IMPROVED v4.0
     # CRITICAL FIX: Ensure max_position_size * max_positions <= max_cash_allocation
-    # Previous config was impossible: 12% * 10 = 120% > 100%!
+    # NOTE: max_position_size aligned with constants.DEFAULT_MAX_POSITION_SIZE (0.12)
+    # but constrained by max_cash_allocation for safety
     total_capital: float = 100_000_000  # 100M VND
-    max_position_size: float = 0.07  # 7% of portfolio per position
+    max_position_size: float = 0.12  # 12% - aligned with constants.DEFAULT_MAX_POSITION_SIZE
     min_position_size: float = 0.03  # 3% of portfolio minimum (lowered for flexibility)
-    max_positions: int = 10  # Max 10 positions
+    max_positions: int = 5  # Max 5 positions (reduced to fit 12% * 5 = 60% < 70%)
     max_cash_allocation: float = 0.70  # Max 70% invested, keep 30% cash buffer
-    # VALIDATION: 7% * 10 = 70% = max_cash_allocation ✓
+    # VALIDATION: 12% * 5 = 60% < max_cash_allocation (70%) ✓
 
     # Risk management
     # IMPROVED: More conservative risk limits for Vietnam market
@@ -132,7 +134,10 @@ class TradingConfig:
     vn_t2_cash_buffer_pct: float = 0.10  # 10% extra cash buffer for T+2
 
     # Liquidity considerations for Vietnam market
-    vn_min_daily_value: float = 2_000_000_000  # 2B VND minimum daily trading value
+    # NOTE: Aligned with constants.VN_MIN_LIQUIDITY_VALUE for consistency
+    vn_min_daily_value: float = (
+        500_000_000  # 500M VND - aligned with constants.VN_MIN_LIQUIDITY_VALUE
+    )
     vn_max_position_pct_of_volume: float = 0.05  # Max 5% of daily volume for single position
     vn_require_continuous_trading: bool = True  # Avoid stocks with trading halts
 
@@ -147,22 +152,25 @@ class TradingConfig:
         return cls(
             max_scan_universe=int(os.getenv("MAX_SCAN_UNIVERSE", 40)),
             watchlist_size=int(os.getenv("WATCHLIST_SIZE", 100)),
-            min_confidence=int(os.getenv("MIN_CONFIDENCE", 45)),
+            # Aligned with constants.TECH_ONLY_MIN_CONFIDENCE
+            min_confidence=int(os.getenv("MIN_CONFIDENCE", 55)),
+            # Aligned with constants.DEFAULT_MIN_RISK_REWARD
             min_risk_reward=float(os.getenv("MIN_RISK_REWARD", 2.0)),
-            support_distance_percent=float(os.getenv("SUPPORT_DISTANCE_PERCENT", 3.0)),
-            stop_loss_percent=float(os.getenv("STOP_LOSS_PERCENT", -7.0)),
-            take_profit_percent=float(os.getenv("TAKE_PROFIT_PERCENT", 15.0)),
-            trailing_stop_percent=float(os.getenv("TRAILING_STOP_PERCENT", 3.0)),
-            trailing_activation_percent=float(os.getenv("TRAILING_ACTIVATION_PERCENT", 8.0)),
+            support_distance_percent=float(os.getenv("SUPPORT_DISTANCE_PERCENT", 4.0)),
+            stop_loss_percent=float(os.getenv("STOP_LOSS_PERCENT", -6.0)),
+            take_profit_percent=float(os.getenv("TAKE_PROFIT_PERCENT", 12.0)),
+            trailing_stop_percent=float(os.getenv("TRAILING_STOP_PERCENT", 4.0)),
+            trailing_activation_percent=float(os.getenv("TRAILING_ACTIVATION_PERCENT", 6.0)),
             total_capital=float(os.getenv("TOTAL_CAPITAL", 100_000_000)),
-            max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.08)),
-            min_position_size=float(os.getenv("MIN_POSITION_SIZE", 0.05)),
-            max_positions=int(os.getenv("MAX_POSITIONS", 10)),
-            max_cash_allocation=float(os.getenv("MAX_CASH_ALLOCATION", 0.80)),
-            max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.20)),
-            max_sector_exposure=float(os.getenv("MAX_SECTOR_EXPOSURE", 0.40)),
+            # Aligned with constants.DEFAULT_MAX_POSITION_SIZE
+            max_position_size=float(os.getenv("MAX_POSITION_SIZE", 0.12)),
+            min_position_size=float(os.getenv("MIN_POSITION_SIZE", 0.03)),
+            max_positions=int(os.getenv("MAX_POSITIONS", 5)),
+            max_cash_allocation=float(os.getenv("MAX_CASH_ALLOCATION", 0.70)),
+            max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.15)),
+            max_sector_exposure=float(os.getenv("MAX_SECTOR_EXPOSURE", 0.30)),
             max_positions_per_sector=int(os.getenv("MAX_POSITIONS_PER_SECTOR", 3)),
-            max_loss_per_day_pct=float(os.getenv("MAX_LOSS_PER_DAY_PCT", 5.0)),
+            max_loss_per_day_pct=float(os.getenv("MAX_LOSS_PER_DAY_PCT", 3.0)),
             # Magic numbers
             bull_market_penalty_scale=float(os.getenv("BULL_MARKET_PENALTY_SCALE", 0.7)),
             bear_market_penalty_scale=float(os.getenv("BEAR_MARKET_PENALTY_SCALE", 1.2)),
@@ -172,7 +180,7 @@ class TradingConfig:
             circuit_breaker_volatility_tighten_factor=float(
                 os.getenv("CIRCUIT_BREAKER_VOLATILITY_TIGHTEN_FACTOR", 0.75)
             ),
-            min_technical_only_confidence=float(os.getenv("MIN_TECHNICAL_ONLY_CONFIDENCE", 40.0)),
+            min_technical_only_confidence=float(os.getenv("MIN_TECHNICAL_ONLY_CONFIDENCE", 55.0)),
             per_symbol_max_consecutive_losses=int(
                 os.getenv("PER_SYMBOL_MAX_CONSECUTIVE_LOSSES", 3)
             ),

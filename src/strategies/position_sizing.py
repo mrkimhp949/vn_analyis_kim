@@ -71,19 +71,49 @@ class PositionSizingConstants:
     SECTOR_HIGH_ADJUSTMENT: float = 0.70  # Reduce 30%
     SECTOR_MEDIUM_ADJUSTMENT: float = 0.85  # Reduce 15%
 
-    # DCA levels
+    # DCA levels - IMPROVED v4.2 for Vietnam Market
+    # Vietnam market characteristics:
+    # - ±7% daily price limit means 1-3% DCA levels can hit within same day
+    # - Transaction cost ~1.48% round trip reduces DCA effectiveness
+    # - Wider levels (2%, 4%, 6%) provide better cost-adjusted entries
+    # - Each DCA level should exceed transaction cost to be profitable
+    #
+    # RECOMMENDATION: Consider disabling DCA for VN market due to:
+    # 1. High transaction costs (1.48% round trip)
+    # 2. T+2 settlement ties up capital
+    # 3. Narrow DCA levels get hit too quickly in volatile market
     DCA_LEVEL_1_PERCENT: float = 0.50  # 50% at first level
     DCA_LEVEL_2_PERCENT: float = 0.30  # 30% at second level
     DCA_LEVEL_3_PERCENT: float = 0.20  # 20% at third level
-    DCA_LEVEL_1_DISCOUNT: float = 0.99  # 1% below entry
-    DCA_LEVEL_2_DISCOUNT: float = 0.98  # 2% below entry
-    DCA_LEVEL_3_DISCOUNT: float = 0.97  # 3% below entry
+    DCA_LEVEL_1_DISCOUNT: float = 0.98  # WIDENED: 2% below entry (was 1%)
+    DCA_LEVEL_2_DISCOUNT: float = 0.96  # WIDENED: 4% below entry (was 2%)
+    DCA_LEVEL_3_DISCOUNT: float = 0.94  # WIDENED: 6% below entry (was 3%)
+
+    # DCA configuration flags
+    DCA_ENABLED: bool = True  # Set False to disable DCA for VN market
+    DCA_MIN_PROFIT_THRESHOLD: float = 0.02  # Min 2% expected profit after costs
 
     # Cache settings
     CORRELATION_CACHE_TTL: int = 3600  # 1 hour
     CORRELATION_CACHE_MAXSIZE: int = 500
 
-    # Risk multiplier bounds
+    # Risk multiplier bounds - DOCUMENTED v4.2
+    # These bounds control position size scaling based on signal quality
+    #
+    # MIN_RISK_MULTIPLIER = 0.5 rationale:
+    # - Even weak signals get 50% of base position
+    # - Prevents over-reduction that makes positions too small
+    # - 50% of 1.5% risk = 0.75% risk per trade (still meaningful)
+    # - Allows participation in uncertain markets with reduced exposure
+    #
+    # MAX_RISK_MULTIPLIER = 1.2 rationale:
+    # - Strong signals get max 20% boost over base position
+    # - Conservative cap prevents overconfidence in any single trade
+    # - 120% of 1.5% risk = 1.8% risk per trade (within 2% guideline)
+    # - Balances conviction with risk management
+    #
+    # Combined with Kelly Criterion, actual position sizes are further
+    # constrained by win rate and risk/reward statistics.
     MIN_RISK_MULTIPLIER: float = 0.5
     MAX_RISK_MULTIPLIER: float = 1.2
 
@@ -1086,33 +1116,74 @@ class EnhancedPositionSizer:
         base_price: float,
         total_shares: int,
     ) -> List[Dict]:
-        """Calculate DCA entry levels."""
+        """
+        Calculate DCA entry levels for Vietnam market.
+
+        IMPROVED v4.2:
+        - Widened DCA levels (2%, 4%, 6%) to account for transaction costs
+        - DCA can be disabled via DCA_ENABLED flag
+        - Each level must exceed transaction cost threshold to be worthwhile
+
+        Vietnam market considerations:
+        - ±7% daily limit means narrow DCA levels hit too quickly
+        - 1.48% round trip cost reduces DCA effectiveness
+        - T+2 settlement ties up capital for each DCA entry
+        """
         c = PositionSizingConstants
+
+        # Check if DCA is enabled
+        if not c.DCA_ENABLED:
+            logger.info(
+                "📊 DCA disabled for VN market (high transaction costs). "
+                "Using single entry strategy."
+            )
+            return [
+                {
+                    "level": 1,
+                    "price": round(base_price, -2),
+                    "shares": total_shares,
+                    "percent": 100,
+                    "note": "Single entry (DCA disabled)",
+                }
+            ]
 
         def round_shares(pct: float) -> int:
             shares = int((total_shares * pct // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE)
             return max(shares, VIETNAM_LOT_SIZE) if shares > 0 else 0
 
-        return [
+        # Calculate DCA levels with widened discounts
+        dca_entries = [
             {
                 "level": 1,
                 "price": round(base_price * c.DCA_LEVEL_1_DISCOUNT, -2),
                 "shares": round_shares(c.DCA_LEVEL_1_PERCENT),
                 "percent": int(c.DCA_LEVEL_1_PERCENT * 100),
+                "discount": f"{(1 - c.DCA_LEVEL_1_DISCOUNT) * 100:.0f}%",
             },
             {
                 "level": 2,
                 "price": round(base_price * c.DCA_LEVEL_2_DISCOUNT, -2),
                 "shares": round_shares(c.DCA_LEVEL_2_PERCENT),
                 "percent": int(c.DCA_LEVEL_2_PERCENT * 100),
+                "discount": f"{(1 - c.DCA_LEVEL_2_DISCOUNT) * 100:.0f}%",
             },
             {
                 "level": 3,
                 "price": round(base_price * c.DCA_LEVEL_3_DISCOUNT, -2),
                 "shares": round_shares(c.DCA_LEVEL_3_PERCENT),
                 "percent": int(c.DCA_LEVEL_3_PERCENT * 100),
+                "discount": f"{(1 - c.DCA_LEVEL_3_DISCOUNT) * 100:.0f}%",
             },
         ]
+
+        logger.debug(
+            f"📊 DCA entries calculated: "
+            f"L1={dca_entries[0]['price']:,.0f} ({dca_entries[0]['discount']}), "
+            f"L2={dca_entries[1]['price']:,.0f} ({dca_entries[1]['discount']}), "
+            f"L3={dca_entries[2]['price']:,.0f} ({dca_entries[2]['discount']})"
+        )
+
+        return dca_entries
 
     def _zero_position(
         self,
