@@ -457,8 +457,8 @@ def test_download_from_tcbs_max_retries_exceeded(mock_sleep, mock_wait, mock_get
     with pytest.raises(DataLoadError, match="after 5 retries"):
         _download_from_tcbs("VNM", start, end, "1D", "stock")
 
-    # Should retry 3 times
-    assert mock_get.call_count == 3
+    # Should retry 5 times (max_retries = 5 in loader.py)
+    assert mock_get.call_count == 5
 
 
 @patch("requests.get")

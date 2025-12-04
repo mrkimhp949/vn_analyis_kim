@@ -480,7 +480,7 @@ def test_get_exchange():
     """Test exchange detection"""
     assert get_exchange("VCB") == "HOSE"  # VN30 symbol
     assert get_exchange("SHS") == "HNX"  # HNX30 symbol
-    assert get_exchange("ABC") == "HOSE"  # Default
+    assert get_exchange("ZZZZZ") == "HOSE"  # Default for unknown symbol
 
 
 def test_calculate_ceiling_floor():

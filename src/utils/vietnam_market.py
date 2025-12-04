@@ -310,7 +310,7 @@ def _load_exchange_database() -> None:
 
     This provides accurate exchange detection instead of heuristics.
     """
-    global _EXCHANGE_DATABASE, _EXCHANGE_DB_LOADED
+    global _EXCHANGE_DB_LOADED
 
     if _EXCHANGE_DB_LOADED:
         return
