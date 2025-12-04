@@ -1,14 +1,20 @@
 """
-T+2 Settlement Tracker for Vietnam Stock Market
+T+2 / T+2.5 Settlement Tracker for Vietnam Stock Market
 
-Vietnam market operates on T+2 settlement:
+Vietnam market operates on T+2 settlement with T+2.5 cash withdrawal:
 - Buy order on Day 0 → Stock settled on Day 2 (can sell)
-- Sell order on Day 0 → Cash settled on Day 2 (can use)
+- Sell order on Day 0 → Cash settled on Day 2 (can use for trading)
+- Cash withdrawal → Available on Day 2.5 (afternoon of T+2)
+
+IMPORTANT: T+2 vs T+2.5 distinction
+- T+2: Cash available for TRADING (buying new stocks)
+- T+2.5: Cash available for WITHDRAWAL (transfer to bank)
 
 This module tracks pending settlements to ensure:
-1. Cash availability for new purchases
-2. Stock availability for sales
-3. Proper accounting of unsettled positions
+1. Cash availability for new purchases (T+2)
+2. Cash availability for withdrawal (T+2.5)
+3. Stock availability for sales
+4. Proper accounting of unsettled positions
 """
 
 import logging
@@ -332,6 +338,137 @@ class T2SettlementTracker:
             "pending_stock_value": pending_stock_value,
             "pending_cash_value": pending_cash_value,
             "oldest_unsettled": min([r.trade_date for r in unsettled], default=None),
+        }
+
+    def get_withdrawable_cash(
+        self, total_cash: float, current_date: Optional[datetime] = None
+    ) -> Dict[str, float]:
+        """
+        Calculate withdrawable cash (T+2.5 rule) for Vietnam market.
+
+        IMPORTANT: In Vietnam:
+        - T+2: Cash is available for TRADING (buying new stocks)
+        - T+2.5: Cash is available for WITHDRAWAL (transfer to bank)
+
+        The 0.5 day difference means:
+        - Morning of T+2: Cash available for trading only
+        - Afternoon of T+2 (after 13:00): Cash available for withdrawal
+
+        Args:
+            total_cash: Total cash including unsettled
+            current_date: Current date/time (default: now)
+
+        Returns:
+            Dict with trading_cash, withdrawable_cash, pending_withdrawal
+        """
+        if current_date is None:
+            current_date = datetime.now()
+
+        # First get trading cash (T+2 settled)
+        trading_cash_info = self.get_available_cash(total_cash, current_date)
+        trading_cash = trading_cash_info["available_cash"]
+
+        # Check time of day for T+2.5 withdrawal availability
+        current_hour = current_date.hour
+
+        # T+2.5: Withdrawal available after 13:00 on T+2
+        withdrawal_cutoff_hour = 13
+
+        # Calculate pending cash from sells that are T+2 settled but not yet T+2.5
+        pending_withdrawal = 0.0
+
+        for record in self.pending_settlements:
+            if record.trade_type == "SELL" and record.is_settled:
+                # Check if it's the settlement day
+                if record.settlement_date.date() == current_date.date():
+                    if current_hour < withdrawal_cutoff_hour:
+                        # Before 13:00 - not yet withdrawable
+                        pending_withdrawal += record.value
+
+        # Withdrawable cash = trading cash - pending withdrawal
+        withdrawable_cash = max(0, trading_cash - pending_withdrawal)
+
+        return {
+            "total_cash": total_cash,
+            "trading_cash": trading_cash,  # T+2 - available for buying
+            "withdrawable_cash": withdrawable_cash,  # T+2.5 - available for bank transfer
+            "pending_withdrawal": pending_withdrawal,  # Will be withdrawable after 13:00
+            "can_withdraw_after": "13:00" if pending_withdrawal > 0 else None,
+            "note": (
+                "⚠️ Cash pending T+2.5 settlement - available for trading but not withdrawal"
+                if pending_withdrawal > 0
+                else "✅ All settled cash is withdrawable"
+            ),
+        }
+
+    def get_settlement_timeline(
+        self, symbol: Optional[str] = None, current_date: Optional[datetime] = None
+    ) -> Dict:
+        """
+        Get detailed settlement timeline for planning.
+
+        Shows when each pending settlement will complete for:
+        - Stock availability (T+2)
+        - Cash for trading (T+2)
+        - Cash for withdrawal (T+2.5)
+
+        Args:
+            symbol: Optional filter by symbol
+            current_date: Current date (default: now)
+
+        Returns:
+            Dict with settlement timeline
+        """
+        if current_date is None:
+            current_date = datetime.now()
+
+        self.update_settlements(current_date)
+
+        timeline = {
+            "today": [],
+            "tomorrow": [],
+            "day_after": [],
+            "later": [],
+        }
+
+        for record in self.pending_settlements:
+            if record.is_settled:
+                continue
+
+            if symbol and record.symbol != symbol:
+                continue
+
+            days_until = (record.settlement_date.date() - current_date.date()).days
+
+            entry = {
+                "trade_id": record.trade_id,
+                "symbol": record.symbol,
+                "type": record.trade_type,
+                "shares": record.shares,
+                "value": record.value,
+                "trade_date": record.trade_date.strftime("%Y-%m-%d"),
+                "settlement_date": record.settlement_date.strftime("%Y-%m-%d"),
+                "days_until": days_until,
+            }
+
+            if record.trade_type == "SELL":
+                # Add withdrawal availability (T+2.5)
+                entry["trading_available"] = record.settlement_date.strftime("%Y-%m-%d 09:00")
+                entry["withdrawal_available"] = record.settlement_date.strftime("%Y-%m-%d 13:00")
+
+            if days_until <= 0:
+                timeline["today"].append(entry)
+            elif days_until == 1:
+                timeline["tomorrow"].append(entry)
+            elif days_until == 2:
+                timeline["day_after"].append(entry)
+            else:
+                timeline["later"].append(entry)
+
+        return {
+            "current_date": current_date.strftime("%Y-%m-%d %H:%M"),
+            "timeline": timeline,
+            "total_pending": sum(len(v) for v in timeline.values()),
         }
 
     def cleanup_old_settlements(self, days_to_keep: int = 30) -> int:

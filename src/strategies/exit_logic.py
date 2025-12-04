@@ -692,20 +692,60 @@ class ImprovedExitStrategy:
                 )
                 effective_stop = tighter_stop
 
-        # IMPROVED: Check if price is at floor (Vietnam ±7% limit)
-        # Don't trigger stop loss at floor - may bounce, wait for confirmation
+        # IMPROVED v5.0: Check if price is at floor (Vietnam ±7% limit)
+        # Don't trigger stop loss at floor - may bounce, but add TIME LIMIT
+        # Floor bounce rule: Wait max 30 minutes for bounce, then exit anyway
         if df is not None and len(df) >= 2:
             try:
                 prev_close = safe_iloc(df, -2, "close")
                 if prev_close and prev_close > 0:
                     floor_price = prev_close * 0.93  # -7% floor for HOSE
-                    # If current price is within 0.5% of floor, wait for next candle
+                    # If current price is within 0.5% of floor
                     if current_price <= floor_price * 1.005:
-                        logger.info(
-                            f"📊 {symbol}: Price at floor ({current_price:,.0f} ≈ {floor_price:,.0f}). "
-                            f"Waiting for confirmation before stop loss."
-                        )
-                        return None
+                        # Check how long we've been at floor (TIME LIMIT FIX)
+                        floor_wait_key = f"floor_wait_{symbol}"
+                        from datetime import datetime
+                        current_time = datetime.now()
+
+                        # Get or initialize floor wait tracking
+                        if not hasattr(self, "_floor_wait_times"):
+                            self._floor_wait_times = {}
+
+                        if floor_wait_key not in self._floor_wait_times:
+                            # First time at floor - start tracking
+                            self._floor_wait_times[floor_wait_key] = current_time
+                            logger.info(
+                                f"📊 {symbol}: Price at floor ({current_price:,.0f} ≈ {floor_price:,.0f}). "
+                                f"Starting 30-minute wait for bounce confirmation."
+                            )
+                            return None
+                        else:
+                            # Check if we've waited too long
+                            floor_wait_start = self._floor_wait_times[floor_wait_key]
+                            wait_minutes = (current_time - floor_wait_start).total_seconds() / 60
+                            max_floor_wait_minutes = 30  # Maximum 30 minutes wait
+
+                            if wait_minutes < max_floor_wait_minutes:
+                                logger.debug(
+                                    f"📊 {symbol}: At floor for {wait_minutes:.0f}/{max_floor_wait_minutes} minutes. "
+                                    f"Waiting for bounce..."
+                                )
+                                return None
+                            else:
+                                # TIME LIMIT EXCEEDED - Exit anyway
+                                logger.warning(
+                                    f"⏰ {symbol}: Floor wait timeout ({wait_minutes:.0f} min). "
+                                    f"No bounce detected - triggering stop loss."
+                                )
+                                # Clear the tracking
+                                del self._floor_wait_times[floor_wait_key]
+                                # Fall through to stop loss below
+                    else:
+                        # Price moved away from floor - clear tracking
+                        floor_wait_key = f"floor_wait_{symbol}"
+                        if hasattr(self, "_floor_wait_times") and floor_wait_key in self._floor_wait_times:
+                            del self._floor_wait_times[floor_wait_key]
+                            logger.info(f"✅ {symbol}: Price moved away from floor - tracking cleared")
             except Exception as e:
                 logger.debug(f"Floor check failed: {e}")
 

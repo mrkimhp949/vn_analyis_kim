@@ -55,7 +55,9 @@ class CircuitBreaker:
         # NEW: Per-session limits
         max_trades_per_session: int = 4,  # NEW: Max 4 trades per session (AM/PM)
         # NEW: Winning streak protection (avoid overconfidence)
-        max_consecutive_wins: int = 5,  # NEW: Pause after 5 consecutive wins
+        # IMPROVED v5.0: Increased from 5 to 7 - less aggressive pause
+        # Rationale: 5 wins is too conservative, 7 wins gives more room while still protecting
+        max_consecutive_wins: int = 7,  # Pause after 7 consecutive wins (was 5)
     ):
         self.max_trades_per_day = max_trades_per_day
         self.max_loss_per_day_pct = max_loss_per_day_pct
