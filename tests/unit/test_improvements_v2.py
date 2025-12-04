@@ -150,16 +150,18 @@ class TestExitLogicImprovements:
     """Test simplified exit logic"""
 
     def test_simplified_tp_levels(self):
-        """Test that TP levels are simplified to 2"""
+        """Test that TP levels are configured correctly (v4.0 optimized)"""
         from src.strategies.exit_logic import ImprovedExitStrategy
 
         strategy = ImprovedExitStrategy()
 
-        assert len(strategy.tp_levels) == 2, f"Expected 2 TP levels, got {len(strategy.tp_levels)}"
+        # v4.0: 3 TP levels optimized for Vietnam market with transaction costs
+        assert len(strategy.tp_levels) == 3, f"Expected 3 TP levels, got {len(strategy.tp_levels)}"
         assert strategy.tp_levels == [
-            0.12,
-            0.20,
-        ], f"Expected [0.12, 0.20], got {strategy.tp_levels}"
+            0.04,
+            0.08,
+            0.15,
+        ], f"Expected [0.04, 0.08, 0.15], got {strategy.tp_levels}"
 
     def test_partial_exit_tracker(self):
         """Test PartialExitTracker functionality"""

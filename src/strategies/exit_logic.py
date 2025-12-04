@@ -114,15 +114,22 @@ class ExitConfig:
     Tất cả thresholds có thể config được.
     """
 
-    # Take Profit levels - IMPROVED v4.0 for VN market shorter cycles
-    # LOWERED: 6%, 12%, 20% (was 12%, 20%) - VN market cycles are shorter
-    take_profit_levels: Tuple[float, float, float] = (0.06, 0.12, 0.20)
+    # Take Profit levels - IMPROVED v4.2 for VN market shorter cycles
+    # Vietnam market characteristics:
+    # - Shorter cycles (2-4 weeks typical)
+    # - Higher volatility (±7% daily limit)
+    # - T+2 settlement affects holding decisions
+    # - Transaction costs ~1.5% round trip
+    # OPTIMIZED: 4%, 8%, 15% - capture profits faster, account for costs
+    # Net profit after costs: ~2.5%, ~6.5%, ~13.5%
+    take_profit_levels: Tuple[float, float, float] = (0.04, 0.08, 0.15)
 
-    # Stop Loss
+    # Stop Loss - IMPROVED v4.1 with transaction cost awareness
+    # Must account for ~1.5% round trip cost
     stop_loss_atr_multiplier: float = 2.0
-    default_stop_loss_pct: float = 0.06  # IMPROVED: 6% below entry (was 7%)
-    min_stop_loss_pct: float = 0.04  # Min 4% risk (was 3%)
-    max_stop_loss_pct: float = 0.08  # Max 8% risk (was 10%)
+    default_stop_loss_pct: float = 0.055  # IMPROVED: 5.5% below entry (net ~4% after costs)
+    min_stop_loss_pct: float = 0.035  # Min 3.5% risk (net ~2% after costs)
+    max_stop_loss_pct: float = 0.075  # Max 7.5% risk (approaching daily limit)
 
     # Beta-adjusted stop loss - IMPROVED v4.0
     use_beta_adjusted_stops: bool = True  # Enable beta-adjusted stops
@@ -131,19 +138,40 @@ class ExitConfig:
     high_beta_threshold: float = 1.2  # Beta threshold for wider stop
     low_beta_threshold: float = 0.8  # Beta threshold for tighter stop
 
-    # Trailing Stop - IMPROVED v4.0 for VN market
-    trailing_stop_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
-    trailing_stop_distance: float = 0.025  # TIGHTENED: Trail 2.5% below peak (was 3%)
-    trailing_stop_atr_multiplier: float = 2.0
+    # Trailing Stop - IMPROVED v4.1 for VN market
+    # VN market has ±7% daily limit, so trailing needs to be responsive
+    trailing_stop_activation: float = (
+        0.025  # TIGHTENED: Activate at 2.5% profit (net ~1% after costs)
+    )
+    trailing_stop_distance: float = 0.02  # TIGHTENED: Trail 2% below peak
+    trailing_stop_atr_multiplier: float = 1.8  # Slightly tighter ATR multiplier
     use_dynamic_trailing: bool = True
 
-    # Time Decay
+    # Time Decay - IMPROVED v4.1 with T+2 awareness
+    # VN market T+2 settlement means capital is tied up longer
     max_holding_days: int = MAX_HOLDING_DAYS
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
+    t2_settlement_days: int = 2  # T+2 settlement cycle
 
-    # Profit Protection - IMPROVED v4.0
-    profit_protection_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
-    profit_protection_percent: float = 0.60  # IMPROVED: Protect 60% of max profit (was 50%)
+    # Profit Protection - IMPROVED v4.1
+    # Protect profits early due to VN market volatility
+    profit_protection_activation: float = 0.025  # TIGHTENED: Activate at 2.5% profit
+    profit_protection_percent: float = 0.65  # IMPROVED: Protect 65% of max profit
+
+    # NEW v4.2: Session-based exit rules (Vietnam market specific)
+    exit_before_lunch_if_profitable: bool = True  # Exit profitable positions before lunch
+    lunch_exit_min_profit_pct: float = (
+        0.025  # Min 2.5% profit to exit before lunch (net ~1% after costs)
+    )
+    exit_before_close_if_profitable: bool = True  # Exit before ATC if profitable
+    close_exit_min_profit_pct: float = (
+        0.02  # Min 2% profit to exit before close (net ~0.5% after costs)
+    )
+
+    # NEW v4.2: Friday exit rules (T+2 settlement = capital locked over weekend)
+    exit_friday_if_marginal: bool = True  # Exit marginal positions on Friday
+    friday_exit_min_profit_pct: float = 0.015  # Min 1.5% profit to hold over weekend
+    friday_exit_max_loss_pct: float = -0.02  # Max -2% loss to hold over weekend
 
     # Partial Exit
     partial_exit_percent: float = 0.50  # Exit 50% at TP1
@@ -457,7 +485,9 @@ class ImprovedExitStrategy:
         # Run exit checks in priority order
         checks = [
             self._check_stop_loss,
-            self._check_breakeven_stop,  # NEW: Check breakeven stop after 1R profit
+            self._check_gap_down,  # NEW: Check gap down protection
+            self._check_friday_weekend,  # NEW v4.2: Friday/weekend risk management
+            self._check_breakeven_stop,  # Check breakeven stop after 1R profit
             self._check_session_boundary,
             self._check_market_crash,
             self._check_take_profit,
@@ -530,11 +560,18 @@ class ImprovedExitStrategy:
             self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
 
     # =========================================================================
-    # EXIT CHECK #1: STOP LOSS
+    # EXIT CHECK #1: STOP LOSS (IMPROVED v4.2 - Vietnam Market Specific)
     # =========================================================================
 
     def _check_stop_loss(self, ctx: Dict) -> Optional[ExitDecision]:
-        """Check stop loss - highest priority."""
+        """
+        Check stop loss - highest priority.
+
+        IMPROVED v4.2 for Vietnam market:
+        - Floor price protection: Don't exit at floor (-7%) as it may bounce
+        - Ceiling price awareness: Exit quickly if hitting ceiling then reversing
+        - T+2 settlement consideration: Factor in capital lock-up
+        """
         current_price = ctx["current_price"]
         stop_loss = ctx["stop_loss"]
         entry_price = ctx["entry_price"]
@@ -542,6 +579,7 @@ class ImprovedExitStrategy:
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
         is_poor_performer = ctx["is_poor_performer"]
+        df = ctx.get("df")
 
         effective_stop = stop_loss
 
@@ -554,6 +592,23 @@ class ImprovedExitStrategy:
                     f"to {tighter_stop:,.0f} (poor performer)"
                 )
                 effective_stop = tighter_stop
+
+        # IMPROVED: Check if price is at floor (Vietnam ±7% limit)
+        # Don't trigger stop loss at floor - may bounce, wait for confirmation
+        if df is not None and len(df) >= 2:
+            try:
+                prev_close = safe_iloc(df, -2, "close")
+                if prev_close and prev_close > 0:
+                    floor_price = prev_close * 0.93  # -7% floor for HOSE
+                    # If current price is within 0.5% of floor, wait for next candle
+                    if current_price <= floor_price * 1.005:
+                        logger.info(
+                            f"📊 {symbol}: Price at floor ({current_price:,.0f} ≈ {floor_price:,.0f}). "
+                            f"Waiting for confirmation before stop loss."
+                        )
+                        return None
+            except Exception as e:
+                logger.debug(f"Floor check failed: {e}")
 
         if current_price <= effective_stop:
             return ExitDecision(
@@ -571,21 +626,49 @@ class ImprovedExitStrategy:
         return None
 
     # =========================================================================
-    # EXIT CHECK #2: SESSION BOUNDARY
+    # EXIT CHECK #1.5: FRIDAY/WEEKEND RISK (NEW v4.2)
     # =========================================================================
 
-    def _check_session_boundary(self, ctx: Dict) -> Optional[ExitDecision]:
-        """Check session boundary - protect profits near session end."""
-        if not TRADING_SCHEDULE_AVAILABLE:
+    def _check_friday_weekend(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check Friday exit rules for Vietnam market.
+
+        Vietnam T+2 settlement means:
+        - Buy on Friday = settlement on Tuesday (capital locked 4 days)
+        - Weekend gap risk is significant
+        - Marginal positions should be closed before weekend
+
+        Exit if:
+        - It's Friday afternoon (after 13:00)
+        - Position is marginally profitable (< 1.5%) or losing (> -2%)
+        - Better to free capital for Monday opportunities
+        """
+        if not self.config.exit_friday_if_marginal:
             return None
 
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
         current_price = ctx["current_price"]
+        symbol = ctx.get("symbol", "")
 
         try:
-            is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
-            if is_near_boundary and pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
+            from datetime import datetime
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            now = datetime.now(vn_tz)
+
+            # Check if Friday afternoon (after 13:00)
+            if now.weekday() != 4:  # Not Friday
+                return None
+            if now.hour < 13:  # Before afternoon session
+                return None
+
+            min_profit = self.config.friday_exit_min_profit_pct * 100
+            max_loss = self.config.friday_exit_max_loss_pct * 100
+
+            # Exit marginal positions
+            if max_loss < pnl_percent < min_profit:
                 return ExitDecision(
                     should_exit=True,
                     exit_reason=ExitReason.SESSION_END,
@@ -593,10 +676,207 @@ class ImprovedExitStrategy:
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
-                    message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
-                    urgency=4,
-                    metadata={"boundary_type": boundary_type},
+                    message=(
+                        f"📅 FRIDAY EXIT: Đóng vị thế marginal {pnl_percent:+.2f}% trước cuối tuần "
+                        f"(T+2 = vốn bị khóa 4 ngày, weekend gap risk)"
+                    ),
+                    urgency=2,
+                    metadata={
+                        "trigger": "friday_weekend_risk",
+                        "day": "Friday",
+                        "reason": "marginal_position_weekend_risk",
+                    },
                 )
+
+        except ImportError:
+            logger.debug("pytz not available for Friday check")
+        except Exception as e:
+            logger.debug(f"Friday check failed: {e}")
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #1.6: GAP DOWN PROTECTION (NEW)
+    # =========================================================================
+
+    def _check_gap_down(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check for significant gap down and exit to protect capital.
+
+        Vietnam market gaps are significant due to:
+        - Overnight news (global markets, company announcements)
+        - Foreign investor sentiment changes
+        - Regulatory changes
+
+        Exit if:
+        - Gap down > 3% from previous close
+        - Position is in profit (protect gains)
+        - Or gap down > 5% regardless of P&L (emergency exit)
+        """
+        df = ctx.get("df")
+        if df is None or len(df) < 2:
+            return None
+
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        symbol = ctx.get("symbol", "")
+
+        try:
+            prev_close = safe_iloc(df, -2, "close")
+            today_open = safe_iloc(df, -1, "open")
+
+            if prev_close is None or today_open is None or prev_close <= 0:
+                return None
+
+            gap_percent = (today_open - prev_close) / prev_close * 100
+
+            # Emergency exit: Gap down > 5%
+            if gap_percent < -5.0:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.BREAKDOWN,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"🚨 GAP DOWN EMERGENCY: {gap_percent:.1f}% gap - "
+                        f"exiting to protect capital | P&L: {pnl_percent:+.2f}%"
+                    ),
+                    urgency=5,
+                    metadata={
+                        "gap_percent": gap_percent,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "emergency_gap_down",
+                    },
+                )
+
+            # Protect profits: Gap down > 3% when in profit
+            if gap_percent < -3.0 and pnl_percent > 0:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.PROFIT_PROTECTION,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📉 GAP DOWN PROTECTION: {gap_percent:.1f}% gap - "
+                        f"protecting {pnl_percent:+.2f}% profit"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "gap_percent": gap_percent,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "profit_protection_gap_down",
+                    },
+                )
+
+            # Log significant gaps for monitoring
+            if gap_percent < -2.0:
+                logger.info(
+                    f"📊 {symbol}: Gap down {gap_percent:.1f}% detected "
+                    f"(P&L: {pnl_percent:+.2f}%) - monitoring"
+                )
+
+        except Exception as e:
+            logger.debug(f"Gap down check failed: {e}")
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #2: SESSION BOUNDARY (IMPROVED v4.1)
+    # =========================================================================
+
+    def _check_session_boundary(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check session boundary - protect profits near session end.
+
+        Vietnam market specific considerations:
+        - Lunch break (11:30-13:00): Gap risk, news during break
+        - ATC session (14:30-14:45): High volatility, institutional orders
+        - Pre-lunch selling pressure (11:00-11:30)
+        """
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        symbol = ctx.get("symbol", "")
+
+        try:
+            # Import Vietnam market utilities
+            from src.utils.vietnam_market import get_time_to_session_end, get_current_session
+
+            minutes_remaining, session = get_time_to_session_end()
+
+            # Check 1: Pre-lunch exit (11:00-11:30)
+            # Lunch gap risk - exit profitable positions before lunch
+            if session == "MORNING" and minutes_remaining <= 30:
+                min_profit = self.config.lunch_exit_min_profit_pct * 100
+                if self.config.exit_before_lunch_if_profitable and pnl_percent >= min_profit:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.SESSION_END,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"🍽️ PRE-LUNCH EXIT: Chốt lời {pnl_percent:+.2f}% trước nghỉ trưa "
+                            f"({minutes_remaining} phút còn lại) - tránh gap risk"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "boundary_type": "LUNCH_BREAK",
+                            "minutes_remaining": minutes_remaining,
+                            "reason": "lunch_gap_protection",
+                        },
+                    )
+
+            # Check 2: Pre-ATC exit (14:15-14:30)
+            # Exit before ATC auction to avoid volatility
+            if session == "AFTERNOON" and minutes_remaining <= 15:
+                min_profit = self.config.close_exit_min_profit_pct * 100
+                if self.config.exit_before_close_if_profitable and pnl_percent >= min_profit:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.SESSION_END,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"⏰ PRE-ATC EXIT: Chốt lời {pnl_percent:+.2f}% trước phiên ATC "
+                            f"({minutes_remaining} phút còn lại) - tránh volatility"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "boundary_type": "ATC_SESSION",
+                            "minutes_remaining": minutes_remaining,
+                            "reason": "atc_volatility_protection",
+                        },
+                    )
+
+            # Check 3: General session end protection (fallback)
+            if TRADING_SCHEDULE_AVAILABLE:
+                is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
+                if is_near_boundary and pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.SESSION_END,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
+                        urgency=4,
+                        metadata={"boundary_type": boundary_type},
+                    )
+
+        except ImportError:
+            logger.debug("Vietnam market utilities not available for session check")
         except Exception as e:
             logger.debug(f"Session boundary check failed: {e}")
 
@@ -967,7 +1247,7 @@ class ImprovedExitStrategy:
     # =========================================================================
 
     def _check_reversal_pattern(self, ctx: Dict) -> Optional[ExitDecision]:
-        """Check bearish reversal patterns (engulfing, shooting star)."""
+        """Check bearish reversal patterns (engulfing, shooting star, distribution volume)."""
         df = ctx["df"]
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
@@ -983,6 +1263,28 @@ class ImprovedExitStrategy:
             return None
 
         try:
+            # NEW: Distribution Volume Check
+            # High volume + price down = institutional selling
+            distribution = self._check_distribution_volume(df, latest)
+            if distribution["is_distribution"]:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.REVERSAL_PATTERN,
+                    exit_type="FULL",
+                    exit_price=latest["close"],
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📊 DISTRIBUTION VOLUME: Volume {distribution['volume_ratio']:.1f}x avg "
+                        f"+ price down - institutional selling | P&L: {pnl_percent:+.2f}%"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "pattern": "distribution_volume",
+                        "volume_ratio": distribution["volume_ratio"],
+                    },
+                )
+
             # Bearish Engulfing
             if self._is_bearish_engulfing(prev, latest):
                 return ExitDecision(
@@ -1014,6 +1316,45 @@ class ImprovedExitStrategy:
             pass
 
         return None
+
+    def _check_distribution_volume(self, df: pd.DataFrame, latest: pd.Series) -> Dict:
+        """
+        Check for distribution volume (institutional selling).
+
+        Distribution = High volume + Price down
+        This often signals smart money exiting positions.
+
+        Args:
+            df: DataFrame with OHLCV
+            latest: Latest candle
+
+        Returns:
+            Dict with is_distribution, volume_ratio
+        """
+        try:
+            if "volume" not in df.columns or len(df) < 20:
+                return {"is_distribution": False, "volume_ratio": 1.0}
+
+            avg_volume = df["volume"].tail(20).mean()
+            if avg_volume <= 0:
+                return {"is_distribution": False, "volume_ratio": 1.0}
+
+            current_volume = latest.get("volume", 0)
+            volume_ratio = current_volume / avg_volume
+
+            # Price down check
+            price_down = latest.get("close", 0) < latest.get("open", 0)
+
+            # Distribution: Volume > 2x average AND price down
+            is_distribution = volume_ratio >= self.config.volume_surge_ratio and price_down
+
+            return {
+                "is_distribution": is_distribution,
+                "volume_ratio": volume_ratio,
+                "price_down": price_down,
+            }
+        except Exception:
+            return {"is_distribution": False, "volume_ratio": 1.0}
 
     def _is_bearish_engulfing(self, prev: pd.Series, latest: pd.Series) -> bool:
         """Check for bearish engulfing pattern."""

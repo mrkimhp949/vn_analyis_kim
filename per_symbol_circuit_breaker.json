@@ -23,14 +23,14 @@
   },
   "LOSER": {
     "symbol": "LOSER",
-    "consecutive_losses": 18,
-    "total_trades": 18,
+    "consecutive_losses": 33,
+    "total_trades": 33,
     "total_wins": 0,
-    "total_losses": 18,
+    "total_losses": 33,
     "win_rate": 0.0,
-    "last_trade_date": "2025-11-26",
+    "last_trade_date": "2025-12-04",
     "blocked": true,
-    "blocked_reason": "🚫 Blocked: Win rate 0.0% < 30.0% (0/18 trades)"
+    "blocked_reason": "🚫 Blocked: Win rate 0.0% < 30.0% (0/33 trades)"
   },
   "SYMBOL": {
     "symbol": "SYMBOL",

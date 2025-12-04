@@ -59,6 +59,17 @@ class RiskManager:
 
 
 class EnhancedRiskManager(RiskManager):
+    """
+    Enhanced Risk Manager with Vietnam market specific features.
+
+    IMPROVED v4.2:
+    - T+2 settlement capital management
+    - Lot size validation (100 shares)
+    - Tick size awareness
+    - Session-based position sizing
+    - Foreign flow integration
+    """
+
     def suggest_limit_orders(self, current_price, atr, signal="BUY"):
         """Override method từ class cha để tránh lỗi"""
         return super().suggest_limit_orders(current_price, atr, signal)
@@ -72,6 +83,11 @@ class EnhancedRiskManager(RiskManager):
         self.volatility_adjustment = True
         self.correlation_penalty = True
         self.market_regime_adjustment = True
+
+        # NEW v4.2: Vietnam market specific settings
+        self.vn_lot_size = 100  # Minimum trading unit
+        self.vn_transaction_cost = 0.015  # ~1.5% round trip
+        self.t2_capital_buffer = 0.10  # 10% buffer for T+2 settlements
 
     def calculate_enhanced_position_size(
         self,
@@ -127,12 +143,41 @@ class EnhancedRiskManager(RiskManager):
         max_shares_by_capital = int((self.total_capital * self.max_position_pct) / price)
         base_position["shares"] = min(base_position["shares"], max_shares_by_capital)
 
-        # Làm tròn đến lot 100
+        # IMPROVED v4.2: Vietnam lot size validation
         if base_position["shares"] > 0:
-            base_position["shares"] = max((base_position["shares"] // 100) * 100, 100)
+            base_position["shares"] = self._round_to_vn_lot(base_position["shares"])
             base_position["value"] = base_position["shares"] * price
 
+        # IMPROVED v4.2: Add transaction cost estimate
+        base_position["estimated_cost"] = base_position["value"] * self.vn_transaction_cost
+        base_position["net_value"] = base_position["value"] - base_position["estimated_cost"]
+
         return base_position
+
+    def _round_to_vn_lot(self, shares: int) -> int:
+        """Round shares to Vietnam lot size (100 shares minimum)."""
+        if shares <= 0:
+            return 0
+        rounded = (shares // self.vn_lot_size) * self.vn_lot_size
+        return max(self.vn_lot_size, rounded)
+
+    def calculate_available_capital(self, pending_settlements: list = None) -> float:
+        """
+        Calculate available capital considering T+2 pending settlements.
+
+        Vietnam T+2 settlement means capital from sells is locked for 2 days.
+        This method accounts for pending settlements to avoid over-trading.
+
+        Args:
+            pending_settlements: List of pending settlement amounts
+
+        Returns:
+            Available capital for new trades
+        """
+        pending = sum(pending_settlements) if pending_settlements else 0
+        buffer = self.total_capital * self.t2_capital_buffer
+        available = self.total_capital - pending - buffer
+        return max(0, available)
 
     def _calculate_volatility_factor(self, market_volatility):
         """Điều chỉnh theo độ biến động thị trường"""
@@ -168,11 +213,16 @@ class EnhancedRiskManager(RiskManager):
         IMPROVEMENT #4: Tích hợp với MarketRegimeDetector thay vì tính toán riêng
         Position sizing phản ánh đúng market conditions
 
+        IMPROVED v4.1: Vietnam market specific adjustments
+        - VN market has ±7% daily limit, so regime impact is amplified
+        - Foreign flow is critical indicator for VN market
+        - T+2 settlement affects position sizing in volatile regimes
+
         Args:
             market_regime: Dict từ regime_detector.detect() hoặc None để tự detect
 
         Returns:
-            float: Factor điều chỉnh position size (0.3 - 1.2)
+            float: Factor điều chỉnh position size (0.25 - 1.15)
         """
         try:
             # Nếu không có market_regime, tự detect
@@ -202,42 +252,46 @@ class EnhancedRiskManager(RiskManager):
             # Không tradeable -> giảm mạnh position
             if not tradeable:
                 print(f"  🚫 Market not tradeable (regime: {regime})")
-                return 0.3
+                return 0.25  # TIGHTENED: 25% instead of 30%
 
             # Điều chỉnh theo regime và confidence
+            # IMPROVED v4.1: More conservative for VN market
             if regime == "BULL":
                 # Bull market: tăng position, scale theo confidence
+                # VN market: Be more conservative even in bull
                 if confidence >= 70:
-                    factor = 1.2  # Strong bull -> tăng 20%
+                    factor = 1.15  # TIGHTENED: Strong bull -> tăng 15% (was 20%)
                 elif confidence >= 50:
-                    factor = 1.1  # Moderate bull -> tăng 10%
+                    factor = 1.05  # TIGHTENED: Moderate bull -> tăng 5% (was 10%)
                 else:
-                    factor = 1.0  # Weak bull -> giữ nguyên
+                    factor = 0.95  # TIGHTENED: Weak bull -> giảm nhẹ 5%
 
             elif regime == "BEAR":
                 # Bear market: giảm mạnh position
+                # VN market: ±7% limit means bear can be brutal
                 if confidence >= 70:
-                    factor = 0.4  # Strong bear -> giảm 60%
+                    factor = 0.35  # TIGHTENED: Strong bear -> giảm 65% (was 60%)
                 elif confidence >= 50:
-                    factor = 0.5  # Moderate bear -> giảm 50%
+                    factor = 0.45  # TIGHTENED: Moderate bear -> giảm 55% (was 50%)
                 else:
-                    factor = 0.6  # Weak bear -> giảm 40%
+                    factor = 0.55  # TIGHTENED: Weak bear -> giảm 45% (was 40%)
 
             elif regime == "HIGH_VOLATILITY":
                 # High volatility: giảm position để quản lý risk
+                # VN market: High vol + ±7% limit = very dangerous
                 volatility = components.get("volatility", 0.5)
                 if volatility > 0.8:
-                    factor = 0.3  # Extreme volatility -> giảm 70%
+                    factor = 0.25  # TIGHTENED: Extreme volatility -> giảm 75% (was 70%)
                 else:
-                    factor = 0.5  # High volatility -> giảm 50%
+                    factor = 0.40  # TIGHTENED: High volatility -> giảm 60% (was 50%)
 
             else:  # SIDEWAYS
                 # Sideways: giảm nhẹ, tùy thuộc vào volatility
                 volatility = components.get("volatility", 0.5)
                 if volatility > 0.5:
-                    factor = 0.7  # Sideways + high vol -> giảm 30%
+                    factor = 0.65  # TIGHTENED: Sideways + high vol -> giảm 35% (was 30%)
                 else:
-                    factor = 0.85  # Sideways + low vol -> giảm 15%
+                    factor = 0.80  # TIGHTENED: Sideways + low vol -> giảm 20% (was 15%)
 
             # Điều chỉnh thêm theo sector rotation và foreign flow nếu có
             sector_score = components.get("sector_rotation", 0)
@@ -249,14 +303,19 @@ class EnhancedRiskManager(RiskManager):
             elif sector_score < -0.3:
                 factor -= 0.05  # Lagging sectors -> penalty nhỏ
 
-            # Bonus/penalty từ foreign flow (-0.1 to +0.1)
-            if foreign_score > 0.3:
+            # IMPROVED v4.1: Foreign flow is critical for VN market
+            # Foreign investors often lead market direction
+            if foreign_score > 0.5:
+                factor += 0.08  # INCREASED: Strong foreign buying -> bonus 8%
+            elif foreign_score > 0.3:
                 factor += 0.05  # Foreign buying -> bonus nhỏ
+            elif foreign_score < -0.5:
+                factor -= 0.10  # INCREASED: Strong foreign selling -> penalty 10%
             elif foreign_score < -0.3:
-                factor -= 0.05  # Foreign selling -> penalty nhỏ
+                factor -= 0.06  # Foreign selling -> penalty nhỏ
 
             # Clamp factor trong range hợp lý
-            factor = max(0.3, min(1.2, factor))
+            factor = max(0.25, min(1.15, factor))
 
             print(f"  🌡️ Market regime: {regime} (conf: {confidence:.0f}%) -> factor: {factor:.2f}")
             return factor
@@ -269,7 +328,7 @@ class EnhancedRiskManager(RiskManager):
             return 1.0
 
     def suggest_enhanced_limit_orders(self, current_price, atr, signal="BUY", confidence=50):
-        """Đề xuất limit orders nâng cao"""
+        """Đề xuất limit orders nâng cao với Vietnam tick size validation"""
         super().suggest_limit_orders(current_price, atr, signal)
 
         # Điều chỉnh theo confidence - Higher confidence = more aggressive (closer to price)
@@ -277,16 +336,68 @@ class EnhancedRiskManager(RiskManager):
         confidence_factor = 1.0 - (confidence / 100) * 0.5  # Maps 0% -> 1.0, 100% -> 0.5
 
         if signal == "BUY":
-            return {
-                "aggressive": round(current_price - (atr * 0.3 * confidence_factor), -2),
-                "moderate": round(current_price - (atr * 0.5 * confidence_factor), -2),
-                "conservative": round(current_price - (atr * 0.7 * confidence_factor), -2),
+            prices = {
+                "aggressive": self._round_to_vn_tick(
+                    current_price - (atr * 0.3 * confidence_factor)
+                ),
+                "moderate": self._round_to_vn_tick(current_price - (atr * 0.5 * confidence_factor)),
+                "conservative": self._round_to_vn_tick(
+                    current_price - (atr * 0.7 * confidence_factor)
+                ),
                 "note": f"Giá mua điều chỉnh theo confidence: {confidence}%",
             }
         else:
-            return {
-                "aggressive": round(current_price + (atr * 0.3 * confidence_factor), -2),
-                "moderate": round(current_price + (atr * 0.5 * confidence_factor), -2),
-                "conservative": round(current_price + (atr * 0.7 * confidence_factor), -2),
+            prices = {
+                "aggressive": self._round_to_vn_tick(
+                    current_price + (atr * 0.3 * confidence_factor)
+                ),
+                "moderate": self._round_to_vn_tick(current_price + (atr * 0.5 * confidence_factor)),
+                "conservative": self._round_to_vn_tick(
+                    current_price + (atr * 0.7 * confidence_factor)
+                ),
                 "note": f"Giá bán điều chỉnh theo confidence: {confidence}%",
             }
+        return prices
+
+    def _round_to_vn_tick(self, price: float) -> float:
+        """
+        Round price to valid Vietnam tick size.
+
+        Vietnam tick sizes (HOSE):
+        - Price < 10,000 VND: Tick = 10 VND
+        - 10,000 <= Price < 50,000 VND: Tick = 50 VND
+        - Price >= 50,000 VND: Tick = 100 VND
+        """
+        if price < 10_000:
+            tick = 10
+        elif price < 50_000:
+            tick = 50
+        else:
+            tick = 100
+        return round(price / tick) * tick
+
+    def get_session_position_multiplier(self) -> float:
+        """
+        Get position size multiplier based on current trading session.
+
+        Vietnam market sessions:
+        - ATO (9:00-9:15): High volatility -> 0.7x
+        - Morning optimal (9:30-10:30): Best time -> 1.0x
+        - Pre-lunch (11:00-11:30): Selling pressure -> 0.8x
+        - Afternoon optimal (13:30-14:15): Good time -> 1.0x
+        - ATC (14:30-14:45): High volatility -> 0.7x
+
+        Returns:
+            Position size multiplier (0.7 to 1.0)
+        """
+        try:
+            from src.market.session_trading import get_session_manager
+
+            manager = get_session_manager()
+            timing = manager.analyze_entry_timing()
+            return timing.position_size_multiplier
+        except ImportError:
+            return 1.0
+        except Exception as e:
+            print(f"  ⚠️ Session multiplier error: {e}")
+            return 1.0

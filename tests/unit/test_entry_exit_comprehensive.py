@@ -450,16 +450,33 @@ class TestEntryLogicVietnamMarket:
 class TestExitLogicStopLoss:
     """Tests cho stop loss logic"""
 
-    def test_stop_loss_triggered(self, exit_strategy_default, sample_df_uptrend):
+    def test_stop_loss_triggered(self, exit_strategy_default):
         """Test stop loss được trigger"""
+        # Create df with prev_close that won't trigger floor protection
+        # prev_close = 80000, floor = 80000 * 0.93 = 74400
+        # current_price = 74000 is below floor, so floor protection kicks in
+        # Use current_price = 75000 which is above floor but below stop_loss
+        dates = pd.date_range(start="2024-01-01", periods=10, freq="D")
+        df = pd.DataFrame(
+            {
+                "close": [80000] * 10,  # prev_close = 80000
+                "open": [79500] * 10,
+                "high": [81000] * 10,
+                "low": [79000] * 10,
+                "volume": [1000000] * 10,
+                "atr": [1500] * 10,
+            },
+            index=dates,
+        )
+
         decision = exit_strategy_default.check_exit(
             symbol="VNM",
             entry_price=80000,
-            current_price=74000,  # Dưới stop loss
+            current_price=75000,  # Below stop_loss but above floor (74400)
             stop_loss=76000,
             take_profit_targets=[88000, 96000],
             entry_date=datetime.now() - timedelta(days=5),
-            df=sample_df_uptrend,
+            df=df,
         )
 
         assert decision.should_exit is True

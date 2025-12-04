@@ -516,10 +516,43 @@ class EnhancedPositionSizer:
             )
 
     def _get_available_capital(self) -> float:
-        """Calculate available capital for new positions."""
+        """
+        Calculate available capital for new positions.
+
+        IMPROVEMENT: Integrates T+2 settlement tracking for Vietnam market.
+        Only settled cash is available for new purchases.
+        """
         current_exposure = self._calculate_current_exposure()
         max_exposure_value = self.total_capital * self.max_total_exposure
-        return max_exposure_value - current_exposure
+
+        # Calculate base available capital
+        base_available = max_exposure_value - current_exposure
+
+        # IMPROVEMENT: Account for T+2 settlement
+        # Only use settled cash for new positions
+        try:
+            from src.portfolio.settlement import get_settlement_tracker
+
+            settlement = get_settlement_tracker()
+            cash_info = settlement.get_available_cash(base_available)
+            settled_available = cash_info.get("available_cash", base_available)
+
+            if settled_available < base_available:
+                pending = base_available - settled_available
+                logger.debug(
+                    f"💰 Available capital adjusted for T+2 settlement: "
+                    f"{base_available:,.0f} → {settled_available:,.0f} "
+                    f"(pending: {pending:,.0f})"
+                )
+
+            return settled_available
+
+        except ImportError:
+            logger.debug("Settlement tracker not available, using base calculation")
+            return base_available
+        except Exception as e:
+            logger.warning(f"Settlement check failed: {e}, using base calculation")
+            return base_available
 
     def _calculate_risk_per_share(
         self,

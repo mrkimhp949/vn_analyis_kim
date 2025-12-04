@@ -41,7 +41,7 @@ class TestRiskManagementMarketRegimeIntegration:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 1.2  # Strong bull -> max increase
+        assert factor == 1.15  # Strong bull -> max increase (TIGHTENED from 1.2)
 
     def test_regime_factor_bull_moderate_confidence(self, risk_manager):
         """Test position sizing in moderate bull market"""
@@ -53,7 +53,7 @@ class TestRiskManagementMarketRegimeIntegration:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 1.1  # Moderate bull -> slight increase
+        assert factor == 1.05  # Moderate bull -> slight increase (TIGHTENED from 1.1)
 
     def test_regime_factor_bear_high_confidence(self, risk_manager):
         """Test position sizing decreases significantly in strong bear market"""
@@ -65,7 +65,7 @@ class TestRiskManagementMarketRegimeIntegration:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 0.4  # Strong bear -> significant decrease
+        assert factor == 0.35  # Strong bear -> significant decrease (TIGHTENED from 0.4)
 
     def test_regime_factor_high_volatility(self, risk_manager):
         """Test position sizing in high volatility regime"""
@@ -77,7 +77,7 @@ class TestRiskManagementMarketRegimeIntegration:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 0.3  # Not tradeable -> minimum factor
+        assert factor == 0.25  # Not tradeable -> minimum factor (TIGHTENED from 0.3)
 
     def test_regime_factor_not_tradeable(self, risk_manager):
         """Test position sizing when market not tradeable"""
@@ -89,7 +89,7 @@ class TestRiskManagementMarketRegimeIntegration:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 0.3  # Not tradeable -> minimum
+        assert factor == 0.25  # Not tradeable -> minimum (TIGHTENED from 0.3)
 
     def test_regime_factor_with_sector_rotation_bonus(self, risk_manager):
         """Test sector rotation adds bonus to factor"""
@@ -126,8 +126,8 @@ class TestRiskManagementMarketRegimeIntegration:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        # SIDEWAYS low vol (0.85) - foreign penalty (0.05) = 0.80
-        assert 0.75 <= factor <= 0.85  # Allow range for penalty
+        # SIDEWAYS low vol (0.80) - foreign penalty (0.10) = 0.70 (TIGHTENED)
+        assert 0.65 <= factor <= 0.75  # Allow range for penalty
 
     def test_regime_factor_none_uses_auto_detect(self, risk_manager):
         """Test that None market_regime triggers auto-detection"""
@@ -169,7 +169,7 @@ class TestEntryLogicT2Settlement:
                 }
 
                 with patch(
-                    "src.services.entry_service.get_vietnam_market_validator"
+                    "src.utils.vietnam_market.get_vietnam_market_validator"
                 ) as mock_validator:
                     mock_validator.return_value.calculate_t2_cash_requirement.return_value = (
                         15_000_000,

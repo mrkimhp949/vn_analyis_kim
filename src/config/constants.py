@@ -87,10 +87,47 @@ REALISTIC_ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% with market orders 
 PESSIMISTIC_ROUND_TRIP_COST = VN_PESSIMISTIC_ROUND_TRIP  # 2.0% with poor execution
 
 # Vietnam Market Specific Constants
-VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling)
+VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling) - HOSE
 VIETNAM_LOT_SIZE = 100  # Minimum trading lot size
-VIETNAM_SETTLEMENT_DAYS = 2  # T+2 settlement
+VIETNAM_SETTLEMENT_DAYS = 2  # T+2 settlement (actually T+2.5)
 VIETNAM_TICK_SIZE = 10  # 10 VND minimum tick size for most stocks
+
+# Exchange-specific price limits
+VN_HOSE_PRICE_LIMIT = 0.07  # ±7% for HOSE
+VN_HNX_PRICE_LIMIT = 0.10  # ±10% for HNX
+VN_UPCOM_PRICE_LIMIT = 0.15  # ±15% for UPCOM
+
+# Tick sizes by price range (HOSE rules)
+VN_TICK_LOW = 10  # Price < 10,000 VND
+VN_TICK_MID = 50  # 10,000 <= Price < 50,000 VND
+VN_TICK_HIGH = 100  # Price >= 50,000 VND
+
+# ATO/ATC Session Settings
+VN_ALLOW_ATO_ATC_TRADING = False  # Block trading during auction sessions by default
+VN_ATO_ATC_PENALTY = -15  # Confidence penalty for ATO/ATC trading
+
+# Gap Protection - IMPROVED v4.1
+VN_GAP_DOWN_EXIT_THRESHOLD = -0.025  # TIGHTENED: Exit on 2.5% gap down (with profit)
+VN_GAP_DOWN_EMERGENCY_THRESHOLD = -0.04  # TIGHTENED: Emergency exit on 4% gap down
+VN_GAP_UP_PROFIT_TAKE_THRESHOLD = 0.04  # NEW: Consider profit taking on 4%+ gap up
+
+# Distribution Volume
+VN_DISTRIBUTION_VOLUME_MULT = 2.0  # Volume > 2x avg = distribution
+
+# NEW v4.1: Session-based trading rules
+VN_AVOID_FIRST_15_MINUTES = True  # Avoid trading in first 15 min (ATO volatility)
+VN_AVOID_LAST_15_MINUTES = True  # Avoid trading in last 15 min (ATC volatility)
+VN_LUNCH_GAP_PROTECTION = True  # Exit profitable positions before lunch
+VN_LUNCH_EXIT_MIN_PROFIT = 0.02  # Min 2% profit to exit before lunch
+
+# NEW v4.1: Intraday volatility limits
+VN_MAX_INTRADAY_RANGE_FOR_ENTRY = 0.045  # TIGHTENED: Max 4.5% intraday range for entry
+VN_HIGH_VOLATILITY_PENALTY = -10  # Confidence penalty for high intraday volatility
+
+# NEW v4.1: Foreign flow thresholds (smart money tracking)
+VN_FOREIGN_NET_BUY_BONUS = 8  # Confidence bonus for net foreign buying
+VN_FOREIGN_NET_SELL_PENALTY = -12  # Confidence penalty for net foreign selling
+VN_FOREIGN_FLOW_LOOKBACK_DAYS = 5  # Days to look back for foreign flow trend
 
 # Stop Loss and Take Profit - TIGHTENED v3.0
 DEFAULT_STOP_LOSS_LEVELS = [0.08, 0.15, 0.25]  # TIGHTENED: 8%, 15%, 25%
