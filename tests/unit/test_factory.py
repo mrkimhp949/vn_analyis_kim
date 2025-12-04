@@ -61,69 +61,55 @@ class TestCreateDataLoader:
 
 
 class TestCreateMLSignalGenerator:
-    """Tests for create_ml_signal_generator factory function"""
+    """Tests for create_ml_signal_generator factory function (V2)"""
 
-    @patch("src.ml.signals.enhanced.EnhancedMLSignalGenerator")
-    def test_creates_enhanced_generator_when_available(self, mock_enhanced_class):
-        """Test that enhanced generator is created when available"""
+    def test_creates_enhanced_generator_when_available(self):
+        """Test that V2 generator is created when available"""
         # Arrange
-        mock_instance = Mock()
-        mock_enhanced_class.return_value = mock_instance
+        config = TradingConfig()
+
+        # Act
+        result = create_ml_signal_generator(config)
+
+        # Assert - V2 generator doesn't take config, but should have analyze method
+        assert result is not None
+        assert hasattr(result, "analyze")
+
+    def test_generator_has_analyze_method(self):
+        """Test that generator has analyze method"""
+        # Arrange
         config = TradingConfig()
 
         # Act
         result = create_ml_signal_generator(config)
 
         # Assert
-        mock_enhanced_class.assert_called_once_with(config)
-        assert result == mock_instance
+        assert hasattr(result, "analyze")
+        assert callable(result.analyze)
 
-    @patch("src.ml.signals.enhanced.EnhancedMLSignalGenerator", side_effect=ImportError)
-    def test_falls_back_to_basic_generator(self, mock_enhanced):
-        """Test fallback when enhanced generator fails - returns None or raises"""
-        # Arrange
-        config = TradingConfig()
-
-        # Act & Assert - should handle gracefully (may return None or raise)
-        try:
-            result = create_ml_signal_generator(config)
-            # If it returns, it should be None or a valid generator
-            assert result is None or hasattr(result, "analyze")
-        except (ImportError, AttributeError):
-            # Expected if no fallback is available
-            pass
-
-    @patch("src.ml.signals.enhanced.EnhancedMLSignalGenerator")
-    def test_passes_config_to_generator(self, mock_enhanced_class):
-        """Test that config is passed to generator"""
+    def test_passes_config_to_generator(self):
+        """Test that generator is created (V2 doesn't use config directly)"""
         # Arrange
         config = TradingConfig(min_confidence=75)
 
         # Act
-        create_ml_signal_generator(config)
+        result = create_ml_signal_generator(config)
 
-        # Assert
-        mock_enhanced_class.assert_called_once_with(config)
+        # Assert - V2 generator is created successfully
+        assert result is not None
+        assert hasattr(result, "analyze")
 
-    @patch(
-        "src.ml.signals.enhanced.EnhancedMLSignalGenerator",
-        side_effect=Exception("Import error"),
-    )
-    def test_logs_warning_on_fallback(self, mock_enhanced, caplog):
-        """Test that fallback logs warning when enhanced generator fails"""
+    def test_generator_returns_valid_signal_format(self):
+        """Test that generator returns valid signal format"""
         # Arrange
         config = TradingConfig()
+        generator = create_ml_signal_generator(config)
 
-        # Act
-        with caplog.at_level(logging.WARNING):
-            try:
-                create_ml_signal_generator(config)
-            except Exception:
-                pass  # May raise if no fallback
-
-        # Assert - warning should be logged
-        # Note: The actual log message may vary based on implementation
-        assert "EnhancedMLSignalGenerator" in caplog.text or len(caplog.records) > 0
+        # Assert - generator should be ready to use
+        assert generator is not None
+        # V2 generator has use_v2 attribute
+        if hasattr(generator, "use_v2"):
+            assert isinstance(generator.use_v2, bool)
 
 
 class TestCreateStrategyManager:

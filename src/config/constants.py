@@ -37,6 +37,53 @@ MAX_HOLDING_DAYS = 20  # Maximum holding period in days
 EARLY_STOPPING_ROUNDS = 20  # ML early stopping rounds
 CORRELATION_LOOKBACK_DAYS = 60  # Correlation calculation lookback
 
+# Adaptive Holding Days by Market Regime
+HOLDING_DAYS_BULL_STRONG_TREND = 20  # Bull + ADX > 25
+HOLDING_DAYS_BULL_WEAK_TREND = 15  # Bull + ADX <= 25
+HOLDING_DAYS_SIDEWAYS_TREND = 12  # Sideways + ADX > 20
+HOLDING_DAYS_SIDEWAYS_NO_TREND = 10  # Sideways + ADX <= 20
+HOLDING_DAYS_BEAR_STRONG_TREND = 8  # Bear + ADX > 25
+HOLDING_DAYS_BEAR_WEAK_TREND = 6  # Bear + ADX <= 25
+HOLDING_DAYS_HIGH_VOLATILITY = 5  # High volatility - exit fast
+HOLDING_DAYS_DEFAULT = 15  # Default fallback
+ADX_STRONG_TREND_THRESHOLD = 25  # ADX threshold for strong trend
+ADX_WEAK_TREND_THRESHOLD = 20  # ADX threshold for weak trend
+
+
+def get_adaptive_holding_days(regime: str, adx: float = 20) -> int:
+    """
+    Get adaptive max holding days based on market regime and trend strength.
+
+    Vietnam market characteristics:
+    - T+2.5 settlement → minimum 3 days practical holding
+    - High volatility → shorter holding to lock profits
+    - Strong trends (ADX > 25) → can hold longer
+
+    Args:
+        regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
+        adx: Average Directional Index (trend strength, default 20)
+
+    Returns:
+        Maximum holding days (5-20)
+    """
+    if regime == "BULL":
+        if adx > ADX_STRONG_TREND_THRESHOLD:
+            return HOLDING_DAYS_BULL_STRONG_TREND  # 20 days - strong trend
+        return HOLDING_DAYS_BULL_WEAK_TREND  # 15 days - weak trend
+    elif regime == "SIDEWAYS":
+        if adx > ADX_WEAK_TREND_THRESHOLD:
+            return HOLDING_DAYS_SIDEWAYS_TREND  # 12 days - some trend
+        return HOLDING_DAYS_SIDEWAYS_NO_TREND  # 10 days - no trend
+    elif regime == "BEAR":
+        if adx > ADX_STRONG_TREND_THRESHOLD:
+            return HOLDING_DAYS_BEAR_STRONG_TREND  # 8 days - strong downtrend
+        return HOLDING_DAYS_BEAR_WEAK_TREND  # 6 days - exit faster
+    elif regime == "HIGH_VOLATILITY":
+        return HOLDING_DAYS_HIGH_VOLATILITY  # 5 days - very short
+    else:
+        return HOLDING_DAYS_DEFAULT  # 15 days default
+
+
 # Commission and Slippage (Vietnam Market) - IMPROVED v4.0
 # REALISTIC transaction costs for Vietnam market based on actual trading experience
 #
@@ -80,6 +127,74 @@ DEFAULT_COMMISSION_RATE = VN_BUY_COST  # 0.70% per trade (buy side)
 DEFAULT_SLIPPAGE = VN_SLIPPAGE_MARKET_ORDER  # 0.40% slippage
 TOTAL_TRANSACTION_COST = VN_BUY_COST  # 0.70% per trade
 ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% round trip (IMPROVED from 1.6%)
+
+# Dynamic Slippage by Liquidity Tier
+VN_SLIPPAGE_VN30 = 0.003  # 0.3% for VN30 blue chips (highest liquidity)
+VN_SLIPPAGE_LIQUID = 0.004  # 0.4% for liquid stocks (> 3B VND daily)
+VN_SLIPPAGE_MEDIUM = 0.006  # 0.6% for medium liquidity (1-3B VND daily)
+VN_SLIPPAGE_ILLIQUID = 0.010  # 1.0% for illiquid stocks (< 1B VND daily)
+
+# VN30 Symbols (Top 30 largest market cap on HOSE)
+VN30_SYMBOLS = [
+    "ACB",
+    "BCM",
+    "BID",
+    "BVH",
+    "CTG",
+    "FPT",
+    "GAS",
+    "GVR",
+    "HDB",
+    "HPG",
+    "MBB",
+    "MSN",
+    "MWG",
+    "PLX",
+    "POW",
+    "SAB",
+    "SHB",
+    "SSB",
+    "SSI",
+    "STB",
+    "TCB",
+    "TPB",
+    "VCB",
+    "VHM",
+    "VIB",
+    "VIC",
+    "VJC",
+    "VNM",
+    "VPB",
+    "VRE",
+]
+
+
+def get_dynamic_slippage(symbol: str, liquidity_value: float) -> float:
+    """
+    Get dynamic slippage based on symbol and liquidity.
+
+    VN30 stocks have highest liquidity and lowest slippage.
+    Other stocks are tiered by daily trading value.
+
+    Args:
+        symbol: Stock symbol (e.g., "VNM", "HPG")
+        liquidity_value: Average daily trading value in VND
+
+    Returns:
+        Slippage rate (0.003-0.010)
+    """
+    # VN30 blue chips have best liquidity
+    if symbol.upper() in VN30_SYMBOLS:
+        return VN_SLIPPAGE_VN30  # 0.3%
+
+    # Tier by liquidity value
+    if liquidity_value > 3_000_000_000:  # > 3B VND
+        return VN_SLIPPAGE_LIQUID  # 0.4%
+    elif liquidity_value > 1_000_000_000:  # 1-3B VND
+        return VN_SLIPPAGE_MEDIUM  # 0.6%
+    else:  # < 1B VND
+        return VN_SLIPPAGE_ILLIQUID  # 1.0%
+
 
 # Alternative costs for different scenarios (backward compatible)
 OPTIMISTIC_ROUND_TRIP_COST = VN_OPTIMISTIC_ROUND_TRIP  # 1.0% with best execution
@@ -167,6 +282,34 @@ SIDEWAYS_MARKET_EXPOSURE = 0.45  # TIGHTENED: 45% exposure in sideways
 ML_SIGNAL_WEIGHT = 1.5  # Weight for ML signals
 TECH_SIGNAL_WEIGHT = 0.5  # Weight for technical signals
 
+# ML Confidence Thresholds for Dynamic Weighting
+ML_HIGH_CONFIDENCE_THRESHOLD = 70  # High confidence threshold
+ML_MEDIUM_CONFIDENCE_THRESHOLD = 60  # Medium confidence threshold
+ML_HIGH_CONFIDENCE_WEIGHT = 1.5  # Weight for high confidence ML signals
+ML_MEDIUM_CONFIDENCE_WEIGHT = 1.0  # Weight for medium confidence ML signals
+ML_LOW_CONFIDENCE_WEIGHT = 0.5  # Weight for low confidence - trust technical more
+
+
+def get_ml_signal_weight(ml_confidence: float) -> float:
+    """
+    Get dynamic ML signal weight based on confidence level.
+
+    Higher confidence = trust ML more, lower confidence = trust technical more.
+
+    Args:
+        ml_confidence: ML model confidence score (0-100)
+
+    Returns:
+        Weight multiplier for ML signal (0.5-1.5)
+    """
+    if ml_confidence >= ML_HIGH_CONFIDENCE_THRESHOLD:
+        return ML_HIGH_CONFIDENCE_WEIGHT  # 1.5 - High confidence
+    elif ml_confidence >= ML_MEDIUM_CONFIDENCE_THRESHOLD:
+        return ML_MEDIUM_CONFIDENCE_WEIGHT  # 1.0 - Medium confidence
+    else:
+        return ML_LOW_CONFIDENCE_WEIGHT  # 0.5 - Low confidence, trust technical more
+
+
 # Validation Thresholds - TIGHTENED v3.0
 MAX_CORRELATION = 0.65  # TIGHTENED: Maximum 0.65 correlation between positions
 DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
@@ -251,6 +394,34 @@ FOREIGN_FLOW_STRONG_SELL_PENALTY = -15  # -15 confidence for strong foreign sell
 
 # Export all constants
 __all__ = [
+    # Dynamic Functions
+    "get_ml_signal_weight",
+    "get_dynamic_slippage",
+    "get_adaptive_holding_days",
+    # Adaptive Holding Days Constants
+    "HOLDING_DAYS_BULL_STRONG_TREND",
+    "HOLDING_DAYS_BULL_WEAK_TREND",
+    "HOLDING_DAYS_SIDEWAYS_TREND",
+    "HOLDING_DAYS_SIDEWAYS_NO_TREND",
+    "HOLDING_DAYS_BEAR_STRONG_TREND",
+    "HOLDING_DAYS_BEAR_WEAK_TREND",
+    "HOLDING_DAYS_HIGH_VOLATILITY",
+    "HOLDING_DAYS_DEFAULT",
+    "ADX_STRONG_TREND_THRESHOLD",
+    "ADX_WEAK_TREND_THRESHOLD",
+    # VN30 Symbols
+    "VN30_SYMBOLS",
+    # ML Confidence Weighting
+    "ML_HIGH_CONFIDENCE_THRESHOLD",
+    "ML_MEDIUM_CONFIDENCE_THRESHOLD",
+    "ML_HIGH_CONFIDENCE_WEIGHT",
+    "ML_MEDIUM_CONFIDENCE_WEIGHT",
+    "ML_LOW_CONFIDENCE_WEIGHT",
+    # Dynamic Slippage Tiers
+    "VN_SLIPPAGE_VN30",
+    "VN_SLIPPAGE_LIQUID",
+    "VN_SLIPPAGE_MEDIUM",
+    "VN_SLIPPAGE_ILLIQUID",
     # Vietnam Market Extended
     "VN_MIN_LIQUIDITY_VALUE",
     "VN_MID_CAP_LIQUIDITY_VALUE",
