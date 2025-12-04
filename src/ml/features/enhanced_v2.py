@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Enhanced Features V2 - Improved for 58-62% accuracy target
+Enhanced Features V2 - Improved for 65%+ accuracy target
 Key improvements:
 1. Better target definition (forward returns with threshold)
 2. Predictive features (not just lagging indicators)
 3. Market regime features
 4. Momentum quality indicators
 5. Mean reversion signals
+6. NEW: Price action patterns
+7. NEW: Liquidity features
+8. NEW: Sentiment proxy features
 """
 
 import logging
@@ -63,20 +66,38 @@ def create_improved_target(
 def create_multi_horizon_target(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create targets for multiple horizons - helps model learn different patterns.
+    IMPROVED: Risk-adjusted returns and drawdown consideration.
     """
     df = df.copy()
 
+    # Calculate volatility for risk adjustment
+    vol_20 = df["close"].pct_change().rolling(20).std()
+    vol_factor = (vol_20 / vol_20.rolling(50).mean()).clip(0.5, 2.0).fillna(1.0)
+
     # Short-term (3 days) - momentum
-    df["target_3d"] = (df["close"].pct_change(3).shift(-3) > 0.015).astype(int)
+    ret_3d = df["close"].pct_change(3).shift(-3)
+    threshold_3d = 0.015 * vol_factor
+    df["target_3d"] = (ret_3d > threshold_3d).astype(int)
 
     # Medium-term (5 days) - main target
-    df["target_5d"] = (df["close"].pct_change(5).shift(-5) > 0.02).astype(int)
+    ret_5d = df["close"].pct_change(5).shift(-5)
+    threshold_5d = 0.02 * vol_factor
+    df["target_5d"] = (ret_5d > threshold_5d).astype(int)
 
     # Longer-term (10 days) - trend
-    df["target_10d"] = (df["close"].pct_change(10).shift(-10) > 0.03).astype(int)
+    ret_10d = df["close"].pct_change(10).shift(-10)
+    threshold_10d = 0.03 * vol_factor
+    df["target_10d"] = (ret_10d > threshold_10d).astype(int)
 
-    # Combined target: at least 2 of 3 horizons positive
-    df["target"] = ((df["target_3d"] + df["target_5d"] + df["target_10d"]) >= 2).astype(int)
+    # NEW: Max drawdown check - avoid entries before big drops
+    future_low_5d = df["low"].rolling(5).min().shift(-5)
+    max_dd_5d = (future_low_5d - df["close"]) / df["close"]
+    no_big_drawdown = (max_dd_5d > -0.05).astype(int)  # No >5% drawdown
+
+    # Combined target: at least 2 of 3 horizons positive AND no big drawdown
+    df["target"] = (
+        ((df["target_3d"] + df["target_5d"] + df["target_10d"]) >= 2) & (no_big_drawdown == 1)
+    ).astype(int)
 
     return df
 
@@ -104,9 +125,10 @@ def add_predictive_features(df: pd.DataFrame) -> pd.DataFrame:
     # Momentum acceleration (2nd derivative)
     df["mom_accel"] = df["mom_5"] - df["mom_5"].shift(5)
 
-    # Momentum consistency (how many of last 5 days were up)
-    df["up_days_5"] = df["close"].diff().rolling(5).apply(lambda x: (x > 0).sum() / 5)
-    df["up_days_10"] = df["close"].diff().rolling(10).apply(lambda x: (x > 0).sum() / 10)
+    # Momentum consistency (how many of last 5 days were up) - optimized
+    close_diff = df["close"].diff()
+    df["up_days_5"] = (close_diff > 0).rolling(5).sum() / 5
+    df["up_days_10"] = (close_diff > 0).rolling(10).sum() / 10
 
     # Momentum vs Volume (confirmed momentum)
     vol_change = df["volume"].pct_change(5)
@@ -173,8 +195,8 @@ def add_predictive_features(df: pd.DataFrame) -> pd.DataFrame:
     vol_50 = df["close"].pct_change().rolling(50).std()
     df["vol_regime"] = (vol_20 > vol_50).astype(int)  # 1 = expanding volatility
 
-    # Volatility percentile
-    df["vol_percentile"] = vol_20.rolling(100).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+    # Volatility percentile - optimized (avoid lambda)
+    df["vol_percentile"] = vol_20.rolling(100).rank(pct=True)
 
     # =========================================================================
     # 5. TREND STRENGTH
@@ -223,6 +245,92 @@ def add_predictive_features(df: pd.DataFrame) -> pd.DataFrame:
         (df["macd"] > df["macd_signal"]) & (df["macd"].shift(1) <= df["macd_signal"].shift(1))
     ).astype(int)
     df["macd_positive"] = (df["macd_hist"] > 0).astype(int)
+
+    # =========================================================================
+    # 8. PRICE ACTION PATTERNS (NEW - High predictive power)
+    # =========================================================================
+
+    # Candlestick body size
+    body = abs(df["close"] - df["open"])
+    full_range = df["high"] - df["low"]
+    df["body_ratio"] = (body / full_range.replace(0, np.nan)).fillna(0.5)
+
+    # Upper/Lower shadows
+    upper_shadow = df["high"] - df[["close", "open"]].max(axis=1)
+    lower_shadow = df[["close", "open"]].min(axis=1) - df["low"]
+    df["upper_shadow_ratio"] = (upper_shadow / full_range.replace(0, np.nan)).fillna(0)
+    df["lower_shadow_ratio"] = (lower_shadow / full_range.replace(0, np.nan)).fillna(0)
+
+    # Bullish/Bearish candle
+    df["bullish_candle"] = (df["close"] > df["open"]).astype(int)
+
+    # Consecutive up/down days
+    df["consec_up"] = df["bullish_candle"].rolling(5).sum()
+    df["consec_down"] = 5 - df["consec_up"]
+
+    # Gap detection
+    df["gap_up"] = (df["open"] > df["high"].shift(1)).astype(int)
+    df["gap_down"] = (df["open"] < df["low"].shift(1)).astype(int)
+
+    # Inside bar (consolidation)
+    df["inside_bar"] = (
+        (df["high"] < df["high"].shift(1)) & (df["low"] > df["low"].shift(1))
+    ).astype(int)
+
+    # =========================================================================
+    # 9. LIQUIDITY FEATURES (NEW)
+    # =========================================================================
+
+    # Volume-weighted price stability
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3
+    df["vwap_20"] = (typical_price * df["volume"]).rolling(20).sum() / df["volume"].rolling(20).sum()
+    df["price_vs_vwap"] = (df["close"] - df["vwap_20"]) / df["vwap_20"]
+
+    # Liquidity score (volume * price range)
+    df["liquidity_score"] = (df["volume"] * full_range / df["close"]).rolling(10).mean()
+    df["liquidity_score"] = df["liquidity_score"] / df["liquidity_score"].rolling(50).mean()
+
+    # Volume spike detection
+    vol_mean = df["volume"].rolling(20).mean()
+    vol_std = df["volume"].rolling(20).std()
+    df["vol_spike"] = ((df["volume"] - vol_mean) / vol_std.replace(0, 1)).clip(-3, 3)
+
+    # =========================================================================
+    # 10. SENTIMENT PROXY FEATURES (NEW)
+    # =========================================================================
+
+    # Buying pressure (close position in range)
+    df["buying_pressure"] = (df["close"] - df["low"]) / full_range.replace(0, np.nan)
+    df["buying_pressure"] = df["buying_pressure"].fillna(0.5)
+
+    # Accumulation/Distribution momentum
+    ad = ((2 * df["close"] - df["low"] - df["high"]) / full_range.replace(0, np.nan)) * df["volume"]
+    df["ad_momentum"] = ad.rolling(10).mean() / ad.rolling(30).mean()
+    df["ad_momentum"] = df["ad_momentum"].fillna(1).clip(0.5, 2)
+
+    # Smart money indicator (volume on up vs down days)
+    up_vol = df["volume"].where(df["close"] > df["close"].shift(1), 0)
+    down_vol = df["volume"].where(df["close"] <= df["close"].shift(1), 0)
+    df["smart_money"] = up_vol.rolling(10).sum() / (up_vol.rolling(10).sum() + down_vol.rolling(10).sum() + 1)
+
+    # =========================================================================
+    # 11. PATTERN RECOGNITION FEATURES (NEW)
+    # =========================================================================
+
+    # Higher highs / Lower lows
+    df["higher_high"] = (df["high"] > df["high"].shift(1)).astype(int)
+    df["lower_low"] = (df["low"] < df["low"].shift(1)).astype(int)
+    df["hh_count_5"] = df["higher_high"].rolling(5).sum()
+    df["ll_count_5"] = df["lower_low"].rolling(5).sum()
+
+    # Trend structure
+    df["uptrend_structure"] = ((df["hh_count_5"] >= 3) & (df["ll_count_5"] <= 2)).astype(int)
+    df["downtrend_structure"] = ((df["ll_count_5"] >= 3) & (df["hh_count_5"] <= 2)).astype(int)
+
+    # Price compression (low volatility before breakout)
+    range_5 = (df["high"].rolling(5).max() - df["low"].rolling(5).min()) / df["close"]
+    range_20 = (df["high"].rolling(20).max() - df["low"].rolling(20).min()) / df["close"]
+    df["price_compression"] = (range_5 / range_20.replace(0, np.nan)).fillna(1)
 
     return df
 
@@ -367,6 +475,7 @@ def get_feature_columns_v2() -> list:
     """
     Get list of feature columns for V2 model.
     Carefully selected for predictive power.
+    UPDATED: Added 20 new high-predictive features (total 63)
     """
     features = [
         # Momentum (7)
@@ -418,6 +527,30 @@ def get_feature_columns_v2() -> list:
         "beta",
         "bull_market",
         "bear_market",
+        # NEW: Price action patterns (10)
+        "body_ratio",
+        "upper_shadow_ratio",
+        "lower_shadow_ratio",
+        "bullish_candle",
+        "consec_up",
+        "consec_down",
+        "gap_up",
+        "gap_down",
+        "inside_bar",
+        # NEW: Liquidity (4)
+        "price_vs_vwap",
+        "liquidity_score",
+        "vol_spike",
+        # NEW: Sentiment proxy (3)
+        "buying_pressure",
+        "ad_momentum",
+        "smart_money",
+        # NEW: Pattern recognition (6)
+        "hh_count_5",
+        "ll_count_5",
+        "uptrend_structure",
+        "downtrend_structure",
+        "price_compression",
     ]
 
     return features

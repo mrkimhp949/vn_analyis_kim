@@ -96,7 +96,7 @@ class EmergencyStop:
             # IMPROVEMENT: Use cached VNINDEX with force_refresh for emergency checks
             # This ensures we get fresh data while still benefiting from cache
             # during rapid consecutive checks
-            vnindex = get_cached_vnindex(lookback=10, force_refresh=True)
+            vnindex = get_cached_vnindex(lookback=60, force_refresh=True)
 
             if vnindex is None or vnindex.empty or len(vnindex) < 2:
                 return False, None

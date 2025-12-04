@@ -17,36 +17,39 @@ logger = logging.getLogger(__name__)
 # Model paths
 MODELS_DIR = "models"
 SCALER_PATH = os.path.join(MODELS_DIR, "scaler_v2.pkl")
+MODEL_INFO_PATH = os.path.join(MODELS_DIR, "model_info_v2.json")
 MODEL_PATHS = {
     "rf": os.path.join(MODELS_DIR, "rf_v2.pkl"),
     "xgb": os.path.join(MODELS_DIR, "xgb_v2.pkl"),
     "lgb": os.path.join(MODELS_DIR, "lgb_v2.pkl"),
     "ensemble": os.path.join(MODELS_DIR, "ensemble_v2.pkl"),
+    "stacking": os.path.join(MODELS_DIR, "stacking_v2.pkl"),
 }
 
 
 class MLSignalGeneratorV2:
     """
-    ML Signal Generator V2 with improved accuracy.
+    ML Signal Generator V2 with improved accuracy (target 65%+).
 
     Key improvements:
-    - Uses enhanced_v2 features (41 features)
+    - Uses enhanced_v2 features (63 features)
     - Multi-horizon target (more predictable)
     - Ensemble of regularized models
+    - Stacking ensemble option
     - Calibrated confidence scores
     """
 
     def __init__(
         self,
-        model_name: str = "rf",  # rf performs best on unseen data
+        model_name: str = "stacking",  # stacking often best
         confidence_threshold: float = 0.55,
-        use_ensemble: bool = False,
+        use_ensemble: bool = True,
     ):
         """
         Initialize ML Signal Generator V2.
 
         Args:
-            model_name: Which model to use ('rf', 'xgb', 'lgb', 'ensemble')
+            model_name: Which model to use ('rf', 'xgb', 'lgb', 'ensemble', 'stacking')
             confidence_threshold: Minimum confidence for BUY signal
             use_ensemble: Use ensemble voting of all models
         """
@@ -58,6 +61,7 @@ class MLSignalGeneratorV2:
         self.model = None
         self.models = {}  # For ensemble
         self.feature_cols = None
+        self.selected_features = None  # Features selected during training
 
         self._load_models()
 
@@ -72,10 +76,27 @@ class MLSignalGeneratorV2:
                 logger.warning(f"⚠️ Scaler not found at {SCALER_PATH}")
                 return
 
-            # Load feature columns
+            # Load model info to get selected features
+            if os.path.exists(MODEL_INFO_PATH):
+                import json
+                with open(MODEL_INFO_PATH, "r") as f:
+                    model_info = json.load(f)
+                    self.selected_features = model_info.get("selected_features")
+                    logger.info(f"✅ Loaded model info (v{model_info.get('version', '2')})")
+
+            # Load feature columns - prioritize scaler's feature names for consistency
             from src.ml.features.enhanced_v2 import get_feature_columns_v2
 
-            self.feature_cols = get_feature_columns_v2()
+            # Priority: scaler's feature_names_in_ > model_info selected_features > all features
+            if hasattr(self.scaler, 'feature_names_in_'):
+                self.feature_cols = list(self.scaler.feature_names_in_)
+                logger.info(f"  Using {len(self.feature_cols)} features from scaler")
+            elif self.selected_features:
+                self.feature_cols = self.selected_features
+                logger.info(f"  Using {len(self.feature_cols)} selected features from model_info")
+            else:
+                self.feature_cols = get_feature_columns_v2()
+                logger.info(f"  Using all {len(self.feature_cols)} features")
 
             if self.use_ensemble:
                 # Load all models for ensemble
@@ -84,15 +105,22 @@ class MLSignalGeneratorV2:
                         self.models[name] = joblib.load(path)
                         logger.info(f"✅ Loaded {name} model")
             else:
-                # Load single model
+                # Load single model (prefer stacking > ensemble > rf)
+                preferred_order = ["stacking", "ensemble", "rf", "xgb", "lgb"]
+                model_loaded = False
+
+                # First try requested model
                 model_path = MODEL_PATHS.get(self.model_name)
                 if model_path and os.path.exists(model_path):
                     self.model = joblib.load(model_path)
                     logger.info(f"✅ Loaded {self.model_name} model")
-                else:
-                    # Fallback to any available model
-                    for name, path in MODEL_PATHS.items():
-                        if os.path.exists(path):
+                    model_loaded = True
+
+                # Fallback to preferred order
+                if not model_loaded:
+                    for name in preferred_order:
+                        path = MODEL_PATHS.get(name)
+                        if path and os.path.exists(path):
                             self.model = joblib.load(path)
                             self.model_name = name
                             logger.info(f"✅ Loaded {name} model (fallback)")
@@ -128,14 +156,23 @@ class MLSignalGeneratorV2:
                 for col in missing:
                     df_features[col] = 0
 
-            # Get features for latest row
+            # Get features for latest row - ONLY use the exact features from training
+            # This ensures we don't pass extra features that weren't in the training set
             X = df_features[self.feature_cols].iloc[-1:].copy()
 
             # Handle NaN
             X = X.fillna(0)
             X = X.replace([np.inf, -np.inf], 0)
 
-            # Scale
+            # Scale - use feature names from scaler to ensure correct order
+            if hasattr(self.scaler, 'feature_names_in_'):
+                scaler_features = list(self.scaler.feature_names_in_)
+                # Reorder columns to match scaler's expected order
+                missing_in_scaler = [f for f in scaler_features if f not in X.columns]
+                for col in missing_in_scaler:
+                    X[col] = 0
+                X = X[scaler_features]
+
             X_scaled = self.scaler.transform(X)
 
             return X_scaled

@@ -74,7 +74,7 @@ def get_cached_vnindex(
         logger.debug(f"🔄 Loading fresh VNINDEX data (lookback={lookback})...")
         vnindex_df = load_data("VNINDEX", lookback=lookback, is_index=True)
 
-        if vnindex_df is not None and not vnindex_df.empty and len(vnindex_df) >= 50:
+        if vnindex_df is not None and not vnindex_df.empty and len(vnindex_df) >= 20:
             # Update cache
             cache["data"] = vnindex_df
             cache["timestamp"] = current_time
@@ -83,7 +83,7 @@ def get_cached_vnindex(
             return vnindex_df
         else:
             bars = len(vnindex_df) if vnindex_df is not None else 0
-            logger.warning(f"⚠️ VNINDEX data insufficient: {bars} bars")
+            logger.warning(f"⚠️ VNINDEX data insufficient: {bars} bars (need >= 20)")
             # Keep old cache if new data is bad
             if cache["data"] is not None:
                 logger.info("📦 Using stale VNINDEX cache (new data insufficient)")

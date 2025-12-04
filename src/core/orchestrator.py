@@ -144,7 +144,7 @@ class MLAnalysisConfig:
 
     max_retries: int = 2
     retry_delay_base: float = 0.5  # Base delay in seconds
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = 30.0  # Increased for enhanced features (63 features)
 
     @classmethod
     def from_env(cls) -> "MLAnalysisConfig":
@@ -152,7 +152,7 @@ class MLAnalysisConfig:
         return cls(
             max_retries=int(os.getenv("ML_MAX_RETRIES", 2)),
             retry_delay_base=float(os.getenv("ML_RETRY_DELAY", 0.5)),
-            timeout_seconds=float(os.getenv("ML_TIMEOUT", 10.0)),
+            timeout_seconds=float(os.getenv("ML_TIMEOUT", 60.0)),  # Tăng lên 60s
         )
 
 
@@ -1042,29 +1042,34 @@ class TradingOrchestrator:
         no_signal_reasons: Dict[str, List[str]] = {}
         results_lock = asyncio.Lock()
 
+        # Giới hạn concurrency để tránh ML timeout
+        max_concurrent = int(os.getenv("MAX_CONCURRENT_SCANS", 5))
+        semaphore = asyncio.Semaphore(max_concurrent)
+
         async def scan_ticker(symbol: str) -> None:
             nonlocal signal_count
-            try:
-                if self.portfolio_lock.is_pending(symbol):
-                    return
+            async with semaphore:  # Giới hạn số task chạy cùng lúc
+                try:
+                    if self.portfolio_lock.is_pending(symbol):
+                        return
 
-                entry_result = await self._process_ticker_for_entry(symbol, market_regime)
+                    entry_result = await self._process_ticker_for_entry(symbol, market_regime)
 
-                if entry_result:
+                    if entry_result:
+                        async with results_lock:
+                            if entry_result.get("signal"):
+                                signal_count += 1
+                            elif entry_result.get("warnings"):
+                                no_signal_symbols.append(entry_result["symbol"])
+                                no_signal_reasons[entry_result["symbol"]] = entry_result["warnings"]
+                            elif entry_result.get("is_watchlist"):
+                                watchlist_candidates.append(entry_result)
+
+                except Exception as e:
+                    self._logger.error(f"Lỗi nghiêm trọng khi quét mã {symbol}: {e}", exc_info=True)
                     async with results_lock:
-                        if entry_result.get("signal"):
-                            signal_count += 1
-                        elif entry_result.get("warnings"):
-                            no_signal_symbols.append(entry_result["symbol"])
-                            no_signal_reasons[entry_result["symbol"]] = entry_result["warnings"]
-                        elif entry_result.get("is_watchlist"):
-                            watchlist_candidates.append(entry_result)
-
-            except Exception as e:
-                self._logger.error(f"Lỗi nghiêm trọng khi quét mã {symbol}: {e}", exc_info=True)
-                async with results_lock:
-                    no_signal_symbols.append(symbol)
-                    no_signal_reasons[symbol] = [f"Lỗi khi quét: {str(e)}"]
+                        no_signal_symbols.append(symbol)
+                        no_signal_reasons[symbol] = [f"Lỗi khi quét: {str(e)}"]
 
         tasks = [scan_ticker(symbol) for symbol in current_tickers]
         await asyncio.gather(*tasks)

@@ -568,7 +568,7 @@ async def health_check(request: Request):
     try:
         from src.data.loader import load_data
 
-        test_data = load_data("VNM", lookback=5, use_cache=True)
+        test_data = load_data("VNM", lookback=60, use_cache=True, required_bars=2)
         health_info["data_loader"] = "OK"
         health_info["data_points"] = len(test_data)
     except Exception as e:

@@ -59,6 +59,9 @@ scipy==1.11.4
 xgboost==2.0.3
 lightgbm==4.1.0
 
+# Class Balancing
+imbalanced-learn==0.12.0
+
 # Model Interpretability
 shap==0.44.0
 

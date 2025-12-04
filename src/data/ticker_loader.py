@@ -154,7 +154,8 @@ class TickerLoader:
 
             # Try load data, requiring only 2 bars for a basic validity check
             # (Some newly listed stocks may have very limited data)
-            df = load_data(symbol, lookback=30, use_cache=False, required_bars=2)
+            # Dùng lookback=60 để có đủ ~40 bars, tránh warning insufficient data
+            df = load_data(symbol, lookback=60, use_cache=False, required_bars=2)
 
             if df.empty or len(df) < 2:
                 self.validation_cache["invalid"][symbol] = {

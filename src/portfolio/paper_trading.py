@@ -231,7 +231,7 @@ class PaperTradingAccount:
                 from src.data.loader import load_data
                 from src.utils.dataframe_utils import safe_get_latest
 
-                df = load_data(symbol, lookback=5, use_cache=True)
+                df = load_data(symbol, lookback=60, use_cache=True, required_bars=2)
                 if df is None or df.empty:
                     # Fallback: use average entry price if market data unavailable
                     price = position.get("avg_price", 0)

@@ -39,7 +39,7 @@ def load_data(
     resolution: str = "1D",
     data_type: str = "stock",
     use_cache: bool = True,
-    required_bars: int = 50,
+    required_bars: int = 20,  # Giảm từ 50 xuống 20 để tránh warning với lookback ngắn
     lookback: Optional[int] = None,
     is_index: bool = False,
 ) -> pd.DataFrame:
@@ -157,8 +157,8 @@ def _download_from_tcbs(
     """
     import time
 
-    max_retries = 3
-    retry_delays = [2, 4, 8]  # Exponential backoff: 2s, 4s, 8s
+    max_retries = 5
+    retry_delays = [5, 10, 20, 40, 60]  # Aggressive backoff để tránh 429
 
     for attempt in range(max_retries):
         try:
