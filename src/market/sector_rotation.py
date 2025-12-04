@@ -41,63 +41,118 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-# Vietnam market sector definitions
+# Vietnam market sector definitions - EXPANDED v4.0
 VIETNAM_SECTORS = {
     "banking": {
         "name": "Ngân hàng",
-        "symbols": ["VCB", "BID", "CTG", "TCB", "MBB", "ACB", "VPB", "STB", "HDB", "TPB"],
+        "symbols": [
+            "VCB",
+            "BID",
+            "CTG",
+            "TCB",
+            "MBB",
+            "ACB",
+            "VPB",
+            "STB",
+            "HDB",
+            "TPB",
+            "LPB",
+            "EIB",
+            "SHB",
+            "MSB",
+            "OCB",
+        ],
         "cycle_phase": "EARLY",  # Leads in early recovery
         "defensive": False,
     },
     "real_estate": {
         "name": "Bất động sản",
-        "symbols": ["VHM", "VIC", "NVL", "DXG", "KDH", "PDR", "DIG", "NLG"],
+        "symbols": [
+            "VHM",
+            "VIC",
+            "NVL",
+            "DXG",
+            "KDH",
+            "PDR",
+            "DIG",
+            "NLG",
+            "HDG",
+            "CEO",
+            "IJC",
+            "SCR",
+            "LDG",
+            "NBB",
+        ],
         "cycle_phase": "MID",
         "defensive": False,
     },
     "technology": {
         "name": "Công nghệ",
-        "symbols": ["FPT", "CMG"],
+        "symbols": ["FPT", "CMG", "VGI", "ELC", "ITD"],
         "cycle_phase": "MID",
         "defensive": False,
     },
     "retail": {
         "name": "Bán lẻ",
-        "symbols": ["MWG", "PNJ", "DGW", "FRT"],
+        "symbols": ["MWG", "PNJ", "DGW", "FRT", "VRE"],
         "cycle_phase": "EARLY",
         "defensive": False,
     },
     "materials": {
         "name": "Vật liệu (Thép)",
-        "symbols": ["HPG", "HSG", "NKG", "TLH", "SMC"],
+        "symbols": ["HPG", "HSG", "NKG", "TLH", "SMC", "POM", "VGS", "DTL"],
         "cycle_phase": "LATE",
         "defensive": False,
     },
     "energy": {
         "name": "Năng lượng",
-        "symbols": ["GAS", "PLX", "PVD", "PVS", "BSR"],
+        "symbols": ["GAS", "PLX", "PVD", "PVS", "BSR", "PVT", "OIL", "PVC"],
         "cycle_phase": "LATE",
         "defensive": False,
     },
     "utilities": {
         "name": "Tiện ích",
-        "symbols": ["POW", "REE", "NT2", "PC1", "PPC"],
+        "symbols": ["POW", "REE", "NT2", "PC1", "PPC", "GEG", "BCG", "HDC"],
         "cycle_phase": "RECESSION",
         "defensive": True,
     },
     "food_beverage": {
         "name": "Thực phẩm & Đồ uống",
-        "symbols": ["VNM", "SAB", "MSN", "QNS"],
+        "symbols": ["VNM", "SAB", "MSN", "QNS", "KDC", "MCH", "VHC", "ANV"],
         "cycle_phase": "RECESSION",
         "defensive": True,
     },
     "healthcare": {
         "name": "Y tế",
-        "symbols": ["DHG", "DMC", "IMP", "DBD"],
+        "symbols": ["DHG", "DMC", "IMP", "DBD", "TRA", "PME", "DCL"],
+        "cycle_phase": "RECESSION",
+        "defensive": True,
+    },
+    "securities": {
+        "name": "Chứng khoán",
+        "symbols": ["SSI", "VND", "HCM", "VCI", "SHS", "MBS", "VIX", "BSI", "CTS", "FTS"],
+        "cycle_phase": "EARLY",
+        "defensive": False,
+    },
+    "manufacturing": {
+        "name": "Sản xuất",
+        "symbols": ["GEX", "HAX", "GMD", "TCM", "TNG", "VGT", "STK"],
+        "cycle_phase": "MID",
+        "defensive": False,
+    },
+    "agriculture": {
+        "name": "Nông nghiệp",
+        "symbols": ["HAG", "HNG", "BAF", "DBC", "PAN", "LTG"],
         "cycle_phase": "RECESSION",
         "defensive": True,
     },
 }
+
+# Reverse mapping: symbol -> sector_id for quick lookup
+VN_SYMBOL_TO_SECTOR = {}
+for sector_id, sector_info in VIETNAM_SECTORS.items():
+    for symbol in sector_info["symbols"]:
+        VN_SYMBOL_TO_SECTOR[symbol] = sector_id
 
 
 @dataclass
@@ -268,13 +323,66 @@ class SectorRotationAnalyzer:
         """
         Get sector return over specified days.
 
-        PLACEHOLDER: Returns 0 until data source is integrated.
-        In production, would:
-        1. Fetch price data for all sector constituents
-        2. Calculate market-cap weighted average return
+        Calculates equal-weighted average return of sector constituents.
+        Uses cached data when available for performance.
+
+        Args:
+            sector_id: Sector identifier (e.g., 'banking', 'real_estate')
+            days: Number of trading days to calculate return
+
+        Returns:
+            Average return as decimal (e.g., 0.05 = 5%)
         """
-        # TODO: Integrate with data loader
-        return 0.0
+        if sector_id not in VIETNAM_SECTORS:
+            return 0.0
+
+        symbols = VIETNAM_SECTORS[sector_id]["symbols"]
+        if not symbols:
+            return 0.0
+
+        returns = []
+
+        for symbol in symbols:
+            try:
+                # Try to get data from cache first
+                if symbol in self._sector_data:
+                    df = self._sector_data[symbol]
+                else:
+                    # Fetch from data loader
+                    try:
+                        from src.data.loader import load_data
+
+                        df = load_data(symbol, lookback=days + 10, use_cache=True)
+                        if df is not None and not df.empty:
+                            self._sector_data[symbol] = df
+                    except ImportError:
+                        logger.debug(f"Data loader not available for {symbol}")
+                        continue
+                    except Exception as e:
+                        logger.debug(f"Failed to load data for {symbol}: {e}")
+                        continue
+
+                if df is None or len(df) < days:
+                    continue
+
+                # Calculate return
+                df_period = df.tail(days)
+                if len(df_period) >= 2:
+                    start_price = df_period["close"].iloc[0]
+                    end_price = df_period["close"].iloc[-1]
+                    if start_price > 0:
+                        stock_return = (end_price - start_price) / start_price
+                        returns.append(stock_return)
+
+            except Exception as e:
+                logger.debug(f"Error calculating return for {symbol}: {e}")
+                continue
+
+        if not returns:
+            return 0.0
+
+        # Return equal-weighted average
+        return sum(returns) / len(returns)
 
     def _determine_phase(self, leading: List[str], lagging: List[str]) -> Tuple[str, float]:
         """
@@ -419,6 +527,72 @@ class SectorRotationAnalyzer:
     def get_all_sectors(self) -> Dict:
         """Get all sector definitions"""
         return VIETNAM_SECTORS
+
+    def get_symbol_sector(self, symbol: str) -> str:
+        """
+        Get sector ID for a given symbol.
+
+        Args:
+            symbol: Stock symbol (e.g., 'VCB', 'FPT')
+
+        Returns:
+            Sector ID (e.g., 'banking', 'technology') or 'unknown'
+        """
+        return VN_SYMBOL_TO_SECTOR.get(symbol, "unknown")
+
+    def get_symbol_sector_info(self, symbol: str) -> Dict:
+        """
+        Get full sector information for a symbol.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Dict with sector_id, name, cycle_phase, defensive, is_leading, is_lagging
+        """
+        sector_id = self.get_symbol_sector(symbol)
+        if sector_id == "unknown":
+            return {
+                "sector_id": "unknown",
+                "name": "Unknown",
+                "cycle_phase": "UNKNOWN",
+                "defensive": False,
+                "is_leading": False,
+                "is_lagging": False,
+            }
+
+        sector_info = VIETNAM_SECTORS.get(sector_id, {})
+
+        # Get current rotation status
+        rotation = self._cache if self._cache else self.analyze()
+        is_leading = sector_id in rotation.leading_sectors
+        is_lagging = sector_id in rotation.lagging_sectors
+
+        return {
+            "sector_id": sector_id,
+            "name": sector_info.get("name", "Unknown"),
+            "cycle_phase": sector_info.get("cycle_phase", "UNKNOWN"),
+            "defensive": sector_info.get("defensive", False),
+            "is_leading": is_leading,
+            "is_lagging": is_lagging,
+        }
+
+    def is_sector_leading(self, sector_id: str) -> bool:
+        """Check if a sector is currently leading"""
+        rotation = self._cache if self._cache else self.analyze()
+        return sector_id in rotation.leading_sectors
+
+    def is_sector_lagging(self, sector_id: str) -> bool:
+        """Check if a sector is currently lagging"""
+        rotation = self._cache if self._cache else self.analyze()
+        return sector_id in rotation.lagging_sectors
+
+    def clear_cache(self) -> None:
+        """Clear all cached data"""
+        self._cache = None
+        self._cache_time = None
+        self._sector_data.clear()
+        logger.info("Sector rotation cache cleared")
 
 
 # Singleton instance

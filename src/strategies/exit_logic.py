@@ -114,18 +114,26 @@ class ExitConfig:
     Tất cả thresholds có thể config được.
     """
 
-    # Take Profit levels (as percentage, e.g., 0.12 = 12%)
-    take_profit_levels: Tuple[float, float] = (0.12, 0.20)
+    # Take Profit levels - IMPROVED v4.0 for VN market shorter cycles
+    # LOWERED: 6%, 12%, 20% (was 12%, 20%) - VN market cycles are shorter
+    take_profit_levels: Tuple[float, float, float] = (0.06, 0.12, 0.20)
 
     # Stop Loss
     stop_loss_atr_multiplier: float = 2.0
-    default_stop_loss_pct: float = 0.07  # 7% below entry
-    min_stop_loss_pct: float = 0.03  # Min 3% risk
-    max_stop_loss_pct: float = 0.10  # Max 10% risk
+    default_stop_loss_pct: float = 0.06  # IMPROVED: 6% below entry (was 7%)
+    min_stop_loss_pct: float = 0.04  # Min 4% risk (was 3%)
+    max_stop_loss_pct: float = 0.08  # Max 8% risk (was 10%)
 
-    # Trailing Stop
-    trailing_stop_activation: float = DEFAULT_TRAILING_STOP_ACTIVATION
-    trailing_stop_distance: float = DEFAULT_TRAILING_STOP_DISTANCE
+    # Beta-adjusted stop loss - IMPROVED v4.0
+    use_beta_adjusted_stops: bool = True  # Enable beta-adjusted stops
+    high_beta_stop_loss_pct: float = 0.08  # 8% for beta > 1.2
+    low_beta_stop_loss_pct: float = 0.05  # 5% for beta < 0.8
+    high_beta_threshold: float = 1.2  # Beta threshold for wider stop
+    low_beta_threshold: float = 0.8  # Beta threshold for tighter stop
+
+    # Trailing Stop - IMPROVED v4.0 for VN market
+    trailing_stop_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
+    trailing_stop_distance: float = 0.025  # TIGHTENED: Trail 2.5% below peak (was 3%)
     trailing_stop_atr_multiplier: float = 2.0
     use_dynamic_trailing: bool = True
 
@@ -133,9 +141,9 @@ class ExitConfig:
     max_holding_days: int = MAX_HOLDING_DAYS
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
 
-    # Profit Protection
-    profit_protection_activation: float = 0.05  # Activate at 5% profit
-    profit_protection_percent: float = 0.50  # Protect 50% of max profit
+    # Profit Protection - IMPROVED v4.0
+    profit_protection_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
+    profit_protection_percent: float = 0.60  # IMPROVED: Protect 60% of max profit (was 50%)
 
     # Partial Exit
     partial_exit_percent: float = 0.50  # Exit 50% at TP1
@@ -1179,11 +1187,32 @@ class ImprovedExitStrategy:
     ) -> float:
         """
         Ensure stop loss is valid. Fallback to ATR-based or percentage if missing.
+
+        IMPROVED v4.0: Uses beta-adjusted stop loss when enabled.
+        - High beta stocks (>1.2): Wider stop loss (-8%) to avoid premature exit
+        - Normal beta (0.8-1.2): Standard stop loss (-6%)
+        - Low beta stocks (<0.8): Tighter stop loss (-5%) for capital efficiency
         """
         if isinstance(stop_loss, (int, float)) and stop_loss > 0:
+            # If beta-adjusted stops enabled, adjust the provided stop loss
+            if self.config.use_beta_adjusted_stops and df is not None:
+                beta_adjusted = self._calculate_beta_adjusted_stop_loss(symbol, entry_price, df)
+                if beta_adjusted is not None:
+                    # Use the wider of the two stops (more conservative)
+                    return min(float(stop_loss), beta_adjusted)
             return float(stop_loss)
 
-        # Calculate fallback
+        # Calculate fallback with beta adjustment
+        if self.config.use_beta_adjusted_stops and df is not None:
+            beta_adjusted = self._calculate_beta_adjusted_stop_loss(symbol, entry_price, df)
+            if beta_adjusted is not None:
+                logger.info(
+                    f"[{symbol}] 📊 Using beta-adjusted stop loss: {beta_adjusted:,.2f} "
+                    f"(-{((entry_price - beta_adjusted) / entry_price * 100):.1f}%)"
+                )
+                return beta_adjusted
+
+        # Fallback to ATR-based
         fallback = self._calculate_atr_based_stop_loss(entry_price, df)
         logger.warning(
             f"[{symbol}] ⚠️ Stop loss missing/invalid ({stop_loss}). "
@@ -1191,6 +1220,123 @@ class ImprovedExitStrategy:
             f"(-{((entry_price - fallback) / entry_price * 100):.1f}%)"
         )
         return fallback
+
+    def _calculate_beta_adjusted_stop_loss(
+        self,
+        symbol: str,
+        entry_price: float,
+        df: pd.DataFrame,
+    ) -> Optional[float]:
+        """
+        Calculate stop loss adjusted by stock's beta (volatility vs market).
+
+        IMPROVED v4.0:
+        - High beta stocks (>1.2): Wider stop loss (-8%) to avoid premature exit
+        - Normal beta (0.8-1.2): Standard stop loss (-6%)
+        - Low beta stocks (<0.8): Tighter stop loss (-5%) for capital efficiency
+
+        Args:
+            symbol: Stock symbol
+            entry_price: Entry price
+            df: DataFrame with price data
+
+        Returns:
+            Beta-adjusted stop loss price, or None if beta cannot be calculated
+        """
+        try:
+            # Calculate beta
+            beta = self._calculate_stock_beta(df, symbol)
+
+            if beta is None:
+                return None
+
+            # Determine stop loss percentage based on beta
+            if beta > self.config.high_beta_threshold:
+                # High beta: Wider stop
+                stop_loss_pct = abs(self.config.high_beta_stop_loss_pct) / 100
+                reason = f"high beta ({beta:.2f})"
+            elif beta < self.config.low_beta_threshold:
+                # Low beta: Tighter stop
+                stop_loss_pct = abs(self.config.low_beta_stop_loss_pct) / 100
+                reason = f"low beta ({beta:.2f})"
+            else:
+                # Normal beta: Standard stop
+                stop_loss_pct = abs(self.config.default_stop_loss_pct) / 100
+                reason = f"normal beta ({beta:.2f})"
+
+            stop_loss = entry_price * (1 - stop_loss_pct)
+
+            logger.debug(
+                f"[{symbol}] Beta-adjusted stop: {stop_loss:,.0f} "
+                f"(-{stop_loss_pct*100:.1f}%) - {reason}"
+            )
+
+            return stop_loss
+
+        except Exception as e:
+            logger.debug(f"Beta-adjusted stop loss calculation failed for {symbol}: {e}")
+            return None
+
+    def _calculate_stock_beta(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        lookback: int = 60,
+    ) -> Optional[float]:
+        """
+        Calculate stock's beta vs VNINDEX.
+
+        Beta = Covariance(stock, market) / Variance(market)
+
+        Args:
+            df: DataFrame with stock price data
+            symbol: Stock symbol (for logging)
+            lookback: Number of days for calculation
+
+        Returns:
+            Beta value, or None if calculation fails
+        """
+        try:
+            # Get VNINDEX data
+            try:
+                from src.data.vnindex_cache import get_cached_vnindex
+
+                vnindex_df = get_cached_vnindex(lookback=lookback + 10)
+            except ImportError:
+                logger.debug("VNINDEX cache not available for beta calculation")
+                return None
+
+            if vnindex_df is None or len(vnindex_df) < lookback // 2:
+                return None
+
+            # Calculate returns
+            if len(df) < lookback // 2:
+                return None
+
+            stock_returns = df["close"].pct_change().tail(lookback).dropna()
+            market_returns = vnindex_df["close"].pct_change().tail(lookback).dropna()
+
+            # Align data
+            min_len = min(len(stock_returns), len(market_returns))
+            if min_len < 20:
+                return None
+
+            stock_returns = stock_returns.tail(min_len)
+            market_returns = market_returns.tail(min_len)
+
+            # Calculate beta
+            covariance = stock_returns.cov(market_returns)
+            market_variance = market_returns.var()
+
+            if market_variance > 0:
+                beta = covariance / market_variance
+                return float(beta)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Beta calculation failed for {symbol}: {e}")
+            return None
 
     def _calculate_atr_based_stop_loss(
         self, entry_price: float, df: Optional[pd.DataFrame] = None

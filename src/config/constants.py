@@ -37,24 +37,54 @@ MAX_HOLDING_DAYS = 20  # Maximum holding period in days
 EARLY_STOPPING_ROUNDS = 20  # ML early stopping rounds
 CORRELATION_LOOKBACK_DAYS = 60  # Correlation calculation lookback
 
-# Commission and Slippage (Vietnam Market)
-# UPDATED: More realistic transaction costs for Vietnam market
-# Components:
-#   - Brokerage fee: 0.15-0.30% (depending on broker)
-#   - Stock transaction tax: 0.10% (sell only)
-#   - Exchange fees: 0.03%
-#   - Transfer fees: 0.02%
-#   - Slippage: 0.20-0.30% (market orders, especially large orders)
-# Total realistic per-trade cost: 0.50-0.65%
-DEFAULT_COMMISSION_RATE = 0.0055  # 0.55% total transaction cost (commission + tax + fees)
-DEFAULT_SLIPPAGE = 0.0025  # 0.25% realistic slippage for market orders
-TOTAL_TRANSACTION_COST = DEFAULT_COMMISSION_RATE + DEFAULT_SLIPPAGE  # 0.80% total per trade
-ROUND_TRIP_COST = TOTAL_TRANSACTION_COST * 2  # 1.6% round trip (buy + sell) - conservative estimate
+# Commission and Slippage (Vietnam Market) - IMPROVED v4.0
+# REALISTIC transaction costs for Vietnam market based on actual trading experience
+#
+# Cost breakdown per trade:
+#   - Brokerage fee: 0.15-0.30% (depending on broker, VPS/SSI/TCBS etc.)
+#   - Stock transaction tax: 0.10% (sell only - government tax)
+#   - Exchange fees (HOSE/HNX): 0.03%
+#   - Transfer/depository fees: 0.02%
+#   - Slippage: 0.30-0.50% (market orders, especially for large orders or illiquid stocks)
+#
+# Detailed cost calculation:
+VN_BROKERAGE_FEE = 0.0025  # 0.25% (average broker fee)
+VN_STOCK_TAX = 0.0010  # 0.10% (sell only - government tax)
+VN_EXCHANGE_FEE = 0.0003  # 0.03% (HOSE/HNX fee)
+VN_TRANSFER_FEE = 0.0002  # 0.02% (depository fee)
+VN_SLIPPAGE_MARKET_ORDER = 0.0040  # 0.40% (realistic slippage for market orders)
+VN_SLIPPAGE_LIMIT_ORDER = 0.0015  # 0.15% (slippage for limit orders)
 
-# Alternative costs for different scenarios
-OPTIMISTIC_ROUND_TRIP_COST = 0.012  # 1.2% with best execution and limit orders
-REALISTIC_ROUND_TRIP_COST = 0.016  # 1.6% with market orders (default)
-PESSIMISTIC_ROUND_TRIP_COST = 0.020  # 2.0% with poor execution and high slippage
+# Total cost per side:
+# BUY: brokerage + exchange + transfer + slippage = 0.25% + 0.03% + 0.02% + 0.40% = 0.70%
+VN_BUY_COST = (
+    VN_BROKERAGE_FEE + VN_EXCHANGE_FEE + VN_TRANSFER_FEE + VN_SLIPPAGE_MARKET_ORDER
+)  # 0.70%
+
+# SELL: brokerage + tax + exchange + slippage = 0.25% + 0.10% + 0.03% + 0.40% = 0.78%
+VN_SELL_COST = VN_BROKERAGE_FEE + VN_STOCK_TAX + VN_EXCHANGE_FEE + VN_SLIPPAGE_MARKET_ORDER  # 0.78%
+
+# Round trip costs (buy + sell):
+VN_ROUND_TRIP_COST_MARKET = VN_BUY_COST + VN_SELL_COST  # 1.48% with market orders
+VN_ROUND_TRIP_COST_LIMIT = 0.0060 + 0.0053  # 1.13% with limit orders (lower slippage)
+
+# Scenario-based costs for different trading styles:
+VN_OPTIMISTIC_ROUND_TRIP = 0.0100  # 1.0% (best case: limit orders, low slippage, discount broker)
+VN_REALISTIC_ROUND_TRIP = 0.0148  # 1.48% (realistic: market orders, normal execution)
+VN_PESSIMISTIC_ROUND_TRIP = (
+    0.0200  # 2.0% (worst case: high slippage, large orders, illiquid stocks)
+)
+
+# Default values - USE REALISTIC ESTIMATES
+DEFAULT_COMMISSION_RATE = VN_BUY_COST  # 0.70% per trade (buy side)
+DEFAULT_SLIPPAGE = VN_SLIPPAGE_MARKET_ORDER  # 0.40% slippage
+TOTAL_TRANSACTION_COST = VN_BUY_COST  # 0.70% per trade
+ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% round trip (IMPROVED from 1.6%)
+
+# Alternative costs for different scenarios (backward compatible)
+OPTIMISTIC_ROUND_TRIP_COST = VN_OPTIMISTIC_ROUND_TRIP  # 1.0% with best execution
+REALISTIC_ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% with market orders (default)
+PESSIMISTIC_ROUND_TRIP_COST = VN_PESSIMISTIC_ROUND_TRIP  # 2.0% with poor execution
 
 # Vietnam Market Specific Constants
 VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling)
@@ -104,15 +134,19 @@ TECH_SIGNAL_WEIGHT = 0.5  # Weight for technical signals
 MAX_CORRELATION = 0.65  # TIGHTENED: Maximum 0.65 correlation between positions
 DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
 
-# NEW: Vietnam Market Specific Thresholds
-# IMPROVED: Tiered liquidity for different market caps
-VN_MIN_LIQUIDITY_VALUE = 1_000_000_000  # LOWERED: 1B VND for small caps
-VN_MID_CAP_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for mid caps
-VN_LARGE_CAP_LIQUIDITY_VALUE = 5_000_000_000  # 5B VND for large caps
-VN_CRITICAL_LIQUIDITY_VALUE = 500_000_000  # 500M VND critical minimum
-VN_MIN_VOLUME = 50_000  # 50K shares minimum
+# NEW: Vietnam Market Specific Thresholds - OPTIMIZED v4.0
+# IMPROVED: Tiered liquidity for different market caps - LOWERED to capture more opportunities
+VN_MIN_LIQUIDITY_VALUE = 500_000_000  # LOWERED: 500M VND for small caps (was 1B)
+VN_MID_CAP_LIQUIDITY_VALUE = 1_000_000_000  # LOWERED: 1B VND for mid caps (was 2B)
+VN_LARGE_CAP_LIQUIDITY_VALUE = 3_000_000_000  # LOWERED: 3B VND for large caps (was 5B)
+VN_CRITICAL_LIQUIDITY_VALUE = 300_000_000  # LOWERED: 300M VND critical minimum (was 500M)
+VN_MIN_VOLUME = 25_000  # LOWERED: 25K shares minimum (was 50K)
 VN_MAX_INTRADAY_RANGE = 5.0  # 5% max intraday range for entry
 VN_OPTIMAL_ENTRY_TIMES = [(9, 30, 10, 30), (13, 30, 14, 30)]  # Optimal entry windows
+
+# NEW: Micro cap tier for speculative plays
+VN_MICRO_CAP_LIQUIDITY_VALUE = 300_000_000  # 300M VND for micro caps
+VN_MICRO_CAP_MIN_VOLUME = 15_000  # 15K shares minimum for micro caps
 
 # ATO/ATC Session Handling (Auction periods - high volatility)
 VN_ATO_START = (9, 0)  # ATO: 9:00-9:15 - Opening auction
@@ -185,6 +219,8 @@ __all__ = [
     "VN_MID_CAP_LIQUIDITY_VALUE",
     "VN_LARGE_CAP_LIQUIDITY_VALUE",
     "VN_CRITICAL_LIQUIDITY_VALUE",
+    "VN_MICRO_CAP_LIQUIDITY_VALUE",
+    "VN_MICRO_CAP_MIN_VOLUME",
     "VN_CEILING_DISTANCE_THRESHOLD",
     "VN_FLOOR_DISTANCE_THRESHOLD",
     "VN_FLOOR_PENALTY",
@@ -205,6 +241,20 @@ __all__ = [
     "VN_SMALL_CAP_POSITION_MULT",
     "VN_MID_CAP_POSITION_MULT",
     "VN_LARGE_CAP_POSITION_MULT",
+    # Transaction costs - Vietnam specific
+    "VN_BROKERAGE_FEE",
+    "VN_STOCK_TAX",
+    "VN_EXCHANGE_FEE",
+    "VN_TRANSFER_FEE",
+    "VN_SLIPPAGE_MARKET_ORDER",
+    "VN_SLIPPAGE_LIMIT_ORDER",
+    "VN_BUY_COST",
+    "VN_SELL_COST",
+    "VN_ROUND_TRIP_COST_MARKET",
+    "VN_ROUND_TRIP_COST_LIMIT",
+    "VN_OPTIMISTIC_ROUND_TRIP",
+    "VN_REALISTIC_ROUND_TRIP",
+    "VN_PESSIMISTIC_ROUND_TRIP",
     # Entry Logic
     "ENTRY_PULLBACK_MAX_PCT",
     "ENTRY_PULLBACK_MIN_PCT",
