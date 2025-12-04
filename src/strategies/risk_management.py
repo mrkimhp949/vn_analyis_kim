@@ -59,6 +59,17 @@ class RiskManager:
 
 
 class EnhancedRiskManager(RiskManager):
+    """
+    Enhanced Risk Manager with Vietnam market specific features.
+
+    IMPROVED v4.2:
+    - T+2 settlement capital management
+    - Lot size validation (100 shares)
+    - Tick size awareness
+    - Session-based position sizing
+    - Foreign flow integration
+    """
+
     def suggest_limit_orders(self, current_price, atr, signal="BUY"):
         """Override method từ class cha để tránh lỗi"""
         return super().suggest_limit_orders(current_price, atr, signal)
@@ -72,6 +83,11 @@ class EnhancedRiskManager(RiskManager):
         self.volatility_adjustment = True
         self.correlation_penalty = True
         self.market_regime_adjustment = True
+
+        # NEW v4.2: Vietnam market specific settings
+        self.vn_lot_size = 100  # Minimum trading unit
+        self.vn_transaction_cost = 0.015  # ~1.5% round trip
+        self.t2_capital_buffer = 0.10  # 10% buffer for T+2 settlements
 
     def calculate_enhanced_position_size(
         self,
@@ -127,12 +143,41 @@ class EnhancedRiskManager(RiskManager):
         max_shares_by_capital = int((self.total_capital * self.max_position_pct) / price)
         base_position["shares"] = min(base_position["shares"], max_shares_by_capital)
 
-        # Làm tròn đến lot 100
+        # IMPROVED v4.2: Vietnam lot size validation
         if base_position["shares"] > 0:
-            base_position["shares"] = max((base_position["shares"] // 100) * 100, 100)
+            base_position["shares"] = self._round_to_vn_lot(base_position["shares"])
             base_position["value"] = base_position["shares"] * price
 
+        # IMPROVED v4.2: Add transaction cost estimate
+        base_position["estimated_cost"] = base_position["value"] * self.vn_transaction_cost
+        base_position["net_value"] = base_position["value"] - base_position["estimated_cost"]
+
         return base_position
+
+    def _round_to_vn_lot(self, shares: int) -> int:
+        """Round shares to Vietnam lot size (100 shares minimum)."""
+        if shares <= 0:
+            return 0
+        rounded = (shares // self.vn_lot_size) * self.vn_lot_size
+        return max(self.vn_lot_size, rounded)
+
+    def calculate_available_capital(self, pending_settlements: list = None) -> float:
+        """
+        Calculate available capital considering T+2 pending settlements.
+
+        Vietnam T+2 settlement means capital from sells is locked for 2 days.
+        This method accounts for pending settlements to avoid over-trading.
+
+        Args:
+            pending_settlements: List of pending settlement amounts
+
+        Returns:
+            Available capital for new trades
+        """
+        pending = sum(pending_settlements) if pending_settlements else 0
+        buffer = self.total_capital * self.t2_capital_buffer
+        available = self.total_capital - pending - buffer
+        return max(0, available)
 
     def _calculate_volatility_factor(self, market_volatility):
         """Điều chỉnh theo độ biến động thị trường"""
@@ -283,7 +328,7 @@ class EnhancedRiskManager(RiskManager):
             return 1.0
 
     def suggest_enhanced_limit_orders(self, current_price, atr, signal="BUY", confidence=50):
-        """Đề xuất limit orders nâng cao"""
+        """Đề xuất limit orders nâng cao với Vietnam tick size validation"""
         super().suggest_limit_orders(current_price, atr, signal)
 
         # Điều chỉnh theo confidence - Higher confidence = more aggressive (closer to price)
@@ -291,16 +336,68 @@ class EnhancedRiskManager(RiskManager):
         confidence_factor = 1.0 - (confidence / 100) * 0.5  # Maps 0% -> 1.0, 100% -> 0.5
 
         if signal == "BUY":
-            return {
-                "aggressive": round(current_price - (atr * 0.3 * confidence_factor), -2),
-                "moderate": round(current_price - (atr * 0.5 * confidence_factor), -2),
-                "conservative": round(current_price - (atr * 0.7 * confidence_factor), -2),
+            prices = {
+                "aggressive": self._round_to_vn_tick(
+                    current_price - (atr * 0.3 * confidence_factor)
+                ),
+                "moderate": self._round_to_vn_tick(current_price - (atr * 0.5 * confidence_factor)),
+                "conservative": self._round_to_vn_tick(
+                    current_price - (atr * 0.7 * confidence_factor)
+                ),
                 "note": f"Giá mua điều chỉnh theo confidence: {confidence}%",
             }
         else:
-            return {
-                "aggressive": round(current_price + (atr * 0.3 * confidence_factor), -2),
-                "moderate": round(current_price + (atr * 0.5 * confidence_factor), -2),
-                "conservative": round(current_price + (atr * 0.7 * confidence_factor), -2),
+            prices = {
+                "aggressive": self._round_to_vn_tick(
+                    current_price + (atr * 0.3 * confidence_factor)
+                ),
+                "moderate": self._round_to_vn_tick(current_price + (atr * 0.5 * confidence_factor)),
+                "conservative": self._round_to_vn_tick(
+                    current_price + (atr * 0.7 * confidence_factor)
+                ),
                 "note": f"Giá bán điều chỉnh theo confidence: {confidence}%",
             }
+        return prices
+
+    def _round_to_vn_tick(self, price: float) -> float:
+        """
+        Round price to valid Vietnam tick size.
+
+        Vietnam tick sizes (HOSE):
+        - Price < 10,000 VND: Tick = 10 VND
+        - 10,000 <= Price < 50,000 VND: Tick = 50 VND
+        - Price >= 50,000 VND: Tick = 100 VND
+        """
+        if price < 10_000:
+            tick = 10
+        elif price < 50_000:
+            tick = 50
+        else:
+            tick = 100
+        return round(price / tick) * tick
+
+    def get_session_position_multiplier(self) -> float:
+        """
+        Get position size multiplier based on current trading session.
+
+        Vietnam market sessions:
+        - ATO (9:00-9:15): High volatility -> 0.7x
+        - Morning optimal (9:30-10:30): Best time -> 1.0x
+        - Pre-lunch (11:00-11:30): Selling pressure -> 0.8x
+        - Afternoon optimal (13:30-14:15): Good time -> 1.0x
+        - ATC (14:30-14:45): High volatility -> 0.7x
+
+        Returns:
+            Position size multiplier (0.7 to 1.0)
+        """
+        try:
+            from src.market.session_trading import get_session_manager
+
+            manager = get_session_manager()
+            timing = manager.analyze_entry_timing()
+            return timing.position_size_multiplier
+        except ImportError:
+            return 1.0
+        except Exception as e:
+            print(f"  ⚠️ Session multiplier error: {e}")
+            return 1.0

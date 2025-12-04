@@ -14,8 +14,10 @@ Version: 1.0.0
 """
 
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Dict, Optional, Tuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -1114,3 +1116,311 @@ def validate_order_comprehensive(
         "exchange": get_exchange(symbol),
         "order_value": shares * price,
     }
+
+
+# =============================================================================
+# NEW v4.2: CEILING/FLOOR REVERSAL DETECTION
+# =============================================================================
+
+
+def check_ceiling_reversal(
+    current_price: float,
+    day_high: float,
+    reference_price: float,
+    symbol: str,
+    volume_ratio: float = 1.0,
+) -> Tuple[bool, str, float]:
+    """
+    Check if stock hit ceiling and is now reversing (bearish signal).
+
+    Vietnam market specific:
+    - Ceiling = reference_price * 1.07 (HOSE)
+    - If price hit ceiling but now pulling back, it's a warning sign
+    - High volume at ceiling + reversal = strong sell signal
+
+    Args:
+        current_price: Current stock price
+        day_high: Day's high price
+        reference_price: Previous close (reference)
+        symbol: Stock symbol
+        volume_ratio: Current volume / average volume
+
+    Returns:
+        Tuple of (is_reversal, message, reversal_strength)
+        reversal_strength: 0-1 (1 = strong reversal signal)
+    """
+    limit = get_price_limit(symbol)
+    ceiling = reference_price * (1 + limit)
+
+    # Check if day high was at or near ceiling (within 0.5%)
+    hit_ceiling = day_high >= ceiling * 0.995
+
+    if not hit_ceiling:
+        return False, "", 0.0
+
+    # Calculate pullback from ceiling
+    pullback_pct = (ceiling - current_price) / ceiling * 100
+
+    if pullback_pct < 1.0:
+        # Still near ceiling, not a reversal yet
+        return False, f"📈 Near ceiling ({pullback_pct:.1f}% below)", 0.0
+
+    # Calculate reversal strength
+    # Higher pullback + higher volume = stronger reversal signal
+    reversal_strength = min(1.0, (pullback_pct / 5.0) * (volume_ratio / 1.5))
+
+    if pullback_pct >= 3.0 and volume_ratio >= 1.5:
+        return (
+            True,
+            f"🔴 CEILING REVERSAL: Hit ceiling {ceiling:,.0f} but pulled back {pullback_pct:.1f}% "
+            f"with {volume_ratio:.1f}x volume - STRONG SELL SIGNAL",
+            reversal_strength,
+        )
+    elif pullback_pct >= 2.0:
+        return (
+            True,
+            f"⚠️ Ceiling rejection: Pulled back {pullback_pct:.1f}% from ceiling - watch closely",
+            reversal_strength,
+        )
+
+    return False, f"📊 Minor pullback from ceiling ({pullback_pct:.1f}%)", reversal_strength
+
+
+def check_floor_bounce(
+    current_price: float,
+    day_low: float,
+    reference_price: float,
+    symbol: str,
+    volume_ratio: float = 1.0,
+) -> Tuple[bool, str, float]:
+    """
+    Check if stock hit floor and is now bouncing (bullish signal).
+
+    Vietnam market specific:
+    - Floor = reference_price * 0.93 (HOSE)
+    - If price hit floor but now recovering, it's a potential buy signal
+    - High volume at floor + bounce = strong buy signal
+
+    Args:
+        current_price: Current stock price
+        day_low: Day's low price
+        reference_price: Previous close (reference)
+        symbol: Stock symbol
+        volume_ratio: Current volume / average volume
+
+    Returns:
+        Tuple of (is_bounce, message, bounce_strength)
+        bounce_strength: 0-1 (1 = strong bounce signal)
+    """
+    limit = get_price_limit(symbol)
+    floor = reference_price * (1 - limit)
+
+    # Check if day low was at or near floor (within 0.5%)
+    hit_floor = day_low <= floor * 1.005
+
+    if not hit_floor:
+        return False, "", 0.0
+
+    # Calculate bounce from floor
+    bounce_pct = (current_price - floor) / floor * 100
+
+    if bounce_pct < 1.0:
+        # Still near floor, not a bounce yet
+        return False, f"📉 Near floor ({bounce_pct:.1f}% above)", 0.0
+
+    # Calculate bounce strength
+    # Higher bounce + higher volume = stronger bounce signal
+    bounce_strength = min(1.0, (bounce_pct / 5.0) * (volume_ratio / 1.5))
+
+    if bounce_pct >= 3.0 and volume_ratio >= 1.5:
+        return (
+            True,
+            f"🟢 FLOOR BOUNCE: Hit floor {floor:,.0f} but bounced {bounce_pct:.1f}% "
+            f"with {volume_ratio:.1f}x volume - POTENTIAL BUY SIGNAL",
+            bounce_strength,
+        )
+    elif bounce_pct >= 2.0:
+        return (
+            True,
+            f"📊 Floor support: Bounced {bounce_pct:.1f}% from floor - watch for confirmation",
+            bounce_strength,
+        )
+
+    return False, f"📊 Minor bounce from floor ({bounce_pct:.1f}%)", bounce_strength
+
+
+def is_friday_afternoon() -> bool:
+    """
+    Check if current time is Friday afternoon (Vietnam timezone).
+
+    Useful for T+2 settlement awareness:
+    - Buy on Friday = settlement on Tuesday (4 days capital lock)
+    - Consider closing marginal positions before weekend
+
+    Returns:
+        True if Friday after 13:00 Vietnam time
+    """
+    try:
+        import pytz
+
+        vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+        now = datetime.now(vn_tz)
+        return now.weekday() == 4 and now.hour >= 13
+    except ImportError:
+        now = datetime.now()
+        return now.weekday() == 4 and now.hour >= 13
+
+
+def get_t2_settlement_date(trade_date: Optional[datetime] = None) -> datetime:
+    """
+    Calculate T+2 settlement date for Vietnam market.
+
+    Args:
+        trade_date: Trade execution date (default: today)
+
+    Returns:
+        Settlement date (T+2 business days)
+    """
+    if trade_date is None:
+        try:
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            trade_date = datetime.now(vn_tz)
+        except ImportError:
+            trade_date = datetime.now()
+
+    # Add 2 business days
+    settlement = trade_date
+    days_added = 0
+    while days_added < 2:
+        settlement += timedelta(days=1)
+        # Skip weekends
+        if settlement.weekday() < 5:
+            days_added += 1
+
+    return settlement
+
+
+# =============================================================================
+# COMPATIBILITY FUNCTIONS (for test imports)
+# =============================================================================
+
+
+def calculate_t2_requirement(
+    pending_settlements: Dict[str, float],
+    new_order_value: float,
+    buffer_pct: float = 0.10,
+) -> Tuple[float, float]:
+    """
+    Calculate T+2 cash requirement for Vietnam market.
+
+    Alias for calculate_t2_cash_requirement for backward compatibility.
+
+    Args:
+        pending_settlements: Dict of pending settlements {date: value}
+        new_order_value: Value of new order
+        buffer_pct: Additional buffer percentage (default 10%)
+
+    Returns:
+        Tuple of (total_t2_requirement, buffer_amount)
+    """
+    total_pending = sum(pending_settlements.values()) if pending_settlements else 0
+    total_t2 = total_pending + new_order_value
+    buffer = new_order_value * buffer_pct
+    return total_t2, buffer
+
+
+def check_liquidity(
+    df: pd.DataFrame,
+    symbol: str,
+    min_liquidity_value: float = 2_000_000_000,
+) -> Tuple[bool, str]:
+    """
+    Check if stock meets liquidity requirements.
+
+    Convenience function wrapping VietnamMarketValidator.
+
+    Args:
+        df: DataFrame with 'close' and 'volume' columns
+        symbol: Stock symbol
+        min_liquidity_value: Minimum daily liquidity in VND (default: 2B)
+
+    Returns:
+        Tuple of (is_liquid, message)
+    """
+    validator = VietnamMarketValidator(min_liquidity_value=min_liquidity_value)
+    return validator.check_liquidity_requirements(df, symbol)
+
+
+def check_price_limits(
+    current_price: float,
+    reference_price: float,
+    symbol: str,
+) -> Tuple[bool, str]:
+    """
+    Check if current price is safely within floor/ceiling limits.
+
+    Convenience function wrapping VietnamMarketValidator.
+
+    Args:
+        current_price: Current stock price
+        reference_price: Reference (previous close) price
+        symbol: Stock symbol
+
+    Returns:
+        Tuple of (is_safe, message)
+    """
+    validator = VietnamMarketValidator()
+    return validator.check_price_floor_ceiling(current_price, reference_price, symbol)
+
+
+def check_trading_session(
+    current_datetime: Optional[datetime] = None,
+) -> Tuple[bool, str]:
+    """
+    Check if current time is safe for trading.
+
+    Convenience function wrapping VietnamMarketValidator.
+
+    Args:
+        current_datetime: Current datetime (default: now)
+
+    Returns:
+        Tuple of (is_safe, message)
+    """
+    if current_datetime is None:
+        try:
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            current_datetime = datetime.now(vn_tz)
+        except ImportError:
+            current_datetime = datetime.now()
+
+    validator = VietnamMarketValidator()
+    return validator.check_trading_session_timing(current_datetime)
+
+
+def validate_position_vs_volume(
+    shares: int,
+    avg_volume: float,
+    symbol: str,
+    max_position_pct: float = 0.05,
+) -> Tuple[bool, str]:
+    """
+    Validate position size against average volume.
+
+    Convenience function wrapping VietnamMarketValidator.
+
+    Args:
+        shares: Number of shares to trade
+        avg_volume: Average daily volume
+        symbol: Stock symbol
+        max_position_pct: Max position as % of avg volume (default: 5%)
+
+    Returns:
+        Tuple of (is_safe, message)
+    """
+    validator = VietnamMarketValidator(max_position_pct_of_volume=max_position_pct)
+    return validator.validate_position_size_vs_volume(shares, avg_volume, symbol)

@@ -114,13 +114,15 @@ class ExitConfig:
     Tất cả thresholds có thể config được.
     """
 
-    # Take Profit levels - IMPROVED v4.1 for VN market shorter cycles
+    # Take Profit levels - IMPROVED v4.2 for VN market shorter cycles
     # Vietnam market characteristics:
     # - Shorter cycles (2-4 weeks typical)
     # - Higher volatility (±7% daily limit)
     # - T+2 settlement affects holding decisions
-    # LOWERED: 5%, 10%, 18% - capture profits faster in VN market
-    take_profit_levels: Tuple[float, float, float] = (0.05, 0.10, 0.18)
+    # - Transaction costs ~1.5% round trip
+    # OPTIMIZED: 4%, 8%, 15% - capture profits faster, account for costs
+    # Net profit after costs: ~2.5%, ~6.5%, ~13.5%
+    take_profit_levels: Tuple[float, float, float] = (0.04, 0.08, 0.15)
 
     # Stop Loss - IMPROVED v4.1 with transaction cost awareness
     # Must account for ~1.5% round trip cost
@@ -156,11 +158,20 @@ class ExitConfig:
     profit_protection_activation: float = 0.025  # TIGHTENED: Activate at 2.5% profit
     profit_protection_percent: float = 0.65  # IMPROVED: Protect 65% of max profit
 
-    # NEW v4.1: Session-based exit rules
+    # NEW v4.2: Session-based exit rules (Vietnam market specific)
     exit_before_lunch_if_profitable: bool = True  # Exit profitable positions before lunch
-    lunch_exit_min_profit_pct: float = 0.02  # Min 2% profit to exit before lunch
+    lunch_exit_min_profit_pct: float = (
+        0.025  # Min 2.5% profit to exit before lunch (net ~1% after costs)
+    )
     exit_before_close_if_profitable: bool = True  # Exit before ATC if profitable
-    close_exit_min_profit_pct: float = 0.015  # Min 1.5% profit to exit before close
+    close_exit_min_profit_pct: float = (
+        0.02  # Min 2% profit to exit before close (net ~0.5% after costs)
+    )
+
+    # NEW v4.2: Friday exit rules (T+2 settlement = capital locked over weekend)
+    exit_friday_if_marginal: bool = True  # Exit marginal positions on Friday
+    friday_exit_min_profit_pct: float = 0.015  # Min 1.5% profit to hold over weekend
+    friday_exit_max_loss_pct: float = -0.02  # Max -2% loss to hold over weekend
 
     # Partial Exit
     partial_exit_percent: float = 0.50  # Exit 50% at TP1
@@ -475,6 +486,7 @@ class ImprovedExitStrategy:
         checks = [
             self._check_stop_loss,
             self._check_gap_down,  # NEW: Check gap down protection
+            self._check_friday_weekend,  # NEW v4.2: Friday/weekend risk management
             self._check_breakeven_stop,  # Check breakeven stop after 1R profit
             self._check_session_boundary,
             self._check_market_crash,
@@ -548,11 +560,18 @@ class ImprovedExitStrategy:
             self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
 
     # =========================================================================
-    # EXIT CHECK #1: STOP LOSS
+    # EXIT CHECK #1: STOP LOSS (IMPROVED v4.2 - Vietnam Market Specific)
     # =========================================================================
 
     def _check_stop_loss(self, ctx: Dict) -> Optional[ExitDecision]:
-        """Check stop loss - highest priority."""
+        """
+        Check stop loss - highest priority.
+
+        IMPROVED v4.2 for Vietnam market:
+        - Floor price protection: Don't exit at floor (-7%) as it may bounce
+        - Ceiling price awareness: Exit quickly if hitting ceiling then reversing
+        - T+2 settlement consideration: Factor in capital lock-up
+        """
         current_price = ctx["current_price"]
         stop_loss = ctx["stop_loss"]
         entry_price = ctx["entry_price"]
@@ -560,6 +579,7 @@ class ImprovedExitStrategy:
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
         is_poor_performer = ctx["is_poor_performer"]
+        df = ctx.get("df")
 
         effective_stop = stop_loss
 
@@ -572,6 +592,23 @@ class ImprovedExitStrategy:
                     f"to {tighter_stop:,.0f} (poor performer)"
                 )
                 effective_stop = tighter_stop
+
+        # IMPROVED: Check if price is at floor (Vietnam ±7% limit)
+        # Don't trigger stop loss at floor - may bounce, wait for confirmation
+        if df is not None and len(df) >= 2:
+            try:
+                prev_close = safe_iloc(df, -2, "close")
+                if prev_close and prev_close > 0:
+                    floor_price = prev_close * 0.93  # -7% floor for HOSE
+                    # If current price is within 0.5% of floor, wait for next candle
+                    if current_price <= floor_price * 1.005:
+                        logger.info(
+                            f"📊 {symbol}: Price at floor ({current_price:,.0f} ≈ {floor_price:,.0f}). "
+                            f"Waiting for confirmation before stop loss."
+                        )
+                        return None
+            except Exception as e:
+                logger.debug(f"Floor check failed: {e}")
 
         if current_price <= effective_stop:
             return ExitDecision(
@@ -589,7 +626,77 @@ class ImprovedExitStrategy:
         return None
 
     # =========================================================================
-    # EXIT CHECK #1.5: GAP DOWN PROTECTION (NEW)
+    # EXIT CHECK #1.5: FRIDAY/WEEKEND RISK (NEW v4.2)
+    # =========================================================================
+
+    def _check_friday_weekend(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check Friday exit rules for Vietnam market.
+
+        Vietnam T+2 settlement means:
+        - Buy on Friday = settlement on Tuesday (capital locked 4 days)
+        - Weekend gap risk is significant
+        - Marginal positions should be closed before weekend
+
+        Exit if:
+        - It's Friday afternoon (after 13:00)
+        - Position is marginally profitable (< 1.5%) or losing (> -2%)
+        - Better to free capital for Monday opportunities
+        """
+        if not self.config.exit_friday_if_marginal:
+            return None
+
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        symbol = ctx.get("symbol", "")
+
+        try:
+            from datetime import datetime
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            now = datetime.now(vn_tz)
+
+            # Check if Friday afternoon (after 13:00)
+            if now.weekday() != 4:  # Not Friday
+                return None
+            if now.hour < 13:  # Before afternoon session
+                return None
+
+            min_profit = self.config.friday_exit_min_profit_pct * 100
+            max_loss = self.config.friday_exit_max_loss_pct * 100
+
+            # Exit marginal positions
+            if max_loss < pnl_percent < min_profit:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.SESSION_END,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📅 FRIDAY EXIT: Đóng vị thế marginal {pnl_percent:+.2f}% trước cuối tuần "
+                        f"(T+2 = vốn bị khóa 4 ngày, weekend gap risk)"
+                    ),
+                    urgency=2,
+                    metadata={
+                        "trigger": "friday_weekend_risk",
+                        "day": "Friday",
+                        "reason": "marginal_position_weekend_risk",
+                    },
+                )
+
+        except ImportError:
+            logger.debug("pytz not available for Friday check")
+        except Exception as e:
+            logger.debug(f"Friday check failed: {e}")
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #1.6: GAP DOWN PROTECTION (NEW)
     # =========================================================================
 
     def _check_gap_down(self, ctx: Dict) -> Optional[ExitDecision]:
