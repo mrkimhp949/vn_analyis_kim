@@ -296,10 +296,10 @@ class TestConstantsUpdates:
             VN_LARGE_CAP_POSITION_MULT,
         )
 
-        # v4.0 LOWERED thresholds to capture more opportunities
-        assert VN_MIN_LIQUIDITY_VALUE == 500_000_000  # 500M (lowered from 1B)
-        assert VN_MID_CAP_LIQUIDITY_VALUE == 1_000_000_000  # 1B (lowered from 2B)
-        assert VN_LARGE_CAP_LIQUIDITY_VALUE == 3_000_000_000  # 3B (lowered from 5B)
+        # v5.0 RAISED thresholds for better risk management
+        assert VN_MIN_LIQUIDITY_VALUE == 2_000_000_000  # 2B (raised for safety)
+        assert VN_MID_CAP_LIQUIDITY_VALUE == 3_000_000_000  # 3B for mid caps
+        assert VN_LARGE_CAP_LIQUIDITY_VALUE == 5_000_000_000  # 5B for large caps
 
 
 if __name__ == "__main__":

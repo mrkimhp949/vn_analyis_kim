@@ -158,6 +158,43 @@ VN_SESSIONS = {
 # Sell proceeds available on T+2
 VN_SETTLEMENT_DAYS = 2
 
+# =============================================================================
+# VIETNAM HOLIDAY CALENDAR
+# =============================================================================
+
+# Vietnam public holidays (fixed dates)
+# Note: Lunar calendar holidays (Tết) vary each year
+VIETNAM_FIXED_HOLIDAYS = {
+    # New Year's Day
+    (1, 1): "New Year's Day",
+    # Reunification Day
+    (4, 30): "Reunification Day",
+    # International Workers' Day
+    (5, 1): "International Workers' Day",
+    # National Day
+    (9, 2): "National Day",
+}
+
+# Lunar calendar holidays - Tết Nguyên Đán (Vietnamese New Year)
+# These dates change each year based on lunar calendar
+# Format: year -> list of (month, day) tuples for Tết holidays
+VIETNAM_TET_HOLIDAYS = {
+    2024: [(2, 8), (2, 9), (2, 10), (2, 11), (2, 12), (2, 13), (2, 14)],  # Year of Dragon
+    2025: [(1, 27), (1, 28), (1, 29), (1, 30), (1, 31), (2, 1), (2, 2)],  # Year of Snake
+    2026: [(2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (2, 20), (2, 21)],  # Year of Horse
+    2027: [(2, 5), (2, 6), (2, 7), (2, 8), (2, 9), (2, 10), (2, 11)],  # Year of Goat
+    2028: [(1, 25), (1, 26), (1, 27), (1, 28), (1, 29), (1, 30), (1, 31)],  # Year of Monkey
+}
+
+# Hung Kings' Commemoration Day (10th day of 3rd lunar month)
+VIETNAM_HUNG_KINGS_DAY = {
+    2024: (4, 18),
+    2025: (4, 7),
+    2026: (4, 26),
+    2027: (4, 15),
+    2028: (4, 4),
+}
+
 # Foreign ownership limits by sector (approximate)
 VN_FOREIGN_LIMITS = {
     "BANKING": 0.30,  # 30% max foreign ownership
@@ -669,17 +706,22 @@ class VietnamMarketValidator:
 
     def __init__(
         self,
-        min_liquidity_value: float = 2_000_000_000,
+        min_liquidity_value: float = None,
         max_position_pct_of_volume: float = 0.05,
     ):
         """
         Initialize validator.
 
         Args:
-            min_liquidity_value: Minimum daily liquidity in VND (default: 2B)
+            min_liquidity_value: Minimum daily liquidity in VND (default: from constants)
             max_position_pct_of_volume: Max position as % of avg volume (default: 5%)
         """
-        self.min_liquidity_value = min_liquidity_value
+        # Import here to avoid circular imports
+        from src.config.constants import VN_MIN_LIQUIDITY_VALUE
+
+        self.min_liquidity_value = (
+            min_liquidity_value if min_liquidity_value is not None else VN_MIN_LIQUIDITY_VALUE
+        )
         self.max_position_pct_of_volume = max_position_pct_of_volume
 
     def check_liquidity_requirements(self, df, symbol: str) -> Tuple[bool, str]:
@@ -894,6 +936,111 @@ if __name__ == "__main__":
 # =============================================================================
 
 
+def get_vietnam_holidays(year: int) -> set:
+    """
+    Get all Vietnam market holidays for a given year.
+
+    Includes:
+    - Fixed holidays (New Year, 30/4, 1/5, 2/9)
+    - Tết Nguyên Đán (Lunar New Year)
+    - Hung Kings' Commemoration Day
+
+    Args:
+        year: Year to get holidays for
+
+    Returns:
+        Set of datetime.date objects for holidays
+    """
+    from datetime import date
+
+    holidays = set()
+
+    # Fixed holidays
+    for (month, day), name in VIETNAM_FIXED_HOLIDAYS.items():
+        try:
+            holiday_date = date(year, month, day)
+            holidays.add(holiday_date)
+
+            # If holiday falls on weekend, add substitute day (Monday)
+            if holiday_date.weekday() == 5:  # Saturday
+                holidays.add(holiday_date + timedelta(days=2))
+            elif holiday_date.weekday() == 6:  # Sunday
+                holidays.add(holiday_date + timedelta(days=1))
+        except ValueError:
+            pass
+
+    # Tết holidays
+    if year in VIETNAM_TET_HOLIDAYS:
+        for month, day in VIETNAM_TET_HOLIDAYS[year]:
+            try:
+                holidays.add(date(year, month, day))
+            except ValueError:
+                pass
+
+    # Hung Kings' Day
+    if year in VIETNAM_HUNG_KINGS_DAY:
+        month, day = VIETNAM_HUNG_KINGS_DAY[year]
+        try:
+            holidays.add(date(year, month, day))
+        except ValueError:
+            pass
+
+    return holidays
+
+
+def is_vietnam_trading_day(check_date: datetime) -> bool:
+    """
+    Check if a date is a Vietnam market trading day.
+
+    Args:
+        check_date: Date to check
+
+    Returns:
+        True if trading day, False if weekend or holiday
+    """
+    if isinstance(check_date, datetime):
+        check_date = check_date.date()
+
+    # Weekend check
+    if check_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+
+    # Holiday check
+    holidays = get_vietnam_holidays(check_date.year)
+    if check_date in holidays:
+        return False
+
+    return True
+
+
+def get_next_trading_day(from_date: datetime, days_ahead: int = 1) -> datetime:
+    """
+    Get the next N trading days from a given date.
+
+    Skips weekends and Vietnam holidays.
+
+    Args:
+        from_date: Starting date
+        days_ahead: Number of trading days to advance
+
+    Returns:
+        Next trading day datetime
+    """
+    if isinstance(from_date, datetime):
+        current = from_date
+    else:
+        current = datetime.combine(from_date, datetime.min.time())
+
+    trading_days_counted = 0
+
+    while trading_days_counted < days_ahead:
+        current = current + timedelta(days=1)
+        if is_vietnam_trading_day(current):
+            trading_days_counted += 1
+
+    return current
+
+
 def calculate_settlement_date(trade_date: datetime, is_buy: bool = True) -> datetime:
     """
     Calculate settlement date for Vietnam T+2 cycle.
@@ -902,20 +1049,19 @@ def calculate_settlement_date(trade_date: datetime, is_buy: bool = True) -> date
     - Buy: Pay on T+2
     - Sell: Receive proceeds on T+2
 
-    Note: Weekends and holidays are skipped.
+    IMPROVED: Now properly accounts for weekends AND Vietnam holidays
+    (Tết, 30/4, 1/5, 2/9, Hung Kings' Day)
 
     Args:
         trade_date: Date of trade execution
         is_buy: True for buy orders, False for sell orders
 
     Returns:
-        Settlement date
+        Settlement date (T+2 trading days)
     """
-    from pandas.tseries.offsets import BDay
-
-    # T+2 business days
-    settlement = trade_date + BDay(2)
-    return settlement.to_pydatetime() if hasattr(settlement, "to_pydatetime") else settlement
+    # Use Vietnam-aware trading day calculation
+    settlement = get_next_trading_day(trade_date, days_ahead=VN_SETTLEMENT_DAYS)
+    return settlement
 
 
 def calculate_available_cash_for_trading(
@@ -1722,3 +1868,198 @@ def get_vietnam_market_validator() -> VietnamMarketValidator:
     if _validator_instance is None:
         _validator_instance = VietnamMarketValidator()
     return _validator_instance
+
+
+# =============================================================================
+# NEW v5.0: MARKET HALT DETECTION (Vietnam Market Circuit Breaker)
+# =============================================================================
+
+# Vietnam market circuit breaker thresholds
+VN_MARKET_CIRCUIT_BREAKER = {
+    "LEVEL_1": -5.0,  # -5% VNINDEX: Warning, increased monitoring
+    "LEVEL_2": -7.0,  # -7% VNINDEX: Trading halt 15 minutes
+    "LEVEL_3": -10.0,  # -10% VNINDEX: Trading halt 30 minutes, may close early
+}
+
+
+def check_market_halt_status(
+    vnindex_change_pct: float,
+    current_time: Optional[time] = None,
+) -> Dict:
+    """
+    Check if Vietnam market circuit breaker is triggered.
+
+    Vietnam market has circuit breaker rules:
+    - Level 1 (-5%): Warning, increased monitoring
+    - Level 2 (-7%): Trading halt 15 minutes
+    - Level 3 (-10%): Trading halt 30 minutes, may close early
+
+    Args:
+        vnindex_change_pct: VNINDEX change percentage (e.g., -5.0 for -5%)
+        current_time: Current time (optional)
+
+    Returns:
+        Dict with halt status, level, message, and trading_allowed
+    """
+    result = {
+        "halt_triggered": False,
+        "halt_level": 0,
+        "halt_duration_minutes": 0,
+        "trading_allowed": True,
+        "message": "✅ Market trading normally",
+        "vnindex_change": vnindex_change_pct,
+    }
+
+    if vnindex_change_pct >= VN_MARKET_CIRCUIT_BREAKER["LEVEL_1"]:
+        # Normal trading
+        return result
+
+    if vnindex_change_pct >= VN_MARKET_CIRCUIT_BREAKER["LEVEL_2"]:
+        # Level 1: Warning
+        result["halt_level"] = 1
+        result["message"] = (
+            f"⚠️ MARKET WARNING: VNINDEX {vnindex_change_pct:+.2f}% - "
+            f"Approaching circuit breaker level. Reduce position sizes."
+        )
+        return result
+
+    if vnindex_change_pct >= VN_MARKET_CIRCUIT_BREAKER["LEVEL_3"]:
+        # Level 2: Trading halt 15 minutes
+        result["halt_triggered"] = True
+        result["halt_level"] = 2
+        result["halt_duration_minutes"] = 15
+        result["trading_allowed"] = False
+        result["message"] = (
+            f"🚫 MARKET HALT LEVEL 2: VNINDEX {vnindex_change_pct:+.2f}% - "
+            f"Trading halted for 15 minutes. DO NOT place orders."
+        )
+        return result
+
+    # Level 3: Trading halt 30 minutes, may close early
+    result["halt_triggered"] = True
+    result["halt_level"] = 3
+    result["halt_duration_minutes"] = 30
+    result["trading_allowed"] = False
+    result["message"] = (
+        f"🚨 MARKET HALT LEVEL 3: VNINDEX {vnindex_change_pct:+.2f}% - "
+        f"Trading halted for 30 minutes. Market may close early. "
+        f"CRITICAL: Review all positions immediately."
+    )
+    return result
+
+
+def is_trading_allowed(vnindex_change_pct: float) -> Tuple[bool, str]:
+    """
+    Quick check if trading is allowed based on market circuit breaker.
+
+    Args:
+        vnindex_change_pct: VNINDEX change percentage
+
+    Returns:
+        Tuple of (is_allowed, reason)
+    """
+    status = check_market_halt_status(vnindex_change_pct)
+    return status["trading_allowed"], status["message"]
+
+
+# =============================================================================
+# NEW v5.0: UNUSUAL TRADING ACTIVITY DETECTION
+# =============================================================================
+
+
+def detect_unusual_activity(
+    df,
+    symbol: str,
+    volume_threshold: float = 5.0,
+    price_threshold: float = 5.0,
+) -> Dict:
+    """
+    Detect unusual trading activity that may indicate manipulation.
+
+    Checks for:
+    1. Abnormal volume spike (> 5x average)
+    2. Abnormal price movement without news
+    3. Wash trading patterns (high volume, low price change)
+    4. End-of-day manipulation patterns
+
+    Args:
+        df: DataFrame with OHLCV data
+        symbol: Stock symbol
+        volume_threshold: Volume spike threshold (default 5x)
+        price_threshold: Price change threshold (default 5%)
+
+    Returns:
+        Dict with detection results
+    """
+    result = {
+        "unusual_detected": False,
+        "warnings": [],
+        "risk_level": "NORMAL",  # NORMAL, WARNING, HIGH, CRITICAL
+        "trading_recommendation": "OK",
+    }
+
+    if df is None or len(df) < 20:
+        return result
+
+    try:
+        # Calculate metrics
+        current_volume = df["volume"].iloc[-1]
+        avg_volume = df["volume"].tail(20).mean()
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+
+        current_close = df["close"].iloc[-1]
+        prev_close = df["close"].iloc[-2] if len(df) >= 2 else current_close
+        price_change_pct = (
+            abs((current_close - prev_close) / prev_close * 100) if prev_close > 0 else 0
+        )
+
+        # Check 1: Abnormal volume spike
+        if volume_ratio > volume_threshold:
+            result["warnings"].append(
+                f"🚨 Volume spike: {volume_ratio:.1f}x average (threshold: {volume_threshold}x)"
+            )
+            result["unusual_detected"] = True
+
+        # Check 2: Wash trading pattern (high volume, low price change)
+        if volume_ratio > 3.0 and price_change_pct < 1.0:
+            result["warnings"].append(
+                f"⚠️ Possible wash trading: Volume {volume_ratio:.1f}x but price only {price_change_pct:.2f}%"
+            )
+            result["unusual_detected"] = True
+
+        # Check 3: Abnormal price movement
+        if price_change_pct > price_threshold:
+            result["warnings"].append(
+                f"🚨 Abnormal price movement: {price_change_pct:.2f}% (threshold: {price_threshold}%)"
+            )
+            result["unusual_detected"] = True
+
+        # Check 4: Intraday range check
+        if "high" in df.columns and "low" in df.columns:
+            day_high = df["high"].iloc[-1]
+            day_low = df["low"].iloc[-1]
+            intraday_range = (day_high - day_low) / day_low * 100 if day_low > 0 else 0
+
+            if intraday_range > 10.0:  # > 10% intraday range
+                result["warnings"].append(
+                    f"⚠️ High intraday volatility: {intraday_range:.2f}% range"
+                )
+                result["unusual_detected"] = True
+
+        # Determine risk level
+        warning_count = len(result["warnings"])
+        if warning_count >= 3:
+            result["risk_level"] = "CRITICAL"
+            result["trading_recommendation"] = "AVOID"
+        elif warning_count >= 2:
+            result["risk_level"] = "HIGH"
+            result["trading_recommendation"] = "CAUTION"
+        elif warning_count >= 1:
+            result["risk_level"] = "WARNING"
+            result["trading_recommendation"] = "REDUCE_SIZE"
+
+        return result
+
+    except Exception as e:
+        logger.warning(f"Unusual activity detection error for {symbol}: {e}")
+        return result

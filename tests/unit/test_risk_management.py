@@ -129,12 +129,14 @@ class TestEnhancedRiskManager:
 
     @patch("src.data.vnindex_cache.get_cached_vnindex")
     def test_market_regime_factor_error_handling(self, mock_get_vnindex, risk_manager):
-        """Test market regime factor returns default on error"""
+        """Test market regime factor returns conservative default on error"""
         # Mock get_cached_vnindex to raise exception
         mock_get_vnindex.side_effect = Exception("Data not available")
 
         factor = risk_manager._calculate_market_regime_factor()
-        assert factor == 1.0  # Default value
+        # IMPROVED v4.2: Conservative default (0.5) instead of neutral (1.0)
+        # Tránh risk trade trong bear market với bull position size
+        assert factor == 0.5  # Conservative default value
 
     def test_enhanced_limit_orders_buy_high_confidence(self, risk_manager):
         """Test enhanced limit orders for BUY with high confidence"""

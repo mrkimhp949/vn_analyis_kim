@@ -98,6 +98,7 @@ class EnhancedRiskManager(RiskManager):
         signal="BUY",
         market_volatility=0.02,
         market_regime=None,
+        force_regime_refresh: bool = False,
     ):
         """
         Position sizing nâng cao với nhiều yếu tố điều chỉnh
@@ -110,6 +111,8 @@ class EnhancedRiskManager(RiskManager):
             signal: 'BUY' hoặc 'SELL'
             market_volatility: Độ biến động thị trường (VIX proxy)
             market_regime: Dict từ regime_detector (IMPROVEMENT #4)
+            force_regime_refresh: Force refresh VNINDEX cache trước khi detect regime
+                                  (nên dùng = True cho lệnh đầu tiên của trading session)
         """
         # Base position size từ class cha
         base_position = super().calculate_position_size(price, atr, confidence, signal)
@@ -134,7 +137,9 @@ class EnhancedRiskManager(RiskManager):
 
         # ĐIỀU CHỈNH 3: Market Regime (IMPROVEMENT #4 - Tích hợp với regime_detector)
         if self.market_regime_adjustment:
-            regime_factor = self._calculate_market_regime_factor(market_regime)
+            regime_factor = self._calculate_market_regime_factor(
+                market_regime, force_refresh=force_regime_refresh
+            )
             base_position["shares"] = int(base_position["shares"] * regime_factor)
             base_position["value"] = base_position["shares"] * price
             base_position["max_loss"] = base_position["risk_per_share"] * base_position["shares"]
@@ -206,7 +211,9 @@ class EnhancedRiskManager(RiskManager):
         else:
             return 0.3  # Very low confidence -> giảm mạnh
 
-    def _calculate_market_regime_factor(self, market_regime: dict = None):
+    def _calculate_market_regime_factor(
+        self, market_regime: dict = None, force_refresh: bool = False
+    ):
         """
         Điều chỉnh theo regime thị trường từ regime_detector.py
 
@@ -218,19 +225,32 @@ class EnhancedRiskManager(RiskManager):
         - Foreign flow is critical indicator for VN market
         - T+2 settlement affects position sizing in volatile regimes
 
+        IMPROVED v4.2: Better cache handling and conservative fallback
+        - Force refresh option để đảm bảo data fresh trước trading session
+        - Conservative fallback (0.5) thay vì neutral (1.0) khi không detect được
+        - Tránh risk trade trong bear market với bull position size
+
         Args:
             market_regime: Dict từ regime_detector.detect() hoặc None để tự detect
+            force_refresh: Force refresh VNIndex cache (dùng trước trading session)
 
         Returns:
             float: Factor điều chỉnh position size (0.25 - 1.15)
         """
+        # Conservative default - giảm 50% position nếu không detect được regime
+        # Tránh risk trade trong bear market với bull position size
+        CONSERVATIVE_DEFAULT_FACTOR = 0.5
+
         try:
             # Nếu không có market_regime, tự detect
             if market_regime is None:
                 from src.market.regime_detector import get_regime_detector
                 from src.data.vnindex_cache import get_cached_vnindex
 
-                vnindex_data = get_cached_vnindex(lookback=250)
+                # IMPROVED v4.2: Force refresh để đảm bảo data không stale
+                # Đặc biệt quan trọng trước mỗi trading session
+                vnindex_data = get_cached_vnindex(lookback=250, force_refresh=force_refresh)
+
                 if vnindex_data is not None and len(vnindex_data) >= 200:
                     detector = get_regime_detector()
                     regime_result = detector.detect(vnindex_data)
@@ -240,9 +260,21 @@ class EnhancedRiskManager(RiskManager):
                         "tradeable": regime_result.tradeable,
                         "components": regime_result.components,
                     }
+                else:
+                    # IMPROVED v4.2: Log warning khi data không đủ
+                    bars = len(vnindex_data) if vnindex_data is not None else 0
+                    print(
+                        f"  ⚠️ VNINDEX data insufficient ({bars} bars), "
+                        f"using conservative factor: {CONSERVATIVE_DEFAULT_FACTOR}"
+                    )
 
+            # IMPROVED v4.2: Conservative fallback thay vì neutral
             if market_regime is None:
-                return 1.0  # Default nếu không detect được
+                print(
+                    f"  ⚠️ Cannot detect market regime, "
+                    f"using conservative factor: {CONSERVATIVE_DEFAULT_FACTOR}"
+                )
+                return CONSERVATIVE_DEFAULT_FACTOR
 
             regime = market_regime.get("regime", "SIDEWAYS")
             confidence = market_regime.get("confidence", 50)
@@ -321,11 +353,17 @@ class EnhancedRiskManager(RiskManager):
             return factor
 
         except ImportError as e:
-            print(f"  ⚠️ Regime detector not available: {e}")
-            return 1.0
+            print(
+                f"  ⚠️ Regime detector not available: {e}, "
+                f"using conservative factor: {CONSERVATIVE_DEFAULT_FACTOR}"
+            )
+            return CONSERVATIVE_DEFAULT_FACTOR
         except Exception as e:
-            print(f"  ⚠️ Error calculating regime factor: {e}")
-            return 1.0
+            print(
+                f"  ⚠️ Error calculating regime factor: {e}, "
+                f"using conservative factor: {CONSERVATIVE_DEFAULT_FACTOR}"
+            )
+            return CONSERVATIVE_DEFAULT_FACTOR
 
     def suggest_enhanced_limit_orders(self, current_price, atr, signal="BUY", confidence=50):
         """Đề xuất limit orders nâng cao với Vietnam tick size validation"""
@@ -401,3 +439,91 @@ class EnhancedRiskManager(RiskManager):
         except Exception as e:
             print(f"  ⚠️ Session multiplier error: {e}")
             return 1.0
+
+    def prepare_trading_session(self) -> dict:
+        """
+        Prepare for a new trading session by refreshing market data.
+
+        IMPROVED v4.2: Force refresh VNINDEX cache và detect regime mới
+        Nên gọi function này trước khi bắt đầu trading session để:
+        1. Đảm bảo VNINDEX data không stale
+        2. Detect market regime với data mới nhất
+        3. Tránh risk trade trong bear market với bull position size
+
+        Returns:
+            dict: Session preparation result với regime info
+        """
+        from src.data.vnindex_cache import (
+            get_cached_vnindex,
+            invalidate_vnindex_cache,
+            get_vnindex_cache_info,
+        )
+
+        result = {
+            "success": False,
+            "regime": None,
+            "regime_factor": 0.5,  # Conservative default
+            "vnindex_bars": 0,
+            "message": "",
+        }
+
+        try:
+            # Step 1: Invalidate old cache
+            invalidate_vnindex_cache()
+            print("🔄 Invalidated old VNINDEX cache")
+
+            # Step 2: Force refresh VNINDEX data
+            vnindex_data = get_cached_vnindex(lookback=250, force_refresh=True)
+
+            if vnindex_data is None or len(vnindex_data) < 200:
+                bars = len(vnindex_data) if vnindex_data is not None else 0
+                result["message"] = (
+                    f"VNINDEX data insufficient ({bars} bars), " "using conservative mode"
+                )
+                result["vnindex_bars"] = bars
+                print(f"⚠️ {result['message']}")
+                return result
+
+            result["vnindex_bars"] = len(vnindex_data)
+
+            # Step 3: Detect market regime with fresh data
+            from src.market.regime_detector import get_regime_detector
+
+            detector = get_regime_detector()
+            regime_result = detector.detect(vnindex_data)
+
+            market_regime = {
+                "regime": regime_result.regime,
+                "confidence": regime_result.confidence,
+                "tradeable": regime_result.tradeable,
+                "components": regime_result.components,
+            }
+
+            # Step 4: Calculate regime factor
+            regime_factor = self._calculate_market_regime_factor(market_regime)
+
+            result["success"] = True
+            result["regime"] = market_regime
+            result["regime_factor"] = regime_factor
+            result["message"] = (
+                f"Session prepared: {regime_result.regime} "
+                f"(conf: {regime_result.confidence:.0f}%), "
+                f"factor: {regime_factor:.2f}"
+            )
+
+            print(f"✅ {result['message']}")
+
+            # Step 5: Log cache info
+            cache_info = get_vnindex_cache_info()
+            print(f"📦 VNINDEX cache: {cache_info['bars']} bars, TTL: {cache_info['ttl_seconds']}s")
+
+            return result
+
+        except ImportError as e:
+            result["message"] = f"Module not available: {e}"
+            print(f"⚠️ {result['message']}")
+            return result
+        except Exception as e:
+            result["message"] = f"Session preparation failed: {e}"
+            print(f"⚠️ {result['message']}")
+            return result

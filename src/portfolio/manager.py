@@ -78,6 +78,7 @@ class PortfolioManager:
         This ensures:
         1. Global circuit breaker tracks daily P&L and consecutive losses
         2. Per-symbol circuit breaker tracks symbol-specific performance
+        3. Alert when approaching thresholds (v4 improvement)
 
         Args:
             symbol: Stock symbol
@@ -90,6 +91,10 @@ class PortfolioManager:
             try:
                 circuit_breaker = get_circuit_breaker()
                 circuit_breaker.record_trade(pnl)
+
+                # IMPROVEMENT v4: Alert when approaching thresholds
+                self._check_circuit_breaker_thresholds(circuit_breaker, symbol)
+
                 logger.debug(
                     f"📊 Recorded to circuit breaker: {symbol} PnL={pnl:+,.0f} "
                     f"(consecutive_losses={circuit_breaker.stats.get('consecutive_losses', 0)})"
@@ -107,6 +112,62 @@ class PortfolioManager:
                 )
             except Exception as e:
                 logger.warning(f"⚠️ Failed to record to per-symbol circuit breaker: {e}")
+
+    def _check_circuit_breaker_thresholds(self, circuit_breaker, symbol: str):
+        """
+        IMPROVEMENT v4: Check and alert when approaching circuit breaker thresholds.
+
+        Alerts at 70% and 90% of thresholds to give early warning.
+        """
+        try:
+            stats = circuit_breaker.get_daily_stats()
+            consecutive_losses = circuit_breaker.stats.get("consecutive_losses", 0)
+            max_consecutive = circuit_breaker.max_consecutive_losses
+            max_trades = circuit_breaker.max_trades_per_day
+
+            # Alert 1: Consecutive losses approaching limit
+            if consecutive_losses >= max_consecutive - 1:  # 1 away from limit
+                logger.warning(
+                    f"🚨 ALERT: {consecutive_losses}/{max_consecutive} consecutive losses! "
+                    f"Circuit breaker sẽ kích hoạt sau 1 lệnh thua nữa."
+                )
+            elif consecutive_losses >= max_consecutive * 0.7:  # 70% of limit
+                logger.warning(
+                    f"⚠️ WARNING: {consecutive_losses}/{max_consecutive} consecutive losses. "
+                    f"Cân nhắc giảm position size."
+                )
+
+            # Alert 2: Trade count approaching limit
+            trades_today = stats.trades_count
+            if trades_today >= max_trades - 1:  # 1 away from limit
+                logger.warning(
+                    f"🚨 ALERT: {trades_today}/{max_trades} trades today! "
+                    f"Chỉ còn 1 lệnh trước khi circuit breaker kích hoạt."
+                )
+            elif trades_today >= max_trades * 0.8:  # 80% of limit
+                logger.info(
+                    f"📊 INFO: {trades_today}/{max_trades} trades today. "
+                    f"Còn {max_trades - trades_today} lệnh."
+                )
+
+            # Alert 3: Daily loss approaching limit
+            if circuit_breaker.total_capital > 0:
+                daily_loss_pct = stats.total_loss / circuit_breaker.total_capital
+                max_loss_pct = circuit_breaker.max_loss_per_day_pct
+
+                if daily_loss_pct >= max_loss_pct * 0.9:  # 90% of limit
+                    logger.warning(
+                        f"🚨 ALERT: Daily loss {daily_loss_pct:.2%} gần ngưỡng {max_loss_pct:.2%}! "
+                        f"Circuit breaker sắp kích hoạt."
+                    )
+                elif daily_loss_pct >= max_loss_pct * 0.7:  # 70% of limit
+                    logger.warning(
+                        f"⚠️ WARNING: Daily loss {daily_loss_pct:.2%} / {max_loss_pct:.2%}. "
+                        f"Cân nhắc dừng trading."
+                    )
+
+        except Exception as e:
+            logger.debug(f"Circuit breaker threshold check error: {e}")
 
     def get_positions(self) -> Dict:
         """Get all active positions (thread-safe)"""
@@ -261,10 +322,15 @@ class PortfolioManager:
         old_stop_loss = existing_pos.get("stop_loss")
         old_take_profit = existing_pos.get("take_profit")
 
-        # CRITICAL FIX #3: Improved DCA stop loss validation
-        # Calculate new stop loss: -7% below new avg price
-        default_stop_pct = 0.93  # -7%
+        # CRITICAL FIX #3: Improved DCA stop loss validation (v4)
+        # Stop loss thresholds
+        default_stop_pct = 0.93  # -7% default
+        min_stop_pct = 0.95  # -5% minimum (never closer than this)
+        floor_warning_pct = 0.94  # -6% warning zone (close to floor)
+
         new_stop_loss = new_avg_price * default_stop_pct
+        min_safe_stop = new_avg_price * min_stop_pct  # -5% minimum
+        floor_warning_level = new_avg_price * floor_warning_pct  # -6%
 
         # VALIDATION: Ensure stop loss is ALWAYS below new avg price
         # This is critical when DCA-ing into a falling stock
@@ -275,35 +341,48 @@ class PortfolioManager:
                 f"Recalculating to {new_stop_loss:,.0f}"
             )
             final_stop_loss = new_stop_loss
+        elif old_stop_loss and old_stop_loss > min_safe_stop:
+            # Old stop loss is too close to new avg price (within 5%)
+            # This is dangerous - easy to get stopped out
+            logger.warning(
+                f"⚠️ {symbol}: Old stop loss {old_stop_loss:,.0f} quá gần avg price {new_avg_price:,.0f} "
+                f"(chỉ {((new_avg_price - old_stop_loss) / new_avg_price * 100):.1f}%). "
+                f"Điều chỉnh xuống {new_stop_loss:,.0f} (-7%)"
+            )
+            final_stop_loss = new_stop_loss
         elif old_stop_loss and old_stop_loss > new_stop_loss:
-            # Old stop loss is valid but higher (less restrictive) - keep it
-            # But ensure it's still at least 3% below new avg price for safety
-            min_safe_stop = new_avg_price * 0.97  # -3% minimum
-            if old_stop_loss > min_safe_stop:
-                # Old stop is too close to new avg price - use new calculated stop
+            # Old stop loss is valid and higher - keep it but warn if in danger zone
+            final_stop_loss = old_stop_loss
+            if old_stop_loss > floor_warning_level:
                 logger.warning(
-                    f"⚠️ {symbol}: Old stop loss {old_stop_loss:,.0f} too close to new avg {new_avg_price:,.0f}. "
-                    f"Using {new_stop_loss:,.0f} for safety"
+                    f"⚠️ {symbol}: Stop loss {old_stop_loss:,.0f} trong vùng nguy hiểm "
+                    f"(gần floor -7%). Cân nhắc hạ xuống {new_stop_loss:,.0f}"
                 )
-                final_stop_loss = new_stop_loss
             else:
-                final_stop_loss = old_stop_loss
                 logger.info(
-                    f"🔒 {symbol}: Keeping existing stop loss {old_stop_loss:,.0f} "
-                    f"(valid and higher than new {new_stop_loss:,.0f})"
+                    f"🔒 {symbol}: Giữ stop loss {old_stop_loss:,.0f} "
+                    f"(valid và cao hơn {new_stop_loss:,.0f})"
                 )
         else:
             final_stop_loss = new_stop_loss
             logger.info(
-                f"📊 {symbol}: Updated stop loss to {final_stop_loss:,.0f} "
-                f"based on new avg price {new_avg_price:,.0f}"
+                f"📊 {symbol}: Cập nhật stop loss {final_stop_loss:,.0f} "
+                f"dựa trên avg price mới {new_avg_price:,.0f}"
             )
 
-        # Final validation: stop loss must be below entry price
-        if final_stop_loss >= new_avg_price:
-            final_stop_loss = new_avg_price * default_stop_pct
+        # Final validation: stop loss must be at least 5% below entry price
+        if final_stop_loss > min_safe_stop:
+            final_stop_loss = new_stop_loss
             logger.error(
-                f"🚨 {symbol}: Stop loss validation failed! Forcing to {final_stop_loss:,.0f}"
+                f"🚨 {symbol}: Stop loss quá gần! Bắt buộc điều chỉnh xuống {final_stop_loss:,.0f} (-7%)"
+            )
+
+        # Additional warning: check if stop loss is near Vietnam floor limit
+        floor_price = new_avg_price * 0.93  # Vietnam floor is -7%
+        if final_stop_loss <= floor_price * 1.01:  # Within 1% of floor
+            logger.warning(
+                f"🚨 {symbol}: Stop loss {final_stop_loss:,.0f} RẤT GẦN FLOOR {floor_price:,.0f}! "
+                f"Nếu giá chạm sàn, có thể không thoát được lệnh."
             )
 
         # Calculate new take profit: 15% above new avg price

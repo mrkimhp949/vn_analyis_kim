@@ -24,6 +24,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Callable
+import random
+import time
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -275,12 +278,49 @@ class BaseBroker(ABC):
         return account.total_equity if account else 0.0
 
 
+@dataclass
+class SimulationConfig:
+    """Configuration for realistic order simulation"""
+
+    # Slippage settings
+    enable_slippage: bool = True
+    slippage_min_pct: float = 0.001  # 0.1%
+    slippage_max_pct: float = 0.003  # 0.3%
+
+    # Partial fill settings
+    enable_partial_fills: bool = True
+    fill_batch_size: int = 100  # Fill in batches of 100 shares
+    partial_fill_probability: float = 0.3  # 30% chance of partial fill
+
+    # Latency settings
+    enable_latency: bool = True
+    latency_min_ms: int = 1000  # 1 second
+    latency_max_ms: int = 3000  # 3 seconds
+
+    # Market impact (for large orders)
+    enable_market_impact: bool = True
+    market_impact_threshold: int = 10000  # Orders > 10k shares
+    market_impact_factor: float = 0.001  # 0.1% per 10k shares
+
+
 class SimulatedBroker(BaseBroker):
     """
     Simulated broker for paper trading and testing
+
+    Features:
+    - Slippage simulation (±0.1-0.3% random)
+    - Partial fills (fill in batches of 100 shares)
+    - Order latency (1-3s delay before fill)
+    - Market impact for large orders
     """
 
-    def __init__(self, account_id: str = "PAPER", initial_cash: float = 100_000_000):  # 100M VND
+    def __init__(
+        self,
+        account_id: str = "PAPER",
+        initial_cash: float = 100_000_000,  # 100M VND
+        simulation_config: Optional[SimulationConfig] = None,
+        realistic_mode: bool = False,  # Enable all realistic features
+    ):
         super().__init__(account_id)
         self._cash = initial_cash
         self._initial_cash = initial_cash
@@ -288,6 +328,21 @@ class SimulatedBroker(BaseBroker):
         self._orders: Dict[str, Order] = {}
         self._order_counter = 0
         self._connected = True
+        self._pending_fills: List[Dict] = []  # For async partial fills
+
+        # Simulation config
+        if simulation_config:
+            self._sim_config = simulation_config
+        elif realistic_mode:
+            self._sim_config = SimulationConfig()  # All features enabled by default
+        else:
+            # Legacy mode - immediate fills, no slippage
+            self._sim_config = SimulationConfig(
+                enable_slippage=False,
+                enable_partial_fills=False,
+                enable_latency=False,
+                enable_market_impact=False,
+            )
 
     @property
     def broker_name(self) -> str:
@@ -374,58 +429,224 @@ class SimulatedBroker(BaseBroker):
 
         return order
 
-    def _simulate_fill(self, order: Order) -> None:
-        """Simulate order fill"""
-        # Update order status
+    def _calculate_slippage(self, order: Order) -> float:
+        """Calculate slippage based on order side and config"""
+        if not self._sim_config.enable_slippage:
+            return 0.0
+
+        slippage_pct = random.uniform(
+            self._sim_config.slippage_min_pct, self._sim_config.slippage_max_pct
+        )
+
+        # BUY orders get worse (higher) price, SELL orders get worse (lower) price
+        if order.side == OrderSide.BUY:
+            return slippage_pct
+        else:
+            return -slippage_pct
+
+    def _calculate_market_impact(self, order: Order) -> float:
+        """Calculate market impact for large orders"""
+        if not self._sim_config.enable_market_impact:
+            return 0.0
+
+        if order.quantity <= self._sim_config.market_impact_threshold:
+            return 0.0
+
+        # Impact increases with order size
+        size_multiplier = order.quantity / self._sim_config.market_impact_threshold
+        impact_pct = self._sim_config.market_impact_factor * size_multiplier
+
+        # BUY pushes price up, SELL pushes price down
+        if order.side == OrderSide.BUY:
+            return impact_pct
+        else:
+            return -impact_pct
+
+    def _get_fill_price(self, order: Order) -> float:
+        """Calculate realistic fill price with slippage and market impact"""
+        base_price = order.price
+
+        slippage = self._calculate_slippage(order)
+        market_impact = self._calculate_market_impact(order)
+
+        total_adjustment = slippage + market_impact
+        fill_price = base_price * (1 + total_adjustment)
+
+        # Round to valid price tick (Vietnam market: 10 VND for most stocks)
+        fill_price = round(fill_price / 10) * 10
+
+        if total_adjustment != 0:
+            logger.debug(
+                f"Price adjustment for {order.symbol}: "
+                f"slippage={slippage*100:.2f}%, impact={market_impact*100:.2f}%, "
+                f"base={base_price:,.0f} -> fill={fill_price:,.0f}"
+            )
+
+        return fill_price
+
+    def _simulate_fill(self, order: Order, async_mode: bool = False) -> None:
+        """
+        Simulate order fill with realistic behavior
+
+        Features:
+        - Slippage: ±0.1-0.3% random price adjustment
+        - Partial fills: Fill in batches of 100 shares
+        - Latency: 1-3s delay before fill
+        - Market impact: Additional slippage for large orders
+        """
+        # Simulate latency
+        if self._sim_config.enable_latency and not async_mode:
+            latency_ms = random.randint(
+                self._sim_config.latency_min_ms, self._sim_config.latency_max_ms
+            )
+            logger.debug(f"Simulating {latency_ms}ms latency for order {order.order_id}")
+            time.sleep(latency_ms / 1000.0)
+
+        # Calculate fill price with slippage and market impact
+        fill_price = self._get_fill_price(order)
+
+        # Determine fill quantity (partial vs full)
+        if (
+            self._sim_config.enable_partial_fills
+            and order.quantity > self._sim_config.fill_batch_size
+        ):
+            # Chance of partial fill
+            if random.random() < self._sim_config.partial_fill_probability:
+                # Fill in batches
+                fill_qty = self._sim_config.fill_batch_size
+                self._execute_partial_fill(order, fill_qty, fill_price)
+
+                # Schedule remaining fills
+                self._schedule_remaining_fills(order)
+                return
+
+        # Full fill
+        self._execute_full_fill(order, fill_price)
+
+    def _execute_partial_fill(self, order: Order, fill_qty: int, fill_price: float) -> None:
+        """Execute a partial fill"""
+        order.status = OrderStatus.PARTIAL
+        order.filled_quantity += fill_qty
+
+        # Weighted average fill price
+        if order.filled_quantity == fill_qty:
+            order.filled_price = fill_price
+        else:
+            prev_value = (order.filled_quantity - fill_qty) * order.filled_price
+            new_value = fill_qty * fill_price
+            order.filled_price = (prev_value + new_value) / order.filled_quantity
+
+        order.updated_at = datetime.now()
+
+        # Update position and cash for this partial fill
+        self._update_position_and_cash(order.symbol, order.side, fill_qty, fill_price)
+
+        self._notify_order_update(order)
+
+        logger.info(
+            f"📝 Partial fill: {order.side.value} {fill_qty}/{order.quantity} {order.symbol} "
+            f"@ {fill_price:,.0f} VND (total filled: {order.filled_quantity})"
+        )
+
+    def _execute_full_fill(self, order: Order, fill_price: float) -> None:
+        """Execute a full fill (or complete remaining quantity)"""
+        remaining = order.remaining_quantity
+
+        # Update weighted average price
+        if order.filled_quantity > 0:
+            prev_value = order.filled_quantity * order.filled_price
+            new_value = remaining * fill_price
+            order.filled_price = (prev_value + new_value) / order.quantity
+        else:
+            order.filled_price = fill_price
+
         order.status = OrderStatus.FILLED
         order.filled_quantity = order.quantity
-        order.filled_price = order.price
         order.filled_at = datetime.now()
         order.updated_at = datetime.now()
 
         # Update position and cash
-        if order.side == OrderSide.BUY:
-            self._cash -= order.quantity * order.price
+        self._update_position_and_cash(order.symbol, order.side, remaining, fill_price)
 
-            if order.symbol in self._positions:
-                pos = self._positions[order.symbol]
-                total_qty = pos.quantity + order.quantity
-                total_cost = pos.cost_basis + (order.quantity * order.price)
-                pos.quantity = total_qty
-                pos.avg_price = total_cost / total_qty
-                pos.cost_basis = total_cost
-            else:
-                self._positions[order.symbol] = Position(
-                    symbol=order.symbol,
-                    quantity=order.quantity,
-                    avg_price=order.price,
-                    market_price=order.price,
-                    cost_basis=order.quantity * order.price,
-                    market_value=order.quantity * order.price,
-                    available_quantity=order.quantity,
-                    account_id=self.account_id,
-                )
-
-        else:  # SELL
-            self._cash += order.quantity * order.price
-
-            if order.symbol in self._positions:
-                pos = self._positions[order.symbol]
-                pos.quantity -= order.quantity
-                pos.realized_pnl += (order.price - pos.avg_price) * order.quantity
-
-                if pos.quantity <= 0:
-                    del self._positions[order.symbol]
-                else:
-                    pos.cost_basis = pos.quantity * pos.avg_price
-
-        # Notify callbacks
         self._notify_order_update(order)
+
+        slippage_info = ""
+        if order.filled_price != order.price:
+            slippage_pct = (order.filled_price - order.price) / order.price * 100
+            slippage_info = f" (slippage: {slippage_pct:+.2f}%)"
 
         logger.info(
             f"📝 Order filled: {order.side.value} {order.quantity} {order.symbol} "
-            f"@ {order.price:,.0f} VND"
+            f"@ {order.filled_price:,.0f} VND{slippage_info}"
         )
+
+    def _update_position_and_cash(
+        self, symbol: str, side: OrderSide, quantity: int, price: float
+    ) -> None:
+        """Update position and cash for a fill"""
+        if side == OrderSide.BUY:
+            self._cash -= quantity * price
+
+            if symbol in self._positions:
+                pos = self._positions[symbol]
+                total_qty = pos.quantity + quantity
+                total_cost = pos.cost_basis + (quantity * price)
+                pos.quantity = total_qty
+                pos.avg_price = total_cost / total_qty
+                pos.cost_basis = total_cost
+                pos.market_value = total_qty * pos.market_price
+            else:
+                self._positions[symbol] = Position(
+                    symbol=symbol,
+                    quantity=quantity,
+                    avg_price=price,
+                    market_price=price,
+                    cost_basis=quantity * price,
+                    market_value=quantity * price,
+                    available_quantity=quantity,
+                    account_id=self.account_id,
+                )
+        else:  # SELL
+            self._cash += quantity * price
+
+            if symbol in self._positions:
+                pos = self._positions[symbol]
+                pos.realized_pnl += (price - pos.avg_price) * quantity
+                pos.quantity -= quantity
+
+                if pos.quantity <= 0:
+                    del self._positions[symbol]
+                else:
+                    pos.cost_basis = pos.quantity * pos.avg_price
+                    pos.market_value = pos.quantity * pos.market_price
+
+    def _schedule_remaining_fills(self, order: Order) -> None:
+        """Schedule remaining fills for partial fill orders"""
+
+        def fill_remaining():
+            while order.remaining_quantity > 0 and order.status == OrderStatus.PARTIAL:
+                # Random delay between partial fills
+                delay = random.uniform(0.5, 2.0)
+                time.sleep(delay)
+
+                fill_qty = min(self._sim_config.fill_batch_size, order.remaining_quantity)
+                fill_price = self._get_fill_price(order)
+
+                if order.remaining_quantity <= fill_qty:
+                    self._execute_full_fill(order, fill_price)
+                else:
+                    self._execute_partial_fill(order, fill_qty, fill_price)
+
+        # Run in background thread
+        thread = threading.Thread(target=fill_remaining, daemon=True)
+        thread.start()
+
+    def process_pending_fills(self) -> None:
+        """Process any pending partial fills (for synchronous testing)"""
+        for order in self._orders.values():
+            if order.status == OrderStatus.PARTIAL:
+                fill_price = self._get_fill_price(order)
+                self._execute_full_fill(order, fill_price)
 
     def cancel_order(self, order_id: str) -> bool:
         if order_id in self._orders:
