@@ -26,7 +26,9 @@ import pandas as pd
 from src.config.exceptions import DataQualityError
 from src.config.trading_config import get_config
 from src.data.loader import load_data
-from src.ml.signals.enhanced import EnhancedMLSignalGenerator
+
+# Use V2 ML Signal Generator (improved accuracy 58-62%)
+from src.ml.signals.enhanced_v2 import EnhancedMLSignalGeneratorV2 as EnhancedMLSignalGenerator
 from src.portfolio.lock import get_portfolio_lock
 from src.strategies.entry_logic import ImprovedEntryLogic
 from src.strategies.position_sizing import EnhancedPositionSizer

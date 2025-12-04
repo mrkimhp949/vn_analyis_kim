@@ -53,7 +53,9 @@ def create_ml_signal_generator(config: TradingConfig):
         MLSignalGenerator or EnhancedMLSignalGenerator
     """
     try:
-        from src.ml.signals.enhanced import EnhancedMLSignalGenerator
+        from src.ml.signals.enhanced_v2 import (
+            EnhancedMLSignalGeneratorV2 as EnhancedMLSignalGenerator,
+        )
 
         generator = EnhancedMLSignalGenerator(config)
         logger.debug("✅ Created EnhancedMLSignalGenerator")

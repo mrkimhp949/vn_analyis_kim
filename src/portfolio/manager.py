@@ -1002,7 +1002,7 @@ class PortfolioManager:
     def get_detailed_analysis(self) -> str:
         """Get detailed portfolio analysis"""
         # CRITICAL: Force refresh prices from API (bypass cache) to get REAL-TIME prices
-        self.refresh_all_prices(lookback=10, force_refresh=True)
+        self.refresh_all_prices(lookback=60, force_refresh=True)
 
         # Re-fetch positions after price update
         positions = self.db.get_positions()
@@ -1057,7 +1057,7 @@ class PortfolioManager:
         """
         # Force refresh prices if requested
         if force_refresh:
-            self.refresh_all_prices(lookback=5, force_refresh=True)
+            self.refresh_all_prices(lookback=60, force_refresh=True)
 
         positions = self.db.get_positions()
         detail = {}
