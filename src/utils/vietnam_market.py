@@ -40,7 +40,8 @@ EXCHANGE_PRICE_LIMITS = {
     "UPCOM": 0.15,  # ±15%
 }
 
-# VN30 symbols (HOSE blue chips) - Updated 2024
+# VN30 symbols (HOSE blue chips) - Updated Q4 2024
+# Source: https://www.hsx.vn/Modules/Listed/Web/StockIndexView/188
 VN30_SYMBOLS = {
     "ACB",
     "BCM",
@@ -74,6 +75,49 @@ VN30_SYMBOLS = {
     "VRE",
 }
 
+# Sector mapping for VN30 stocks - for sector rotation analysis
+VN30_SECTORS = {
+    # Banking
+    "ACB": "BANKING",
+    "BID": "BANKING",
+    "CTG": "BANKING",
+    "HDB": "BANKING",
+    "MBB": "BANKING",
+    "SHB": "BANKING",
+    "SSB": "BANKING",
+    "STB": "BANKING",
+    "TCB": "BANKING",
+    "TPB": "BANKING",
+    "VCB": "BANKING",
+    "VIB": "BANKING",
+    "VPB": "BANKING",
+    # Real Estate
+    "BCM": "REAL_ESTATE",
+    "VHM": "REAL_ESTATE",
+    "VIC": "REAL_ESTATE",
+    "VRE": "REAL_ESTATE",
+    # Consumer
+    "MWG": "CONSUMER",
+    "MSN": "CONSUMER",
+    "SAB": "CONSUMER",
+    "VNM": "CONSUMER",
+    # Energy & Utilities
+    "GAS": "ENERGY",
+    "PLX": "ENERGY",
+    "POW": "UTILITIES",
+    # Industrial
+    "GVR": "INDUSTRIAL",
+    "HPG": "INDUSTRIAL",
+    # Insurance
+    "BVH": "INSURANCE",
+    # Technology
+    "FPT": "TECHNOLOGY",
+    # Securities
+    "SSI": "SECURITIES",
+    # Aviation
+    "VJC": "AVIATION",
+}
+
 # HNX30 symbols
 HNX30_SYMBOLS = {
     "SHS",
@@ -98,13 +142,33 @@ HNX30_SYMBOLS = {
     "VGC",
 }
 
-# Trading session times
+# Trading session times (Vietnam timezone: Asia/Ho_Chi_Minh, UTC+7)
 VN_SESSIONS = {
-    "ATO": (time(9, 0), time(9, 15)),
-    "MORNING": (time(9, 15), time(11, 30)),
-    "LUNCH": (time(11, 30), time(13, 0)),
-    "AFTERNOON": (time(13, 0), time(14, 30)),
-    "ATC": (time(14, 30), time(14, 45)),
+    "ATO": (time(9, 0), time(9, 15)),  # Opening auction - high volatility
+    "MORNING": (time(9, 15), time(11, 30)),  # Continuous trading AM
+    "LUNCH": (time(11, 30), time(13, 0)),  # Lunch break - no trading
+    "AFTERNOON": (time(13, 0), time(14, 30)),  # Continuous trading PM
+    "ATC": (time(14, 30), time(14, 45)),  # Closing auction - high volatility
+}
+
+# T+2.5 Settlement cycle specifics
+# Buy on T0 -> Settlement on T+2 (actually T+2.5 for cash)
+# Sell proceeds available on T+2
+VN_SETTLEMENT_DAYS = 2
+
+# Foreign ownership limits by sector (approximate)
+VN_FOREIGN_LIMITS = {
+    "BANKING": 0.30,  # 30% max foreign ownership
+    "SECURITIES": 0.49,  # 49% max
+    "INSURANCE": 0.49,  # 49% max
+    "REAL_ESTATE": 0.49,  # 49% max (varies by company)
+    "CONSUMER": 0.49,  # 49% max
+    "TECHNOLOGY": 1.00,  # 100% (no limit)
+    "INDUSTRIAL": 0.49,  # 49% max
+    "ENERGY": 0.49,  # 49% max
+    "UTILITIES": 0.49,  # 49% max
+    "AVIATION": 0.34,  # 34% max (special regulation)
+    "DEFAULT": 0.49,  # Default 49%
 }
 
 
@@ -469,6 +533,188 @@ def validate_order(
 
 
 # =============================================================================
+# VALIDATOR CLASS
+# =============================================================================
+
+
+class VietnamMarketValidator:
+    """
+    Validator class for Vietnam market rules.
+    Wraps standalone functions for easier integration.
+    """
+
+    def __init__(
+        self,
+        min_liquidity_value: float = 2_000_000_000,
+        max_position_pct_of_volume: float = 0.05,
+    ):
+        """
+        Initialize validator.
+
+        Args:
+            min_liquidity_value: Minimum daily liquidity in VND (default: 2B)
+            max_position_pct_of_volume: Max position as % of avg volume (default: 5%)
+        """
+        self.min_liquidity_value = min_liquidity_value
+        self.max_position_pct_of_volume = max_position_pct_of_volume
+
+    def check_liquidity_requirements(self, df, symbol: str) -> Tuple[bool, str]:
+        """
+        Check if stock meets liquidity requirements.
+
+        Args:
+            df: DataFrame with 'close' and 'volume' columns
+            symbol: Stock symbol
+
+        Returns:
+            Tuple of (is_liquid, message)
+        """
+        if df is None or df.empty or len(df) < 20:
+            return False, "Insufficient data for liquidity check"
+
+        try:
+            avg_volume = df["volume"].tail(20).mean()
+            avg_price = df["close"].tail(20).mean()
+            avg_liquidity = avg_volume * avg_price
+
+            if avg_liquidity < self.min_liquidity_value:
+                return (
+                    False,
+                    f"Insufficient liquidity: {avg_liquidity:,.0f} < {self.min_liquidity_value:,.0f}",
+                )
+
+            return True, f"Liquidity OK: {avg_liquidity:,.0f} VND"
+        except Exception as e:
+            return False, f"Liquidity check error: {e}"
+
+    def check_price_floor_ceiling(
+        self, current_price: float, reference_price: float, symbol: str
+    ) -> Tuple[bool, str]:
+        """
+        Check if current price is safely within floor/ceiling limits.
+
+        Args:
+            current_price: Current stock price
+            reference_price: Reference (previous close) price
+            symbol: Stock symbol
+
+        Returns:
+            Tuple of (is_safe, message)
+        """
+        limits = calculate_ceiling_floor(reference_price, symbol)
+        ceiling = limits["ceiling"]
+        floor = limits["floor"]
+
+        # Check if within 1% of ceiling or floor
+        ceiling_threshold = ceiling * 0.99
+        floor_threshold = floor * 1.01
+
+        if current_price >= ceiling_threshold:
+            return False, f"Price {current_price:,.0f} too close to CEILING {ceiling:,.0f}"
+        if current_price <= floor_threshold:
+            return False, f"Price {current_price:,.0f} too close to FLOOR {floor:,.0f}"
+
+        return True, "Price within safe range"
+
+    def validate_position_size_vs_volume(
+        self, shares: int, avg_volume: float, symbol: str
+    ) -> Tuple[bool, str]:
+        """
+        Validate position size against average volume.
+
+        Args:
+            shares: Number of shares to trade
+            avg_volume: Average daily volume
+            symbol: Stock symbol
+
+        Returns:
+            Tuple of (is_safe, message)
+        """
+        if avg_volume <= 0:
+            return False, "Invalid average volume"
+
+        position_pct = shares / avg_volume
+
+        if position_pct > self.max_position_pct_of_volume:
+            return (
+                False,
+                f"Position too large: {position_pct:.1%} of avg volume (max {self.max_position_pct_of_volume:.1%})",
+            )
+
+        return True, f"Position size OK: {position_pct:.1%} of avg volume"
+
+    def calculate_t2_cash_requirement(
+        self, pending_settlements: dict, new_order_value: float
+    ) -> Tuple[float, float]:
+        """
+        Calculate T+2 cash requirement for Vietnam market.
+
+        Args:
+            pending_settlements: Dict of pending settlements {date: value}
+            new_order_value: Value of new order
+
+        Returns:
+            Tuple of (total_t2_requirement, buffer_amount)
+        """
+        total_pending = sum(pending_settlements.values()) if pending_settlements else 0
+        total_t2 = total_pending + new_order_value
+        buffer = new_order_value * 0.10  # 10% buffer
+
+        return total_t2, buffer
+
+    def check_trading_session_timing(self, current_datetime: datetime) -> Tuple[bool, str]:
+        """
+        Check if current time is safe for trading.
+
+        Args:
+            current_datetime: Current datetime
+
+        Returns:
+            Tuple of (is_safe, message)
+        """
+        current_time = current_datetime.time()
+
+        # Avoid last 5 minutes of morning session (11:25-11:30)
+        from datetime import time as dt_time
+
+        if dt_time(11, 25) <= current_time <= dt_time(11, 30):
+            return False, "Avoid trading near morning session end (11:25-11:30)"
+
+        # Avoid last 5 minutes of afternoon session (14:25-14:30)
+        if dt_time(14, 25) <= current_time <= dt_time(14, 30):
+            return False, "Avoid trading near afternoon session end (14:25-14:30)"
+
+        # Check ATO/ATC sessions
+        is_auction, session, warning = check_ato_atc_session(current_time)
+        if is_auction:
+            return False, warning
+
+        return True, "Safe trading time"
+
+    def round_to_lot(self, shares: int) -> int:
+        """Round shares to valid lot size."""
+        return round_to_lot(shares)
+
+    def get_tick_size(self, price: float) -> int:
+        """Get tick size for price."""
+        return get_tick_size(price)
+
+    def round_to_tick(self, price: float, direction: str = "nearest") -> float:
+        """Round price to valid tick."""
+        return round_to_tick(price, direction)
+
+    def get_exchange(self, symbol: str) -> str:
+        """Get exchange for symbol."""
+        return get_exchange(symbol)
+
+    def validate_order(
+        self, symbol: str, shares: int, price: float, order_type: str = "LO"
+    ) -> Tuple[bool, Dict]:
+        """Validate order parameters."""
+        return validate_order(symbol, shares, price, order_type)
+
+
+# =============================================================================
 # TEST
 # =============================================================================
 
@@ -517,3 +763,354 @@ if __name__ == "__main__":
     print(f"  Corrected price: {details['corrected_price']}")
 
     print("\n✅ All tests completed!")
+
+
+# =============================================================================
+# IMPROVED: T+2 SETTLEMENT TRACKING
+# =============================================================================
+
+
+def calculate_settlement_date(trade_date: datetime, is_buy: bool = True) -> datetime:
+    """
+    Calculate settlement date for Vietnam T+2 cycle.
+
+    Vietnam uses T+2 settlement:
+    - Buy: Pay on T+2
+    - Sell: Receive proceeds on T+2
+
+    Note: Weekends and holidays are skipped.
+
+    Args:
+        trade_date: Date of trade execution
+        is_buy: True for buy orders, False for sell orders
+
+    Returns:
+        Settlement date
+    """
+    from pandas.tseries.offsets import BDay
+
+    # T+2 business days
+    settlement = trade_date + BDay(2)
+    return settlement.to_pydatetime() if hasattr(settlement, "to_pydatetime") else settlement
+
+
+def calculate_available_cash_for_trading(
+    total_cash: float, pending_settlements: list, reserve_buffer_pct: float = 0.10
+) -> float:
+    """
+    Calculate available cash considering T+2 pending settlements.
+
+    Args:
+        total_cash: Total cash in account
+        pending_settlements: List of pending settlement amounts
+        reserve_buffer_pct: Additional buffer to keep (default 10%)
+
+    Returns:
+        Available cash for new trades
+    """
+    total_pending = sum(pending_settlements)
+    reserve = total_cash * reserve_buffer_pct
+    available = total_cash - total_pending - reserve
+    return max(0, available)
+
+
+# =============================================================================
+# IMPROVED: INTRADAY VOLATILITY CHECK
+# =============================================================================
+
+
+def check_intraday_volatility(
+    current_price: float,
+    day_high: float,
+    day_low: float,
+    reference_price: float,
+    max_range_pct: float = 5.0,
+) -> Tuple[bool, str]:
+    """
+    Check if intraday volatility is too high for safe entry.
+
+    High intraday range indicates:
+    - Potential manipulation
+    - News-driven volatility
+    - Institutional activity
+
+    Args:
+        current_price: Current price
+        day_high: Day's high price
+        day_low: Day's low price
+        reference_price: Previous close (reference)
+        max_range_pct: Maximum acceptable intraday range (default 5%)
+
+    Returns:
+        Tuple of (is_safe, warning_message)
+    """
+    if day_high <= 0 or day_low <= 0 or reference_price <= 0:
+        return True, ""
+
+    intraday_range = ((day_high - day_low) / reference_price) * 100
+
+    if intraday_range > max_range_pct:
+        return (
+            False,
+            f"⚠️ High intraday volatility: {intraday_range:.1f}% range (max {max_range_pct}%)",
+        )
+
+    # Check if price is near day's extremes (potential reversal)
+    price_position = (
+        (current_price - day_low) / (day_high - day_low) if day_high != day_low else 0.5
+    )
+
+    if price_position > 0.95:
+        return True, "⚠️ Price near day high - potential resistance"
+    elif price_position < 0.05:
+        return True, "⚠️ Price near day low - potential support"
+
+    return True, ""
+
+
+# =============================================================================
+# IMPROVED: FOREIGN FLOW INTEGRATION
+# =============================================================================
+
+
+def get_sector_for_symbol(symbol: str) -> str:
+    """
+    Get sector classification for a symbol.
+
+    Args:
+        symbol: Stock symbol
+
+    Returns:
+        Sector name
+    """
+    symbol = symbol.upper().strip()
+    return VN30_SECTORS.get(symbol, "DEFAULT")
+
+
+def check_foreign_room(
+    symbol: str, current_foreign_pct: float, sector: Optional[str] = None
+) -> Tuple[bool, str]:
+    """
+    Check if foreign ownership room is available.
+
+    Important for:
+    - Foreign investors
+    - ETF tracking
+    - Liquidity assessment
+
+    Args:
+        symbol: Stock symbol
+        current_foreign_pct: Current foreign ownership percentage (0-1)
+        sector: Optional sector override
+
+    Returns:
+        Tuple of (has_room, message)
+    """
+    if sector is None:
+        sector = get_sector_for_symbol(symbol)
+
+    limit = VN_FOREIGN_LIMITS.get(sector, VN_FOREIGN_LIMITS["DEFAULT"])
+
+    if current_foreign_pct >= limit:
+        return False, f"🚫 Foreign room full: {current_foreign_pct:.1%} >= {limit:.0%} limit"
+
+    remaining_room = limit - current_foreign_pct
+    if remaining_room < 0.05:  # Less than 5% room
+        return True, f"⚠️ Limited foreign room: {remaining_room:.1%} remaining"
+
+    return True, f"✅ Foreign room available: {remaining_room:.1%}"
+
+
+# =============================================================================
+# IMPROVED: MARKET HOURS VALIDATION
+# =============================================================================
+
+
+def is_market_open(current_time: Optional[time] = None) -> Tuple[bool, str]:
+    """
+    Check if Vietnam stock market is currently open.
+
+    Trading hours (Vietnam time, UTC+7):
+    - Morning: 9:00 - 11:30
+    - Afternoon: 13:00 - 15:00
+
+    Args:
+        current_time: Time to check (default: now in VN timezone)
+
+    Returns:
+        Tuple of (is_open, session_info)
+    """
+    if current_time is None:
+        try:
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            current_time = datetime.now(vn_tz).time()
+        except ImportError:
+            current_time = datetime.now().time()
+
+    session, is_trading = get_current_session(current_time)
+
+    if session == "PRE_MARKET":
+        return False, "Market opens at 9:00"
+    elif session == "POST_MARKET":
+        return False, "Market closed for the day"
+    elif session == "LUNCH":
+        return False, "Lunch break (11:30-13:00)"
+    elif is_trading:
+        return True, f"Market open - {session} session"
+    else:
+        return False, f"Market closed - {session}"
+
+
+def get_time_to_session_end(current_time: Optional[time] = None) -> Tuple[int, str]:
+    """
+    Get minutes until current session ends.
+
+    Useful for:
+    - Avoiding trades near session end
+    - Planning exit timing
+
+    Args:
+        current_time: Time to check
+
+    Returns:
+        Tuple of (minutes_remaining, session_name)
+    """
+    if current_time is None:
+        try:
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            current_time = datetime.now(vn_tz).time()
+        except ImportError:
+            current_time = datetime.now().time()
+
+    session, _ = get_current_session(current_time)
+
+    if session in VN_SESSIONS:
+        _, end_time = VN_SESSIONS[session]
+
+        # Calculate minutes difference
+        current_minutes = current_time.hour * 60 + current_time.minute
+        end_minutes = end_time.hour * 60 + end_time.minute
+
+        remaining = end_minutes - current_minutes
+        return max(0, remaining), session
+
+    return 0, session
+
+
+# =============================================================================
+# IMPROVED: COMPREHENSIVE ORDER VALIDATION
+# =============================================================================
+
+
+def validate_order_comprehensive(
+    symbol: str,
+    shares: int,
+    price: float,
+    order_type: str = "LO",
+    reference_price: Optional[float] = None,
+    available_cash: Optional[float] = None,
+    current_time: Optional[time] = None,
+) -> Dict:
+    """
+    Comprehensive order validation for Vietnam market.
+
+    Validates:
+    1. Lot size (100 shares)
+    2. Tick size (10/50/100 VND)
+    3. Price limits (floor/ceiling)
+    4. Session timing
+    5. Cash availability
+    6. Order type validity
+
+    Args:
+        symbol: Stock symbol
+        shares: Number of shares
+        price: Order price
+        order_type: LO (Limit), ATO, ATC, MP (Market)
+        reference_price: Previous close for limit calculation
+        available_cash: Available cash for buy orders
+        current_time: Current time for session check
+
+    Returns:
+        Dict with validation results
+    """
+    errors = []
+    warnings = []
+    corrections = {}
+
+    # 1. Validate lot size
+    lot_valid, lot_msg = validate_lot_size(shares)
+    if not lot_valid:
+        errors.append(lot_msg)
+        corrections["shares"] = round_to_lot(shares)
+
+    # 2. Validate tick size (for limit orders)
+    if order_type == "LO":
+        price_valid, price_msg = validate_price(price)
+        if not price_valid:
+            errors.append(price_msg)
+            corrections["price"] = round_to_tick(price)
+
+    # 3. Validate price limits
+    if reference_price and order_type == "LO":
+        limits = calculate_ceiling_floor(reference_price, symbol)
+        if price > limits["ceiling"]:
+            errors.append(f"Price {price:,.0f} exceeds ceiling {limits['ceiling']:,.0f}")
+            corrections["price"] = limits["ceiling"]
+        elif price < limits["floor"]:
+            errors.append(f"Price {price:,.0f} below floor {limits['floor']:,.0f}")
+            corrections["price"] = limits["floor"]
+
+        # Warn if near limits
+        ceiling_dist = (limits["ceiling"] - price) / price * 100
+        floor_dist = (price - limits["floor"]) / price * 100
+
+        if ceiling_dist < 1.0:
+            warnings.append(f"⚠️ Price within 1% of ceiling ({ceiling_dist:.1f}%)")
+        if floor_dist < 1.0:
+            warnings.append(f"⚠️ Price within 1% of floor ({floor_dist:.1f}%)")
+
+    # 4. Validate session timing
+    if order_type in ["ATO", "ATC"]:
+        is_auction, session, _ = check_ato_atc_session(current_time)
+        if order_type == "ATO" and session != "ATO":
+            errors.append("ATO orders only valid during 9:00-9:15")
+        if order_type == "ATC" and session != "ATC":
+            errors.append("ATC orders only valid during 14:30-14:45")
+
+    # 5. Check optimal entry time
+    is_optimal, timing_reason = is_optimal_entry_time(current_time)
+    if not is_optimal:
+        warnings.append(timing_reason)
+
+    # 6. Validate cash availability
+    if available_cash is not None:
+        order_value = shares * price
+        if order_value > available_cash:
+            errors.append(f"Insufficient cash: need {order_value:,.0f}, have {available_cash:,.0f}")
+            max_shares = int(available_cash / price)
+            corrections["shares"] = round_to_lot(max_shares)
+
+    # 7. Check market hours
+    is_open, market_status = is_market_open(current_time)
+    if not is_open and order_type not in ["ATO", "ATC"]:
+        warnings.append(f"⚠️ Market status: {market_status}")
+
+    is_valid = len(errors) == 0
+
+    return {
+        "valid": is_valid,
+        "errors": errors,
+        "warnings": warnings,
+        "corrections": corrections,
+        "symbol": symbol,
+        "shares": corrections.get("shares", shares),
+        "price": corrections.get("price", price),
+        "order_type": order_type,
+        "exchange": get_exchange(symbol),
+        "order_value": shares * price,
+    }

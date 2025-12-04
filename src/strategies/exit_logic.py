@@ -114,15 +114,20 @@ class ExitConfig:
     Tất cả thresholds có thể config được.
     """
 
-    # Take Profit levels - IMPROVED v4.0 for VN market shorter cycles
-    # LOWERED: 6%, 12%, 20% (was 12%, 20%) - VN market cycles are shorter
-    take_profit_levels: Tuple[float, float, float] = (0.06, 0.12, 0.20)
+    # Take Profit levels - IMPROVED v4.1 for VN market shorter cycles
+    # Vietnam market characteristics:
+    # - Shorter cycles (2-4 weeks typical)
+    # - Higher volatility (±7% daily limit)
+    # - T+2 settlement affects holding decisions
+    # LOWERED: 5%, 10%, 18% - capture profits faster in VN market
+    take_profit_levels: Tuple[float, float, float] = (0.05, 0.10, 0.18)
 
-    # Stop Loss
+    # Stop Loss - IMPROVED v4.1 with transaction cost awareness
+    # Must account for ~1.5% round trip cost
     stop_loss_atr_multiplier: float = 2.0
-    default_stop_loss_pct: float = 0.06  # IMPROVED: 6% below entry (was 7%)
-    min_stop_loss_pct: float = 0.04  # Min 4% risk (was 3%)
-    max_stop_loss_pct: float = 0.08  # Max 8% risk (was 10%)
+    default_stop_loss_pct: float = 0.055  # IMPROVED: 5.5% below entry (net ~4% after costs)
+    min_stop_loss_pct: float = 0.035  # Min 3.5% risk (net ~2% after costs)
+    max_stop_loss_pct: float = 0.075  # Max 7.5% risk (approaching daily limit)
 
     # Beta-adjusted stop loss - IMPROVED v4.0
     use_beta_adjusted_stops: bool = True  # Enable beta-adjusted stops
@@ -131,19 +136,31 @@ class ExitConfig:
     high_beta_threshold: float = 1.2  # Beta threshold for wider stop
     low_beta_threshold: float = 0.8  # Beta threshold for tighter stop
 
-    # Trailing Stop - IMPROVED v4.0 for VN market
-    trailing_stop_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
-    trailing_stop_distance: float = 0.025  # TIGHTENED: Trail 2.5% below peak (was 3%)
-    trailing_stop_atr_multiplier: float = 2.0
+    # Trailing Stop - IMPROVED v4.1 for VN market
+    # VN market has ±7% daily limit, so trailing needs to be responsive
+    trailing_stop_activation: float = (
+        0.025  # TIGHTENED: Activate at 2.5% profit (net ~1% after costs)
+    )
+    trailing_stop_distance: float = 0.02  # TIGHTENED: Trail 2% below peak
+    trailing_stop_atr_multiplier: float = 1.8  # Slightly tighter ATR multiplier
     use_dynamic_trailing: bool = True
 
-    # Time Decay
+    # Time Decay - IMPROVED v4.1 with T+2 awareness
+    # VN market T+2 settlement means capital is tied up longer
     max_holding_days: int = MAX_HOLDING_DAYS
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
+    t2_settlement_days: int = 2  # T+2 settlement cycle
 
-    # Profit Protection - IMPROVED v4.0
-    profit_protection_activation: float = 0.03  # TIGHTENED: Activate at 3% profit (was 5%)
-    profit_protection_percent: float = 0.60  # IMPROVED: Protect 60% of max profit (was 50%)
+    # Profit Protection - IMPROVED v4.1
+    # Protect profits early due to VN market volatility
+    profit_protection_activation: float = 0.025  # TIGHTENED: Activate at 2.5% profit
+    profit_protection_percent: float = 0.65  # IMPROVED: Protect 65% of max profit
+
+    # NEW v4.1: Session-based exit rules
+    exit_before_lunch_if_profitable: bool = True  # Exit profitable positions before lunch
+    lunch_exit_min_profit_pct: float = 0.02  # Min 2% profit to exit before lunch
+    exit_before_close_if_profitable: bool = True  # Exit before ATC if profitable
+    close_exit_min_profit_pct: float = 0.015  # Min 1.5% profit to exit before close
 
     # Partial Exit
     partial_exit_percent: float = 0.50  # Exit 50% at TP1
@@ -664,32 +681,95 @@ class ImprovedExitStrategy:
         return None
 
     # =========================================================================
-    # EXIT CHECK #2: SESSION BOUNDARY
+    # EXIT CHECK #2: SESSION BOUNDARY (IMPROVED v4.1)
     # =========================================================================
 
     def _check_session_boundary(self, ctx: Dict) -> Optional[ExitDecision]:
-        """Check session boundary - protect profits near session end."""
-        if not TRADING_SCHEDULE_AVAILABLE:
-            return None
+        """
+        Check session boundary - protect profits near session end.
 
+        Vietnam market specific considerations:
+        - Lunch break (11:30-13:00): Gap risk, news during break
+        - ATC session (14:30-14:45): High volatility, institutional orders
+        - Pre-lunch selling pressure (11:00-11:30)
+        """
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
         current_price = ctx["current_price"]
+        symbol = ctx.get("symbol", "")
 
         try:
-            is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
-            if is_near_boundary and pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
-                return ExitDecision(
-                    should_exit=True,
-                    exit_reason=ExitReason.SESSION_END,
-                    exit_type="FULL",
-                    exit_price=current_price,
-                    expected_pnl=pnl_amount,
-                    expected_pnl_percent=pnl_percent,
-                    message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
-                    urgency=4,
-                    metadata={"boundary_type": boundary_type},
-                )
+            # Import Vietnam market utilities
+            from src.utils.vietnam_market import get_time_to_session_end, get_current_session
+
+            minutes_remaining, session = get_time_to_session_end()
+
+            # Check 1: Pre-lunch exit (11:00-11:30)
+            # Lunch gap risk - exit profitable positions before lunch
+            if session == "MORNING" and minutes_remaining <= 30:
+                min_profit = self.config.lunch_exit_min_profit_pct * 100
+                if self.config.exit_before_lunch_if_profitable and pnl_percent >= min_profit:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.SESSION_END,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"🍽️ PRE-LUNCH EXIT: Chốt lời {pnl_percent:+.2f}% trước nghỉ trưa "
+                            f"({minutes_remaining} phút còn lại) - tránh gap risk"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "boundary_type": "LUNCH_BREAK",
+                            "minutes_remaining": minutes_remaining,
+                            "reason": "lunch_gap_protection",
+                        },
+                    )
+
+            # Check 2: Pre-ATC exit (14:15-14:30)
+            # Exit before ATC auction to avoid volatility
+            if session == "AFTERNOON" and minutes_remaining <= 15:
+                min_profit = self.config.close_exit_min_profit_pct * 100
+                if self.config.exit_before_close_if_profitable and pnl_percent >= min_profit:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.SESSION_END,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"⏰ PRE-ATC EXIT: Chốt lời {pnl_percent:+.2f}% trước phiên ATC "
+                            f"({minutes_remaining} phút còn lại) - tránh volatility"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "boundary_type": "ATC_SESSION",
+                            "minutes_remaining": minutes_remaining,
+                            "reason": "atc_volatility_protection",
+                        },
+                    )
+
+            # Check 3: General session end protection (fallback)
+            if TRADING_SCHEDULE_AVAILABLE:
+                is_near_boundary, boundary_type = is_near_session_boundary(minutes=5)
+                if is_near_boundary and pnl_percent >= 3 and boundary_type in ["AM_END", "PM_END"]:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.SESSION_END,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=f"⏰ SESSION END PROTECTION: Chốt lời {pnl_percent:+.2f}% trước {boundary_type}",
+                        urgency=4,
+                        metadata={"boundary_type": boundary_type},
+                    )
+
+        except ImportError:
+            logger.debug("Vietnam market utilities not available for session check")
         except Exception as e:
             logger.debug(f"Session boundary check failed: {e}")
 

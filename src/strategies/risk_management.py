@@ -168,11 +168,16 @@ class EnhancedRiskManager(RiskManager):
         IMPROVEMENT #4: Tích hợp với MarketRegimeDetector thay vì tính toán riêng
         Position sizing phản ánh đúng market conditions
 
+        IMPROVED v4.1: Vietnam market specific adjustments
+        - VN market has ±7% daily limit, so regime impact is amplified
+        - Foreign flow is critical indicator for VN market
+        - T+2 settlement affects position sizing in volatile regimes
+
         Args:
             market_regime: Dict từ regime_detector.detect() hoặc None để tự detect
 
         Returns:
-            float: Factor điều chỉnh position size (0.3 - 1.2)
+            float: Factor điều chỉnh position size (0.25 - 1.15)
         """
         try:
             # Nếu không có market_regime, tự detect
@@ -202,42 +207,46 @@ class EnhancedRiskManager(RiskManager):
             # Không tradeable -> giảm mạnh position
             if not tradeable:
                 print(f"  🚫 Market not tradeable (regime: {regime})")
-                return 0.3
+                return 0.25  # TIGHTENED: 25% instead of 30%
 
             # Điều chỉnh theo regime và confidence
+            # IMPROVED v4.1: More conservative for VN market
             if regime == "BULL":
                 # Bull market: tăng position, scale theo confidence
+                # VN market: Be more conservative even in bull
                 if confidence >= 70:
-                    factor = 1.2  # Strong bull -> tăng 20%
+                    factor = 1.15  # TIGHTENED: Strong bull -> tăng 15% (was 20%)
                 elif confidence >= 50:
-                    factor = 1.1  # Moderate bull -> tăng 10%
+                    factor = 1.05  # TIGHTENED: Moderate bull -> tăng 5% (was 10%)
                 else:
-                    factor = 1.0  # Weak bull -> giữ nguyên
+                    factor = 0.95  # TIGHTENED: Weak bull -> giảm nhẹ 5%
 
             elif regime == "BEAR":
                 # Bear market: giảm mạnh position
+                # VN market: ±7% limit means bear can be brutal
                 if confidence >= 70:
-                    factor = 0.4  # Strong bear -> giảm 60%
+                    factor = 0.35  # TIGHTENED: Strong bear -> giảm 65% (was 60%)
                 elif confidence >= 50:
-                    factor = 0.5  # Moderate bear -> giảm 50%
+                    factor = 0.45  # TIGHTENED: Moderate bear -> giảm 55% (was 50%)
                 else:
-                    factor = 0.6  # Weak bear -> giảm 40%
+                    factor = 0.55  # TIGHTENED: Weak bear -> giảm 45% (was 40%)
 
             elif regime == "HIGH_VOLATILITY":
                 # High volatility: giảm position để quản lý risk
+                # VN market: High vol + ±7% limit = very dangerous
                 volatility = components.get("volatility", 0.5)
                 if volatility > 0.8:
-                    factor = 0.3  # Extreme volatility -> giảm 70%
+                    factor = 0.25  # TIGHTENED: Extreme volatility -> giảm 75% (was 70%)
                 else:
-                    factor = 0.5  # High volatility -> giảm 50%
+                    factor = 0.40  # TIGHTENED: High volatility -> giảm 60% (was 50%)
 
             else:  # SIDEWAYS
                 # Sideways: giảm nhẹ, tùy thuộc vào volatility
                 volatility = components.get("volatility", 0.5)
                 if volatility > 0.5:
-                    factor = 0.7  # Sideways + high vol -> giảm 30%
+                    factor = 0.65  # TIGHTENED: Sideways + high vol -> giảm 35% (was 30%)
                 else:
-                    factor = 0.85  # Sideways + low vol -> giảm 15%
+                    factor = 0.80  # TIGHTENED: Sideways + low vol -> giảm 20% (was 15%)
 
             # Điều chỉnh thêm theo sector rotation và foreign flow nếu có
             sector_score = components.get("sector_rotation", 0)
@@ -249,14 +258,19 @@ class EnhancedRiskManager(RiskManager):
             elif sector_score < -0.3:
                 factor -= 0.05  # Lagging sectors -> penalty nhỏ
 
-            # Bonus/penalty từ foreign flow (-0.1 to +0.1)
-            if foreign_score > 0.3:
+            # IMPROVED v4.1: Foreign flow is critical for VN market
+            # Foreign investors often lead market direction
+            if foreign_score > 0.5:
+                factor += 0.08  # INCREASED: Strong foreign buying -> bonus 8%
+            elif foreign_score > 0.3:
                 factor += 0.05  # Foreign buying -> bonus nhỏ
+            elif foreign_score < -0.5:
+                factor -= 0.10  # INCREASED: Strong foreign selling -> penalty 10%
             elif foreign_score < -0.3:
-                factor -= 0.05  # Foreign selling -> penalty nhỏ
+                factor -= 0.06  # Foreign selling -> penalty nhỏ
 
             # Clamp factor trong range hợp lý
-            factor = max(0.3, min(1.2, factor))
+            factor = max(0.25, min(1.15, factor))
 
             print(f"  🌡️ Market regime: {regime} (conf: {confidence:.0f}%) -> factor: {factor:.2f}")
             return factor

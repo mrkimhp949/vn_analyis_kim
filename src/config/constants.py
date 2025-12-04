@@ -106,12 +106,28 @@ VN_TICK_HIGH = 100  # Price >= 50,000 VND
 VN_ALLOW_ATO_ATC_TRADING = False  # Block trading during auction sessions by default
 VN_ATO_ATC_PENALTY = -15  # Confidence penalty for ATO/ATC trading
 
-# Gap Protection
-VN_GAP_DOWN_EXIT_THRESHOLD = -0.03  # Exit on 3% gap down (with profit)
-VN_GAP_DOWN_EMERGENCY_THRESHOLD = -0.05  # Emergency exit on 5% gap down
+# Gap Protection - IMPROVED v4.1
+VN_GAP_DOWN_EXIT_THRESHOLD = -0.025  # TIGHTENED: Exit on 2.5% gap down (with profit)
+VN_GAP_DOWN_EMERGENCY_THRESHOLD = -0.04  # TIGHTENED: Emergency exit on 4% gap down
+VN_GAP_UP_PROFIT_TAKE_THRESHOLD = 0.04  # NEW: Consider profit taking on 4%+ gap up
 
 # Distribution Volume
 VN_DISTRIBUTION_VOLUME_MULT = 2.0  # Volume > 2x avg = distribution
+
+# NEW v4.1: Session-based trading rules
+VN_AVOID_FIRST_15_MINUTES = True  # Avoid trading in first 15 min (ATO volatility)
+VN_AVOID_LAST_15_MINUTES = True  # Avoid trading in last 15 min (ATC volatility)
+VN_LUNCH_GAP_PROTECTION = True  # Exit profitable positions before lunch
+VN_LUNCH_EXIT_MIN_PROFIT = 0.02  # Min 2% profit to exit before lunch
+
+# NEW v4.1: Intraday volatility limits
+VN_MAX_INTRADAY_RANGE_FOR_ENTRY = 0.045  # TIGHTENED: Max 4.5% intraday range for entry
+VN_HIGH_VOLATILITY_PENALTY = -10  # Confidence penalty for high intraday volatility
+
+# NEW v4.1: Foreign flow thresholds (smart money tracking)
+VN_FOREIGN_NET_BUY_BONUS = 8  # Confidence bonus for net foreign buying
+VN_FOREIGN_NET_SELL_PENALTY = -12  # Confidence penalty for net foreign selling
+VN_FOREIGN_FLOW_LOOKBACK_DAYS = 5  # Days to look back for foreign flow trend
 
 # Stop Loss and Take Profit - TIGHTENED v3.0
 DEFAULT_STOP_LOSS_LEVELS = [0.08, 0.15, 0.25]  # TIGHTENED: 8%, 15%, 25%
