@@ -19,7 +19,7 @@ from src.config.trading_config import get_config
 from src.strategies.exit_logic import ImprovedExitStrategy
 from src.strategies.position_sizing import EnhancedPositionSizer
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
-from src.ml.signals.enhanced import EnhancedMLSignalGenerator as MLSignalGenerator
+from src.ml.signals.enhanced_v2 import EnhancedMLSignalGeneratorV2 as MLSignalGenerator
 from src.portfolio.optimizer import PortfolioOptimizer
 
 # from portfolio_regime_adjuster import PortfolioRegimeAdjuster  # Module not found

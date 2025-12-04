@@ -1,0 +1,83 @@
+{
+  "version": "v2",
+  "created_at": "2025-12-04T18:43:15.892479",
+  "feature_columns": [
+    "mom_5",
+    "mom_10",
+    "mom_20",
+    "mom_accel",
+    "up_days_5",
+    "up_days_10",
+    "mom_vol_confirm",
+    "dist_sma20",
+    "dist_sma50",
+    "rsi",
+    "rsi_oversold",
+    "rsi_overbought",
+    "bb_pct",
+    "bb_squeeze",
+    "vol_ratio",
+    "vol_trend",
+    "pv_divergence",
+    "obv_trend",
+    "atr_pct",
+    "vol_regime",
+    "vol_percentile",
+    "adx",
+    "adx_strong",
+    "ema_aligned_bull",
+    "ema_aligned_bear",
+    "above_ema20",
+    "above_ema20_streak",
+    "near_high",
+    "near_low",
+    "range_position",
+    "macd_hist",
+    "macd_cross_up",
+    "macd_positive",
+    "index_mom_5",
+    "index_mom_20",
+    "index_above_ema20",
+    "relative_strength",
+    "outperforming",
+    "beta",
+    "bull_market",
+    "bear_market"
+  ],
+  "n_features": 41,
+  "models": [
+    "rf",
+    "gb",
+    "xgb",
+    "lgb",
+    "lr",
+    "ensemble"
+  ],
+  "cv_results": {
+    "rf": {
+      "accuracy_mean": 0.6162303664921465,
+      "accuracy_std": 0.1128166630004235,
+      "f1_mean": 0.3249809987237229
+    },
+    "gb": {
+      "accuracy_mean": 0.712914485165794,
+      "accuracy_std": 0.09628068373520496,
+      "f1_mean": 0.21611463092977368
+    },
+    "xgb": {
+      "accuracy_mean": 0.7113438045375219,
+      "accuracy_std": 0.08828956360312351,
+      "f1_mean": 0.19015850732641862
+    },
+    "lgb": {
+      "accuracy_mean": 0.7095986038394415,
+      "accuracy_std": 0.08853931364450704,
+      "f1_mean": 0.22051583552896972
+    },
+    "lr": {
+      "accuracy_mean": 0.5410122164048865,
+      "accuracy_std": 0.06738599344843826,
+      "f1_mean": 0.3690372159690848
+    }
+  }
+}

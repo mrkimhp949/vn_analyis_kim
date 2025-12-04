@@ -38,7 +38,7 @@ from src.data.loader import load_data
 from src.data.ticker_loader import get_ticker_loader
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
 from src.ml.monitor import get_ml_model_monitor
-from src.ml.signals.enhanced import EnhancedMLSignalGenerator
+from src.ml.signals.enhanced_v2 import EnhancedMLSignalGeneratorV2 as EnhancedMLSignalGenerator
 from src.monitoring.signal_performance import get_signal_performance_tracker
 from src.portfolio.lock import get_portfolio_lock
 from src.portfolio.manager import get_portfolio_manager

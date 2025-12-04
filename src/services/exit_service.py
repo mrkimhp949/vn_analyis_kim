@@ -13,7 +13,7 @@ import pandas as pd
 
 from src.config.exceptions import DataQualityError
 from src.data.loader import load_data
-from src.ml.signals.enhanced import EnhancedMLSignalGenerator
+from src.ml.signals.enhanced_v2 import EnhancedMLSignalGeneratorV2 as EnhancedMLSignalGenerator
 from src.portfolio.manager import get_portfolio_manager
 from src.portfolio.paper_trading import get_paper_account
 from src.strategies.exit_logic import ImprovedExitStrategy
