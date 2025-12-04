@@ -87,10 +87,31 @@ REALISTIC_ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% with market orders 
 PESSIMISTIC_ROUND_TRIP_COST = VN_PESSIMISTIC_ROUND_TRIP  # 2.0% with poor execution
 
 # Vietnam Market Specific Constants
-VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling)
+VIETNAM_PRICE_LIMIT_PERCENT = 0.07  # ±7% daily price limit (floor/ceiling) - HOSE
 VIETNAM_LOT_SIZE = 100  # Minimum trading lot size
-VIETNAM_SETTLEMENT_DAYS = 2  # T+2 settlement
+VIETNAM_SETTLEMENT_DAYS = 2  # T+2 settlement (actually T+2.5)
 VIETNAM_TICK_SIZE = 10  # 10 VND minimum tick size for most stocks
+
+# Exchange-specific price limits
+VN_HOSE_PRICE_LIMIT = 0.07  # ±7% for HOSE
+VN_HNX_PRICE_LIMIT = 0.10  # ±10% for HNX
+VN_UPCOM_PRICE_LIMIT = 0.15  # ±15% for UPCOM
+
+# Tick sizes by price range (HOSE rules)
+VN_TICK_LOW = 10  # Price < 10,000 VND
+VN_TICK_MID = 50  # 10,000 <= Price < 50,000 VND
+VN_TICK_HIGH = 100  # Price >= 50,000 VND
+
+# ATO/ATC Session Settings
+VN_ALLOW_ATO_ATC_TRADING = False  # Block trading during auction sessions by default
+VN_ATO_ATC_PENALTY = -15  # Confidence penalty for ATO/ATC trading
+
+# Gap Protection
+VN_GAP_DOWN_EXIT_THRESHOLD = -0.03  # Exit on 3% gap down (with profit)
+VN_GAP_DOWN_EMERGENCY_THRESHOLD = -0.05  # Emergency exit on 5% gap down
+
+# Distribution Volume
+VN_DISTRIBUTION_VOLUME_MULT = 2.0  # Volume > 2x avg = distribution
 
 # Stop Loss and Take Profit - TIGHTENED v3.0
 DEFAULT_STOP_LOSS_LEVELS = [0.08, 0.15, 0.25]  # TIGHTENED: 8%, 15%, 25%

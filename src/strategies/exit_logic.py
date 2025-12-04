@@ -457,7 +457,8 @@ class ImprovedExitStrategy:
         # Run exit checks in priority order
         checks = [
             self._check_stop_loss,
-            self._check_breakeven_stop,  # NEW: Check breakeven stop after 1R profit
+            self._check_gap_down,  # NEW: Check gap down protection
+            self._check_breakeven_stop,  # Check breakeven stop after 1R profit
             self._check_session_boundary,
             self._check_market_crash,
             self._check_take_profit,
@@ -567,6 +568,98 @@ class ImprovedExitStrategy:
                 urgency=5,
                 metadata={"stop_loss": effective_stop, "is_poor_performer": is_poor_performer},
             )
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #1.5: GAP DOWN PROTECTION (NEW)
+    # =========================================================================
+
+    def _check_gap_down(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check for significant gap down and exit to protect capital.
+
+        Vietnam market gaps are significant due to:
+        - Overnight news (global markets, company announcements)
+        - Foreign investor sentiment changes
+        - Regulatory changes
+
+        Exit if:
+        - Gap down > 3% from previous close
+        - Position is in profit (protect gains)
+        - Or gap down > 5% regardless of P&L (emergency exit)
+        """
+        df = ctx.get("df")
+        if df is None or len(df) < 2:
+            return None
+
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        symbol = ctx.get("symbol", "")
+
+        try:
+            prev_close = safe_iloc(df, -2, "close")
+            today_open = safe_iloc(df, -1, "open")
+
+            if prev_close is None or today_open is None or prev_close <= 0:
+                return None
+
+            gap_percent = (today_open - prev_close) / prev_close * 100
+
+            # Emergency exit: Gap down > 5%
+            if gap_percent < -5.0:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.BREAKDOWN,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"🚨 GAP DOWN EMERGENCY: {gap_percent:.1f}% gap - "
+                        f"exiting to protect capital | P&L: {pnl_percent:+.2f}%"
+                    ),
+                    urgency=5,
+                    metadata={
+                        "gap_percent": gap_percent,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "emergency_gap_down",
+                    },
+                )
+
+            # Protect profits: Gap down > 3% when in profit
+            if gap_percent < -3.0 and pnl_percent > 0:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.PROFIT_PROTECTION,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📉 GAP DOWN PROTECTION: {gap_percent:.1f}% gap - "
+                        f"protecting {pnl_percent:+.2f}% profit"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "gap_percent": gap_percent,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "profit_protection_gap_down",
+                    },
+                )
+
+            # Log significant gaps for monitoring
+            if gap_percent < -2.0:
+                logger.info(
+                    f"📊 {symbol}: Gap down {gap_percent:.1f}% detected "
+                    f"(P&L: {pnl_percent:+.2f}%) - monitoring"
+                )
+
+        except Exception as e:
+            logger.debug(f"Gap down check failed: {e}")
 
         return None
 
@@ -967,7 +1060,7 @@ class ImprovedExitStrategy:
     # =========================================================================
 
     def _check_reversal_pattern(self, ctx: Dict) -> Optional[ExitDecision]:
-        """Check bearish reversal patterns (engulfing, shooting star)."""
+        """Check bearish reversal patterns (engulfing, shooting star, distribution volume)."""
         df = ctx["df"]
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
@@ -983,6 +1076,28 @@ class ImprovedExitStrategy:
             return None
 
         try:
+            # NEW: Distribution Volume Check
+            # High volume + price down = institutional selling
+            distribution = self._check_distribution_volume(df, latest)
+            if distribution["is_distribution"]:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.REVERSAL_PATTERN,
+                    exit_type="FULL",
+                    exit_price=latest["close"],
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📊 DISTRIBUTION VOLUME: Volume {distribution['volume_ratio']:.1f}x avg "
+                        f"+ price down - institutional selling | P&L: {pnl_percent:+.2f}%"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "pattern": "distribution_volume",
+                        "volume_ratio": distribution["volume_ratio"],
+                    },
+                )
+
             # Bearish Engulfing
             if self._is_bearish_engulfing(prev, latest):
                 return ExitDecision(
@@ -1014,6 +1129,45 @@ class ImprovedExitStrategy:
             pass
 
         return None
+
+    def _check_distribution_volume(self, df: pd.DataFrame, latest: pd.Series) -> Dict:
+        """
+        Check for distribution volume (institutional selling).
+
+        Distribution = High volume + Price down
+        This often signals smart money exiting positions.
+
+        Args:
+            df: DataFrame with OHLCV
+            latest: Latest candle
+
+        Returns:
+            Dict with is_distribution, volume_ratio
+        """
+        try:
+            if "volume" not in df.columns or len(df) < 20:
+                return {"is_distribution": False, "volume_ratio": 1.0}
+
+            avg_volume = df["volume"].tail(20).mean()
+            if avg_volume <= 0:
+                return {"is_distribution": False, "volume_ratio": 1.0}
+
+            current_volume = latest.get("volume", 0)
+            volume_ratio = current_volume / avg_volume
+
+            # Price down check
+            price_down = latest.get("close", 0) < latest.get("open", 0)
+
+            # Distribution: Volume > 2x average AND price down
+            is_distribution = volume_ratio >= self.config.volume_surge_ratio and price_down
+
+            return {
+                "is_distribution": is_distribution,
+                "volume_ratio": volume_ratio,
+                "price_down": price_down,
+            }
+        except Exception:
+            return {"is_distribution": False, "volume_ratio": 1.0}
 
     def _is_bearish_engulfing(self, prev: pd.Series, latest: pd.Series) -> bool:
         """Check for bearish engulfing pattern."""
