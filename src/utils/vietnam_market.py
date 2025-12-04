@@ -1424,3 +1424,23 @@ def validate_position_vs_volume(
     """
     validator = VietnamMarketValidator(max_position_pct_of_volume=max_position_pct)
     return validator.validate_position_size_vs_volume(shares, avg_volume, symbol)
+
+
+# =============================================================================
+# SINGLETON VALIDATOR INSTANCE
+# =============================================================================
+
+_validator_instance: Optional[VietnamMarketValidator] = None
+
+
+def get_vietnam_market_validator() -> VietnamMarketValidator:
+    """
+    Get singleton instance of VietnamMarketValidator.
+
+    Returns:
+        VietnamMarketValidator instance
+    """
+    global _validator_instance
+    if _validator_instance is None:
+        _validator_instance = VietnamMarketValidator()
+    return _validator_instance

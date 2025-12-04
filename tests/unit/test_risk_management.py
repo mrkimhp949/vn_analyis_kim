@@ -97,7 +97,7 @@ class TestEnhancedRiskManager:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 1.2  # Strong bull -> 1.2x
+        assert factor == 1.15  # Strong bull -> 1.15x (TIGHTENED from 1.2)
 
     def test_market_regime_factor_bear(self, risk_manager):
         """Test market regime factor in bear market"""
@@ -111,7 +111,7 @@ class TestEnhancedRiskManager:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 0.4  # Strong bear -> 0.4x
+        assert factor == 0.35  # Strong bear -> 0.35x (TIGHTENED from 0.4)
 
     def test_market_regime_factor_sideway(self, risk_manager):
         """Test market regime factor in sideway market"""
@@ -125,7 +125,7 @@ class TestEnhancedRiskManager:
         }
 
         factor = risk_manager._calculate_market_regime_factor(market_regime)
-        assert factor == 0.85  # Sideways + low vol -> 0.85x
+        assert factor == 0.80  # Sideways + low vol -> 0.80x (TIGHTENED from 0.85)
 
     @patch("src.data.vnindex_cache.get_cached_vnindex")
     def test_market_regime_factor_error_handling(self, mock_get_vnindex, risk_manager):

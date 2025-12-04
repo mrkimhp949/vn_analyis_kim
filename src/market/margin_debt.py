@@ -1,192 +1,125 @@
 # -*- coding: utf-8 -*-
 """
-Margin Debt Analysis for Vietnam Market
-Phân tích dư nợ margin để đánh giá rủi ro thị trường
+Margin Debt Tracking for Vietnam Stock Market
 
-FEATURES:
-- Margin debt trend analysis
-- Market leverage indicator
-- Risk warning signals
-- Historical comparison
+Tracks market-wide margin debt levels to assess:
+- Market leverage risk
+- Potential margin call cascades
+- Force sell pressure
+
+Author: Trading Bot Team
+Version: 1.0.0
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
+from enum import Enum
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
+class MarginRiskLevel(Enum):
+    """Margin risk levels"""
+
+    LOW = "LOW"  # < 2% of market cap
+    MODERATE = "MODERATE"  # 2-3% of market cap
+    HIGH = "HIGH"  # 3-4% of market cap
+    CRITICAL = "CRITICAL"  # > 4% of market cap
+
+
 @dataclass
-class MarginDebtAnalysis:
-    """Margin debt analysis result"""
+class MarginDebtData:
+    """Margin debt analysis data"""
 
-    # Current state
-    current_margin_debt: float  # VND
-    margin_debt_change_1m: float  # % change 1 month
-    margin_debt_change_3m: float  # % change 3 months
+    date: datetime
+    total_margin_debt: float  # Total margin debt in VND
+    market_cap: float  # Total market cap in VND
+    margin_ratio: float  # Margin debt / Market cap
 
-    # Relative metrics
-    margin_to_market_cap: float  # Margin / Total market cap
-    margin_percentile: float  # Current vs historical (0-100)
+    # Risk assessment
+    risk_level: MarginRiskLevel
+    risk_score: float  # 0-100 (higher = more risk)
 
-    # Signals
-    signal: str  # INCREASING, DECREASING, STABLE, HIGH_RISK, DELEVERAGING
-    risk_level: str  # LOW, MEDIUM, HIGH, EXTREME
+    # Trend
+    change_1d: float = 0.0  # 1-day change %
+    change_5d: float = 0.0  # 5-day change %
+    change_20d: float = 0.0  # 20-day change %
 
-    # Interpretation
-    description: str
-    recommendations: List[str]
+    # Thresholds
+    margin_call_risk: bool = False
+    force_sell_risk: bool = False
 
-    # Timestamp
-    last_updated: datetime
+    # Recommendations
+    position_adjustment: float = 1.0  # Multiplier for position sizing
+    warnings: List[str] = field(default_factory=list)
 
 
-class MarginDebtAnalyzer:
+class MarginDebtTracker:
     """
-    Analyzes margin debt levels in Vietnam market
+    Tracks and analyzes market-wide margin debt
 
-    High margin debt indicates:
-    - Bullish sentiment (investors borrowing to buy)
-    - BUT also higher risk (forced selling if market drops)
+    Vietnam Market Context:
+    - Margin debt typically 1.5-3% of market cap
+    - High margin = increased volatility risk
+    - Margin calls can trigger cascading sells
+    - Monitor during market corrections
 
-    Key thresholds (Vietnam market):
-    - Margin/Market Cap > 3%: Elevated risk
-    - Margin/Market Cap > 4%: High risk
-    - Margin/Market Cap > 5%: Extreme risk
-
-    Data sources:
-    - SSC (State Securities Commission) reports
-    - Broker margin lending data
-    - Exchange statistics
+    Risk Thresholds:
+    - LOW: < 2% margin ratio
+    - MODERATE: 2-3% margin ratio
+    - HIGH: 3-4% margin ratio
+    - CRITICAL: > 4% margin ratio
     """
 
-    # Risk thresholds (margin as % of market cap)
-    RISK_THRESHOLDS = {
-        "low": 0.02,  # < 2%
-        "medium": 0.03,  # 2-3%
-        "high": 0.04,  # 3-4%
-        "extreme": 0.05,  # > 5%
+    # Risk thresholds (margin debt / market cap)
+    THRESHOLDS = {
+        MarginRiskLevel.LOW: 0.02,
+        MarginRiskLevel.MODERATE: 0.03,
+        MarginRiskLevel.HIGH: 0.04,
+        MarginRiskLevel.CRITICAL: 0.05,
     }
 
-    # Change thresholds
-    CHANGE_THRESHOLDS = {
-        "rapid_increase": 0.15,  # > 15% increase in 1 month
-        "moderate_increase": 0.08,  # 8-15% increase
-        "stable": 0.03,  # -3% to +3%
-        "moderate_decrease": -0.08,  # -8% to -3%
-        "rapid_decrease": -0.15,  # < -15% (deleveraging)
-    }
+    def __init__(self, cache_ttl: int = 3600):
+        self._cache: Optional[MarginDebtData] = None
+        self._cache_time: Optional[datetime] = None
+        self._cache_ttl = cache_ttl
+        self._historical: List[Dict] = []
 
-    def __init__(self):
-        self._cache = None
-        self._cache_time = None
-        self._cache_ttl = 3600 * 6  # 6 hours
-
-        # Historical data storage
-        self._historical_data: List[Dict] = []
-
-    def analyze(
-        self,
-        current_margin_debt: Optional[float] = None,
-        market_cap: Optional[float] = None,
-        historical_margin: Optional[List[Dict]] = None,
-    ) -> MarginDebtAnalysis:
+    def analyze(self, force_refresh: bool = False) -> MarginDebtData:
         """
-        Analyze margin debt levels
+        Analyze current margin debt situation
 
         Args:
-            current_margin_debt: Current total margin debt (VND)
-            market_cap: Total market capitalization (VND)
-            historical_margin: Historical margin data [{date, value}, ...]
+            force_refresh: Bypass cache
 
         Returns:
-            MarginDebtAnalysis
-        """
-        # Try to fetch data if not provided
-        if current_margin_debt is None:
-            data = self._fetch_margin_data()
-            if data:
-                current_margin_debt = data.get("current_margin")
-                market_cap = data.get("market_cap")
-                historical_margin = data.get("historical")
-
-        # If still no data, return default
-        if current_margin_debt is None:
-            return self._default_analysis("No margin data available")
-
-        # Calculate metrics
-        margin_to_cap = current_margin_debt / market_cap if market_cap else 0
-
-        # Calculate changes
-        change_1m = 0.0
-        change_3m = 0.0
-        percentile = 50.0
-
-        if historical_margin and len(historical_margin) >= 2:
-            # Sort by date
-            sorted_data = sorted(historical_margin, key=lambda x: x["date"])
-
-            # 1 month change
-            if len(sorted_data) >= 22:  # ~1 month of trading days
-                prev_1m = sorted_data[-22]["value"]
-                change_1m = (current_margin_debt - prev_1m) / prev_1m if prev_1m else 0
-
-            # 3 month change
-            if len(sorted_data) >= 66:  # ~3 months
-                prev_3m = sorted_data[-66]["value"]
-                change_3m = (current_margin_debt - prev_3m) / prev_3m if prev_3m else 0
-
-            # Percentile
-            all_values = [d["value"] for d in sorted_data]
-            percentile = (
-                np.sum(np.array(all_values) < current_margin_debt) / len(all_values)
-            ) * 100
-
-        # Determine signal
-        signal = self._determine_signal(change_1m, change_3m)
-
-        # Determine risk level
-        risk_level = self._determine_risk_level(margin_to_cap, change_1m)
-
-        # Generate description and recommendations
-        description = self._generate_description(
-            margin_to_cap, change_1m, change_3m, signal, risk_level
-        )
-        recommendations = self._generate_recommendations(signal, risk_level)
-
-        return MarginDebtAnalysis(
-            current_margin_debt=current_margin_debt,
-            margin_debt_change_1m=change_1m,
-            margin_debt_change_3m=change_3m,
-            margin_to_market_cap=margin_to_cap,
-            margin_percentile=percentile,
-            signal=signal,
-            risk_level=risk_level,
-            description=description,
-            recommendations=recommendations,
-            last_updated=datetime.now(),
-        )
-
-    def _fetch_margin_data(self) -> Optional[Dict]:
-        """
-        Fetch margin data from external sources
-
-        Integrated sources:
-        - TCBS API (primary)
-        - SSI API (fallback)
-        - SSC reports (manual)
+            MarginDebtData with analysis
         """
         # Check cache
-        if self._cache and self._cache_time:
-            age = (datetime.now() - self._cache_time).seconds
-            if age < self._cache_ttl:
-                return self._cache
+        if not force_refresh and self._is_cache_valid():
+            return self._cache
 
+        # Fetch data
+        margin_data = self._fetch_margin_data()
+
+        if margin_data is None:
+            return self._default_result()
+
+        # Calculate metrics
+        result = self._calculate_metrics(margin_data)
+
+        # Update cache
+        self._cache = result
+        self._cache_time = datetime.now()
+
+        return result
+
+    def _fetch_margin_data(self) -> Optional[Dict]:
+        """Fetch margin debt data from sources"""
         # Try TCBS provider
         try:
             from src.data.tcbs_provider import get_tcbs_provider
@@ -195,256 +128,148 @@ class MarginDebtAnalyzer:
             data = provider.get_margin_statistics()
 
             if data:
-                self._cache = data
-                self._cache_time = datetime.now()
-                logger.info("✅ Fetched margin data from TCBS")
+                logger.info("✅ Got margin data from TCBS")
                 return data
-
-        except ImportError:
-            logger.debug("TCBS provider not available for margin data")
         except Exception as e:
-            logger.warning(f"TCBS margin data fetch failed: {e}")
+            logger.debug(f"TCBS margin data failed: {e}")
 
-        # Try SSI provider as fallback
-        try:
-            from src.data.ssi_provider import get_ssi_provider
+        # Estimate from market data
+        return self._estimate_margin_data()
 
-            provider = get_ssi_provider()
-            data = provider.get_margin_statistics()
-
-            if data:
-                self._cache = data
-                self._cache_time = datetime.now()
-                logger.info("✅ Fetched margin data from SSI")
-                return data
-
-        except ImportError:
-            logger.debug("SSI provider not available for margin data")
-        except Exception as e:
-            logger.warning(f"SSI margin data fetch failed: {e}")
-
-        # Use estimated data from market indicators
-        try:
-            estimated = self._estimate_margin_from_market()
-            if estimated:
-                self._cache = estimated
-                self._cache_time = datetime.now()
-                logger.info("Using estimated margin data from market indicators")
-                return estimated
-        except Exception as e:
-            logger.debug(f"Margin estimation failed: {e}")
-
-        return None
-
-    def _estimate_margin_from_market(self) -> Optional[Dict]:
-        """
-        Estimate margin debt levels from market indicators.
-
-        Uses:
-        - Market cap data
-        - Historical margin/cap ratios (typically 1.5-3% for VN market)
-        - Volume and volatility as proxies
-        """
+    def _estimate_margin_data(self) -> Optional[Dict]:
+        """Estimate margin debt from market indicators"""
         try:
             from src.data.vnindex_cache import get_cached_vnindex
 
-            vnindex_df = get_cached_vnindex(lookback=60)
-            if vnindex_df is None or vnindex_df.empty:
+            vnindex = get_cached_vnindex(lookback=60)
+            if vnindex is None or len(vnindex) < 20:
                 return None
 
-            # Estimate market cap (VNINDEX * typical multiplier)
-            # VN market cap is roughly VNINDEX * 5-6 trillion VND
-            current_index = vnindex_df["close"].iloc[-1]
-            estimated_market_cap = current_index * 5_500_000_000_000  # ~5500T VND per index point
+            # Estimate market cap (VNINDEX * multiplier)
+            current_index = vnindex["close"].iloc[-1]
+            market_cap = current_index * 5_500_000_000_000  # ~5500T per point
 
-            # Estimate margin debt (typically 1.5-2.5% of market cap)
+            # Estimate margin based on volatility and trend
+            volatility = vnindex["close"].pct_change().std() * 100
+            trend = (vnindex["close"].iloc[-1] / vnindex["close"].iloc[-20] - 1) * 100
+
+            # Base margin ratio 1.8%, adjust for conditions
+            base_ratio = 0.018
+
             # Higher volatility = higher margin usage
-            volatility = vnindex_df["close"].pct_change().std() * 100
-            margin_ratio = 0.015 + (volatility * 0.002)  # Base 1.5% + volatility adjustment
-            margin_ratio = min(0.035, max(0.012, margin_ratio))  # Clamp to 1.2-3.5%
+            vol_adjustment = volatility * 0.002
 
-            estimated_margin = estimated_market_cap * margin_ratio
+            # Uptrend = higher margin, downtrend = lower (margin calls)
+            trend_adjustment = trend * 0.0005
 
-            # Build historical estimates
-            historical = []
-            for i in range(min(60, len(vnindex_df))):
-                idx_value = vnindex_df["close"].iloc[i]
-                est_cap = idx_value * 5_500_000_000_000
-                historical.append(
-                    {
-                        "date": vnindex_df.index[i],
-                        "value": est_cap * margin_ratio * (0.95 + 0.1 * (i / 60)),  # Slight trend
-                    }
-                )
+            margin_ratio = base_ratio + vol_adjustment + trend_adjustment
+            margin_ratio = max(0.01, min(0.05, margin_ratio))
+
+            margin_debt = market_cap * margin_ratio
 
             return {
-                "current_margin": estimated_margin,
-                "market_cap": estimated_market_cap,
-                "historical": historical,
+                "current_margin": margin_debt,
+                "market_cap": market_cap,
+                "margin_ratio": margin_ratio,
                 "is_estimated": True,
             }
 
         except Exception as e:
-            logger.debug(f"Market-based margin estimation failed: {e}")
+            logger.warning(f"Margin estimation failed: {e}")
             return None
 
-    def _determine_signal(self, change_1m: float, change_3m: float) -> str:
-        """Determine margin debt signal"""
-        if change_1m > self.CHANGE_THRESHOLDS["rapid_increase"]:
-            return "RAPID_INCREASE"
-        elif change_1m > self.CHANGE_THRESHOLDS["moderate_increase"]:
-            return "INCREASING"
-        elif change_1m < self.CHANGE_THRESHOLDS["rapid_decrease"]:
-            return "DELEVERAGING"
-        elif change_1m < self.CHANGE_THRESHOLDS["moderate_decrease"]:
-            return "DECREASING"
+    def _calculate_metrics(self, data: Dict) -> MarginDebtData:
+        """Calculate margin debt metrics"""
+        margin_debt = data.get("current_margin", 0)
+        market_cap = data.get("market_cap", 1)
+        margin_ratio = data.get("margin_ratio", margin_debt / market_cap)
+
+        # Determine risk level
+        risk_level = MarginRiskLevel.LOW
+        for level, threshold in sorted(self.THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
+            if margin_ratio >= threshold:
+                risk_level = level
+                break
+
+        # Calculate risk score (0-100)
+        risk_score = min(100, (margin_ratio / 0.05) * 100)
+
+        # Assess specific risks
+        margin_call_risk = margin_ratio > 0.035
+        force_sell_risk = margin_ratio > 0.045
+
+        # Position adjustment
+        if risk_level == MarginRiskLevel.CRITICAL:
+            position_adjustment = 0.5
+        elif risk_level == MarginRiskLevel.HIGH:
+            position_adjustment = 0.7
+        elif risk_level == MarginRiskLevel.MODERATE:
+            position_adjustment = 0.85
         else:
-            return "STABLE"
+            position_adjustment = 1.0
 
-    def _determine_risk_level(self, margin_to_cap: float, change_1m: float) -> str:
-        """Determine risk level"""
-        # Base risk from margin/cap ratio
-        if margin_to_cap >= self.RISK_THRESHOLDS["extreme"]:
-            base_risk = "EXTREME"
-        elif margin_to_cap >= self.RISK_THRESHOLDS["high"]:
-            base_risk = "HIGH"
-        elif margin_to_cap >= self.RISK_THRESHOLDS["medium"]:
-            base_risk = "MEDIUM"
-        else:
-            base_risk = "LOW"
+        # Warnings
+        warnings = []
+        if risk_level == MarginRiskLevel.CRITICAL:
+            warnings.append("🚨 CRITICAL: Margin debt at dangerous levels")
+            warnings.append("High risk of margin call cascade")
+        elif risk_level == MarginRiskLevel.HIGH:
+            warnings.append("⚠️ HIGH: Elevated margin debt")
+            warnings.append("Monitor for potential margin calls")
+        elif margin_call_risk:
+            warnings.append("⚠️ Margin call risk elevated")
 
-        # Adjust for rapid changes
-        if change_1m > self.CHANGE_THRESHOLDS["rapid_increase"]:
-            # Rapid increase = higher risk
-            if base_risk == "LOW":
-                return "MEDIUM"
-            elif base_risk == "MEDIUM":
-                return "HIGH"
-            elif base_risk == "HIGH":
-                return "EXTREME"
-
-        return base_risk
-
-    def _generate_description(
-        self,
-        margin_to_cap: float,
-        change_1m: float,
-        change_3m: float,
-        signal: str,
-        risk_level: str,
-    ) -> str:
-        """Generate human-readable description"""
-        parts = []
-
-        # Margin level
-        parts.append(f"Margin/Market Cap: {margin_to_cap*100:.2f}%")
-
-        # Changes
-        parts.append(f"1M change: {change_1m*100:+.1f}%")
-        parts.append(f"3M change: {change_3m*100:+.1f}%")
-
-        # Signal interpretation
-        signal_desc = {
-            "RAPID_INCREASE": "Margin debt increasing rapidly - bullish sentiment but elevated risk",
-            "INCREASING": "Margin debt trending up - investors leveraging",
-            "STABLE": "Margin debt stable",
-            "DECREASING": "Margin debt declining - deleveraging in progress",
-            "DELEVERAGING": "Rapid deleveraging - potential forced selling",
-        }
-        parts.append(signal_desc.get(signal, ""))
-
-        # Risk level
-        parts.append(f"Risk Level: {risk_level}")
-
-        return " | ".join(parts)
-
-    def _generate_recommendations(self, signal: str, risk_level: str) -> List[str]:
-        """Generate trading recommendations"""
-        recommendations = []
-
-        if risk_level == "EXTREME":
-            recommendations.append("🚨 EXTREME RISK: Consider reducing exposure significantly")
-            recommendations.append("💰 Maintain high cash levels")
-            recommendations.append("⚠️ Avoid margin trading")
-
-        elif risk_level == "HIGH":
-            recommendations.append("⚠️ HIGH RISK: Be cautious with new positions")
-            recommendations.append("📉 Consider tightening stop losses")
-            recommendations.append("💵 Increase cash allocation")
-
-        elif risk_level == "MEDIUM":
-            recommendations.append("📊 MODERATE RISK: Normal position sizing")
-            recommendations.append("👀 Monitor margin levels")
-
-        else:
-            recommendations.append("✅ LOW RISK: Normal trading conditions")
-
-        # Signal-specific recommendations
-        if signal == "DELEVERAGING":
-            recommendations.append("📉 Deleveraging may cause selling pressure")
-            recommendations.append("🔍 Watch for capitulation signals")
-
-        elif signal == "RAPID_INCREASE":
-            recommendations.append("📈 High leverage = potential for sharp corrections")
-            recommendations.append("🎯 Consider taking profits on winners")
-
-        return recommendations
-
-    def _default_analysis(self, reason: str) -> MarginDebtAnalysis:
-        """Return default analysis when data unavailable"""
-        return MarginDebtAnalysis(
-            current_margin_debt=0,
-            margin_debt_change_1m=0,
-            margin_debt_change_3m=0,
-            margin_to_market_cap=0,
-            margin_percentile=50,
-            signal="UNKNOWN",
-            risk_level="UNKNOWN",
-            description=f"Margin data unavailable: {reason}",
-            recommendations=["📊 Unable to assess margin risk - use caution"],
-            last_updated=datetime.now(),
+        return MarginDebtData(
+            date=datetime.now(),
+            total_margin_debt=margin_debt,
+            market_cap=market_cap,
+            margin_ratio=margin_ratio,
+            risk_level=risk_level,
+            risk_score=risk_score,
+            margin_call_risk=margin_call_risk,
+            force_sell_risk=force_sell_risk,
+            position_adjustment=position_adjustment,
+            warnings=warnings,
         )
 
+    def _is_cache_valid(self) -> bool:
+        """Check if cache is valid"""
+        if self._cache is None or self._cache_time is None:
+            return False
+        age = (datetime.now() - self._cache_time).total_seconds()
+        return age < self._cache_ttl
 
-# Singleton instance
-_margin_analyzer = None
+    def _default_result(self) -> MarginDebtData:
+        """Return default result"""
+        return MarginDebtData(
+            date=datetime.now(),
+            total_margin_debt=0,
+            market_cap=0,
+            margin_ratio=0.02,
+            risk_level=MarginRiskLevel.MODERATE,
+            risk_score=40,
+            position_adjustment=1.0,
+            warnings=["⚠️ Margin data unavailable - using defaults"],
+        )
+
+    def get_position_multiplier(self) -> float:
+        """Get position size multiplier based on margin risk"""
+        data = self.analyze()
+        return data.position_adjustment
 
 
-def get_margin_debt_analyzer() -> MarginDebtAnalyzer:
-    """Get singleton instance"""
-    global _margin_analyzer
-    if _margin_analyzer is None:
-        _margin_analyzer = MarginDebtAnalyzer()
-    return _margin_analyzer
+# Singleton
+_margin_tracker: Optional[MarginDebtTracker] = None
 
 
-# Test
-if __name__ == "__main__":
-    print("Testing Margin Debt Analyzer...")
+def get_margin_tracker() -> MarginDebtTracker:
+    """Get singleton margin tracker"""
+    global _margin_tracker
+    if _margin_tracker is None:
+        _margin_tracker = MarginDebtTracker()
+    return _margin_tracker
 
-    analyzer = MarginDebtAnalyzer()
 
-    # Test with sample data
-    # Vietnam market: ~100T VND margin, ~6000T VND market cap
-    result = analyzer.analyze(
-        current_margin_debt=100_000_000_000_000,  # 100T VND
-        market_cap=6_000_000_000_000_000,  # 6000T VND
-        historical_margin=[
-            {"date": datetime(2024, 1, 1), "value": 90_000_000_000_000},
-            {"date": datetime(2024, 2, 1), "value": 95_000_000_000_000},
-            {"date": datetime(2024, 3, 1), "value": 100_000_000_000_000},
-        ],
-    )
-
-    print(f"\nMargin Debt Analysis:")
-    print(f"  Current: {result.current_margin_debt/1e12:.1f}T VND")
-    print(f"  Margin/Cap: {result.margin_to_market_cap*100:.2f}%")
-    print(f"  1M Change: {result.margin_debt_change_1m*100:+.1f}%")
-    print(f"  Signal: {result.signal}")
-    print(f"  Risk Level: {result.risk_level}")
-    print(f"\nDescription: {result.description}")
-    print(f"\nRecommendations:")
-    for r in result.recommendations:
-        print(f"  {r}")
-
-    print("\n✅ Margin Debt Analyzer test completed!")
+def get_margin_risk_multiplier() -> float:
+    """Get position multiplier based on margin risk"""
+    return get_margin_tracker().get_position_multiplier()
