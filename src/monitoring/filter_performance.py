@@ -291,6 +291,242 @@ class FilterPerformanceTracker:
 
         return redundant
 
+    def get_dashboard_data(self) -> Dict:
+        """
+        Get comprehensive dashboard data for filter analytics.
+
+        Returns:
+            Dict with dashboard metrics and visualizable data
+        """
+        with self._lock:
+            dashboard = {
+                "summary": self._get_summary_metrics(),
+                "filters": self._get_filter_metrics(),
+                "recommendations": self._get_recommendations(),
+                "trends": self._get_trend_data(),
+                "generated_at": datetime.now().isoformat(),
+            }
+            return dashboard
+
+    def _get_summary_metrics(self) -> Dict:
+        """Get high-level summary metrics."""
+        total_checks = sum(f.total_checks for f in self.filters.values())
+        total_blocks = sum(f.blocked_count for f in self.filters.values())
+        total_warnings = sum(f.warning_count for f in self.filters.values())
+        total_passes = sum(f.passed_count for f in self.filters.values())
+
+        # Win/loss from passed trades
+        total_wins = sum(f.passed_that_won for f in self.filters.values())
+        total_losses = sum(f.passed_that_lost for f in self.filters.values())
+
+        # Missed opportunities (false negatives)
+        total_missed = sum(f.blocked_that_won for f in self.filters.values())
+        total_avoided = sum(f.blocked_that_lost for f in self.filters.values())
+
+        return {
+            "total_checks": total_checks,
+            "total_blocks": total_blocks,
+            "total_warnings": total_warnings,
+            "total_passes": total_passes,
+            "overall_block_rate": total_blocks / total_checks if total_checks > 0 else 0,
+            "overall_win_rate": (
+                total_wins / (total_wins + total_losses) if (total_wins + total_losses) > 0 else 0
+            ),
+            "missed_opportunities": total_missed,
+            "avoided_losses": total_avoided,
+            "active_filters": sum(1 for f in self.filters.values() if f.total_checks > 0),
+        }
+
+    def _get_filter_metrics(self) -> List[Dict]:
+        """Get detailed metrics for each filter."""
+        metrics = []
+        for stats in sorted(
+            self.filters.values(), key=lambda x: x.effectiveness_score, reverse=True
+        ):
+            if stats.total_checks == 0:
+                continue
+
+            metrics.append(
+                {
+                    "name": stats.filter_name,
+                    "total_checks": stats.total_checks,
+                    "block_rate": round(stats.block_rate * 100, 1),
+                    "precision": round(stats.precision * 100, 1),
+                    "false_negative_rate": round(stats.false_negative_rate * 100, 1),
+                    "effectiveness_score": round(stats.effectiveness_score, 1),
+                    "passed_wins": stats.passed_that_won,
+                    "passed_losses": stats.passed_that_lost,
+                    "blocked_wins": stats.blocked_that_won,
+                    "blocked_losses": stats.blocked_that_lost,
+                    "status": self._get_filter_status(stats),
+                }
+            )
+        return metrics
+
+    def _get_filter_status(self, stats: FilterStats) -> str:
+        """Determine filter health status."""
+        if stats.total_checks < 10:
+            return "INSUFFICIENT_DATA"
+        if stats.effectiveness_score >= 70:
+            return "HEALTHY"
+        if stats.effectiveness_score >= 50:
+            return "MODERATE"
+        if stats.false_negative_rate > 0.5:
+            return "TOO_STRICT"
+        return "NEEDS_OPTIMIZATION"
+
+    def _get_recommendations(self) -> List[Dict]:
+        """Generate actionable recommendations."""
+        recommendations = []
+
+        for stats in self.filters.values():
+            if stats.total_checks < 10:
+                continue
+
+            # Too strict filter (high false negative rate)
+            if stats.false_negative_rate > 0.4:
+                recommendations.append(
+                    {
+                        "filter": stats.filter_name,
+                        "type": "RELAX",
+                        "priority": "HIGH",
+                        "reason": f"False negative rate {stats.false_negative_rate:.1%} - missing profitable trades",
+                        "suggestion": "Consider relaxing threshold or converting to soft filter (warning only)",
+                    }
+                )
+
+            # Low precision filter
+            elif stats.precision < 0.4 and (stats.passed_that_won + stats.passed_that_lost) >= 10:
+                recommendations.append(
+                    {
+                        "filter": stats.filter_name,
+                        "type": "TIGHTEN",
+                        "priority": "MEDIUM",
+                        "reason": f"Precision only {stats.precision:.1%} - passing too many losing trades",
+                        "suggestion": "Consider tightening threshold or adding additional conditions",
+                    }
+                )
+
+            # Very low block rate (might be redundant)
+            elif stats.block_rate < 0.05 and stats.total_checks >= 50:
+                recommendations.append(
+                    {
+                        "filter": stats.filter_name,
+                        "type": "REVIEW",
+                        "priority": "LOW",
+                        "reason": f"Block rate only {stats.block_rate:.1%} - filter rarely triggers",
+                        "suggestion": "Review if filter is still relevant or needs threshold adjustment",
+                    }
+                )
+
+            # Very high block rate
+            elif stats.block_rate > 0.7:
+                recommendations.append(
+                    {
+                        "filter": stats.filter_name,
+                        "type": "REVIEW",
+                        "priority": "MEDIUM",
+                        "reason": f"Block rate {stats.block_rate:.1%} - filter blocks most signals",
+                        "suggestion": "Verify threshold is appropriate for current market conditions",
+                    }
+                )
+
+        # Sort by priority
+        priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+        recommendations.sort(key=lambda x: priority_order.get(x["priority"], 3))
+
+        return recommendations
+
+    def _get_trend_data(self) -> Dict:
+        """Get trend data for visualization (placeholder for time-series)."""
+        # TODO: Implement time-series tracking for trend analysis
+        return {
+            "note": "Time-series tracking not yet implemented",
+            "top_performers": [
+                f.filter_name
+                for f in sorted(
+                    self.filters.values(), key=lambda x: x.effectiveness_score, reverse=True
+                )[:3]
+                if f.total_checks >= 10
+            ],
+            "needs_attention": [
+                f.filter_name
+                for f in self.filters.values()
+                if f.total_checks >= 10 and f.effectiveness_score < 50
+            ],
+        }
+
+    def print_dashboard(self) -> None:
+        """Print a formatted dashboard to console."""
+        dashboard = self.get_dashboard_data()
+
+        print("\n" + "=" * 80)
+        print("📊 FILTER EFFECTIVENESS DASHBOARD")
+        print("=" * 80)
+
+        # Summary
+        summary = dashboard["summary"]
+        print(f"\n📈 SUMMARY")
+        print(f"   Total Checks: {summary['total_checks']:,}")
+        print(f"   Overall Block Rate: {summary['overall_block_rate']:.1%}")
+        print(f"   Overall Win Rate: {summary['overall_win_rate']:.1%}")
+        print(f"   Missed Opportunities: {summary['missed_opportunities']}")
+        print(f"   Avoided Losses: {summary['avoided_losses']}")
+        print(f"   Active Filters: {summary['active_filters']}")
+
+        # Filter Performance Table
+        print(f"\n📋 FILTER PERFORMANCE")
+        print("-" * 80)
+        print(
+            f"{'Filter':<25} {'Checks':>8} {'Block%':>8} {'Prec%':>8} {'FNR%':>8} {'Score':>8} {'Status':<15}"
+        )
+        print("-" * 80)
+
+        for f in dashboard["filters"]:
+            status_icon = {
+                "HEALTHY": "✅",
+                "MODERATE": "⚠️",
+                "TOO_STRICT": "🔴",
+                "NEEDS_OPTIMIZATION": "🟡",
+                "INSUFFICIENT_DATA": "⬜",
+            }.get(f["status"], "❓")
+
+            print(
+                f"{f['name']:<25} {f['total_checks']:>8} {f['block_rate']:>7.1f}% "
+                f"{f['precision']:>7.1f}% {f['false_negative_rate']:>7.1f}% "
+                f"{f['effectiveness_score']:>7.1f} {status_icon} {f['status']:<12}"
+            )
+
+        # Recommendations
+        if dashboard["recommendations"]:
+            print(f"\n💡 RECOMMENDATIONS")
+            print("-" * 80)
+            for rec in dashboard["recommendations"][:5]:  # Top 5
+                priority_icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(
+                    rec["priority"], "⬜"
+                )
+                print(f"\n{priority_icon} [{rec['priority']}] {rec['filter']}: {rec['type']}")
+                print(f"   Reason: {rec['reason']}")
+                print(f"   Suggestion: {rec['suggestion']}")
+
+        # Trends
+        trends = dashboard["trends"]
+        if trends["top_performers"]:
+            print(f"\n🏆 Top Performers: {', '.join(trends['top_performers'])}")
+        if trends["needs_attention"]:
+            print(f"⚠️  Needs Attention: {', '.join(trends['needs_attention'])}")
+
+        print(f"\n📅 Generated: {dashboard['generated_at']}")
+        print("=" * 80 + "\n")
+
+    def export_dashboard_json(self, filepath: str = "filter_dashboard.json") -> str:
+        """Export dashboard data to JSON file."""
+        dashboard = self.get_dashboard_data()
+        with open(filepath, "w") as f:
+            json.dump(dashboard, f, indent=2)
+        logger.info(f"Dashboard exported to {filepath}")
+        return filepath
+
 
 # Singleton
 _filter_tracker = None

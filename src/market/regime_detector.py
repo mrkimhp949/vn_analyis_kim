@@ -1505,22 +1505,196 @@ class MarketRegimeDetector:
         Returns:
             True if correlation breakdown detected
         """
+        result = self.analyze_index_divergence(vnindex_score, vn30_score, hnx_score)
+        return result["has_breakdown"]
+
+    def analyze_index_divergence(
+        self,
+        vnindex_score: float,
+        vn30_score: float,
+        hnx_score: float,
+    ) -> Dict[str, any]:
+        """
+        Analyze divergence between market indices with detailed alerts.
+
+        IMPROVED v4.2: Provides detailed divergence analysis and alerts.
+
+        Divergence scenarios:
+        1. VNINDEX up, VN30 down: Blue chips lagging (distribution?)
+        2. VNINDEX down, VN30 up: Small caps selling (flight to quality)
+        3. VNINDEX up, HNX down: Small caps lagging (risk-off)
+        4. Large deviation between any indices: Market stress
+
+        Args:
+            vnindex_score: VNINDEX composite score (-1 to 1)
+            vn30_score: VN30 composite score (-1 to 1)
+            hnx_score: HNX composite score (-1 to 1)
+
+        Returns:
+            Dict with divergence analysis:
+            - has_breakdown: bool
+            - divergence_type: str
+            - alert_level: str (INFO, WARNING, CRITICAL)
+            - alerts: List[str]
+            - recommendation: str
+        """
+        result = {
+            "has_breakdown": False,
+            "divergence_type": "NONE",
+            "alert_level": "INFO",
+            "alerts": [],
+            "recommendation": "",
+            "scores": {
+                "vnindex": vnindex_score,
+                "vn30": vn30_score,
+                "hnx": hnx_score,
+            },
+        }
+
         scores = [s for s in [vnindex_score, vn30_score, hnx_score] if s != 0]
 
         if len(scores) < 2:
-            return False
+            return result
 
         mean_score = np.mean(scores)
         max_deviation = max(abs(s - mean_score) for s in scores)
 
-        # Check for divergence (some positive, some negative)
-        has_positive = any(s > ThresholdConstants.CORRELATION_DIVERGENCE_THRESHOLD for s in scores)
-        has_negative = any(s < -ThresholdConstants.CORRELATION_DIVERGENCE_THRESHOLD for s in scores)
+        # Thresholds
+        div_threshold = ThresholdConstants.CORRELATION_DIVERGENCE_THRESHOLD
+        max_dev_threshold = ThresholdConstants.CORRELATION_MAX_DEVIATION
 
-        # Breakdown if large deviation OR opposing directions
-        return max_deviation > ThresholdConstants.CORRELATION_MAX_DEVIATION or (
-            has_positive and has_negative
-        )
+        # Check for divergence patterns
+        has_positive = any(s > div_threshold for s in scores)
+        has_negative = any(s < -div_threshold for s in scores)
+
+        # Scenario 1: VNINDEX up, VN30 down (distribution in blue chips)
+        if vnindex_score > div_threshold and vn30_score < -div_threshold:
+            result["has_breakdown"] = True
+            result["divergence_type"] = "VNINDEX_UP_VN30_DOWN"
+            result["alert_level"] = "WARNING"
+            result["alerts"].append(
+                f"⚠️ DIVERGENCE: VNINDEX up ({vnindex_score:+.2f}) but VN30 down ({vn30_score:+.2f})"
+            )
+            result["alerts"].append(
+                "📊 Blue chips lagging - possible distribution or sector rotation"
+            )
+            result["recommendation"] = (
+                "Caution: Blue chip weakness may signal broader market weakness. "
+                "Consider reducing VN30 exposure."
+            )
+
+        # Scenario 2: VNINDEX down, VN30 up (flight to quality)
+        elif vnindex_score < -div_threshold and vn30_score > div_threshold:
+            result["has_breakdown"] = True
+            result["divergence_type"] = "VNINDEX_DOWN_VN30_UP"
+            result["alert_level"] = "WARNING"
+            result["alerts"].append(
+                f"⚠️ DIVERGENCE: VNINDEX down ({vnindex_score:+.2f}) but VN30 up ({vn30_score:+.2f})"
+            )
+            result["alerts"].append(
+                "📊 Flight to quality - small/mid caps selling, blue chips holding"
+            )
+            result["recommendation"] = (
+                "Risk-off environment: Focus on VN30 blue chips. " "Avoid small/mid cap stocks."
+            )
+
+        # Scenario 3: VNINDEX up, HNX down (small caps lagging)
+        elif vnindex_score > div_threshold and hnx_score < -div_threshold:
+            result["has_breakdown"] = True
+            result["divergence_type"] = "VNINDEX_UP_HNX_DOWN"
+            result["alert_level"] = "INFO"
+            result["alerts"].append(
+                f"📊 DIVERGENCE: VNINDEX up ({vnindex_score:+.2f}) but HNX down ({hnx_score:+.2f})"
+            )
+            result["alerts"].append(
+                "Small caps underperforming - typical in early bull or late cycle"
+            )
+            result["recommendation"] = (
+                "Focus on HOSE stocks. HNX weakness may indicate "
+                "risk aversion or liquidity concerns."
+            )
+
+        # Scenario 4: VNINDEX down, HNX up (speculative rally)
+        elif vnindex_score < -div_threshold and hnx_score > div_threshold:
+            result["has_breakdown"] = True
+            result["divergence_type"] = "VNINDEX_DOWN_HNX_UP"
+            result["alert_level"] = "WARNING"
+            result["alerts"].append(
+                f"⚠️ DIVERGENCE: VNINDEX down ({vnindex_score:+.2f}) but HNX up ({hnx_score:+.2f})"
+            )
+            result["alerts"].append("📊 Speculative rally in small caps - high risk environment")
+            result["recommendation"] = (
+                "High risk: Small cap rally while main index falls is unsustainable. "
+                "Avoid chasing HNX momentum."
+            )
+
+        # Scenario 5: Large deviation (general market stress)
+        elif max_deviation > max_dev_threshold:
+            result["has_breakdown"] = True
+            result["divergence_type"] = "HIGH_DEVIATION"
+            result["alert_level"] = "WARNING"
+            result["alerts"].append(
+                f"⚠️ HIGH DEVIATION: Max deviation {max_deviation:.2f} > threshold {max_dev_threshold:.2f}"
+            )
+            result["alerts"].append(
+                f"📊 Scores: VNINDEX={vnindex_score:+.2f}, VN30={vn30_score:+.2f}, HNX={hnx_score:+.2f}"
+            )
+            result["recommendation"] = (
+                "Market stress detected. Indices not moving together. "
+                "Reduce exposure until correlation normalizes."
+            )
+
+        # Scenario 6: Opposing directions (general divergence)
+        elif has_positive and has_negative:
+            result["has_breakdown"] = True
+            result["divergence_type"] = "OPPOSING_DIRECTIONS"
+            result["alert_level"] = "INFO"
+            result["alerts"].append(f"📊 MIXED SIGNALS: Some indices positive, some negative")
+            result["alerts"].append(
+                f"Scores: VNINDEX={vnindex_score:+.2f}, VN30={vn30_score:+.2f}, HNX={hnx_score:+.2f}"
+            )
+            result["recommendation"] = (
+                "Mixed market signals. Be selective with entries. "
+                "Focus on sectors showing strength."
+            )
+
+        # Log alerts
+        if result["alerts"]:
+            for alert in result["alerts"]:
+                if result["alert_level"] == "CRITICAL":
+                    logger.warning(alert)
+                elif result["alert_level"] == "WARNING":
+                    logger.warning(alert)
+                else:
+                    logger.info(alert)
+
+        return result
+
+    def get_divergence_alerts(
+        self,
+        vnindex_df: pd.DataFrame,
+        vn30_df: Optional[pd.DataFrame] = None,
+        hnx_df: Optional[pd.DataFrame] = None,
+    ) -> Dict[str, any]:
+        """
+        Get divergence alerts from index data.
+
+        Convenience method to analyze divergence from raw DataFrames.
+
+        Args:
+            vnindex_df: VNINDEX OHLCV data
+            vn30_df: Optional VN30 data
+            hnx_df: Optional HNX data
+
+        Returns:
+            Divergence analysis dict
+        """
+        # Calculate scores
+        vnindex_score = self._calculate_index_score(vnindex_df) if vnindex_df is not None else 0.0
+        vn30_score = self._calculate_index_score(vn30_df) if vn30_df is not None else 0.0
+        hnx_score = self._calculate_index_score(hnx_df) if hnx_df is not None else 0.0
+
+        return self.analyze_index_divergence(vnindex_score, vn30_score, hnx_score)
 
     def _get_sector_leaders_laggers(self) -> Tuple[List[str], List[str]]:
         """Get leading and lagging sectors."""

@@ -90,13 +90,17 @@ class CircuitBreaker:
         # NEW: Per-session limits
         self.max_trades_per_session = max_trades_per_session
         self._session_trades = {"morning": 0, "afternoon": 0}
+        self._last_session_date: str = ""  # Track date for session reset
 
         # NEW: Winning streak protection
+        # Rationale: After 5 consecutive wins, traders often become overconfident
+        # and take excessive risks. A brief pause helps maintain discipline.
         self.max_consecutive_wins = max_consecutive_wins
         self._consecutive_wins = 0
 
         self.stats = self._load_stats()
         self._check_new_day()
+        self._reset_session_trades_if_new_day()
 
         # Trạng thái ngắt mạch
         self.tripped = False
@@ -157,7 +161,178 @@ class CircuitBreaker:
             self.tripped_reason = ""
             # OPTIMIZATION: Reset volatility cache for fresh calculation
             self._last_volatility = None
+            # Reset session trades for new day
+            self._reset_session_trades_if_new_day()
             self._save_stats()
+
+    def _reset_session_trades_if_new_day(self):
+        """Reset session trade counts if it's a new day."""
+        today = date.today().isoformat()
+        if self._last_session_date != today:
+            self._session_trades = {"morning": 0, "afternoon": 0}
+            self._last_session_date = today
+
+    def _get_current_session(self) -> str:
+        """
+        Get current trading session based on Vietnam market hours.
+
+        Vietnam market sessions:
+        - Morning (ATO): 09:00 - 11:30
+        - Afternoon (ATC): 13:00 - 14:45
+
+        Returns:
+            "morning", "afternoon", or "closed"
+        """
+        try:
+            # Try to use session_trading module if available
+            from src.market.session_trading import get_session_manager
+
+            session_mgr = get_session_manager()
+            session_info = session_mgr.get_current_session()
+
+            # Handle both dict and object responses
+            if hasattr(session_info, "session"):
+                session_name = str(session_info.session).lower()
+            elif isinstance(session_info, dict):
+                session_name = session_info.get("session", "").lower()
+            else:
+                session_name = str(session_info).lower()
+
+            if "morning" in session_name or "ato" in session_name or "am" in session_name:
+                return "morning"
+            elif "afternoon" in session_name or "atc" in session_name or "pm" in session_name:
+                return "afternoon"
+            return "closed"
+
+        except (ImportError, AttributeError, Exception):
+            # Fallback: Simple time-based detection
+            from datetime import datetime
+
+            try:
+                import pytz
+
+                vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+                now = datetime.now(vn_tz)
+            except ImportError:
+                now = datetime.now()
+
+            hour = now.hour
+            minute = now.minute
+            current_time = hour * 60 + minute  # Minutes since midnight
+
+            # Morning session: 09:00 - 11:30 (540 - 690 minutes)
+            if 540 <= current_time <= 690:
+                return "morning"
+            # Afternoon session: 13:00 - 14:45 (780 - 885 minutes)
+            elif 780 <= current_time <= 885:
+                return "afternoon"
+            else:
+                return "closed"
+
+    def check_session_limit(self) -> tuple:
+        """
+        Check if current session trade limit has been reached.
+
+        Vietnam market has 2 sessions:
+        - Morning: 09:00 - 11:30
+        - Afternoon: 13:00 - 14:45
+
+        Limiting trades per session helps:
+        - Avoid overtrading during volatile periods
+        - Spread risk across sessions
+        - Allow time for market analysis between sessions
+
+        Returns:
+            (can_trade: bool, message: str)
+        """
+        self._reset_session_trades_if_new_day()
+
+        current_session = self._get_current_session()
+
+        if current_session == "closed":
+            return False, "🚫 Market is closed - no trading allowed"
+
+        session_trades = self._session_trades.get(current_session, 0)
+
+        if session_trades >= self.max_trades_per_session:
+            return (
+                False,
+                f"🚫 Session limit reached: {session_trades}/{self.max_trades_per_session} "
+                f"trades in {current_session} session",
+            )
+
+        remaining = self.max_trades_per_session - session_trades
+        return (
+            True,
+            f"✅ Session OK: {session_trades}/{self.max_trades_per_session} trades "
+            f"({remaining} remaining in {current_session})",
+        )
+
+    def record_session_trade(self):
+        """Record a trade in the current session."""
+        self._reset_session_trades_if_new_day()
+        current_session = self._get_current_session()
+
+        if current_session in self._session_trades:
+            self._session_trades[current_session] += 1
+
+    def check_winning_streak(self) -> tuple:
+        """
+        Check if winning streak limit has been reached.
+
+        Rationale for winning streak protection:
+        - After 5+ consecutive wins, traders often become overconfident
+        - Overconfidence leads to larger position sizes and excessive risk
+        - A brief pause (1-2 trades skipped) helps maintain discipline
+        - This is a "cooling off" period, not a full stop
+
+        Returns:
+            (can_trade: bool, message: str)
+        """
+        if self._consecutive_wins >= self.max_consecutive_wins:
+            return (
+                False,
+                f"⚠️ Winning streak pause: {self._consecutive_wins} consecutive wins. "
+                f"Take a break to avoid overconfidence. "
+                f"(Limit: {self.max_consecutive_wins})",
+            )
+
+        if self._consecutive_wins >= self.max_consecutive_wins - 1:
+            # Warning: approaching limit
+            return (
+                True,
+                f"🟡 Winning streak warning: {self._consecutive_wins} consecutive wins. "
+                f"Consider reducing position size.",
+            )
+
+        return (
+            True,
+            f"✅ Winning streak OK: {self._consecutive_wins}/{self.max_consecutive_wins}",
+        )
+
+    def reset_winning_streak(self):
+        """Reset winning streak counter (called after a loss or manual reset)."""
+        self._consecutive_wins = 0
+
+    def get_session_stats(self) -> dict:
+        """Get current session trading statistics."""
+        self._reset_session_trades_if_new_day()
+        current_session = self._get_current_session()
+
+        return {
+            "current_session": current_session,
+            "morning_trades": self._session_trades.get("morning", 0),
+            "afternoon_trades": self._session_trades.get("afternoon", 0),
+            "max_per_session": self.max_trades_per_session,
+            "session_limit_reached": (
+                self._session_trades.get(current_session, 0) >= self.max_trades_per_session
+                if current_session != "closed"
+                else False
+            ),
+            "consecutive_wins": self._consecutive_wins,
+            "max_consecutive_wins": self.max_consecutive_wins,
+            "winning_streak_pause": self._consecutive_wins >= self.max_consecutive_wins,
+        }
 
     def check_and_update(
         self,
@@ -260,7 +435,22 @@ class CircuitBreaker:
                 self._save_stats()
                 return True
 
-            # ENHANCEMENT: Check 5: Portfolio heat (overexposure)
+            # NEW Check 5: Per-session trade limit
+            session_ok, session_msg = self.check_session_limit()
+            if not session_ok and "limit reached" in session_msg:
+                # Don't trip circuit breaker, just block this session
+                # Trading can resume in next session
+                print(f"⚠️ {session_msg}")
+                # Note: We don't set self.tripped here as it's session-specific
+
+            # NEW Check 6: Winning streak protection
+            streak_ok, streak_msg = self.check_winning_streak()
+            if not streak_ok:
+                # Soft block - warn but don't trip circuit breaker
+                print(f"⚠️ {streak_msg}")
+                # Note: This is advisory, not a hard stop
+
+            # Check 7: Portfolio heat (overexposure)
             if portfolio_heat > self.max_portfolio_heat:
                 self.tripped = True
                 self.tripped_reason = (
@@ -370,21 +560,39 @@ class CircuitBreaker:
 
     def can_trade(self) -> Tuple[bool, str]:
         """
-        DEPRECATED: Use check_and_update instead.
         Check xem có thể vào lệnh mới không.
+
+        IMPROVED v4.2: Includes session limits and winning streak checks.
+
+        Returns:
+            (can_trade: bool, reason: str)
         """
         if self.tripped:
             return False, self.tripped_reason
 
-        # This part is now mostly redundant as checks are in check_and_update
         today_stats = self.stats["today"]
+
+        # Check 1: Max trades per day
         if today_stats["trades_count"] >= self.max_trades_per_day:
             return False, f"🚫 Max trades per day reached ({self.max_trades_per_day})"
+
+        # Check 2: Consecutive losses
         if self.stats["consecutive_losses"] >= self.max_consecutive_losses:
             return (
                 False,
                 f"🚫 Too many consecutive losses ({self.stats['consecutive_losses']})",
             )
+
+        # Check 3: Per-session limit
+        session_ok, session_msg = self.check_session_limit()
+        if not session_ok:
+            return False, session_msg
+
+        # Check 4: Winning streak (soft check - warning only)
+        streak_ok, streak_msg = self.check_winning_streak()
+        if not streak_ok:
+            # This is a soft block - return warning but allow override
+            return False, streak_msg
 
         return True, "✅ OK to trade"
 
@@ -393,6 +601,7 @@ class CircuitBreaker:
         Record một trade
 
         CRITICAL FIX: Thread-safe with RLock.
+        IMPROVED v4.2: Tracks session trades and winning streak.
 
         Args:
             pnl: Profit/Loss (positive = profit, negative = loss)
@@ -406,13 +615,30 @@ class CircuitBreaker:
             today_stats["trades_count"] += 1
             today_stats["last_updated"] = datetime.now().isoformat()
 
-            # Update P&L
+            # NEW: Record session trade
+            self.record_session_trade()
+
+            # Update P&L and streak tracking
             if pnl > 0:
                 today_stats["total_profit"] += pnl
-                self.stats["consecutive_losses"] = 0  # Reset
+                self.stats["consecutive_losses"] = 0  # Reset loss streak
+                # NEW: Track winning streak
+                self._consecutive_wins += 1
+                if self._consecutive_wins >= self.max_consecutive_wins:
+                    print(
+                        f"🏆 Winning streak: {self._consecutive_wins} consecutive wins! "
+                        f"Consider taking a break to avoid overconfidence."
+                    )
             else:
                 today_stats["total_loss"] += abs(pnl)
                 self.stats["consecutive_losses"] += 1
+                # NEW: Reset winning streak on loss
+                if self._consecutive_wins > 0:
+                    print(
+                        f"📉 Winning streak ended at {self._consecutive_wins} wins. "
+                        f"Resetting counter."
+                    )
+                self._consecutive_wins = 0
 
             today_stats["net_pnl"] = today_stats["total_profit"] - today_stats["total_loss"]
 
@@ -457,6 +683,7 @@ class CircuitBreaker:
         self._check_new_day()
 
         stats = self.get_daily_stats()
+        session_stats = self.get_session_stats()
 
         msg = []
         msg.append("🔒 **CIRCUIT BREAKER STATUS**")
@@ -470,6 +697,27 @@ class CircuitBreaker:
             f"⚠️ Consecutive losses: {self.stats.get('consecutive_losses', 0)}/{self.max_consecutive_losses}"
         )
         msg.append("")
+
+        # NEW: Session info
+        msg.append("📊 **SESSION STATS**")
+        msg.append(f"   Current session: {session_stats['current_session']}")
+        msg.append(
+            f"   Morning trades: {session_stats['morning_trades']}/{self.max_trades_per_session}"
+        )
+        msg.append(
+            f"   Afternoon trades: {session_stats['afternoon_trades']}/{self.max_trades_per_session}"
+        )
+        msg.append("")
+
+        # NEW: Winning streak info
+        msg.append("🏆 **WINNING STREAK**")
+        msg.append(
+            f"   Consecutive wins: {session_stats['consecutive_wins']}/{self.max_consecutive_wins}"
+        )
+        if session_stats["winning_streak_pause"]:
+            msg.append("   ⚠️ PAUSE RECOMMENDED - Take a break to avoid overconfidence")
+        msg.append("")
+
         msg.append(f"Status: {'TRIPPED - ' + self.tripped_reason if self.tripped else 'OK'}")
 
         return "\n".join(msg)

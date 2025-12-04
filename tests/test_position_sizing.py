@@ -758,12 +758,12 @@ def test_calculate_position_size_dca_entries(sizer):
     )
 
     assert len(result.recommended_entries) == 3
-    # Level 1: 50% at -1%
+    # Level 1: 50% at -2% (DCA_LEVEL_1_DISCOUNT = 0.98)
     assert result.recommended_entries[0]["percent"] == 50
-    assert result.recommended_entries[0]["price"] == pytest.approx(80000 * 0.99, abs=100)
-    # Level 2: 30% at -2%
+    assert result.recommended_entries[0]["price"] == pytest.approx(80000 * 0.98, abs=100)
+    # Level 2: 30% at -4%
     assert result.recommended_entries[1]["percent"] == 30
-    # Level 3: 20% at -3%
+    # Level 3: 20% at -6%
     assert result.recommended_entries[2]["percent"] == 20
 
 
@@ -903,21 +903,21 @@ def test_calculate_dca_entries(sizer):
     entries = sizer._calculate_dca_entries(base_price=80000, total_shares=1000)
 
     assert len(entries) == 3
-    # Level 1: 50% at -1%
+    # Level 1: 50% at -2% (DCA_LEVEL_1_DISCOUNT = 0.98)
     assert entries[0]["level"] == 1
-    assert entries[0]["price"] == pytest.approx(80000 * 0.99, abs=100)
+    assert entries[0]["price"] == pytest.approx(80000 * 0.98, abs=100)
     assert entries[0]["shares"] == 500
     assert entries[0]["percent"] == 50
 
-    # Level 2: 30% at -2%
+    # Level 2: 30% at -4% (DCA_LEVEL_2_DISCOUNT = 0.96)
     assert entries[1]["level"] == 2
-    assert entries[1]["price"] == pytest.approx(80000 * 0.98, abs=100)
+    assert entries[1]["price"] == pytest.approx(80000 * 0.96, abs=100)
     assert entries[1]["shares"] == 300
     assert entries[1]["percent"] == 30
 
-    # Level 3: 20% at -3%
+    # Level 3: 20% at -6% (DCA_LEVEL_3_DISCOUNT = 0.94)
     assert entries[2]["level"] == 3
-    assert entries[2]["price"] == pytest.approx(80000 * 0.97, abs=100)
+    assert entries[2]["price"] == pytest.approx(80000 * 0.94, abs=100)
     assert entries[2]["shares"] == 200
     assert entries[2]["percent"] == 20
 
