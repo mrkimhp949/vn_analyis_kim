@@ -618,18 +618,32 @@ class ImprovedEntryLogic:
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
     ) -> None:
-        """Apply Vietnam price limit filter (floor warning)."""
+        """Apply Vietnam price limit filter (BLOCK ceiling, warn floor)."""
         price_limit_check = self._check_vietnam_price_limits(df, current_price)
-        if price_limit_check["near_limit"] and price_limit_check["limit_type"] == "FLOOR":
+
+        if price_limit_check["near_limit"]:
             warning_msg = price_limit_check["warning"]
-            warnings.append(f"⚠️ {warning_msg}")
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "vietnam_price_limits",
-                VN_FLOOR_PENALTY,
-                warning_msg,
-            )
+
+            if price_limit_check["limit_type"] == "CEILING":
+                # BLOCK entry near ceiling - too risky, may get trapped
+                warnings.append(f"🚫 BLOCKED: {warning_msg}")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vietnam_price_limits",
+                    -999,  # Block entry
+                    f"BLOCKED: {warning_msg}",
+                )
+            elif price_limit_check["limit_type"] == "FLOOR":
+                # Warn but allow entry near floor (potential reversal)
+                warnings.append(f"⚠️ {warning_msg}")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vietnam_price_limits",
+                    VN_FLOOR_PENALTY,
+                    warning_msg,
+                )
 
     def _apply_trend_filter(
         self,
@@ -698,9 +712,23 @@ class ImprovedEntryLogic:
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
     ) -> None:
-        """Apply volume confirmation filter."""
+        """Apply volume confirmation filter with manipulation detection."""
         volume_check = self._check_volume_confirmation(df, market_regime)
         is_small_cap = self._is_small_cap(df, current_price)
+
+        # Check for volume manipulation (abnormal spike)
+        manipulation_check = self._check_volume_manipulation(df)
+        if manipulation_check["is_manipulation"]:
+            warning_msg = f"🚫 BLOCKED: {manipulation_check['reason']}"
+            warnings.append(warning_msg)
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "volume_manipulation",
+                -999,
+                manipulation_check["reason"],
+            )
+            return  # Don't process further if manipulation detected
 
         if not volume_check["confirmed"]:
             volume_note = volume_check["reason"]
@@ -2127,6 +2155,65 @@ class ImprovedEntryLogic:
             "confidence": confidence_score,
         }
 
+    def _check_volume_manipulation(self, df: pd.DataFrame) -> Dict:
+        """
+        Detect potential volume manipulation (abnormal volume spike).
+
+        Signs of manipulation:
+        - Volume > 5x average (extreme spike)
+        - Volume spike with price barely moving (wash trading)
+        - Volume spike at end of day (closing manipulation)
+
+        Returns:
+            Dict with is_manipulation, reason, volume_ratio
+        """
+        if df is None or len(df) < 20 or "volume" not in df.columns:
+            return {"is_manipulation": False, "reason": "Insufficient data", "volume_ratio": 1.0}
+
+        try:
+            current_volume = safe_get_latest(df, "volume", 0)
+            avg_volume = safe_rolling_operation(df, "volume", 20, "mean", 1)
+
+            if avg_volume == 0:
+                return {"is_manipulation": False, "reason": "No volume data", "volume_ratio": 1.0}
+
+            volume_ratio = current_volume / avg_volume
+
+            # Extreme volume spike (> 5x average) - potential manipulation
+            if volume_ratio > 5.0:
+                # Check if price moved proportionally
+                current_close = safe_get_latest(df, "close", 0)
+                prev_close = df["close"].iloc[-2] if len(df) >= 2 else current_close
+                price_change_pct = (
+                    abs((current_close - prev_close) / prev_close * 100) if prev_close > 0 else 0
+                )
+
+                # Volume spike > 5x but price change < 2% = suspicious (wash trading)
+                if price_change_pct < 2.0:
+                    return {
+                        "is_manipulation": True,
+                        "reason": f"Volume spike {volume_ratio:.1f}x với giá chỉ thay đổi {price_change_pct:.1f}% - nghi ngờ wash trading",
+                        "volume_ratio": volume_ratio,
+                    }
+
+                # Volume spike > 8x is always suspicious
+                if volume_ratio > 8.0:
+                    return {
+                        "is_manipulation": True,
+                        "reason": f"Volume đột biến bất thường {volume_ratio:.1f}x - nghi ngờ manipulation",
+                        "volume_ratio": volume_ratio,
+                    }
+
+            return {
+                "is_manipulation": False,
+                "reason": "Volume bình thường",
+                "volume_ratio": volume_ratio,
+            }
+
+        except Exception as e:
+            logger.warning(f"Volume manipulation check error: {e}")
+            return {"is_manipulation": False, "reason": f"Error: {e}", "volume_ratio": 1.0}
+
     def _check_volatility(self, df: pd.DataFrame) -> Dict:
         """
         Check volatility (ATR/Price)
@@ -3266,6 +3353,52 @@ class ImprovedEntryLogic:
         enhanced_warnings = list(base_signal.warnings)
         enhanced_reasons = list(base_signal.reasons)
         position_multiplier = base_signal.position_size_multiplier
+
+        # 2a-pre. Market halt check (Vietnam circuit breaker)
+        if vnindex_df is not None:
+            try:
+                from src.utils.vietnam_market import (
+                    check_market_halt_status,
+                    detect_unusual_activity,
+                )
+
+                # Calculate VNINDEX change
+                if len(vnindex_df) >= 2:
+                    vnindex_current = vnindex_df["close"].iloc[-1]
+                    vnindex_prev = vnindex_df["close"].iloc[-2]
+                    vnindex_change_pct = (vnindex_current - vnindex_prev) / vnindex_prev * 100
+
+                    halt_status = check_market_halt_status(vnindex_change_pct)
+
+                    if not halt_status["trading_allowed"]:
+                        return self._no_signal(
+                            halt_status["message"],
+                            telemetry={"market_halt": halt_status},
+                        )
+
+                    if halt_status["halt_level"] >= 1:
+                        enhanced_warnings.append(halt_status["message"])
+                        enhanced_adjustments -= 15  # Reduce confidence in warning mode
+                        position_multiplier *= 0.5  # Reduce position size
+
+                # Check for unusual activity on the stock
+                unusual = detect_unusual_activity(df, symbol)
+                if unusual["unusual_detected"]:
+                    enhanced_warnings.extend(unusual["warnings"])
+                    if unusual["risk_level"] == "CRITICAL":
+                        return self._no_signal(
+                            f"Unusual trading activity detected: {unusual['risk_level']}",
+                            telemetry={"unusual_activity": unusual},
+                        )
+                    elif unusual["risk_level"] == "HIGH":
+                        enhanced_adjustments -= 20
+                        position_multiplier *= 0.5
+                    elif unusual["risk_level"] == "WARNING":
+                        enhanced_adjustments -= 10
+                        position_multiplier *= 0.75
+
+            except Exception as e:
+                logger.warning(f"Market halt/unusual activity check failed: {e}")
 
         # 2a. Session timing check
         if check_session_timing and SESSION_TRADING_AVAILABLE:

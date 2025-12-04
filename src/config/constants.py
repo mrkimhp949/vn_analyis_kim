@@ -258,6 +258,8 @@ DEFAULT_VALIDATION_MIN_ROWS = 20  # Minimum rows for validation
 # Volume Analysis
 VOLUME_CONFIRMATION_THRESHOLD = 1.2  # 1.2x volume for confirmation
 VOLUME_SURGE_THRESHOLD = 1.5  # 1.5x volume for surge
+VOLUME_MANIPULATION_THRESHOLD = 5.0  # 5x volume = potential manipulation
+VOLUME_EXTREME_THRESHOLD = 8.0  # 8x volume = always block (extreme manipulation)
 OBV_PERIODS = [5, 20]  # OBV calculation periods
 
 # RSI and Momentum
@@ -314,11 +316,11 @@ def get_ml_signal_weight(ml_confidence: float) -> float:
 MAX_CORRELATION = 0.65  # TIGHTENED: Maximum 0.65 correlation between positions
 DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
 
-# NEW: Vietnam Market Specific Thresholds - OPTIMIZED v4.0
-# IMPROVED: Tiered liquidity for different market caps - LOWERED to capture more opportunities
-VN_MIN_LIQUIDITY_VALUE = 500_000_000  # LOWERED: 500M VND for small caps (was 1B)
-VN_MID_CAP_LIQUIDITY_VALUE = 1_000_000_000  # LOWERED: 1B VND for mid caps (was 2B)
-VN_LARGE_CAP_LIQUIDITY_VALUE = 3_000_000_000  # LOWERED: 3B VND for large caps (was 5B)
+# NEW: Vietnam Market Specific Thresholds - OPTIMIZED v5.0
+# IMPROVED: Tiered liquidity for different market caps - balanced for VN market
+VN_MIN_LIQUIDITY_VALUE = 1_000_000_000  # 1B VND for small caps
+VN_MID_CAP_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for mid caps
+VN_LARGE_CAP_LIQUIDITY_VALUE = 5_000_000_000  # 5B VND for large caps
 VN_CRITICAL_LIQUIDITY_VALUE = 300_000_000  # LOWERED: 300M VND critical minimum (was 500M)
 VN_MIN_VOLUME = 25_000  # LOWERED: 25K shares minimum (was 50K)
 VN_MAX_INTRADAY_RANGE = 5.0  # 5% max intraday range for entry
@@ -535,6 +537,8 @@ __all__ = [
     # Volume
     "VOLUME_CONFIRMATION_THRESHOLD",
     "VOLUME_SURGE_THRESHOLD",
+    "VOLUME_MANIPULATION_THRESHOLD",
+    "VOLUME_EXTREME_THRESHOLD",
     "OBV_PERIODS",
     # RSI
     "RSI_OVERSOLD",

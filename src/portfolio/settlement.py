@@ -166,15 +166,18 @@ class T2SettlementTracker:
 
     def _calculate_settlement_date(self, trade_date: datetime) -> datetime:
         """
-        Calculate settlement date (T+2 business days)
+        Calculate settlement date (T+2 trading days)
 
-        ENHANCEMENT: Account for weekends and holidays
-        Note: This is simplified - real implementation should use Vietnam market calendar
+        IMPROVED: Now properly accounts for:
+        - Weekends (Saturday, Sunday)
+        - Vietnam public holidays (Tết, 30/4, 1/5, 2/9, Hung Kings' Day)
+
+        Uses Vietnam market calendar from src/utils/vietnam_market.py
         """
-        from pandas.tseries.offsets import BDay
+        from src.utils.vietnam_market import get_next_trading_day
 
-        # Add 2 business days
-        settlement_date = trade_date + BDay(self.settlement_days)
+        # Get T+2 trading days (skips weekends and VN holidays)
+        settlement_date = get_next_trading_day(trade_date, days_ahead=self.settlement_days)
 
         return settlement_date
 
