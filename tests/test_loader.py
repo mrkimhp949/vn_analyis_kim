@@ -454,7 +454,7 @@ def test_download_from_tcbs_max_retries_exceeded(mock_sleep, mock_wait, mock_get
     start = datetime(2024, 1, 1)
     end = datetime(2024, 1, 3)
 
-    with pytest.raises(DataLoadError, match="after 3 retries"):
+    with pytest.raises(DataLoadError, match="after 5 retries"):
         _download_from_tcbs("VNM", start, end, "1D", "stock")
 
     # Should retry 3 times
