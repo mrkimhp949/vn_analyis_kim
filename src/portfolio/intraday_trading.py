@@ -39,22 +39,25 @@ logger = logging.getLogger(__name__)
 
 class IntradayPositionStatus(Enum):
     """Status of an intraday position"""
-    OPEN = "OPEN"                    # Position opened today, still holding
-    PARTIALLY_CLOSED = "PARTIAL"     # Partially closed intraday
-    CLOSED = "CLOSED"                # Fully closed intraday (day trade)
-    CARRIED_OVER = "CARRIED"         # Will be carried to T+1 (not closed today)
+
+    OPEN = "OPEN"  # Position opened today, still holding
+    PARTIALLY_CLOSED = "PARTIAL"  # Partially closed intraday
+    CLOSED = "CLOSED"  # Fully closed intraday (day trade)
+    CARRIED_OVER = "CARRIED"  # Will be carried to T+1 (not closed today)
 
 
 class TradingMode(Enum):
     """Trading mode for the account"""
-    CASH_ONLY = "CASH"              # Cash account - T+2 settlement
-    MARGIN_T2 = "MARGIN_T2"         # Margin account - T+2 settlement
-    MARGIN_T0 = "MARGIN_T0"         # Margin account with T+0 enabled
+
+    CASH_ONLY = "CASH"  # Cash account - T+2 settlement
+    MARGIN_T2 = "MARGIN_T2"  # Margin account - T+2 settlement
+    MARGIN_T0 = "MARGIN_T0"  # Margin account with T+0 enabled
 
 
 @dataclass
 class IntradayTrade:
     """Record of a single intraday trade"""
+
     trade_id: str
     symbol: str
     side: str  # "BUY" or "SELL"
@@ -73,16 +76,17 @@ class IntradayPosition:
 
     Tracks positions opened today that may be closed same-day (T+0).
     """
+
     symbol: str
-    open_quantity: int              # Shares bought today
-    current_quantity: int           # Remaining shares (after partial sells)
-    avg_open_price: float          # Average buy price
-    current_price: float           # Latest price
-    open_time: datetime            # When position was opened
+    open_quantity: int  # Shares bought today
+    current_quantity: int  # Remaining shares (after partial sells)
+    avg_open_price: float  # Average buy price
+    current_price: float  # Latest price
+    open_time: datetime  # When position was opened
     close_time: Optional[datetime] = None
     close_price: Optional[float] = None
-    realized_pnl: float = 0.0      # P&L from closed portion
-    unrealized_pnl: float = 0.0    # P&L from open portion
+    realized_pnl: float = 0.0  # P&L from closed portion
+    unrealized_pnl: float = 0.0  # P&L from open portion
     status: IntradayPositionStatus = IntradayPositionStatus.OPEN
     trades: List[IntradayTrade] = field(default_factory=list)
 
@@ -110,11 +114,12 @@ class IntradayPosition:
 @dataclass
 class IntradayStats:
     """Daily intraday trading statistics"""
+
     date: date
     total_trades: int = 0
     buy_trades: int = 0
     sell_trades: int = 0
-    day_trades: int = 0              # Complete round trips (buy+sell same day)
+    day_trades: int = 0  # Complete round trips (buy+sell same day)
     total_volume: int = 0
     total_value: float = 0.0
     realized_pnl: float = 0.0
@@ -167,16 +172,16 @@ class IntradayTracker:
     LUNCH_END = time(13, 0)
 
     # Intraday limits
-    MAX_INTRADAY_TRADES = 20         # Max trades per day (prevent overtrading)
-    MAX_INTRADAY_LOSS_PCT = 0.02     # Stop trading if -2% intraday loss
-    MIN_HOLDING_MINUTES = 5          # Minimum holding time (avoid wash trades)
+    MAX_INTRADAY_TRADES = 20  # Max trades per day (prevent overtrading)
+    MAX_INTRADAY_LOSS_PCT = 0.02  # Stop trading if -2% intraday loss
+    MIN_HOLDING_MINUTES = 5  # Minimum holding time (avoid wash trades)
 
     def __init__(
         self,
         mode: TradingMode = TradingMode.MARGIN_T0,
         margin_buying_power: float = 0.0,
         commission_rate: float = 0.0015,  # 0.15% per trade
-        enable_t0: bool = True
+        enable_t0: bool = True,
     ):
         """
         Initialize intraday tracker.
@@ -221,6 +226,7 @@ class IntradayTracker:
     def _generate_trade_id(self) -> str:
         """Generate unique trade ID."""
         import uuid
+
         return f"T{datetime.now().strftime('%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
 
     def is_market_open(self) -> bool:
@@ -238,11 +244,7 @@ class IntradayTracker:
         return True
 
     def record_buy(
-        self,
-        symbol: str,
-        quantity: int,
-        price: float,
-        timestamp: Optional[datetime] = None
+        self, symbol: str, quantity: int, price: float, timestamp: Optional[datetime] = None
     ) -> IntradayTrade:
         """
         Record a buy trade.
@@ -271,7 +273,7 @@ class IntradayTracker:
                 price=price,
                 value=value,
                 timestamp=timestamp,
-                commission=commission
+                commission=commission,
             )
 
             self._today_trades.append(trade)
@@ -294,7 +296,7 @@ class IntradayTracker:
                     avg_open_price=price,
                     current_price=price,
                     open_time=timestamp,
-                    trades=[trade]
+                    trades=[trade],
                 )
 
             # Update stats
@@ -305,17 +307,12 @@ class IntradayTracker:
             self._stats.total_commission += commission
 
             logger.info(
-                f"📈 BUY recorded: {symbol} {quantity} @ {price:,.0f} "
-                f"(value: {value:,.0f} VND)"
+                f"📈 BUY recorded: {symbol} {quantity} @ {price:,.0f} " f"(value: {value:,.0f} VND)"
             )
 
             return trade
 
-    def can_sell_intraday(
-        self,
-        symbol: str,
-        quantity: int
-    ) -> Tuple[bool, str]:
+    def can_sell_intraday(self, symbol: str, quantity: int) -> Tuple[bool, str]:
         """
         Check if an intraday sell is allowed.
 
@@ -344,7 +341,7 @@ class IntradayTracker:
                 return (
                     False,
                     f"Insufficient shares. Have: {pos.current_quantity}, "
-                    f"Want to sell: {quantity}"
+                    f"Want to sell: {quantity}",
                 )
 
             # Check minimum holding time (prevent wash trades)
@@ -352,7 +349,7 @@ class IntradayTracker:
                 return (
                     False,
                     f"Minimum holding time not met. "
-                    f"Hold for {self.MIN_HOLDING_MINUTES - pos.holding_minutes} more minutes"
+                    f"Hold for {self.MIN_HOLDING_MINUTES - pos.holding_minutes} more minutes",
                 )
 
             # Check daily trade limit
@@ -361,19 +358,12 @@ class IntradayTracker:
 
             # Check daily loss limit
             if self._stats.net_pnl < -self.margin_buying_power * self.MAX_INTRADAY_LOSS_PCT:
-                return (
-                    False,
-                    f"Daily loss limit reached. Net P&L: {self._stats.net_pnl:,.0f} VND"
-                )
+                return (False, f"Daily loss limit reached. Net P&L: {self._stats.net_pnl:,.0f} VND")
 
             return True, "OK"
 
     def record_sell(
-        self,
-        symbol: str,
-        quantity: int,
-        price: float,
-        timestamp: Optional[datetime] = None
+        self, symbol: str, quantity: int, price: float, timestamp: Optional[datetime] = None
     ) -> Optional[IntradayTrade]:
         """
         Record a sell trade (T+0 intraday exit).
@@ -412,7 +402,7 @@ class IntradayTracker:
                 value=value,
                 timestamp=timestamp,
                 is_intraday_close=True,
-                commission=commission
+                commission=commission,
             )
 
             self._today_trades.append(trade)
@@ -440,9 +430,9 @@ class IntradayTracker:
             if pos.status == IntradayPositionStatus.CLOSED:
                 self._stats.day_trades += 1
                 self._stats.avg_holding_minutes = (
-                    (self._stats.avg_holding_minutes * (self._stats.day_trades - 1) +
-                     pos.holding_minutes) / self._stats.day_trades
-                )
+                    self._stats.avg_holding_minutes * (self._stats.day_trades - 1)
+                    + pos.holding_minutes
+                ) / self._stats.day_trades
 
             if realized_pnl > 0:
                 self._stats.win_trades += 1
@@ -491,9 +481,10 @@ class IntradayTracker:
         with self._lock:
             self._check_new_day()
             return [
-                p for p in self._positions.values()
-                if p.status in [IntradayPositionStatus.OPEN,
-                               IntradayPositionStatus.PARTIALLY_CLOSED]
+                p
+                for p in self._positions.values()
+                if p.status
+                in [IntradayPositionStatus.OPEN, IntradayPositionStatus.PARTIALLY_CLOSED]
             ]
 
     def get_stats(self) -> IntradayStats:
@@ -519,11 +510,7 @@ class IntradayTracker:
             for pos in open_positions:
                 current_price = get_price_func(pos.symbol)
                 if current_price and pos.current_quantity > 0:
-                    trade = self.record_sell(
-                        pos.symbol,
-                        pos.current_quantity,
-                        current_price
-                    )
+                    trade = self.record_sell(pos.symbol, pos.current_quantity, current_price)
                     if trade:
                         trades.append(trade)
 
@@ -577,16 +564,12 @@ _intraday_tracker: Optional[IntradayTracker] = None
 
 
 def get_intraday_tracker(
-    mode: TradingMode = TradingMode.MARGIN_T0,
-    margin_buying_power: float = 100_000_000
+    mode: TradingMode = TradingMode.MARGIN_T0, margin_buying_power: float = 100_000_000
 ) -> IntradayTracker:
     """Get singleton intraday tracker instance."""
     global _intraday_tracker
     if _intraday_tracker is None:
-        _intraday_tracker = IntradayTracker(
-            mode=mode,
-            margin_buying_power=margin_buying_power
-        )
+        _intraday_tracker = IntradayTracker(mode=mode, margin_buying_power=margin_buying_power)
     return _intraday_tracker
 
 
@@ -595,9 +578,7 @@ if __name__ == "__main__":
     print("Testing Intraday Tracker...")
 
     tracker = IntradayTracker(
-        mode=TradingMode.MARGIN_T0,
-        margin_buying_power=100_000_000,
-        enable_t0=True
+        mode=TradingMode.MARGIN_T0, margin_buying_power=100_000_000, enable_t0=True
     )
 
     # Simulate intraday trading
@@ -615,6 +596,7 @@ if __name__ == "__main__":
 
     # Wait minimum holding time (simulated)
     import time
+
     print("\n4️⃣ Waiting for minimum holding time...")
     time.sleep(1)  # In real scenario, wait 5 minutes
 

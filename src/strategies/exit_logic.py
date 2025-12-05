@@ -705,6 +705,7 @@ class ImprovedExitStrategy:
                         # Check how long we've been at floor (TIME LIMIT FIX)
                         floor_wait_key = f"floor_wait_{symbol}"
                         from datetime import datetime
+
                         current_time = datetime.now()
 
                         # Get or initialize floor wait tracking
@@ -743,9 +744,14 @@ class ImprovedExitStrategy:
                     else:
                         # Price moved away from floor - clear tracking
                         floor_wait_key = f"floor_wait_{symbol}"
-                        if hasattr(self, "_floor_wait_times") and floor_wait_key in self._floor_wait_times:
+                        if (
+                            hasattr(self, "_floor_wait_times")
+                            and floor_wait_key in self._floor_wait_times
+                        ):
                             del self._floor_wait_times[floor_wait_key]
-                            logger.info(f"✅ {symbol}: Price moved away from floor - tracking cleared")
+                            logger.info(
+                                f"✅ {symbol}: Price moved away from floor - tracking cleared"
+                            )
             except Exception as e:
                 logger.debug(f"Floor check failed: {e}")
 

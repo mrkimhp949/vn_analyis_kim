@@ -117,7 +117,9 @@ class TradingConfig:
 
     # Technical-only signals
     # IMPROVED v5.0: Increased from 40 to 60 for better signal quality
-    min_technical_only_confidence: float = 60.0  # Threshold for technical-only signals (aligned with constants)
+    min_technical_only_confidence: float = (
+        60.0  # Threshold for technical-only signals (aligned with constants)
+    )
 
     # Per-symbol circuit breaker
     per_symbol_max_consecutive_losses: int = 3  # Block symbol after N consecutive losses

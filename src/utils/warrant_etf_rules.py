@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 class InstrumentType(Enum):
     """Type of trading instrument"""
+
     STOCK = "STOCK"
     COVERED_WARRANT = "CW"
     ETF = "ETF"
@@ -46,28 +47,31 @@ class InstrumentType(Enum):
 
 class WarrantType(Enum):
     """Type of covered warrant"""
+
     CALL = "CALL"  # Bullish - profits when underlying rises
-    PUT = "PUT"    # Bearish - profits when underlying falls
+    PUT = "PUT"  # Bearish - profits when underlying falls
 
 
 class WarrantStatus(Enum):
     """Status of covered warrant"""
-    ACTIVE = "ACTIVE"           # Trading normally
-    NEAR_EXPIRY = "NEAR_EXPIRY" # < 30 days to expiry
+
+    ACTIVE = "ACTIVE"  # Trading normally
+    NEAR_EXPIRY = "NEAR_EXPIRY"  # < 30 days to expiry
     EXPIRING_SOON = "EXPIRING"  # < 7 days to expiry
-    EXPIRED = "EXPIRED"         # Past expiry date
-    SUSPENDED = "SUSPENDED"     # Trading halted
+    EXPIRED = "EXPIRED"  # Past expiry date
+    SUSPENDED = "SUSPENDED"  # Trading halted
 
 
 @dataclass
 class WarrantInfo:
     """Information about a covered warrant"""
+
     symbol: str
-    underlying: str           # Underlying stock (e.g., "VNM")
-    warrant_type: WarrantType # CALL or PUT
-    issuer: str              # Issuing securities company
-    strike_price: float      # Exercise price
-    exercise_ratio: float    # How many warrants = 1 underlying share
+    underlying: str  # Underlying stock (e.g., "VNM")
+    warrant_type: WarrantType  # CALL or PUT
+    issuer: str  # Issuing securities company
+    strike_price: float  # Exercise price
+    exercise_ratio: float  # How many warrants = 1 underlying share
     expiry_date: date
     issue_date: date
     status: WarrantStatus
@@ -110,15 +114,16 @@ class WarrantInfo:
 @dataclass
 class ETFInfo:
     """Information about an ETF"""
+
     symbol: str
     name: str
-    index_tracked: str        # Index being tracked (e.g., "VN30")
-    nav: float               # Net Asset Value
+    index_tracked: str  # Index being tracked (e.g., "VN30")
+    nav: float  # Net Asset Value
     market_price: float
-    aum: float               # Assets Under Management
-    expense_ratio: float     # Annual expense ratio
-    can_short: bool          # Whether shorting is allowed
-    tracking_error: float    # Tracking error percentage
+    aum: float  # Assets Under Management
+    expense_ratio: float  # Annual expense ratio
+    can_short: bool  # Whether shorting is allowed
+    tracking_error: float  # Tracking error percentage
 
     @property
     def premium_discount(self) -> float:
@@ -173,14 +178,14 @@ class WarrantETFHandler:
     }
 
     # Price limits
-    STOCK_PRICE_LIMIT = 0.07    # ±7%
+    STOCK_PRICE_LIMIT = 0.07  # ±7%
     WARRANT_PRICE_LIMIT = 0.50  # ±50%
-    ETF_PRICE_LIMIT = 0.07      # ±7% (same as stocks)
+    ETF_PRICE_LIMIT = 0.07  # ±7% (same as stocks)
 
     # Trading rules
     WARRANT_MIN_DAYS_TO_EXPIRY = 3  # Don't trade if < 3 days to expiry
-    WARRANT_WARNING_DAYS = 30       # Warning if < 30 days to expiry
-    WARRANT_EXPIRING_DAYS = 7       # "Expiring soon" if < 7 days
+    WARRANT_WARNING_DAYS = 30  # Warning if < 30 days to expiry
+    WARRANT_EXPIRING_DAYS = 7  # "Expiring soon" if < 7 days
 
     def __init__(self):
         """Initialize warrant/ETF handler."""
@@ -283,10 +288,7 @@ class WarrantETFHandler:
             return 2  # T+2 for stocks and ETFs
 
     def validate_warrant_trade(
-        self,
-        symbol: str,
-        side: str,
-        expiry_date: Optional[date] = None
+        self, symbol: str, side: str, expiry_date: Optional[date] = None
     ) -> Tuple[bool, str, List[str]]:
         """
         Validate if a warrant trade is allowed.
@@ -323,26 +325,18 @@ class WarrantETFHandler:
                     False,
                     f"Warrant {symbol} expires in {days_to_expiry} days - "
                     f"minimum {self.WARRANT_MIN_DAYS_TO_EXPIRY} days required",
-                    []
+                    [],
                 )
 
             if days_to_expiry < self.WARRANT_EXPIRING_DAYS:
-                warnings.append(
-                    f"⚠️ EXPIRING SOON: {symbol} expires in {days_to_expiry} days"
-                )
+                warnings.append(f"⚠️ EXPIRING SOON: {symbol} expires in {days_to_expiry} days")
             elif days_to_expiry < self.WARRANT_WARNING_DAYS:
-                warnings.append(
-                    f"🟡 Near expiry: {symbol} expires in {days_to_expiry} days"
-                )
+                warnings.append(f"🟡 Near expiry: {symbol} expires in {days_to_expiry} days")
 
         # Additional warnings for buying
         if side.upper() == "BUY":
-            warnings.append(
-                f"💡 Warrant tip: {symbol} has ±50% daily price limit (not ±7%)"
-            )
-            warnings.append(
-                f"⏰ T+0 settlement - can sell same day"
-            )
+            warnings.append(f"💡 Warrant tip: {symbol} has ±50% daily price limit (not ±7%)")
+            warnings.append(f"⏰ T+0 settlement - can sell same day")
 
         return True, "✅ Warrant trade validated", warnings
 
@@ -351,7 +345,7 @@ class WarrantETFHandler:
         symbol: str,
         side: str,
         nav: Optional[float] = None,
-        market_price: Optional[float] = None
+        market_price: Optional[float] = None,
     ) -> Tuple[bool, str, List[str]]:
         """
         Validate if an ETF trade is allowed.
@@ -425,36 +419,40 @@ class WarrantETFHandler:
             "lot_size": 100,  # Same for all
             "can_short": False,
             "margin_available": True,
-            "notes": []
+            "notes": [],
         }
 
         if instrument_type == InstrumentType.COVERED_WARRANT:
             parsed = self.parse_warrant_symbol(symbol)
-            rules.update({
-                "underlying": parsed["underlying"] if parsed else None,
-                "issuer": parsed["issuer_name"] if parsed else None,
-                "can_short": False,  # Can't short warrants directly
-                "margin_available": False,  # No margin for warrants
-                "notes": [
-                    "T+0 settlement - can sell same day",
-                    "±50% daily price limit",
-                    "Check expiry date before trading",
-                    "Time decay accelerates near expiry",
-                ]
-            })
+            rules.update(
+                {
+                    "underlying": parsed["underlying"] if parsed else None,
+                    "issuer": parsed["issuer_name"] if parsed else None,
+                    "can_short": False,  # Can't short warrants directly
+                    "margin_available": False,  # No margin for warrants
+                    "notes": [
+                        "T+0 settlement - can sell same day",
+                        "±50% daily price limit",
+                        "Check expiry date before trading",
+                        "Time decay accelerates near expiry",
+                    ],
+                }
+            )
         elif instrument_type == InstrumentType.ETF:
             etf_info = self.ETFS.get(symbol.upper())
-            rules.update({
-                "index_tracked": etf_info.get("index") if etf_info else None,
-                "can_short": etf_info.get("can_short", False) if etf_info else False,
-                "margin_available": True,
-                "notes": [
-                    "T+2 settlement",
-                    "±7% daily price limit",
-                    "Can be used for index exposure",
-                    "Lower costs than buying component stocks",
-                ]
-            })
+            rules.update(
+                {
+                    "index_tracked": etf_info.get("index") if etf_info else None,
+                    "can_short": etf_info.get("can_short", False) if etf_info else False,
+                    "margin_available": True,
+                    "notes": [
+                        "T+2 settlement",
+                        "±7% daily price limit",
+                        "Can be used for index exposure",
+                        "Lower costs than buying component stocks",
+                    ],
+                }
+            )
             if rules["can_short"]:
                 rules["notes"].append("Short selling allowed via margin")
         else:  # STOCK
@@ -467,9 +465,7 @@ class WarrantETFHandler:
         return rules
 
     def get_warrant_decay_warning(
-        self,
-        days_to_expiry: int,
-        is_out_of_money: bool
+        self, days_to_expiry: int, is_out_of_money: bool
     ) -> Optional[str]:
         """
         Get time decay warning for warrant.
@@ -526,10 +522,12 @@ class WarrantETFHandler:
             short_status = "✓ Short OK" if info.get("can_short") else "✗ No short"
             lines.append(f"   • {symbol}: {info['name']} ({short_status})")
 
-        lines.extend([
-            "",
-            "=" * 50,
-        ])
+        lines.extend(
+            [
+                "",
+                "=" * 50,
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -546,10 +544,7 @@ def get_warrant_etf_handler() -> WarrantETFHandler:
     return _warrant_etf_handler
 
 
-def classify_and_validate(
-    symbol: str,
-    side: str = "BUY"
-) -> Dict:
+def classify_and_validate(symbol: str, side: str = "BUY") -> Dict:
     """
     Convenience function to classify instrument and get trading rules.
 
@@ -569,23 +564,15 @@ def classify_and_validate(
         "is_valid": True,
         "reason": "",
         "warnings": [],
-        "rules": handler.get_trading_rules(symbol)
+        "rules": handler.get_trading_rules(symbol),
     }
 
     if instrument_type == InstrumentType.COVERED_WARRANT:
         is_valid, reason, warnings = handler.validate_warrant_trade(symbol, side)
-        result.update({
-            "is_valid": is_valid,
-            "reason": reason,
-            "warnings": warnings
-        })
+        result.update({"is_valid": is_valid, "reason": reason, "warnings": warnings})
     elif instrument_type == InstrumentType.ETF:
         is_valid, reason, warnings = handler.validate_etf_trade(symbol, side)
-        result.update({
-            "is_valid": is_valid,
-            "reason": reason,
-            "warnings": warnings
-        })
+        result.update({"is_valid": is_valid, "reason": reason, "warnings": warnings})
     else:
         result["reason"] = "✅ Standard stock - normal trading rules apply"
 
@@ -612,7 +599,7 @@ if __name__ == "__main__":
     print(f"   Type: {result['instrument_type']}")
     print(f"   Valid: {result['is_valid']}")
     print(f"   Reason: {result['reason']}")
-    for warning in result['warnings']:
+    for warning in result["warnings"]:
         print(f"   Warning: {warning}")
 
     print("\n3️⃣ Testing ETF validation:")

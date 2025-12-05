@@ -33,16 +33,18 @@ logger = logging.getLogger(__name__)
 
 class MarginStatus(Enum):
     """Margin account status levels"""
-    SAFE = "SAFE"                    # Margin ratio > 50%
-    WARNING = "WARNING"              # 40% < Margin ratio <= 50%
-    MARGIN_CALL = "MARGIN_CALL"      # 30% < Margin ratio <= 40%
-    CRITICAL = "CRITICAL"            # 25% < Margin ratio <= 30%
+
+    SAFE = "SAFE"  # Margin ratio > 50%
+    WARNING = "WARNING"  # 40% < Margin ratio <= 50%
+    MARGIN_CALL = "MARGIN_CALL"  # 30% < Margin ratio <= 40%
+    CRITICAL = "CRITICAL"  # 25% < Margin ratio <= 30%
     FORCE_LIQUIDATION = "FORCE_LIQUIDATION"  # Margin ratio <= 25%
 
 
 @dataclass
 class MarginPosition:
     """Individual position margin information"""
+
     symbol: str
     quantity: int
     avg_price: float
@@ -71,6 +73,7 @@ class MarginPosition:
 @dataclass
 class MarginAccountSummary:
     """Overall margin account summary"""
+
     total_market_value: float
     total_loan: float
     total_equity: float
@@ -105,17 +108,44 @@ class MarginTracker:
 
     # Margin rates by stock tier (Vietnam specific)
     MARGIN_RATES = {
-        "VN30": 0.50,      # Blue chips: 50% margin
-        "MIDCAP": 0.40,    # Mid caps: 40% margin
+        "VN30": 0.50,  # Blue chips: 50% margin
+        "MIDCAP": 0.40,  # Mid caps: 40% margin
         "SMALLCAP": 0.30,  # Small caps: 30% margin
-        "SPECULATIVE": 0.0  # No margin for speculative stocks
+        "SPECULATIVE": 0.0,  # No margin for speculative stocks
     }
 
     # VN30 symbols (highest margin rate)
     VN30_SYMBOLS = {
-        "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
-        "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
-        "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE"
+        "ACB",
+        "BCM",
+        "BID",
+        "BVH",
+        "CTG",
+        "FPT",
+        "GAS",
+        "GVR",
+        "HDB",
+        "HPG",
+        "MBB",
+        "MSN",
+        "MWG",
+        "PLX",
+        "POW",
+        "SAB",
+        "SHB",
+        "SSB",
+        "SSI",
+        "STB",
+        "TCB",
+        "TPB",
+        "VCB",
+        "VHM",
+        "VIB",
+        "VIC",
+        "VJC",
+        "VNM",
+        "VPB",
+        "VRE",
     }
 
     # Non-marginable stocks (speculative, penny stocks)
@@ -128,7 +158,7 @@ class MarginTracker:
         warning_margin: float = 0.40,
         critical_margin: float = 0.30,
         force_liquidation_margin: float = 0.25,
-        broker: str = "SSI"
+        broker: str = "SSI",
     ):
         """
         Initialize margin tracker.
@@ -197,7 +227,7 @@ class MarginTracker:
         quantity: int,
         avg_price: float,
         current_price: float,
-        loan_amount: float = 0.0
+        loan_amount: float = 0.0,
     ) -> MarginPosition:
         """
         Update or add a margin position.
@@ -229,7 +259,7 @@ class MarginTracker:
                 margin_ratio=margin_ratio,
                 marginable=margin_rate > 0,
                 margin_rate=margin_rate,
-                last_updated=datetime.now()
+                last_updated=datetime.now(),
             )
 
             self._positions[symbol] = position
@@ -303,7 +333,7 @@ class MarginTracker:
                     buying_power=self._cash_balance * 2,  # 50% margin = 2x buying power
                     maintenance_requirement=0,
                     positions=[],
-                    last_updated=datetime.now()
+                    last_updated=datetime.now(),
                 )
 
             # Calculate totals
@@ -325,7 +355,11 @@ class MarginTracker:
 
             # Calculate margin call amount (if applicable)
             margin_call_amount = 0.0
-            if status in [MarginStatus.MARGIN_CALL, MarginStatus.CRITICAL, MarginStatus.FORCE_LIQUIDATION]:
+            if status in [
+                MarginStatus.MARGIN_CALL,
+                MarginStatus.CRITICAL,
+                MarginStatus.FORCE_LIQUIDATION,
+            ]:
                 margin_call_amount = maintenance_requirement - total_equity
 
             # Calculate available margin and buying power
@@ -351,14 +385,11 @@ class MarginTracker:
                 margin_call_amount=margin_call_amount,
                 positions=positions,
                 warnings=warnings,
-                last_updated=datetime.now()
+                last_updated=datetime.now(),
             )
 
     def _generate_warnings(
-        self,
-        margin_ratio: float,
-        positions: List[MarginPosition],
-        status: MarginStatus
+        self, margin_ratio: float, positions: List[MarginPosition], status: MarginStatus
     ) -> List[str]:
         """Generate warning messages based on margin status."""
         warnings = []
@@ -413,18 +444,12 @@ class MarginTracker:
                     f"(ratio: {margin_ratio:.1%})"
                 )
             else:
-                logger.info(
-                    f"📊 Margin status: {self._last_status.value} → {new_status.value}"
-                )
+                logger.info(f"📊 Margin status: {self._last_status.value} → {new_status.value}")
 
         self._last_status = new_status
 
     def can_open_position(
-        self,
-        symbol: str,
-        quantity: int,
-        price: float,
-        use_margin: bool = True
+        self, symbol: str, quantity: int, price: float, use_margin: bool = True
     ) -> Tuple[bool, str, float]:
         """
         Check if a new position can be opened within margin limits.
@@ -442,12 +467,15 @@ class MarginTracker:
             summary = self.get_account_summary()
 
             # Check if already in margin call
-            if summary.status in [MarginStatus.MARGIN_CALL, MarginStatus.CRITICAL,
-                                  MarginStatus.FORCE_LIQUIDATION]:
+            if summary.status in [
+                MarginStatus.MARGIN_CALL,
+                MarginStatus.CRITICAL,
+                MarginStatus.FORCE_LIQUIDATION,
+            ]:
                 return (
                     False,
                     f"Cannot open new positions - margin status: {summary.status.value}",
-                    0
+                    0,
                 )
 
             position_value = quantity * price
@@ -461,7 +489,7 @@ class MarginTracker:
                 required_cash = position_value * (1 - margin_rate)
 
             if required_cash > summary.available_margin + self._cash_balance:
-                max_affordable = (summary.available_margin + self._cash_balance)
+                max_affordable = summary.available_margin + self._cash_balance
                 if use_margin and margin_rate > 0:
                     max_affordable = max_affordable / (1 - margin_rate)
                 max_quantity = int(max_affordable / price)
@@ -470,13 +498,15 @@ class MarginTracker:
                     False,
                     f"Insufficient margin. Required: {required_cash:,.0f} VND, "
                     f"Available: {summary.available_margin + self._cash_balance:,.0f} VND",
-                    max_quantity
+                    max_quantity,
                 )
 
             # Check if new position would breach margin limits
             new_total_value = summary.total_market_value + position_value
             new_loan = summary.total_loan + (position_value * margin_rate if use_margin else 0)
-            new_equity = summary.total_equity + (position_value * (1 - margin_rate) if use_margin else position_value)
+            new_equity = summary.total_equity + (
+                position_value * (1 - margin_rate) if use_margin else position_value
+            )
             new_margin_ratio = new_equity / new_total_value if new_total_value > 0 else 1.0
 
             if new_margin_ratio < self.warning_margin:
@@ -484,7 +514,7 @@ class MarginTracker:
                     False,
                     f"Position would breach warning margin level "
                     f"(projected ratio: {new_margin_ratio:.1%})",
-                    0
+                    0,
                 )
 
             return (True, "OK", quantity)
@@ -517,10 +547,7 @@ class MarginTracker:
                 return []
 
             # Sort positions by unrealized P&L (worst first)
-            positions_sorted = sorted(
-                summary.positions,
-                key=lambda p: p.unrealized_pnl_pct
-            )
+            positions_sorted = sorted(summary.positions, key=lambda p: p.unrealized_pnl_pct)
 
             candidates = []
             remaining_shortfall = equity_shortfall
@@ -537,15 +564,17 @@ class MarginTracker:
                 shares_to_sell = min(shares_needed, pos.quantity)
 
                 if shares_to_sell > 0:
-                    candidates.append({
-                        "symbol": pos.symbol,
-                        "current_quantity": pos.quantity,
-                        "sell_quantity": shares_to_sell,
-                        "current_price": pos.current_price,
-                        "unrealized_pnl_pct": pos.unrealized_pnl_pct,
-                        "value_to_sell": shares_to_sell * pos.current_price,
-                        "reason": "Margin restoration"
-                    })
+                    candidates.append(
+                        {
+                            "symbol": pos.symbol,
+                            "current_quantity": pos.quantity,
+                            "sell_quantity": shares_to_sell,
+                            "current_price": pos.current_price,
+                            "unrealized_pnl_pct": pos.unrealized_pnl_pct,
+                            "value_to_sell": shares_to_sell * pos.current_price,
+                            "reason": "Margin restoration",
+                        }
+                    )
 
                     remaining_shortfall -= shares_to_sell * loan_reduction_per_share
 
@@ -560,7 +589,7 @@ class MarginTracker:
             MarginStatus.WARNING: "🟡",
             MarginStatus.MARGIN_CALL: "⚠️",
             MarginStatus.CRITICAL: "🔴",
-            MarginStatus.FORCE_LIQUIDATION: "🚨"
+            MarginStatus.FORCE_LIQUIDATION: "🚨",
         }
 
         lines = [
@@ -596,17 +625,13 @@ _margin_tracker: Optional[MarginTracker] = None
 
 
 def get_margin_tracker(
-    initial_margin: float = 0.50,
-    maintenance_margin: float = 0.35,
-    broker: str = "SSI"
+    initial_margin: float = 0.50, maintenance_margin: float = 0.35, broker: str = "SSI"
 ) -> MarginTracker:
     """Get singleton margin tracker instance."""
     global _margin_tracker
     if _margin_tracker is None:
         _margin_tracker = MarginTracker(
-            initial_margin=initial_margin,
-            maintenance_margin=maintenance_margin,
-            broker=broker
+            initial_margin=initial_margin, maintenance_margin=maintenance_margin, broker=broker
         )
     return _margin_tracker
 
@@ -615,11 +640,7 @@ def get_margin_tracker(
 if __name__ == "__main__":
     print("Testing Margin Tracker...")
 
-    tracker = MarginTracker(
-        initial_margin=0.50,
-        maintenance_margin=0.35,
-        broker="SSI"
-    )
+    tracker = MarginTracker(initial_margin=0.50, maintenance_margin=0.35, broker="SSI")
 
     # Add some positions
     tracker.set_cash_balance(50_000_000)  # 50M VND cash
@@ -629,7 +650,7 @@ if __name__ == "__main__":
         quantity=1000,
         avg_price=80_000,
         current_price=75_000,  # Lost 6.25%
-        loan_amount=40_000_000  # 50% margin
+        loan_amount=40_000_000,  # 50% margin
     )
 
     tracker.update_position(
@@ -637,7 +658,7 @@ if __name__ == "__main__":
         quantity=2000,
         avg_price=25_000,
         current_price=23_000,  # Lost 8%
-        loan_amount=25_000_000
+        loan_amount=25_000_000,
     )
 
     # Get summary
@@ -652,6 +673,8 @@ if __name__ == "__main__":
     if candidates:
         print("\n📉 Liquidation Candidates:")
         for c in candidates:
-            print(f"   {c['symbol']}: Sell {c['sell_quantity']} shares ({c['unrealized_pnl_pct']:.1%} P&L)")
+            print(
+                f"   {c['symbol']}: Sell {c['sell_quantity']} shares ({c['unrealized_pnl_pct']:.1%} P&L)"
+            )
 
     print("\n✅ Test completed!")

@@ -37,13 +37,15 @@ logger = logging.getLogger(__name__)
 
 class OrderLotType(Enum):
     """Order lot type classification"""
-    REGULAR_LOT = "REGULAR"    # >= 100 shares, multiple of 100
-    ODD_LOT = "ODD_LOT"        # 1-99 shares
-    MIXED_LOT = "MIXED"        # Has both regular and odd-lot components
+
+    REGULAR_LOT = "REGULAR"  # >= 100 shares, multiple of 100
+    ODD_LOT = "ODD_LOT"  # 1-99 shares
+    MIXED_LOT = "MIXED"  # Has both regular and odd-lot components
 
 
 class OddLotOrderStatus(Enum):
     """Odd-lot order execution status"""
+
     PENDING = "PENDING"
     PARTIALLY_FILLED = "PARTIAL"
     FILLED = "FILLED"
@@ -54,6 +56,7 @@ class OddLotOrderStatus(Enum):
 @dataclass
 class OddLotOrder:
     """Odd-lot order record"""
+
     order_id: str
     symbol: str
     side: str  # "BUY" or "SELL"
@@ -74,10 +77,11 @@ class OddLotOrder:
 @dataclass
 class LotBreakdown:
     """Breakdown of order into regular and odd-lot components"""
+
     total_quantity: int
-    regular_lots: int           # Number of regular lots (100-share units)
-    regular_quantity: int       # Total shares in regular lots
-    odd_lot_quantity: int       # Remaining odd-lot shares (0-99)
+    regular_lots: int  # Number of regular lots (100-share units)
+    regular_quantity: int  # Total shares in regular lots
+    odd_lot_quantity: int  # Remaining odd-lot shares (0-99)
     lot_type: OrderLotType
     recommendations: List[str]
 
@@ -102,20 +106,20 @@ class OddLotTrader:
     REGULAR_LOT_SIZE = 100
 
     # Odd-lot trading hours (continuous session only)
-    ODD_LOT_START_AM = time(9, 15)    # After ATO
-    ODD_LOT_END_AM = time(11, 30)     # Before lunch
-    ODD_LOT_START_PM = time(13, 0)    # After lunch
-    ODD_LOT_END_PM = time(14, 30)     # Before ATC
+    ODD_LOT_START_AM = time(9, 15)  # After ATO
+    ODD_LOT_END_AM = time(11, 30)  # Before lunch
+    ODD_LOT_START_PM = time(13, 0)  # After lunch
+    ODD_LOT_END_PM = time(14, 30)  # Before ATC
 
     # Odd-lot specific costs (may vary by broker)
-    ODD_LOT_SPREAD_PREMIUM = 0.005    # 0.5% wider spread for odd-lots
-    ODD_LOT_MIN_COMMISSION = 11_000   # 11,000 VND minimum commission
+    ODD_LOT_SPREAD_PREMIUM = 0.005  # 0.5% wider spread for odd-lots
+    ODD_LOT_MIN_COMMISSION = 11_000  # 11,000 VND minimum commission
 
     def __init__(
         self,
         enable_odd_lot: bool = True,
         prefer_regular_lots: bool = True,
-        max_odd_lot_pct: float = 0.10  # Max 10% of position as odd-lot
+        max_odd_lot_pct: float = 0.10,  # Max 10% of position as odd-lot
     ):
         """
         Initialize odd-lot trader.
@@ -155,7 +159,7 @@ class OddLotTrader:
                 regular_quantity=0,
                 odd_lot_quantity=0,
                 lot_type=OrderLotType.REGULAR_LOT,
-                recommendations=["Invalid quantity"]
+                recommendations=["Invalid quantity"],
             )
 
         regular_lots = quantity // self.REGULAR_LOT_SIZE
@@ -187,7 +191,7 @@ class OddLotTrader:
             regular_quantity=regular_quantity,
             odd_lot_quantity=odd_lot_quantity,
             lot_type=lot_type,
-            recommendations=recommendations
+            recommendations=recommendations,
         )
 
     def is_odd_lot_session(self, check_time: Optional[datetime] = None) -> bool:
@@ -255,16 +259,15 @@ class OddLotTrader:
             "session": session,
             "odd_lot_allowed": is_valid,
             "next_open": next_open.strftime("%H:%M") if next_open else None,
-            "message": "✅ Odd-lot trading available" if is_valid else
-                      f"❌ Odd-lot not available during {session}"
+            "message": (
+                "✅ Odd-lot trading available"
+                if is_valid
+                else f"❌ Odd-lot not available during {session}"
+            ),
         }
 
     def calculate_odd_lot_price(
-        self,
-        side: str,
-        current_price: float,
-        bid_price: float,
-        ask_price: float
+        self, side: str, current_price: float, bid_price: float, ask_price: float
     ) -> float:
         """
         Calculate appropriate price for odd-lot order.
@@ -289,12 +292,7 @@ class OddLotTrader:
             # For buys, use ask price (higher)
             return ask_price
 
-    def estimate_execution_cost(
-        self,
-        quantity: int,
-        price: float,
-        side: str
-    ) -> Dict:
+    def estimate_execution_cost(self, quantity: int, price: float, side: str) -> Dict:
         """
         Estimate execution cost for odd-lot order.
 
@@ -334,15 +332,10 @@ class OddLotTrader:
             "tax": tax,
             "total_cost": total_cost,
             "cost_pct": total_cost / value * 100 if value > 0 else 0,
-            "note": "⚠️ Odd-lot costs are higher than regular lots"
+            "note": "⚠️ Odd-lot costs are higher than regular lots",
         }
 
-    def can_place_odd_lot(
-        self,
-        symbol: str,
-        side: str,
-        quantity: int
-    ) -> Tuple[bool, str]:
+    def can_place_odd_lot(self, symbol: str, side: str, quantity: int) -> Tuple[bool, str]:
         """
         Validate if odd-lot order can be placed.
 
@@ -377,11 +370,7 @@ class OddLotTrader:
         return True, "✅ Odd-lot order can be placed"
 
     def place_odd_lot_order(
-        self,
-        symbol: str,
-        side: str,
-        quantity: int,
-        price: float
+        self, symbol: str, side: str, quantity: int, price: float
     ) -> Optional[OddLotOrder]:
         """
         Place an odd-lot order.
@@ -408,7 +397,7 @@ class OddLotTrader:
             side=side.upper(),
             quantity=quantity,
             price=price,
-            order_time=datetime.now()
+            order_time=datetime.now(),
         )
 
         self._pending_orders[order_id] = order
@@ -427,7 +416,7 @@ class OddLotTrader:
         total_quantity: int,
         price: float,
         bid_price: float,
-        ask_price: float
+        ask_price: float,
     ) -> Dict:
         """
         Split a mixed order into regular and odd-lot components.
@@ -449,7 +438,7 @@ class OddLotTrader:
             "breakdown": breakdown,
             "regular_order": None,
             "odd_lot_order": None,
-            "total_cost_estimate": 0.0
+            "total_cost_estimate": 0.0,
         }
 
         # Regular lot component
@@ -460,14 +449,12 @@ class OddLotTrader:
                 "side": side,
                 "quantity": breakdown.regular_quantity,
                 "price": price,
-                "order_type": "LO"  # Or "MP" for market
+                "order_type": "LO",  # Or "MP" for market
             }
 
         # Odd-lot component
         if breakdown.odd_lot_quantity > 0:
-            odd_lot_price = self.calculate_odd_lot_price(
-                side, price, bid_price, ask_price
-            )
+            odd_lot_price = self.calculate_odd_lot_price(side, price, bid_price, ask_price)
             cost_estimate = self.estimate_execution_cost(
                 breakdown.odd_lot_quantity, odd_lot_price, side
             )
@@ -479,17 +466,13 @@ class OddLotTrader:
                 "quantity": breakdown.odd_lot_quantity,
                 "price": odd_lot_price,
                 "order_type": "LO",  # Only limit orders for odd-lots
-                "cost_estimate": cost_estimate
+                "cost_estimate": cost_estimate,
             }
             result["total_cost_estimate"] += cost_estimate["total_cost"]
 
         return result
 
-    def round_to_lot(
-        self,
-        quantity: int,
-        direction: str = "down"
-    ) -> int:
+    def round_to_lot(self, quantity: int, direction: str = "down") -> int:
         """
         Round quantity to nearest lot size.
 
@@ -503,8 +486,9 @@ class OddLotTrader:
         if direction == "down":
             return (quantity // self.REGULAR_LOT_SIZE) * self.REGULAR_LOT_SIZE
         elif direction == "up":
-            return ((quantity + self.REGULAR_LOT_SIZE - 1) //
-                    self.REGULAR_LOT_SIZE) * self.REGULAR_LOT_SIZE
+            return (
+                (quantity + self.REGULAR_LOT_SIZE - 1) // self.REGULAR_LOT_SIZE
+            ) * self.REGULAR_LOT_SIZE
         else:  # nearest
             return round(quantity / self.REGULAR_LOT_SIZE) * self.REGULAR_LOT_SIZE
 
@@ -527,11 +511,13 @@ class OddLotTrader:
         pending_count = len(self._pending_orders)
         filled_count = len(self._filled_orders)
 
-        lines.extend([
-            "-" * 50,
-            f"Pending Orders: {pending_count}",
-            f"Filled Orders:  {filled_count}",
-        ])
+        lines.extend(
+            [
+                "-" * 50,
+                f"Pending Orders: {pending_count}",
+                f"Filled Orders:  {filled_count}",
+            ]
+        )
 
         if self._pending_orders:
             lines.append("-" * 50)
@@ -559,11 +545,7 @@ def get_odd_lot_trader(enable: bool = True) -> OddLotTrader:
 
 
 def validate_and_split_order(
-    quantity: int,
-    symbol: str,
-    side: str,
-    price: float,
-    enable_odd_lot: bool = True
+    quantity: int, symbol: str, side: str, price: float, enable_odd_lot: bool = True
 ) -> Dict:
     """
     Convenience function to validate and split an order.
@@ -581,48 +563,44 @@ def validate_and_split_order(
     trader = get_odd_lot_trader(enable_odd_lot)
     breakdown = trader.analyze_order(quantity)
 
-    result = {
-        "breakdown": breakdown,
-        "can_execute": True,
-        "orders": []
-    }
+    result = {"breakdown": breakdown, "can_execute": True, "orders": []}
 
     if breakdown.lot_type == OrderLotType.REGULAR_LOT:
-        result["orders"].append({
-            "type": "REGULAR",
-            "quantity": quantity,
-            "price": price
-        })
+        result["orders"].append({"type": "REGULAR", "quantity": quantity, "price": price})
     elif breakdown.lot_type == OrderLotType.ODD_LOT:
         if enable_odd_lot and trader.is_odd_lot_session():
-            result["orders"].append({
-                "type": "ODD_LOT",
-                "quantity": quantity,
-                "price": price,
-                "note": "Odd-lot order - limit order only"
-            })
+            result["orders"].append(
+                {
+                    "type": "ODD_LOT",
+                    "quantity": quantity,
+                    "price": price,
+                    "note": "Odd-lot order - limit order only",
+                }
+            )
         else:
             result["can_execute"] = False
             result["reason"] = "Odd-lot trading not available"
     else:  # MIXED_LOT
-        result["orders"].append({
-            "type": "REGULAR",
-            "quantity": breakdown.regular_quantity,
-            "price": price
-        })
+        result["orders"].append(
+            {"type": "REGULAR", "quantity": breakdown.regular_quantity, "price": price}
+        )
         if enable_odd_lot and trader.is_odd_lot_session():
-            result["orders"].append({
-                "type": "ODD_LOT",
-                "quantity": breakdown.odd_lot_quantity,
-                "price": price,
-                "note": "Odd-lot portion"
-            })
+            result["orders"].append(
+                {
+                    "type": "ODD_LOT",
+                    "quantity": breakdown.odd_lot_quantity,
+                    "price": price,
+                    "note": "Odd-lot portion",
+                }
+            )
         else:
-            result["orders"].append({
-                "type": "SKIPPED",
-                "quantity": breakdown.odd_lot_quantity,
-                "reason": "Odd-lot skipped (not available)"
-            })
+            result["orders"].append(
+                {
+                    "type": "SKIPPED",
+                    "quantity": breakdown.odd_lot_quantity,
+                    "reason": "Odd-lot skipped (not available)",
+                }
+            )
 
     return result
 
