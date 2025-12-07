@@ -85,8 +85,26 @@ pytest-cov==4.1.0
 pytest-asyncio==0.23.0
 
 # ============================================================================
+# NLP & DEEP LEARNING (Phase 2/3)
+# ============================================================================
+
+# PyTorch (CPU version - use torch-cuda for GPU)
+torch>=2.0.0
+
+# Transformers (PhoBERT, FinBERT)
+transformers>=4.35.0
+
+# Vietnamese NLP
+underthesea>=6.8.0
+
+# Web Scraping
+beautifulsoup4>=4.12.0
+aiohttp>=3.9.0
+
+# ============================================================================
 # NOTES
 # ============================================================================
-# Total size: ~500MB
+# Total size: ~2GB (with PyTorch)
+# For GPU support: pip install torch --index-url https://download.pytorch.org/whl/cu118
 # For development tools: pip install -r requirements/dev.txt
 # For optional features: see requirements/optional.txt

@@ -471,39 +471,69 @@ class TestStopLossCalculator:
         assert isinstance(reason, str)
 
     def test_calculate_take_profit_targets_normal_case(self):
-        """Test take profit targets calculation"""
+        """Test take profit targets calculation with HYBRID approach.
+
+        Hybrid approach: TP = max(ATR-based, Percentage-based)
+        - ATR-based: entry + (ATR × R:R)
+        - Percentage-based: entry × (1 + min_tp_pct)
+        Default min_tp_percentages = [0.06, 0.10, 0.15]
+        """
         entry_price = 100_000
-        atr = 2_000
+        atr = 2_000  # 2% of entry price
         risk_reward_ratios = [1.5, 2.0, 3.0]
 
         targets = StopLossCalculator.calculate_take_profit_targets(
             entry_price, atr, risk_reward_ratios
         )
 
-        expected_targets = [
-            100_000 + (2_000 * 1.5),  # 103,000
-            100_000 + (2_000 * 2.0),  # 104,000
-            100_000 + (2_000 * 3.0),  # 106,000
-        ]
+        # With hybrid approach:
+        # TP1: max(100000 + 2000*1.5, 100000*1.06) = max(103000, 106000) = 106000
+        # TP2: max(100000 + 2000*2.0, 100000*1.10) = max(104000, 110000) = 110000
+        # TP3: max(100000 + 2000*3.0, 100000*1.15) = max(106000, 115000) = 115000
+        expected_targets = [106_000.0, 110_000.0, 115_000.0]
 
-        assert targets == expected_targets
+        assert len(targets) == 3
+        for i, (actual, expected) in enumerate(zip(targets, expected_targets)):
+            assert abs(actual - expected) < 1, f"TP{i+1}: {actual} != {expected}"
         assert all(isinstance(t, float) for t in targets)
 
     def test_calculate_take_profit_targets_default_ratios(self):
-        """Test take profit targets with default ratios"""
+        """Test take profit targets with default ratios using HYBRID approach.
+
+        Default ratios: [1.5, 3.0, 5.0]
+        Default min_tp_percentages: [0.06, 0.10, 0.15]
+        """
         entry_price = 100_000
-        atr = 2_000
+        atr = 2_000  # 2% of entry price (low volatility)
 
         targets = StopLossCalculator.calculate_take_profit_targets(entry_price, atr)
 
-        # Should use default ratios [1.5, 3.0, 5.0]
-        expected_targets = [
-            100_000 + (2_000 * 1.5),  # 103,000
-            100_000 + (2_000 * 3.0),  # 106,000
-            100_000 + (2_000 * 5.0),  # 110,000
-        ]
+        # With hybrid approach (low ATR, percentage-based wins):
+        # TP1: max(100000 + 2000*1.5, 100000*1.06) = max(103000, 106000) = 106000
+        # TP2: max(100000 + 2000*3.0, 100000*1.10) = max(106000, 110000) = 110000
+        # TP3: max(100000 + 2000*5.0, 100000*1.15) = max(110000, 115000) = 115000
+        expected_targets = [106_000.0, 110_000.0, 115_000.0]
 
-        assert targets == expected_targets
+        assert len(targets) == 3
+        for i, (actual, expected) in enumerate(zip(targets, expected_targets)):
+            assert abs(actual - expected) < 1, f"TP{i+1}: {actual} != {expected}"
+
+    def test_calculate_take_profit_targets_high_volatility(self):
+        """Test take profit targets with HIGH volatility (ATR-based wins)."""
+        entry_price = 100_000
+        atr = 10_000  # 10% of entry price (high volatility)
+
+        targets = StopLossCalculator.calculate_take_profit_targets(entry_price, atr)
+
+        # With high ATR, ATR-based wins:
+        # TP1: max(100000 + 10000*1.5, 100000*1.06) = max(115000, 106000) = 115000
+        # TP2: max(100000 + 10000*3.0, 100000*1.10) = max(130000, 110000) = 130000
+        # TP3: max(100000 + 10000*5.0, 100000*1.15) = max(150000, 115000) = 150000
+        expected_targets = [115_000.0, 130_000.0, 150_000.0]
+
+        assert len(targets) == 3
+        for i, (actual, expected) in enumerate(zip(targets, expected_targets)):
+            assert abs(actual - expected) < 1, f"TP{i+1}: {actual} != {expected}"
 
     def test_calculate_take_profit_targets_invalid_entry_price(self):
         """Test take profit targets with invalid entry price"""

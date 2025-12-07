@@ -114,6 +114,9 @@ class ExitReason(Enum):
     BREAKDOWN = "Support Breakdown"
     SESSION_END = "Session End Protection"
     PROFIT_PROTECTION = "Profit Protection"
+    FLOOR_BOUNCE_TIMEOUT = "Floor Bounce Timeout (No recovery)"  # NEW v6.0
+    PANIC_SELLING = "Panic Selling (High volume at floor)"  # NEW v6.0
+    GAP_DOWN_EMERGENCY = "Gap Down Emergency Exit"  # NEW v6.0
 
 
 @dataclass
@@ -144,9 +147,10 @@ class ExitConfig:
     # - Higher volatility (±7% daily limit)
     # - T+2 settlement affects holding decisions
     # - Transaction costs ~1.5% round trip
-    # OPTIMIZED: 4%, 8%, 15% - capture profits faster, account for costs
-    # Net profit after costs: ~2.5%, ~6.5%, ~13.5%
-    take_profit_levels: Tuple[float, float, float] = (0.04, 0.08, 0.15)
+    # OPTIMIZED: 6%, 10%, 15% - improved R:R ratio >= 1.5
+    # Net profit after costs: ~4.5%, ~8.5%, ~13.5%
+    # With SL ~4%, R:R = 6/4 = 1.5 (minimum acceptable)
+    take_profit_levels: Tuple[float, float, float] = (0.06, 0.10, 0.15)
 
     # Stop Loss - IMPROVED v4.1 with transaction cost awareness
     # Must account for ~1.5% round trip cost
@@ -658,8 +662,43 @@ class ImprovedExitStrategy:
         else:
             self.position_highs[symbol] = max(self.position_highs[symbol], current_price)
 
+    def _calculate_volume_ratio(self, df: pd.DataFrame, lookback: int = 20) -> float:
+        """
+        Calculate current volume ratio vs average volume.
+
+        Used for panic selling detection in floor bounce logic.
+
+        Args:
+            df: DataFrame with 'volume' column
+            lookback: Number of periods for average calculation
+
+        Returns:
+            Volume ratio (current / average). Returns 1.0 if calculation fails.
+        """
+        try:
+            if df is None or df.empty or "volume" not in df.columns:
+                return 1.0
+
+            if len(df) < lookback + 1:
+                lookback = max(1, len(df) - 1)
+
+            current_volume = safe_iloc(df, -1, "volume")
+            if current_volume is None or current_volume <= 0:
+                return 1.0
+
+            # Calculate average volume (excluding current bar)
+            avg_volume = df["volume"].iloc[-(lookback + 1) : -1].mean()
+            if avg_volume is None or avg_volume <= 0 or pd.isna(avg_volume):
+                return 1.0
+
+            return current_volume / avg_volume
+
+        except Exception as e:
+            logger.debug(f"Volume ratio calculation failed: {e}")
+            return 1.0
+
     # =========================================================================
-    # EXIT CHECK #1: STOP LOSS (IMPROVED v4.2 - Vietnam Market Specific)
+    # EXIT CHECK #1: STOP LOSS (IMPROVED v6.0 - Vietnam Market Specific)
     # =========================================================================
 
     def _check_stop_loss(self, ctx: Dict) -> Optional[ExitDecision]:
@@ -692,66 +731,150 @@ class ImprovedExitStrategy:
                 )
                 effective_stop = tighter_stop
 
-        # IMPROVED v5.0: Check if price is at floor (Vietnam ±7% limit)
-        # Don't trigger stop loss at floor - may bounce, but add TIME LIMIT
-        # Floor bounce rule: Wait max 30 minutes for bounce, then exit anyway
+        # IMPROVED v6.0: Volume-based floor bounce logic
+        # =========================================================================
+        # Floor bounce protection with VOLUME-BASED exit triggers
+        #
+        # Problem: Time-only wait (30 min) may not be enough in panic selling
+        # Solution: Use volume ratio to determine exit urgency
+        #
+        # Volume-based rules:
+        # - Volume ratio > 3.0 (panic): EXIT IMMEDIATELY, no bounce wait
+        # - Volume ratio 1.5-3.0 (elevated): Extended 60-minute wait
+        # - Volume ratio < 1.5 (normal): Standard 30-minute wait
+        # - Price recovery > 1%: Cancel timer, resume normal monitoring
+        # =========================================================================
         if df is not None and len(df) >= 2:
             try:
                 prev_close = safe_iloc(df, -2, "close")
                 if prev_close and prev_close > 0:
                     floor_price = prev_close * 0.93  # -7% floor for HOSE
+
                     # If current price is within 0.5% of floor
                     if current_price <= floor_price * 1.005:
-                        # Check how long we've been at floor (TIME LIMIT FIX)
-                        floor_wait_key = f"floor_wait_{symbol}"
                         from datetime import datetime
 
-                        current_time = datetime.now()
+                        # Calculate volume ratio for panic detection
+                        volume_ratio = self._calculate_volume_ratio(df)
 
-                        # Get or initialize floor wait tracking
-                        if not hasattr(self, "_floor_wait_times"):
-                            self._floor_wait_times = {}
-
-                        if floor_wait_key not in self._floor_wait_times:
-                            # First time at floor - start tracking
-                            self._floor_wait_times[floor_wait_key] = current_time
-                            logger.info(
-                                f"📊 {symbol}: Price at floor ({current_price:,.0f} ≈ {floor_price:,.0f}). "
-                                f"Starting 30-minute wait for bounce confirmation."
+                        # Import floor bounce constants
+                        try:
+                            from src.config.constants import (
+                                VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES,
+                                VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES,
+                                VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO,
+                                VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO,
+                                VN_FLOOR_BOUNCE_RECOVERY_PCT,
                             )
-                            return None
-                        else:
-                            # Check if we've waited too long
-                            floor_wait_start = self._floor_wait_times[floor_wait_key]
-                            wait_minutes = (current_time - floor_wait_start).total_seconds() / 60
-                            max_floor_wait_minutes = 30  # Maximum 30 minutes wait
+                        except ImportError:
+                            VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES = 30
+                            VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES = 60
+                            VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO = (
+                                2.5  # IMPROVED Priority 1: Increased sensitivity
+                            )
+                            VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5
+                            VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01
 
-                            if wait_minutes < max_floor_wait_minutes:
-                                logger.debug(
-                                    f"📊 {symbol}: At floor for {wait_minutes:.0f}/{max_floor_wait_minutes} minutes. "
-                                    f"Waiting for bounce..."
+                        # PANIC SELLING: Volume > 3x average → EXIT IMMEDIATELY
+                        if volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO:
+                            logger.warning(
+                                f"🚨 {symbol}: PANIC SELLING detected at floor! "
+                                f"Volume ratio: {volume_ratio:.1f}x (>= {VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO}x). "
+                                f"Triggering immediate exit - no bounce wait."
+                            )
+                            # Clear any existing floor wait tracking
+                            floor_wait_key = f"floor_wait_{symbol}"
+                            if (
+                                hasattr(self, "_floor_wait_times")
+                                and floor_wait_key in self._floor_wait_times
+                            ):
+                                del self._floor_wait_times[floor_wait_key]
+                            # Return None to fall through to stop loss check below
+                            # (don't return exit decision here, let stop loss handle it)
+                        else:
+                            # Determine wait time based on volume
+                            if volume_ratio >= VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
+                                max_floor_wait_minutes = (
+                                    VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES  # 60 min
+                                )
+                                volume_status = f"elevated ({volume_ratio:.1f}x)"
+                            else:
+                                max_floor_wait_minutes = VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES  # 30 min
+                                volume_status = f"normal ({volume_ratio:.1f}x)"
+
+                            floor_wait_key = f"floor_wait_{symbol}"
+                            current_time = datetime.now()
+
+                            # Get or initialize floor wait tracking
+                            if not hasattr(self, "_floor_wait_times"):
+                                self._floor_wait_times = {}
+
+                            if floor_wait_key not in self._floor_wait_times:
+                                # First time at floor - start tracking
+                                self._floor_wait_times[floor_wait_key] = {
+                                    "start_time": current_time,
+                                    "volume_ratio": volume_ratio,
+                                    "floor_price": floor_price,
+                                }
+                                logger.info(
+                                    f"📊 {symbol}: Price at floor ({current_price:,.0f} ≈ {floor_price:,.0f}). "
+                                    f"Volume {volume_status}. "
+                                    f"Starting {max_floor_wait_minutes}-minute wait for bounce."
                                 )
                                 return None
                             else:
-                                # TIME LIMIT EXCEEDED - Exit anyway
-                                logger.warning(
-                                    f"⏰ {symbol}: Floor wait timeout ({wait_minutes:.0f} min). "
-                                    f"No bounce detected - triggering stop loss."
-                                )
-                                # Clear the tracking
-                                del self._floor_wait_times[floor_wait_key]
-                                # Fall through to stop loss below
+                                # Check if we've waited too long
+                                floor_data = self._floor_wait_times[floor_wait_key]
+                                floor_wait_start = floor_data["start_time"]
+                                wait_minutes = (
+                                    current_time - floor_wait_start
+                                ).total_seconds() / 60
+
+                                # Update volume ratio (may have changed)
+                                floor_data["volume_ratio"] = volume_ratio
+
+                                if wait_minutes < max_floor_wait_minutes:
+                                    logger.debug(
+                                        f"📊 {symbol}: At floor for {wait_minutes:.0f}/{max_floor_wait_minutes} min. "
+                                        f"Volume {volume_status}. Waiting for bounce..."
+                                    )
+                                    return None
+                                else:
+                                    # TIME LIMIT EXCEEDED - Exit anyway
+                                    logger.warning(
+                                        f"⏰ {symbol}: Floor wait timeout ({wait_minutes:.0f} min). "
+                                        f"Volume {volume_status}. No bounce detected - triggering stop loss."
+                                    )
+                                    # Clear the tracking
+                                    del self._floor_wait_times[floor_wait_key]
+                                    # Fall through to stop loss below
                     else:
-                        # Price moved away from floor - clear tracking
+                        # Price moved away from floor - check if recovery is significant
                         floor_wait_key = f"floor_wait_{symbol}"
                         if (
                             hasattr(self, "_floor_wait_times")
                             and floor_wait_key in self._floor_wait_times
                         ):
-                            del self._floor_wait_times[floor_wait_key]
-                            logger.info(
-                                f"✅ {symbol}: Price moved away from floor - tracking cleared"
-                            )
+                            floor_data = self._floor_wait_times[floor_wait_key]
+                            floor_price = floor_data.get("floor_price", prev_close * 0.93)
+                            recovery_pct = (current_price - floor_price) / floor_price
+
+                            try:
+                                from src.config.constants import VN_FLOOR_BOUNCE_RECOVERY_PCT
+                            except ImportError:
+                                VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01
+
+                            if recovery_pct >= VN_FLOOR_BOUNCE_RECOVERY_PCT:
+                                del self._floor_wait_times[floor_wait_key]
+                                logger.info(
+                                    f"✅ {symbol}: Price recovered {recovery_pct:.1%} from floor - "
+                                    f"tracking cleared, resuming normal monitoring"
+                                )
+                            else:
+                                logger.debug(
+                                    f"📊 {symbol}: Price slightly above floor ({recovery_pct:.1%} recovery). "
+                                    f"Keeping floor tracking active."
+                                )
             except Exception as e:
                 logger.debug(f"Floor check failed: {e}")
 
@@ -848,15 +971,18 @@ class ImprovedExitStrategy:
         """
         Check for significant gap down and exit to protect capital.
 
+        IMPROVED v6.0: Enhanced gap protection for Vietnam market
+
         Vietnam market gaps are significant due to:
         - Overnight news (global markets, company announcements)
         - Foreign investor sentiment changes
         - Regulatory changes
+        - VN market can gap up to ±7% (full daily limit)
 
-        Exit if:
-        - Gap down > 3% from previous close
-        - Position is in profit (protect gains)
-        - Or gap down > 5% regardless of P&L (emergency exit)
+        Exit rules (TIGHTENED):
+        - Gap down > 4%: EMERGENCY EXIT regardless of P&L
+        - Gap down 2.5-4% AND profitable: Profit protection exit
+        - Gap up > 4%: Consider partial profit taking
         """
         df = ctx.get("df")
         if df is None or len(df) < 2:
@@ -868,38 +994,54 @@ class ImprovedExitStrategy:
         symbol = ctx.get("symbol", "")
 
         try:
+            # Import gap thresholds from constants
+            try:
+                from src.config.constants import (
+                    VN_GAP_DOWN_EMERGENCY_THRESHOLD,
+                    VN_GAP_DOWN_EXIT_THRESHOLD,
+                    VN_GAP_UP_PROFIT_TAKE_THRESHOLD,
+                )
+            except ImportError:
+                VN_GAP_DOWN_EMERGENCY_THRESHOLD = -0.04  # -4%
+                VN_GAP_DOWN_EXIT_THRESHOLD = -0.025  # -2.5%
+                VN_GAP_UP_PROFIT_TAKE_THRESHOLD = 0.04  # +4%
+
             prev_close = safe_iloc(df, -2, "close")
             today_open = safe_iloc(df, -1, "open")
 
             if prev_close is None or today_open is None or prev_close <= 0:
                 return None
 
-            gap_percent = (today_open - prev_close) / prev_close * 100
+            gap_percent = (today_open - prev_close) / prev_close
+            gap_percent_display = gap_percent * 100
 
-            # Emergency exit: Gap down > 5%
-            if gap_percent < -5.0:
+            # EMERGENCY EXIT: Gap down > 4% (TIGHTENED from 5%)
+            # VN market can gap full 7%, so 4% is already severe
+            if gap_percent <= VN_GAP_DOWN_EMERGENCY_THRESHOLD:
                 return ExitDecision(
                     should_exit=True,
-                    exit_reason=ExitReason.BREAKDOWN,
+                    exit_reason=ExitReason.EMERGENCY_EXIT,
                     exit_type="FULL",
                     exit_price=current_price,
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
                     message=(
-                        f"🚨 GAP DOWN EMERGENCY: {gap_percent:.1f}% gap - "
+                        f"🚨 GAP DOWN EMERGENCY: {gap_percent_display:.1f}% gap "
+                        f"(threshold: {VN_GAP_DOWN_EMERGENCY_THRESHOLD*100:.1f}%) - "
                         f"exiting to protect capital | P&L: {pnl_percent:+.2f}%"
                     ),
                     urgency=5,
                     metadata={
-                        "gap_percent": gap_percent,
+                        "gap_percent": gap_percent_display,
                         "prev_close": prev_close,
                         "today_open": today_open,
                         "trigger": "emergency_gap_down",
+                        "threshold": VN_GAP_DOWN_EMERGENCY_THRESHOLD * 100,
                     },
                 )
 
-            # Protect profits: Gap down > 3% when in profit
-            if gap_percent < -3.0 and pnl_percent > 0:
+            # PROFIT PROTECTION: Gap down 2.5-4% when in profit (TIGHTENED from 3%)
+            if gap_percent <= VN_GAP_DOWN_EXIT_THRESHOLD and pnl_percent > 0:
                 return ExitDecision(
                     should_exit=True,
                     exit_reason=ExitReason.PROFIT_PROTECTION,
@@ -908,22 +1050,32 @@ class ImprovedExitStrategy:
                     expected_pnl=pnl_amount,
                     expected_pnl_percent=pnl_percent,
                     message=(
-                        f"📉 GAP DOWN PROTECTION: {gap_percent:.1f}% gap - "
+                        f"📉 GAP DOWN PROTECTION: {gap_percent_display:.1f}% gap - "
                         f"protecting {pnl_percent:+.2f}% profit"
                     ),
                     urgency=4,
                     metadata={
-                        "gap_percent": gap_percent,
+                        "gap_percent": gap_percent_display,
                         "prev_close": prev_close,
                         "today_open": today_open,
                         "trigger": "profit_protection_gap_down",
                     },
                 )
 
-            # Log significant gaps for monitoring
-            if gap_percent < -2.0:
+            # GAP UP PROFIT TAKING: Gap up > 4% - consider partial exit
+            if gap_percent >= VN_GAP_UP_PROFIT_TAKE_THRESHOLD and pnl_percent > 3.0:
+                # Don't force exit, but log recommendation
                 logger.info(
-                    f"📊 {symbol}: Gap down {gap_percent:.1f}% detected "
+                    f"📈 {symbol}: Gap UP {gap_percent_display:.1f}% with {pnl_percent:+.2f}% profit. "
+                    f"Consider partial profit taking (gap may reverse)."
+                )
+                # Return None - let user decide, but metadata will be available
+                ctx["gap_up_profit_take_recommended"] = True
+
+            # Log significant gaps for monitoring
+            if gap_percent <= -0.02:  # -2%
+                logger.info(
+                    f"📊 {symbol}: Gap down {gap_percent_display:.1f}% detected "
                     f"(P&L: {pnl_percent:+.2f}%) - monitoring"
                 )
 

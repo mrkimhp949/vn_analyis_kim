@@ -99,7 +99,9 @@ class TradingConfig:
     max_sector_exposure: float = (
         0.30  # 30% max per sector (reduced from 40% for better diversification)
     )
-    max_positions_per_sector: int = 3  # Max 3 positions per sector for diversification
+    max_positions_per_sector: int = (
+        2  # Max 2 positions per sector (ensures min 3 sectors with 5 positions)
+    )
     max_loss_per_day_pct: float = 3.0  # Max loss per day (%) for circuit breaker (reduced from 5%)
 
     # CRITICAL FIX: Magic numbers moved to config for easier tuning
@@ -172,7 +174,7 @@ class TradingConfig:
             max_cash_allocation=float(os.getenv("MAX_CASH_ALLOCATION", 0.70)),
             max_portfolio_risk=float(os.getenv("MAX_PORTFOLIO_RISK", 0.15)),
             max_sector_exposure=float(os.getenv("MAX_SECTOR_EXPOSURE", 0.30)),
-            max_positions_per_sector=int(os.getenv("MAX_POSITIONS_PER_SECTOR", 3)),
+            max_positions_per_sector=int(os.getenv("MAX_POSITIONS_PER_SECTOR", 2)),
             max_loss_per_day_pct=float(os.getenv("MAX_LOSS_PER_DAY_PCT", 3.0)),
             # Magic numbers
             bull_market_penalty_scale=float(os.getenv("BULL_MARKET_PENALTY_SCALE", 0.7)),

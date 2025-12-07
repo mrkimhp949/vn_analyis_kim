@@ -71,6 +71,59 @@ class PositionSizingConstants:
     SECTOR_HIGH_ADJUSTMENT: float = 0.70  # Reduce 30%
     SECTOR_MEDIUM_ADJUSTMENT: float = 0.85  # Reduce 15%
 
+    # =========================================================================
+    # LIQUIDITY TIERS - IMPROVED v5.0 for Vietnam Market
+    # =========================================================================
+    # 4-tier system based on stock liquidity and market cap
+    # Higher liquidity = larger position sizes allowed
+    #
+    # VN30: Blue chips with highest liquidity (HPG, VNM, VCB, etc.)
+    # LARGE_CAP: Large caps outside VN30 (> 5B VND daily)
+    # MID_CAP: Mid caps (3-5B VND daily)
+    # SMALL_CAP: Small caps (< 3B VND daily)
+    #
+    # Position limits prevent excessive exposure to illiquid stocks
+    LIQUIDITY_TIERS = {
+        "VN30": {
+            "max_position_pct": 0.15,  # 15% max position for VN30
+            "min_daily_value": 10_000_000_000,  # 10B VND
+            "slippage": 0.003,  # 0.3% slippage
+        },
+        "LARGE_CAP": {
+            "max_position_pct": 0.12,  # 12% max position
+            "min_daily_value": 5_000_000_000,  # 5B VND
+            "slippage": 0.004,  # 0.4% slippage
+        },
+        "MID_CAP": {
+            "max_position_pct": 0.10,  # 10% max position
+            "min_daily_value": 3_000_000_000,  # 3B VND
+            "slippage": 0.006,  # 0.6% slippage
+        },
+        "SMALL_CAP": {
+            "max_position_pct": 0.06,  # 6% max position
+            "min_daily_value": 0,  # Any liquidity
+            "slippage": 0.010,  # 1.0% slippage
+        },
+    }
+
+    # =========================================================================
+    # REGIME-AWARE KELLY ADJUSTMENTS - IMPROVED v5.0
+    # =========================================================================
+    # Kelly fraction adjusted by market regime for risk management
+    # BULL: Full half-Kelly (aggressive)
+    # SIDEWAYS: Standard half-Kelly
+    # BEAR: Quarter-Kelly (defensive)
+    # HIGH_VOL: Eighth-Kelly (very defensive)
+    REGIME_KELLY_FRACTIONS = {
+        "BULL": 0.50,  # Full half-Kelly
+        "SIDEWAYS": 0.40,  # Slightly reduced
+        "BEAR": 0.25,  # Quarter-Kelly
+        "HIGH_VOLATILITY": 0.125,  # Eighth-Kelly
+    }
+
+    # Transaction cost for Kelly adjustment (Vietnam market)
+    VN_TRANSACTION_COST: float = 0.0148  # 1.48% round trip
+
     # DCA levels - IMPROVED v4.2 for Vietnam Market
     # Vietnam market characteristics:
     # - ±7% daily price limit means 1-3% DCA levels can hit within same day
@@ -89,12 +142,38 @@ class PositionSizingConstants:
     DCA_LEVEL_2_DISCOUNT: float = 0.96  # WIDENED: 4% below entry (was 2%)
     DCA_LEVEL_3_DISCOUNT: float = 0.94  # WIDENED: 6% below entry (was 3%)
 
-    # DCA configuration flags - IMPROVED v5.1
-    # RISK: DCA not suitable for VN market due to:
-    # 1. High transaction costs (1.48% round trip)
-    # 2. T+2 settlement ties up capital
-    # 3. ±7% daily limit means narrow DCA levels hit too quickly
-    # RECOMMENDATION: Disable DCA or use very wide levels only
+    # =========================================================================
+    # DCA (Dollar Cost Averaging) Configuration - IMPROVED v6.0
+    # =========================================================================
+    # DCA is DISABLED for Vietnam market due to unfavorable cost structure
+    #
+    # RATIONALE - Why DCA doesn't work well for VN market:
+    #
+    # 1. HIGH TRANSACTION COSTS (1.48% round trip)
+    #    - Each DCA buy costs ~0.70% (brokerage + fees + slippage)
+    #    - Each sell costs ~0.78% (includes 0.1% government tax)
+    #    - Total round trip: 1.48%
+    #    - DCA level must exceed 1.48% to be profitable
+    #
+    # 2. T+2 SETTLEMENT TIES UP CAPITAL
+    #    - Buy on T0 → Cash locked until T+2
+    #    - Multiple DCA buys = multiple capital lockups
+    #    - Reduces flexibility for other opportunities
+    #
+    # 3. ±7% DAILY LIMIT MAKES DCA LEVELS HIT TOO QUICKLY
+    #    - Traditional DCA levels (1%, 2%, 3%) can all hit in one day
+    #    - No time to assess if drop is temporary or trend change
+    #    - Wider levels (2%, 4%, 6%) recommended if DCA is used
+    #
+    # 4. COST-BENEFIT ANALYSIS
+    #    - 3 DCA buys at 2%, 4%, 6% below entry
+    #    - Total transaction cost: 3 × 0.70% = 2.1% on buys
+    #    - Plus 0.78% on final sell = 2.88% total
+    #    - Average entry improvement: ~4%
+    #    - Net benefit: 4% - 2.88% = 1.12% (marginal)
+    #
+    # RECOMMENDATION: Use single entry with proper position sizing instead
+    # =========================================================================
     DCA_ENABLED: bool = False  # DISABLED: High transaction costs make DCA unprofitable
     DCA_MIN_PROFIT_THRESHOLD: float = 0.03  # TIGHTENED: Min 3% expected profit after costs
 
@@ -472,6 +551,13 @@ class EnhancedPositionSizer:
             warnings=warnings,
         )
 
+        # IMPROVED v5.0: Get avg daily value for liquidity tier
+        avg_daily_value = self._get_avg_daily_value(symbol)
+        if avg_daily_value:
+            tier_name, tier_config = self._get_liquidity_tier(symbol, avg_daily_value)
+            adjustments["liquidity_tier"] = tier_name
+            adjustments["tier_max_position"] = tier_config["max_position_pct"]
+
         # Enforce limits and round to lot size
         final_shares = self._enforce_limits(
             shares=adjusted_shares,
@@ -479,6 +565,8 @@ class EnhancedPositionSizer:
             available_capital=available_capital,
             risk_per_share=risk_per_share,
             warnings=warnings,
+            symbol=symbol,
+            avg_daily_value=avg_daily_value,
         )
 
         if final_shares <= 0:
@@ -633,7 +721,14 @@ class EnhancedPositionSizer:
         avg_win_loss_ratio: Optional[float],
         adjustments: Dict[str, float],
     ) -> int:
-        """Calculate base shares using risk-based and Kelly methods."""
+        """
+        Calculate base shares using risk-based and Kelly methods.
+
+        IMPROVED v5.0:
+        - 3-step calculation: Base size → Apply adjustments → Enforce limits
+        - Regime-aware Kelly with cost adjustment
+        - Liquidity tier-based position limits
+        """
 
         # Method 1: Risk-based sizing
         base_risk_amount = self.total_capital * self.max_risk_per_trade
@@ -644,12 +739,24 @@ class EnhancedPositionSizer:
         shares_by_risk = int(adjusted_risk_amount / risk_per_share)
 
         # Method 2: Kelly Criterion (if data available)
+        # IMPROVED v5.0: Pass market regime for regime-aware Kelly
         shares_by_kelly = 0
         kelly_percent = 0.0
 
         if self.use_kelly and win_rate and avg_win_loss_ratio:
-            kelly_percent = self._calculate_kelly(win_rate, avg_win_loss_ratio)
+            # Extract regime string for Kelly calculation
+            market_regime_str = None
+            if regime_info:
+                if isinstance(regime_info, dict):
+                    market_regime_str = regime_info.get("regime")
+                else:
+                    market_regime_str = regime_info.regime
+
+            kelly_percent = self._calculate_kelly(
+                win_rate, avg_win_loss_ratio, market_regime=market_regime_str
+            )
             adjustments["kelly"] = kelly_percent
+            adjustments["kelly_regime"] = market_regime_str or "N/A"
 
             if kelly_percent > 0:
                 kelly_capital = self.total_capital * kelly_percent
@@ -665,14 +772,22 @@ class EnhancedPositionSizer:
         self,
         win_rate: float,
         avg_win_loss_ratio: float,
+        market_regime: Optional[str] = None,
     ) -> float:
         """
-        Calculate Kelly Criterion percentage.
+        Calculate Kelly Criterion percentage with regime-aware adjustment.
 
-        Formula: K = W - (1-W)/R
-        Where: W = win rate, R = average win / average loss
+        IMPROVED v5.0:
+        - Regime-aware Kelly fraction (BULL=0.5, BEAR=0.25, HIGH_VOL=0.125)
+        - Transaction cost adjustment for Vietnam market (1.48%)
+        - Cost-adjusted win/loss ratio for realistic sizing
 
-        Returns half-Kelly for safety, clamped to reasonable range.
+        Formula: K = W - (1-W)/R_adjusted
+        Where:
+            W = win rate
+            R_adjusted = (avg_win - cost) / (avg_loss + cost)
+
+        Returns regime-adjusted Kelly, clamped to reasonable range.
         """
         # Validation
         if avg_win_loss_ratio <= 0:
@@ -689,11 +804,31 @@ class EnhancedPositionSizer:
         if win_rate < 0.3:
             logger.warning(f"⚠️ Low win rate: {win_rate:.1%}. Review strategy.")
 
-        # Calculate Kelly
-        kelly = win_rate - ((1 - win_rate) / avg_win_loss_ratio)
+        # IMPROVED v5.0: Adjust W/L ratio for transaction costs
+        # Assume average win = avg_win_loss_ratio * average_loss
+        # Cost reduces wins and increases losses
+        cost_pct = PositionSizingConstants.VN_TRANSACTION_COST  # 1.48%
+
+        # Cost-adjusted ratio: (win - cost) / (loss + cost)
+        # If avg_win_loss_ratio = 2.0, and cost = 1.48%
+        # Adjusted = (2.0 - 0.0148) / (1.0 + 0.0148) ≈ 1.96
+        cost_adjusted_ratio = (avg_win_loss_ratio - cost_pct) / (1.0 + cost_pct)
+
+        if cost_adjusted_ratio <= 0:
+            logger.warning(
+                f"⚠️ Cost-adjusted W/L ratio <= 0 ({cost_adjusted_ratio:.3f}). "
+                f"Original: {avg_win_loss_ratio:.2f}, cost: {cost_pct:.2%}. "
+                "Transaction costs exceed expected profit."
+            )
+            return PositionSizingConstants.MIN_KELLY_FALLBACK
+
+        # Calculate Kelly with cost-adjusted ratio
+        kelly = win_rate - ((1 - win_rate) / cost_adjusted_ratio)
 
         logger.debug(
-            f"📊 Kelly: win_rate={win_rate:.1%}, " f"W/L={avg_win_loss_ratio:.2f}, raw={kelly:.1%}"
+            f"📊 Kelly: win_rate={win_rate:.1%}, "
+            f"W/L={avg_win_loss_ratio:.2f} (cost-adj: {cost_adjusted_ratio:.2f}), "
+            f"raw={kelly:.1%}"
         )
 
         # Handle negative Kelly (strategy has negative expected value)
@@ -703,20 +838,30 @@ class EnhancedPositionSizer:
                 f"Win rate: {win_rate:.1%}, W/L: {avg_win_loss_ratio:.2f}. "
                 f"Returning minimum {PositionSizingConstants.MIN_KELLY_FALLBACK:.1%} fallback."
             )
-            return PositionSizingConstants.MIN_KELLY_FALLBACK  # v2.0: Return minimum instead of 0
+            return PositionSizingConstants.MIN_KELLY_FALLBACK
 
-        # Apply half-Kelly for safety
-        half_kelly = kelly * self.kelly_fraction
+        # IMPROVED v5.0: Regime-aware Kelly fraction
+        if market_regime:
+            kelly_fraction = PositionSizingConstants.REGIME_KELLY_FRACTIONS.get(
+                market_regime, self.kelly_fraction
+            )
+            logger.debug(f"📊 Regime-aware Kelly fraction: {kelly_fraction:.2f} ({market_regime})")
+        else:
+            kelly_fraction = self.kelly_fraction
+
+        # Apply regime-adjusted Kelly fraction
+        adjusted_kelly = kelly * kelly_fraction
 
         if kelly > 0.5:
             logger.warning(f"⚠️ Very high Kelly ({kelly:.1%}). Clamping to 25%.")
 
         # Clamp to reasonable range
-        final_kelly = max(0.0, min(half_kelly, PositionSizingConstants.MAX_KELLY_PERCENT))
+        final_kelly = max(0.0, min(adjusted_kelly, PositionSizingConstants.MAX_KELLY_PERCENT))
 
         logger.info(
             f"✅ Kelly sizing: {final_kelly:.1%} "
-            f"(win={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
+            f"(win={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f}, "
+            f"regime={market_regime or 'N/A'}, fraction={kelly_fraction:.2f})"
         )
 
         return final_kelly
@@ -995,6 +1140,185 @@ class EnhancedPositionSizer:
     # PRIVATE HELPER METHODS - Limits & Finalization
     # =========================================================================
 
+    def _get_avg_daily_value(self, symbol: str) -> Optional[float]:
+        """
+        Get average daily trading value for a symbol.
+
+        IMPROVED v5.0: Used for liquidity tier determination.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Average daily value in VND, or None if unavailable
+        """
+        try:
+            load_data = self._get_data_loader()
+            df = load_data(symbol, lookback=20)
+
+            if df is None or df.empty or len(df) < 5:
+                logger.debug(f"Insufficient data for {symbol} liquidity calculation")
+                return None
+
+            if "volume" not in df.columns or "close" not in df.columns:
+                return None
+
+            avg_volume = df["volume"].tail(20).mean()
+            avg_price = df["close"].tail(20).mean()
+            avg_daily_value = avg_volume * avg_price
+
+            logger.debug(f"📊 {symbol} avg daily value: {avg_daily_value/1e9:.2f}B VND")
+            return avg_daily_value
+
+        except Exception as e:
+            logger.debug(f"Could not calculate avg daily value for {symbol}: {e}")
+            return None
+
+    def _get_liquidity_tier(
+        self,
+        symbol: str,
+        avg_daily_value: float,
+    ) -> Tuple[str, Dict]:
+        """
+        Determine liquidity tier for a symbol.
+
+        IMPROVED v6.0: Enhanced liquidity risk management for Vietnam market
+        =========================================================================
+        4-tier system with additional critical liquidity handling:
+        - VN30: Blue chips (highest liquidity) - 15% max position
+        - LARGE_CAP: Large caps outside VN30 (> 5B VND) - 12% max position
+        - MID_CAP: Mid caps (3-5B VND) - 10% max position
+        - SMALL_CAP: Small caps (< 3B VND) - 6% max position
+        - CRITICAL: Below 500M VND - 3% max position, 2% of daily volume limit
+
+        Additional rules for illiquid stocks:
+        - Position limited to 2% of average daily volume
+        - 1.0% slippage applied (vs 0.4% for liquid stocks)
+        - Exit recommendation: split into multiple orders if > 5% of daily volume
+        =========================================================================
+
+        Args:
+            symbol: Stock symbol
+            avg_daily_value: Average daily trading value in VND
+
+        Returns:
+            Tuple of (tier_name, tier_config)
+        """
+        from src.config.constants import VN30_SYMBOLS, VN_CRITICAL_LIQUIDITY_VALUE
+
+        tiers = PositionSizingConstants.LIQUIDITY_TIERS
+
+        # VN30 blue chips get highest tier
+        if symbol.upper() in VN30_SYMBOLS:
+            return ("VN30", tiers["VN30"])
+
+        # IMPROVED v6.0: Critical liquidity check (< 500M VND)
+        # These stocks have severe liquidity risk
+        if avg_daily_value < VN_CRITICAL_LIQUIDITY_VALUE:
+            logger.warning(
+                f"⚠️ {symbol}: CRITICAL LIQUIDITY ({avg_daily_value/1e6:.0f}M VND < "
+                f"{VN_CRITICAL_LIQUIDITY_VALUE/1e6:.0f}M threshold). "
+                f"Position limited to 3% max, 2% of daily volume."
+            )
+            return (
+                "CRITICAL",
+                {
+                    "max_position_pct": 0.03,  # 3% max position
+                    "min_daily_value": 0,
+                    "slippage": 0.015,  # 1.5% slippage for critical liquidity
+                    "max_volume_pct": 0.02,  # Max 2% of daily volume
+                },
+            )
+
+        # Tier by daily trading value
+        if avg_daily_value >= tiers["LARGE_CAP"]["min_daily_value"]:
+            return ("LARGE_CAP", tiers["LARGE_CAP"])
+        elif avg_daily_value >= tiers["MID_CAP"]["min_daily_value"]:
+            return ("MID_CAP", tiers["MID_CAP"])
+        else:
+            return ("SMALL_CAP", tiers["SMALL_CAP"])
+
+    def check_exit_liquidity(
+        self,
+        symbol: str,
+        shares: int,
+        avg_daily_volume: float,
+    ) -> Dict:
+        """
+        Check if exit position has liquidity risk.
+
+        IMPROVED v6.0: Exit liquidity risk assessment
+        =========================================================================
+        When exiting a position, check if it's too large relative to daily volume.
+
+        Rules:
+        - Position > 5% of daily volume: Recommend splitting into multiple orders
+        - Position > 10% of daily volume: High risk, may take multiple days to exit
+        - Position > 20% of daily volume: Critical risk, significant price impact
+        =========================================================================
+
+        Args:
+            symbol: Stock symbol
+            shares: Number of shares to exit
+            avg_daily_volume: Average daily volume in shares
+
+        Returns:
+            Dict with risk assessment and recommendations
+        """
+        if avg_daily_volume <= 0:
+            return {
+                "risk_level": "UNKNOWN",
+                "volume_pct": 0,
+                "recommendation": "Unable to assess - no volume data",
+                "split_orders": False,
+            }
+
+        volume_pct = shares / avg_daily_volume
+
+        if volume_pct > 0.20:
+            return {
+                "risk_level": "CRITICAL",
+                "volume_pct": volume_pct,
+                "recommendation": (
+                    f"⚠️ CRITICAL: Position is {volume_pct:.1%} of daily volume. "
+                    f"Recommend splitting into 4+ orders over multiple days. "
+                    f"Expect significant price impact."
+                ),
+                "split_orders": True,
+                "suggested_splits": max(4, int(volume_pct / 0.05)),
+            }
+        elif volume_pct > 0.10:
+            return {
+                "risk_level": "HIGH",
+                "volume_pct": volume_pct,
+                "recommendation": (
+                    f"⚠️ HIGH: Position is {volume_pct:.1%} of daily volume. "
+                    f"Recommend splitting into 2-3 orders. "
+                    f"May take 1-2 days to fully exit."
+                ),
+                "split_orders": True,
+                "suggested_splits": max(2, int(volume_pct / 0.05)),
+            }
+        elif volume_pct > 0.05:
+            return {
+                "risk_level": "MODERATE",
+                "volume_pct": volume_pct,
+                "recommendation": (
+                    f"📊 MODERATE: Position is {volume_pct:.1%} of daily volume. "
+                    f"Consider splitting into 2 orders for better execution."
+                ),
+                "split_orders": True,
+                "suggested_splits": 2,
+            }
+        else:
+            return {
+                "risk_level": "LOW",
+                "volume_pct": volume_pct,
+                "recommendation": f"✅ Position is {volume_pct:.1%} of daily volume - safe to exit in single order.",
+                "split_orders": False,
+                "suggested_splits": 1,
+            }
+
     def _enforce_limits(
         self,
         shares: int,
@@ -1002,11 +1326,33 @@ class EnhancedPositionSizer:
         available_capital: float,
         risk_per_share: float,
         warnings: List[str],
+        symbol: Optional[str] = None,
+        avg_daily_value: Optional[float] = None,
     ) -> int:
-        """Enforce position limits and round to lot size."""
+        """
+        Enforce position limits and round to lot size.
+
+        IMPROVED v5.0: Liquidity tier-based position limits
+        - VN30: 15% max position
+        - LARGE_CAP: 12% max position
+        - MID_CAP: 10% max position
+        - SMALL_CAP: 6% max position
+        """
+
+        # IMPROVED v5.0: Get liquidity tier-based max position
+        if symbol and avg_daily_value is not None:
+            tier_name, tier_config = self._get_liquidity_tier(symbol, avg_daily_value)
+            tier_max_position = tier_config["max_position_pct"]
+            logger.debug(f"📊 Liquidity tier: {tier_name} → max position {tier_max_position:.0%}")
+        else:
+            tier_name = "DEFAULT"
+            tier_max_position = self.max_position_size
+
+        # Use the more restrictive of tier limit and configured limit
+        effective_max_position = min(tier_max_position, self.max_position_size)
 
         # Calculate limits
-        max_by_capital = int((self.total_capital * self.max_position_size) / entry_price)
+        max_by_capital = int((self.total_capital * effective_max_position) / entry_price)
         max_by_available = int(available_capital / entry_price)
         min_shares = int((self.total_capital * self.min_position_size) / entry_price)
 
@@ -1032,8 +1378,15 @@ class EnhancedPositionSizer:
             final_shares, entry_price, risk_per_share, warnings
         )
 
+        # Add tier info to warnings if position was limited
+        if shares > final_shares and tier_name != "DEFAULT":
+            warnings.append(
+                f"Position limited by {tier_name} tier (max {effective_max_position:.0%})"
+            )
+
         logger.debug(
-            f"✅ Final: {final_shares} shares " f"({final_shares // VIETNAM_LOT_SIZE} lots)"
+            f"✅ Final: {final_shares} shares "
+            f"({final_shares // VIETNAM_LOT_SIZE} lots, tier={tier_name})"
         )
 
         return final_shares
@@ -1256,3 +1609,520 @@ class EnhancedPositionSizer:
             "available_capital": self._get_available_capital(),
             "correlation_cache_hit_rate": self._correlation_cache.hit_rate,
         }
+
+    # =========================================================================
+    # NEW v6.0: ODD-LOT TRADING INTEGRATION
+    # =========================================================================
+
+    def calculate_odd_lot_position(
+        self,
+        symbol: str,
+        entry_price: float,
+        target_value: float,
+        expected_return_pct: float = 5.0,
+    ) -> Dict:
+        """
+        Calculate position size for odd-lot trading (1-99 shares).
+
+        IMPROVED v6.0: Odd-lot Trading Implementation
+        =========================================================================
+        Odd-lot trading in Vietnam market:
+        - Enabled since 2021 for quantities 1-99 shares
+        - Higher spread premium (0.5% wider)
+        - Minimum commission applies (11,000 VND)
+        - Useful for small portfolios or selling remaining shares
+        =========================================================================
+
+        Args:
+            symbol: Stock symbol
+            entry_price: Entry price per share
+            target_value: Target position value in VND
+            expected_return_pct: Expected return percentage
+
+        Returns:
+            Dict with odd-lot position details and cost analysis
+        """
+        from src.config.constants import (
+            VN_ODD_LOT_ENABLED,
+            VN_ODD_LOT_MIN_QTY,
+            VN_ODD_LOT_MAX_QTY,
+            VN_ODD_LOT_SPREAD_PREMIUM,
+            VN_ODD_LOT_MIN_COMMISSION,
+        )
+
+        if not VN_ODD_LOT_ENABLED:
+            return {
+                "enabled": False,
+                "reason": "Odd-lot trading is disabled",
+                "recommendation": "Use standard lot (100 shares minimum)",
+            }
+
+        # Calculate shares
+        raw_shares = int(target_value / entry_price)
+
+        if raw_shares >= 100:
+            return {
+                "enabled": True,
+                "is_odd_lot": False,
+                "shares": (raw_shares // 100) * 100,
+                "recommendation": "Use standard lot trading",
+            }
+
+        if raw_shares < VN_ODD_LOT_MIN_QTY:
+            return {
+                "enabled": True,
+                "is_odd_lot": False,
+                "shares": 0,
+                "reason": "Position value too small for any shares",
+            }
+
+        # Calculate costs for odd-lot
+        gross_value = raw_shares * entry_price
+        commission = max(gross_value * 0.0025, VN_ODD_LOT_MIN_COMMISSION)  # 0.25% or min
+        spread_cost = gross_value * VN_ODD_LOT_SPREAD_PREMIUM
+        total_cost = commission + spread_cost
+        cost_pct = (total_cost / gross_value) * 100 if gross_value > 0 else 0
+
+        # Check if trade is worthwhile
+        is_worthwhile = expected_return_pct > cost_pct
+
+        result = {
+            "enabled": True,
+            "is_odd_lot": True,
+            "shares": raw_shares,
+            "gross_value": gross_value,
+            "commission": commission,
+            "spread_cost": spread_cost,
+            "total_cost": total_cost,
+            "cost_pct": cost_pct,
+            "is_worthwhile": is_worthwhile,
+            "net_return_pct": expected_return_pct - cost_pct,
+        }
+
+        if not is_worthwhile:
+            result["warning"] = (
+                f"⚠️ Odd-lot costs ({cost_pct:.2f}%) exceed expected return "
+                f"({expected_return_pct:.2f}%). Consider larger position."
+            )
+            logger.warning(result["warning"])
+
+        return result
+
+    # =========================================================================
+    # NEW v6.0: MARGIN TRADING INTEGRATION
+    # =========================================================================
+
+    def calculate_margin_position(
+        self,
+        symbol: str,
+        entry_price: float,
+        stop_loss: float,
+        confidence: int,
+        use_margin: bool = True,
+        margin_ratio: float = 0.50,
+    ) -> Dict:
+        """
+        Calculate position size with margin trading integration.
+
+        IMPROVED v6.0: Margin Trading Integration
+        =========================================================================
+        Vietnam margin trading rules:
+        - Initial margin: 50% (can borrow up to 50% of position value)
+        - Maintenance margin: 35%
+        - Margin call: 30%
+        - Force liquidation: 25%
+        =========================================================================
+
+        Args:
+            symbol: Stock symbol
+            entry_price: Entry price per share
+            stop_loss: Stop loss price
+            confidence: Signal confidence (0-100)
+            use_margin: Whether to use margin
+            margin_ratio: Margin ratio (default 50%)
+
+        Returns:
+            Dict with margin-adjusted position details
+        """
+        from src.config.constants import (
+            VN_INITIAL_MARGIN,
+            VN_MAINTENANCE_MARGIN,
+            VN_MARGIN_WARNING_LEVEL,
+            VN_MARGIN_CALL_LEVEL,
+        )
+
+        # Get margin manager
+        try:
+            from src.risk.margin_manager import MarginManager
+
+            margin_mgr = MarginManager()
+            account_state = margin_mgr.get_account_state()
+        except ImportError:
+            logger.warning("MarginManager not available, using cash-only calculation")
+            account_state = None
+
+        # Calculate base position (without margin)
+        base_result = self.calculate_position_size(
+            symbol=symbol,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=entry_price * 1.10,  # 10% target
+            confidence=confidence,
+        )
+
+        if not use_margin or account_state is None:
+            return {
+                "use_margin": False,
+                "base_shares": base_result.shares,
+                "margin_shares": base_result.shares,
+                "buying_power": self.total_capital,
+                "margin_status": "CASH_ONLY",
+            }
+
+        # Check margin status
+        margin_status = account_state.status.value
+        equity_ratio = account_state.equity_ratio
+
+        # Adjust position based on margin status
+        margin_multiplier = 1.0
+        warnings = []
+
+        if equity_ratio < VN_MARGIN_CALL_LEVEL:
+            # Margin call - block new positions
+            return {
+                "use_margin": True,
+                "base_shares": base_result.shares,
+                "margin_shares": 0,
+                "buying_power": 0,
+                "margin_status": margin_status,
+                "blocked": True,
+                "reason": f"Margin call active (equity: {equity_ratio:.1%}). No new positions allowed.",
+            }
+        elif equity_ratio < VN_MARGIN_WARNING_LEVEL:
+            # Warning level - reduce position by 50%
+            margin_multiplier = 0.5
+            warnings.append(
+                f"⚠️ Margin warning (equity: {equity_ratio:.1%}). Position reduced by 50%."
+            )
+        elif equity_ratio < VN_MAINTENANCE_MARGIN + 0.05:
+            # Near maintenance - reduce position by 25%
+            margin_multiplier = 0.75
+            warnings.append(
+                f"⚠️ Near maintenance margin (equity: {equity_ratio:.1%}). Position reduced by 25%."
+            )
+
+        # Calculate margin-enhanced position
+        # With 50% margin, buying power is 2x cash
+        margin_buying_power = account_state.buying_power
+        max_margin_shares = int(margin_buying_power / entry_price)
+
+        # Apply multiplier and limits
+        margin_shares = int(base_result.shares * (1 + margin_ratio) * margin_multiplier)
+        margin_shares = min(margin_shares, max_margin_shares)
+        margin_shares = (margin_shares // VIETNAM_LOT_SIZE) * VIETNAM_LOT_SIZE
+
+        # Calculate borrowed amount
+        cash_portion = base_result.shares * entry_price
+        borrowed_amount = max(0, (margin_shares * entry_price) - cash_portion)
+
+        return {
+            "use_margin": True,
+            "base_shares": base_result.shares,
+            "margin_shares": margin_shares,
+            "cash_portion": cash_portion,
+            "borrowed_amount": borrowed_amount,
+            "buying_power": margin_buying_power,
+            "margin_status": margin_status,
+            "equity_ratio": equity_ratio,
+            "margin_multiplier": margin_multiplier,
+            "warnings": warnings,
+        }
+
+    # =========================================================================
+    # NEW v6.0: T+0 INTRADAY TRADING VALIDATION
+    # =========================================================================
+
+    def validate_t0_trading(
+        self,
+        symbol: str,
+        quantity: int,
+        price: float,
+        account_value: float,
+    ) -> Dict:
+        """
+        Validate T+0 intraday trading capability.
+
+        IMPROVED v6.0: T+0 Intraday Trading Validation
+        =========================================================================
+        Vietnam T+0 rules:
+        - Only for margin accounts
+        - Minimum account value: 50M VND
+        - Max trades per day: 20
+        - Max daily loss: 2%
+        - Min holding time: 5 minutes (wash trade prevention)
+        =========================================================================
+
+        Args:
+            symbol: Stock symbol
+            quantity: Number of shares
+            price: Trade price
+            account_value: Total account value
+
+        Returns:
+            Dict with T+0 validation result
+        """
+        from src.config.constants import (
+            VN_T0_ENABLED,
+            VN_T0_MIN_ACCOUNT_VALUE,
+            VN_T0_MAX_TRADES_PER_DAY,
+            VN_T0_MAX_LOSS_PCT,
+            VN_T0_MIN_HOLDING_MINUTES,
+        )
+
+        result = {
+            "t0_enabled": VN_T0_ENABLED,
+            "can_trade_t0": False,
+            "validations": [],
+            "warnings": [],
+        }
+
+        if not VN_T0_ENABLED:
+            result["reason"] = "T+0 trading is disabled in configuration"
+            return result
+
+        # Check 1: Account value
+        if account_value < VN_T0_MIN_ACCOUNT_VALUE:
+            result["validations"].append(
+                {
+                    "check": "account_value",
+                    "passed": False,
+                    "message": f"Account value ({account_value/1e6:.0f}M) < minimum ({VN_T0_MIN_ACCOUNT_VALUE/1e6:.0f}M)",
+                }
+            )
+            result["reason"] = "Account value below T+0 minimum"
+            return result
+        else:
+            result["validations"].append(
+                {
+                    "check": "account_value",
+                    "passed": True,
+                    "message": f"Account value ({account_value/1e6:.0f}M) meets minimum",
+                }
+            )
+
+        # Check 2: Broker API support
+        # Note: Broker validation is optional - T+0 can proceed without broker verification
+        # In production, broker should be configured and available
+        try:
+            from src.broker import get_broker
+
+            # get_broker requires configuration - skip if not configured
+            # This check is informational only
+            result["validations"].append(
+                {
+                    "check": "broker_support",
+                    "passed": True,
+                    "message": "Broker module available (verification skipped - requires configuration)",
+                }
+            )
+        except (ImportError, TypeError) as e:
+            result["warnings"].append(f"Broker verification skipped: {str(e)}")
+
+        # Check 3: Daily trade count
+        try:
+            from src.portfolio.intraday_trading import get_intraday_tracker
+
+            tracker = get_intraday_tracker()
+            stats = tracker.get_stats()
+
+            if stats.total_trades >= VN_T0_MAX_TRADES_PER_DAY:
+                result["validations"].append(
+                    {
+                        "check": "daily_trades",
+                        "passed": False,
+                        "message": f"Daily trade limit reached ({stats.total_trades}/{VN_T0_MAX_TRADES_PER_DAY})",
+                    }
+                )
+                result["reason"] = "Daily T+0 trade limit reached"
+                return result
+            else:
+                result["validations"].append(
+                    {
+                        "check": "daily_trades",
+                        "passed": True,
+                        "message": f"Trade count OK ({stats.total_trades}/{VN_T0_MAX_TRADES_PER_DAY})",
+                    }
+                )
+
+            # Check 4: Daily loss limit
+            daily_loss_pct = abs(stats.net_pnl / account_value) if stats.net_pnl < 0 else 0
+            if daily_loss_pct >= VN_T0_MAX_LOSS_PCT:
+                result["validations"].append(
+                    {
+                        "check": "daily_loss",
+                        "passed": False,
+                        "message": f"Daily loss limit reached ({daily_loss_pct:.1%} >= {VN_T0_MAX_LOSS_PCT:.1%})",
+                    }
+                )
+                result["reason"] = "Daily T+0 loss limit reached"
+                return result
+            else:
+                result["validations"].append(
+                    {
+                        "check": "daily_loss",
+                        "passed": True,
+                        "message": f"Daily loss OK ({daily_loss_pct:.1%} < {VN_T0_MAX_LOSS_PCT:.1%})",
+                    }
+                )
+
+        except ImportError:
+            result["warnings"].append("Intraday tracker not available - cannot verify trade limits")
+
+        # All checks passed
+        result["can_trade_t0"] = True
+        result["min_holding_minutes"] = VN_T0_MIN_HOLDING_MINUTES
+
+        return result
+
+    # =========================================================================
+    # NEW v6.0: WARRANT/ETF SPECIAL INSTRUMENT HANDLING
+    # =========================================================================
+
+    def calculate_special_instrument_position(
+        self,
+        symbol: str,
+        entry_price: float,
+        confidence: int,
+        instrument_type: str = "AUTO",
+    ) -> Dict:
+        """
+        Calculate position size for special instruments (warrants, ETFs).
+
+        IMPROVED v6.0: Warrant/ETF Specific Logic
+        =========================================================================
+        Warrants:
+        - ±50% daily price limit (vs ±7% for stocks)
+        - T+0 settlement
+        - Don't trade if < 3 days to expiry
+        - Warning if < 30 days to expiry
+        - Max 5% portfolio allocation
+
+        ETFs:
+        - ±7% daily price limit (same as stocks)
+        - Some allow short selling
+        - Track premium/discount to NAV
+        =========================================================================
+
+        Args:
+            symbol: Instrument symbol
+            entry_price: Entry price
+            confidence: Signal confidence (0-100)
+            instrument_type: "WARRANT", "ETF", or "AUTO" (auto-detect)
+
+        Returns:
+            Dict with special instrument position details
+        """
+        try:
+            from src.strategies.special_instruments import (
+                get_instrument_handler,
+                InstrumentType,
+            )
+
+            handler = get_instrument_handler()
+        except ImportError:
+            logger.warning("Special instruments module not available")
+            return {
+                "instrument_type": "UNKNOWN",
+                "error": "Special instruments module not available",
+            }
+
+        # Auto-detect instrument type
+        if instrument_type == "AUTO":
+            detected_type = handler.detect_instrument_type(symbol)
+        else:
+            detected_type = InstrumentType[instrument_type]
+
+        result = {
+            "symbol": symbol,
+            "instrument_type": detected_type.value,
+            "entry_price": entry_price,
+            "confidence": confidence,
+        }
+
+        # Get price limits
+        limits = handler.get_price_limits(symbol, entry_price)
+        result["price_limits"] = limits
+
+        if detected_type == InstrumentType.WARRANT:
+            # Warrant-specific logic
+            from src.strategies.special_instruments import get_warrant_logic
+
+            warrant_logic = get_warrant_logic()
+
+            # Check if tradeable
+            from src.strategies.special_instruments import WarrantInfo
+            from datetime import datetime, timedelta
+
+            # Create basic warrant info (in production, fetch from data source)
+            warrant_info = WarrantInfo(
+                symbol=symbol,
+                underlying=warrant_logic.get_underlying(symbol) or "UNKNOWN",
+                issuer="UNKNOWN",
+                exercise_price=entry_price * 0.9,  # Estimate
+                exercise_ratio=1.0,
+                expiry_date=datetime.now() + timedelta(days=60),  # Estimate
+                warrant_type="CALL",
+                warrant_price=entry_price,
+            )
+
+            is_tradeable, warnings = warrant_logic.check_tradeable(warrant_info, entry_price)
+            result["is_tradeable"] = is_tradeable
+            result["warnings"] = warnings
+
+            if is_tradeable:
+                # Calculate position (max 5% for warrants)
+                max_allocation = self.total_capital * 0.05
+                shares = warrant_logic.calculate_position_size(
+                    self.total_capital, entry_price, confidence
+                )
+                result["shares"] = shares
+                result["max_allocation"] = max_allocation
+                result["stop_loss"] = warrant_logic.calculate_stop_loss(entry_price, warrant_info)
+            else:
+                result["shares"] = 0
+                result["blocked_reason"] = warnings[0] if warnings else "Not tradeable"
+
+        elif detected_type == InstrumentType.ETF:
+            # ETF-specific logic
+            from src.strategies.special_instruments import get_etf_logic
+
+            etf_logic = get_etf_logic()
+
+            etf_info = etf_logic.get_etf_info(symbol)
+            result["etf_info"] = etf_info
+            result["can_short"] = etf_logic.can_short(symbol)
+
+            # Standard position sizing for ETFs
+            base_result = self.calculate_position_size(
+                symbol=symbol,
+                entry_price=entry_price,
+                stop_loss=entry_price * 0.95,  # 5% stop
+                take_profit=entry_price * 1.10,  # 10% target
+                confidence=confidence,
+            )
+            result["shares"] = base_result.shares
+            result["position_value"] = base_result.value
+
+        else:
+            # Regular stock - use standard calculation
+            base_result = self.calculate_position_size(
+                symbol=symbol,
+                entry_price=entry_price,
+                stop_loss=entry_price * 0.93,  # 7% stop (floor)
+                take_profit=entry_price * 1.10,
+                confidence=confidence,
+            )
+            result["shares"] = base_result.shares
+            result["position_value"] = base_result.value
+
+        return result

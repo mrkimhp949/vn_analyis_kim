@@ -332,8 +332,98 @@ class ForeignFlowAnalyzer:
         age = (datetime.now() - self._cache_time).total_seconds()
         return age < self.cache_ttl
 
+    def is_data_stale(self, max_delay_minutes: int = 15) -> bool:
+        """
+        Check if foreign flow data is stale (delayed more than threshold).
+
+        IMPROVED v6.0: Data staleness detection
+        =========================================================================
+        Foreign flow data can be delayed due to:
+        - API rate limits
+        - Data provider delays
+        - Network issues
+
+        When data is stale (> 15 minutes old), its weight should be reduced
+        by 50% in trading decisions.
+        =========================================================================
+
+        Args:
+            max_delay_minutes: Maximum acceptable delay in minutes (default: 15)
+
+        Returns:
+            True if data is stale, False if fresh
+        """
+        if self._cache_time is None:
+            return True
+
+        age_minutes = (datetime.now() - self._cache_time).total_seconds() / 60
+        is_stale = age_minutes > max_delay_minutes
+
+        if is_stale:
+            logger.warning(
+                f"⚠️ Foreign flow data is stale ({age_minutes:.0f} min old, "
+                f"threshold: {max_delay_minutes} min). Reducing weight by 50%."
+            )
+
+        return is_stale
+
+    def get_data_age_minutes(self) -> float:
+        """Get age of cached data in minutes"""
+        if self._cache_time is None:
+            return float("inf")
+        return (datetime.now() - self._cache_time).total_seconds() / 60
+
+    def get_adjusted_score(self, max_delay_minutes: int = 15) -> float:
+        """
+        Get foreign flow score with staleness adjustment.
+
+        IMPROVED v6.0: Automatic weight reduction for stale data
+        =========================================================================
+        - Fresh data (< 15 min): Full score
+        - Stale data (> 15 min): Score reduced by 50%
+        - No data: Score = 0 (neutral)
+        =========================================================================
+
+        Args:
+            max_delay_minutes: Maximum acceptable delay before weight reduction
+
+        Returns:
+            Adjusted score (-1 to +1, or reduced if stale)
+        """
+        result = self.analyze()
+
+        if result.score == 0:
+            return 0.0
+
+        if self.is_data_stale(max_delay_minutes):
+            adjusted = result.score * 0.5
+            logger.info(
+                f"📊 Foreign flow score adjusted for staleness: "
+                f"{result.score:.2f} → {adjusted:.2f}"
+            )
+            return adjusted
+
+        return result.score
+
     def _default_result(self, reason: str) -> ForeignFlowData:
-        """Return default neutral result"""
+        """
+        Return default neutral result when data is unavailable.
+
+        IMPROVED v6.0: Foreign Flow Fallback Logic
+        =========================================================================
+        When foreign flow data is unavailable, the system:
+        1. Returns neutral (zero) score - no bias in either direction
+        2. Logs the reason for unavailability
+        3. Marks data as unavailable in metadata
+
+        This ensures trading decisions can continue without foreign flow data,
+        but with reduced confidence in the signal.
+        =========================================================================
+        """
+        logger.warning(
+            f"⚠️ Foreign flow data unavailable: {reason}. "
+            f"Using neutral score (0.0). Trading decisions will proceed without foreign flow signal."
+        )
         return ForeignFlowData(
             date=datetime.now().isoformat(),
             net_value=0,

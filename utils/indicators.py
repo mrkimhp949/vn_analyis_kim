@@ -181,15 +181,31 @@ class StopLossCalculator:
 
     @staticmethod
     def calculate_take_profit_targets(
-        entry_price: float, atr: float, risk_reward_ratios: list = [1.5, 3.0, 5.0]
+        entry_price: float,
+        atr: float,
+        risk_reward_ratios: list = [1.5, 3.0, 5.0],
+        min_tp_percentages: list = [0.06, 0.10, 0.15],
     ) -> list:
         """
-        Calculate take profit targets
+        Calculate take profit targets using HYBRID approach.
+
+        Combines ATR-based and percentage-based methods:
+        - ATR-based: TP = entry + (ATR × R:R ratio) - adaptive to volatility
+        - Percentage-based: TP = entry × (1 + min_tp_pct) - ensures minimum R:R
+
+        Final TP = max(ATR-based, Percentage-based)
+
+        This ensures:
+        - TP adapts to stock volatility (ATR)
+        - Minimum R:R ratio is always maintained (min_tp_percentages)
+        - For VN market with ±7% daily limit, min TP1=6%, TP2=10%, TP3=15%
 
         Args:
             entry_price: Entry price
             atr: Average True Range
-            risk_reward_ratios: List of R:R ratios
+            risk_reward_ratios: List of R:R ratios for ATR-based calculation
+            min_tp_percentages: Minimum TP percentages [TP1, TP2, TP3]
+                Default: [0.06, 0.10, 0.15] = 6%, 10%, 15%
 
         Returns:
             List of take profit prices
@@ -201,8 +217,16 @@ class StopLossCalculator:
             raise ValueError(f"Invalid ATR: {atr}")
 
         targets = []
-        for rr in risk_reward_ratios:
-            tp = entry_price + (atr * rr)
+        for i, rr in enumerate(risk_reward_ratios):
+            # ATR-based TP
+            tp_atr = entry_price + (atr * rr)
+
+            # Percentage-based TP (minimum)
+            min_pct = min_tp_percentages[i] if i < len(min_tp_percentages) else 0.15
+            tp_pct = entry_price * (1 + min_pct)
+
+            # Hybrid: take the higher of the two
+            tp = max(tp_atr, tp_pct)
             targets.append(float(tp))
 
         return targets
