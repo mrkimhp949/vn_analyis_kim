@@ -116,7 +116,10 @@ class TradingConfig:
     circuit_breaker_volatility_tighten_factor: float = 0.75  # Tighten 25% in high vol
 
     # Technical-only signals
-    min_technical_only_confidence: float = 40.0  # Lower threshold for technical signals
+    # IMPROVED v5.0: Increased from 40 to 60 for better signal quality
+    min_technical_only_confidence: float = (
+        60.0  # Threshold for technical-only signals (aligned with constants)
+    )
 
     # Per-symbol circuit breaker
     per_symbol_max_consecutive_losses: int = 3  # Block symbol after N consecutive losses
@@ -136,7 +139,7 @@ class TradingConfig:
     # Liquidity considerations for Vietnam market
     # NOTE: Aligned with constants.VN_MIN_LIQUIDITY_VALUE for consistency
     vn_min_daily_value: float = (
-        1_000_000_000  # 1B VND - aligned with constants.VN_MIN_LIQUIDITY_VALUE
+        2_000_000_000  # 2B VND - aligned with constants.VN_MIN_LIQUIDITY_VALUE
     )
     vn_max_position_pct_of_volume: float = 0.05  # Max 5% of daily volume for single position
     vn_require_continuous_trading: bool = True  # Avoid stocks with trading halts

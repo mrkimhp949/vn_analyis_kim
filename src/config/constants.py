@@ -318,8 +318,8 @@ DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
 
 # NEW: Vietnam Market Specific Thresholds - OPTIMIZED v5.0
 # IMPROVED: Tiered liquidity for different market caps - balanced for VN market
-VN_MIN_LIQUIDITY_VALUE = 1_000_000_000  # 1B VND for small caps
-VN_MID_CAP_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for mid caps
+VN_MIN_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for small caps
+VN_MID_CAP_LIQUIDITY_VALUE = 3_000_000_000  # 3B VND for mid caps
 VN_LARGE_CAP_LIQUIDITY_VALUE = 5_000_000_000  # 5B VND for large caps
 VN_CRITICAL_LIQUIDITY_VALUE = 300_000_000  # LOWERED: 300M VND critical minimum (was 500M)
 VN_MIN_VOLUME = 25_000  # LOWERED: 25K shares minimum (was 50K)
@@ -379,7 +379,8 @@ TECH_SCORE_LOW = 0.4
 TECH_SCORE_POOR = 0.2
 
 # Technical Confidence Threshold
-TECH_ONLY_MIN_CONFIDENCE = 55  # Min confidence for technical-only signals
+# IMPROVED v5.0: Increased from 55 to 60 for higher signal quality
+TECH_ONLY_MIN_CONFIDENCE = 60  # Min confidence for technical-only signals (was 55)
 
 # Per-Symbol Performance Tracking
 MIN_TRADES_FOR_POOR_PERFORMER = (
@@ -393,6 +394,52 @@ FOREIGN_FLOW_STRONG_BUY_BONUS = 10  # +10 confidence for strong foreign buying (
 FOREIGN_FLOW_MODERATE_BUY_BONUS = 5  # +5 confidence for moderate foreign buying (score > 0)
 FOREIGN_FLOW_MODERATE_SELL_PENALTY = -5  # -5 confidence for moderate foreign selling (score < 0)
 FOREIGN_FLOW_STRONG_SELL_PENALTY = -15  # -15 confidence for strong foreign selling (score < -0.5)
+
+# ============================================================================
+# NEW v5.0: Additional Vietnam Market Features
+# ============================================================================
+
+# Margin Trading Constants
+VN_INITIAL_MARGIN = 0.50  # 50% initial margin requirement
+VN_MAINTENANCE_MARGIN = 0.35  # 35% maintenance margin (broker dependent)
+VN_MARGIN_WARNING_LEVEL = 0.40  # 40% - warning level
+VN_MARGIN_CALL_LEVEL = 0.30  # 30% - margin call trigger
+VN_FORCE_LIQUIDATION_LEVEL = 0.25  # 25% - force liquidation
+
+# T+0 Intraday Trading Constants
+VN_T0_ENABLED = True  # T+0 enabled for margin accounts
+VN_T0_MIN_ACCOUNT_VALUE = 50_000_000  # 50M VND minimum for T+0
+VN_T0_MAX_TRADES_PER_DAY = 20  # Max intraday trades
+VN_T0_MAX_LOSS_PCT = 0.02  # Stop T+0 trading at -2% daily loss
+VN_T0_MIN_HOLDING_MINUTES = 5  # Min holding time (prevent wash trades)
+
+# Odd-Lot Trading Constants
+VN_ODD_LOT_ENABLED = True  # Odd-lot trading enabled since 2021
+VN_ODD_LOT_MIN_QTY = 1  # Minimum 1 share
+VN_ODD_LOT_MAX_QTY = 99  # Maximum 99 shares (odd-lot)
+VN_ODD_LOT_SPREAD_PREMIUM = 0.005  # 0.5% wider spread for odd-lots
+VN_ODD_LOT_MIN_COMMISSION = 11_000  # 11,000 VND minimum commission
+
+# Warrant Trading Constants
+VN_WARRANT_PRICE_LIMIT = 0.50  # ±50% daily limit for warrants
+VN_WARRANT_SETTLEMENT = 0  # T+0 settlement for warrants
+VN_WARRANT_MIN_DAYS_TO_EXPIRY = 3  # Don't trade if < 3 days to expiry
+VN_WARRANT_WARNING_DAYS = 30  # Warning if < 30 days to expiry
+
+# ETF Trading Constants
+VN_ETF_PRICE_LIMIT = 0.07  # ±7% (same as stocks)
+VN_ETF_SHORT_ALLOWED = True  # Some ETFs allow short selling
+
+# T+2.5 Cash Settlement
+VN_CASH_TRADING_AVAILABLE = 2  # T+2 - cash available for trading
+VN_CASH_WITHDRAWAL_AVAILABLE = 2.5  # T+2.5 - cash available for withdrawal
+VN_WITHDRAWAL_CUTOFF_HOUR = 13  # After 13:00 on T+2 for withdrawal
+
+# Floor Bounce Protection
+VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES = 30  # Max wait time for floor bounce
+
+# Circuit Breaker Improvements
+VN_MAX_CONSECUTIVE_WINS = 7  # Pause after 7 consecutive wins (was 5)
 
 # Export all constants
 __all__ = [
@@ -560,4 +607,38 @@ __all__ = [
     # Validation
     "MAX_CORRELATION",
     "DIVERSIFICATION_PENALTY",
+    # NEW v5.0: Margin Trading
+    "VN_INITIAL_MARGIN",
+    "VN_MAINTENANCE_MARGIN",
+    "VN_MARGIN_WARNING_LEVEL",
+    "VN_MARGIN_CALL_LEVEL",
+    "VN_FORCE_LIQUIDATION_LEVEL",
+    # NEW v5.0: T+0 Intraday Trading
+    "VN_T0_ENABLED",
+    "VN_T0_MIN_ACCOUNT_VALUE",
+    "VN_T0_MAX_TRADES_PER_DAY",
+    "VN_T0_MAX_LOSS_PCT",
+    "VN_T0_MIN_HOLDING_MINUTES",
+    # NEW v5.0: Odd-Lot Trading
+    "VN_ODD_LOT_ENABLED",
+    "VN_ODD_LOT_MIN_QTY",
+    "VN_ODD_LOT_MAX_QTY",
+    "VN_ODD_LOT_SPREAD_PREMIUM",
+    "VN_ODD_LOT_MIN_COMMISSION",
+    # NEW v5.0: Warrant Trading
+    "VN_WARRANT_PRICE_LIMIT",
+    "VN_WARRANT_SETTLEMENT",
+    "VN_WARRANT_MIN_DAYS_TO_EXPIRY",
+    "VN_WARRANT_WARNING_DAYS",
+    # NEW v5.0: ETF Trading
+    "VN_ETF_PRICE_LIMIT",
+    "VN_ETF_SHORT_ALLOWED",
+    # NEW v5.0: T+2.5 Cash Settlement
+    "VN_CASH_TRADING_AVAILABLE",
+    "VN_CASH_WITHDRAWAL_AVAILABLE",
+    "VN_WITHDRAWAL_CUTOFF_HOUR",
+    # NEW v5.0: Floor Bounce Protection
+    "VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES",
+    # NEW v5.0: Circuit Breaker
+    "VN_MAX_CONSECUTIVE_WINS",
 ]
