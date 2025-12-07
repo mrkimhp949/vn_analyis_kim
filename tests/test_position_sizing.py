@@ -581,7 +581,8 @@ def test_calculate_position_size_basic(sizer):
     assert result.value == result.shares * 80000
     assert result.position_percent <= sizer.max_position_size * 100
     assert result.risk_percent <= sizer.max_risk_per_trade * 100
-    assert len(result.recommended_entries) == 3  # DCA levels
+    # DCA may be disabled (1 entry) or enabled (3 entries)
+    assert len(result.recommended_entries) >= 1
 
 
 def test_calculate_position_size_with_kelly(sizer):
@@ -747,7 +748,7 @@ def test_calculate_position_size_rounds_to_lot_100(sizer):
 
 
 def test_calculate_position_size_dca_entries(sizer):
-    """Test DCA entry recommendations"""
+    """Test DCA entry recommendations - handles both DCA enabled/disabled"""
     result = sizer.calculate_position_size(
         symbol="VNM",
         entry_price=80000,
@@ -757,14 +758,23 @@ def test_calculate_position_size_dca_entries(sizer):
         auto_detect_regime=False,
     )
 
-    assert len(result.recommended_entries) == 3
-    # Level 1: 50% at -2% (DCA_LEVEL_1_DISCOUNT = 0.98)
-    assert result.recommended_entries[0]["percent"] == 50
-    assert result.recommended_entries[0]["price"] == pytest.approx(80000 * 0.98, abs=100)
-    # Level 2: 30% at -4%
-    assert result.recommended_entries[1]["percent"] == 30
-    # Level 3: 20% at -6%
-    assert result.recommended_entries[2]["percent"] == 20
+    # DCA may be disabled (1 entry) or enabled (3 entries)
+    from src.strategies.position_sizing import PositionSizingConstants
+
+    if PositionSizingConstants.DCA_ENABLED:
+        assert len(result.recommended_entries) == 3
+        # Level 1: 50% at -2% (DCA_LEVEL_1_DISCOUNT = 0.98)
+        assert result.recommended_entries[0]["percent"] == 50
+        assert result.recommended_entries[0]["price"] == pytest.approx(80000 * 0.98, abs=100)
+        # Level 2: 30% at -4%
+        assert result.recommended_entries[1]["percent"] == 30
+        # Level 3: 20% at -6%
+        assert result.recommended_entries[2]["percent"] == 20
+    else:
+        # DCA disabled - single entry
+        assert len(result.recommended_entries) == 1
+        assert result.recommended_entries[0]["percent"] == 100
+        assert "DCA disabled" in result.recommended_entries[0].get("note", "")
 
 
 def test_calculate_position_size_warnings_large_position(sizer):
@@ -899,27 +909,36 @@ def test_calculate_current_exposure_no_positions(sizer):
 
 
 def test_calculate_dca_entries(sizer):
-    """Test _calculate_dca_entries"""
+    """Test _calculate_dca_entries - handles both DCA enabled/disabled"""
+    from src.strategies.position_sizing import PositionSizingConstants
+
     entries = sizer._calculate_dca_entries(base_price=80000, total_shares=1000)
 
-    assert len(entries) == 3
-    # Level 1: 50% at -2% (DCA_LEVEL_1_DISCOUNT = 0.98)
-    assert entries[0]["level"] == 1
-    assert entries[0]["price"] == pytest.approx(80000 * 0.98, abs=100)
-    assert entries[0]["shares"] == 500
-    assert entries[0]["percent"] == 50
+    if PositionSizingConstants.DCA_ENABLED:
+        assert len(entries) == 3
+        # Level 1: 50% at -2% (DCA_LEVEL_1_DISCOUNT = 0.98)
+        assert entries[0]["level"] == 1
+        assert entries[0]["price"] == pytest.approx(80000 * 0.98, abs=100)
+        assert entries[0]["shares"] == 500
+        assert entries[0]["percent"] == 50
 
-    # Level 2: 30% at -4% (DCA_LEVEL_2_DISCOUNT = 0.96)
-    assert entries[1]["level"] == 2
-    assert entries[1]["price"] == pytest.approx(80000 * 0.96, abs=100)
-    assert entries[1]["shares"] == 300
-    assert entries[1]["percent"] == 30
+        # Level 2: 30% at -4% (DCA_LEVEL_2_DISCOUNT = 0.96)
+        assert entries[1]["level"] == 2
+        assert entries[1]["price"] == pytest.approx(80000 * 0.96, abs=100)
+        assert entries[1]["shares"] == 300
+        assert entries[1]["percent"] == 30
 
-    # Level 3: 20% at -6% (DCA_LEVEL_3_DISCOUNT = 0.94)
-    assert entries[2]["level"] == 3
-    assert entries[2]["price"] == pytest.approx(80000 * 0.94, abs=100)
-    assert entries[2]["shares"] == 200
-    assert entries[2]["percent"] == 20
+        # Level 3: 20% at -6% (DCA_LEVEL_3_DISCOUNT = 0.94)
+        assert entries[2]["level"] == 3
+        assert entries[2]["price"] == pytest.approx(80000 * 0.94, abs=100)
+        assert entries[2]["shares"] == 200
+        assert entries[2]["percent"] == 20
+    else:
+        # DCA disabled - single entry with all shares
+        assert len(entries) == 1
+        assert entries[0]["level"] == 1
+        assert entries[0]["percent"] == 100
+        assert "DCA disabled" in entries[0].get("note", "")
 
 
 def test_zero_position(sizer):
@@ -1035,7 +1054,8 @@ def test_full_position_sizing_workflow(sizer):
     assert result.risk_percent > 0
     assert result.position_percent > 0
     assert result.kelly_percent > 0
-    assert len(result.recommended_entries) == 3
+    # DCA may be disabled (1 entry) or enabled (3 entries)
+    assert len(result.recommended_entries) >= 1
     assert result.adjustments is not None
 
     # Verify constraints

@@ -1,14 +1,22 @@
 """
 Circuit Breaker - Giới hạn trades và loss per day
 Bảo vệ khỏi lỗi logic hoặc market anomaly
+
+IMPROVED v5.1:
+- Database-backed storage option (see circuit_breaker_db.py)
+- Regime-aware consecutive loss limits
+- Distributed locking for multiple bots
 """
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from threading import RLock
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,7 +44,12 @@ class CircuitBreaker:
         self,
         max_trades_per_day: int = 8,  # TIGHTENED: Max 8 trades/day
         max_loss_per_day_pct: float = 0.03,  # TIGHTENED: 3% max daily loss
-        max_consecutive_losses: int = 3,  # TIGHTENED: 3 consecutive losses
+        max_consecutive_losses: int = 3,  # TIGHTENED: 3 consecutive losses (regime-aware)
+        # IMPROVED v5.1: Regime-aware consecutive loss limits
+        # BULL: 4 losses (more lenient)
+        # SIDEWAYS: 3 losses (standard - allows mean-reversion)
+        # BEAR: 2 losses (strict)
+        use_regime_aware_limits: bool = True,  # Enable regime-aware limits
         vnindex_drop_threshold: float = -2.5,  # -2.5% VNINDEX drop triggers stop
         # VN market specific: -2.5% is standard, but can be adjusted
         # Use vnindex_drop_threshold_conservative for stricter protection
@@ -63,6 +76,9 @@ class CircuitBreaker:
         self.max_loss_per_day_pct = max_loss_per_day_pct
         self.base_max_loss_per_day_pct = max_loss_per_day_pct  # Store original
         self.max_consecutive_losses = max_consecutive_losses
+        self.base_max_consecutive_losses = max_consecutive_losses  # Store original
+        self.use_regime_aware_limits = use_regime_aware_limits
+        self._current_regime: str = "SIDEWAYS"  # Default regime
 
         # IMPROVED: Configurable VNINDEX thresholds with conservative option
         self.use_conservative_threshold = use_conservative_threshold
@@ -852,6 +868,69 @@ class CircuitBreaker:
             self.peak_portfolio_value = new_peak or self.total_capital
             self.current_drawdown = 0.0
             print(f"📊 Peak portfolio value reset to {self.peak_portfolio_value:,.0f}")
+
+    # ========================================================================
+    # IMPROVEMENT v5.1: Regime-Aware Consecutive Loss Limits
+    # ========================================================================
+
+    def update_market_regime(self, regime: str):
+        """
+        IMPROVED v5.1: Update market regime and adjust consecutive loss limit.
+
+        ADDRESSES RISK: Max 3 consecutive losses too aggressive in sideways market,
+        may miss mean-reversion opportunities.
+
+        Regime-aware limits:
+        - BULL: 4 losses (more lenient - trend continuation expected)
+        - SIDEWAYS: 3 losses (standard - allows mean-reversion plays)
+        - BEAR: 2 losses (strict - protect capital)
+        - HIGH_VOLATILITY: 2 losses (very strict)
+
+        Args:
+            regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
+        """
+        if not self.use_regime_aware_limits:
+            return
+
+        self._current_regime = regime.upper()
+
+        # Import regime-aware limits
+        try:
+            from src.risk.circuit_breaker_db import get_regime_aware_loss_limit
+
+            new_limit = get_regime_aware_loss_limit(regime)
+        except ImportError:
+            # Fallback to inline limits
+            regime_limits = {
+                "BULL": 4,
+                "SIDEWAYS": 3,
+                "BEAR": 2,
+                "HIGH_VOLATILITY": 2,
+            }
+            new_limit = regime_limits.get(regime.upper(), self.base_max_consecutive_losses)
+
+        old_limit = self.max_consecutive_losses
+        self.max_consecutive_losses = new_limit
+
+        if old_limit != new_limit:
+            logger.info(
+                f"📊 Consecutive loss limit adjusted for {regime}: " f"{old_limit} → {new_limit}"
+            )
+
+    def get_regime_adjusted_limit(self) -> Dict:
+        """
+        Get current regime-adjusted consecutive loss limit info.
+
+        Returns:
+            Dict with regime, limit, and base_limit
+        """
+        return {
+            "current_regime": self._current_regime,
+            "consecutive_loss_limit": self.max_consecutive_losses,
+            "base_limit": self.base_max_consecutive_losses,
+            "current_losses": self.stats.get("consecutive_losses", 0),
+            "regime_aware_enabled": self.use_regime_aware_limits,
+        }
 
 
 # Global instance

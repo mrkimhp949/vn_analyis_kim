@@ -1673,6 +1673,137 @@ def check_floor_bounce(
     return False, f"📊 Minor bounce from floor ({bounce_pct:.1f}%)", bounce_strength
 
 
+def check_floor_bounce_enhanced(
+    current_price: float,
+    day_low: float,
+    reference_price: float,
+    symbol: str,
+    volume_ratio: float = 1.0,
+    minutes_at_floor: int = 0,
+    market_volatility: float = 0.0,
+) -> Tuple[bool, str, float, int]:
+    """
+    IMPROVED v5.1: Enhanced floor bounce check with volume confirmation and dynamic wait time.
+
+    ADDRESSES RISK: 30 minutes may not be enough in panic selling.
+
+    Improvements:
+    1. Volume confirmation required for valid bounce
+    2. Extended wait time in high volatility / panic selling
+    3. Panic selling detection (volume > 3x average)
+
+    Args:
+        current_price: Current stock price
+        day_low: Day's low price
+        reference_price: Previous close (reference)
+        symbol: Stock symbol
+        volume_ratio: Current volume / average volume
+        minutes_at_floor: Minutes since price hit floor
+        market_volatility: Market volatility (ATR/Price ratio)
+
+    Returns:
+        Tuple of (is_valid_bounce, message, bounce_strength, recommended_wait_minutes)
+    """
+    from src.config.constants import (
+        VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES,
+        VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES,
+        VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO,
+        VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO,
+    )
+
+    limit = get_price_limit(symbol)
+    floor = reference_price * (1 - limit)
+
+    # Check if day low was at or near floor (within 0.5%)
+    hit_floor = day_low <= floor * 1.005
+
+    if not hit_floor:
+        return False, "", 0.0, 0
+
+    # Calculate bounce from floor
+    bounce_pct = (current_price - floor) / floor * 100
+
+    # Determine wait time based on conditions
+    base_wait = VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES  # 30 minutes
+    extended_wait = VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES  # 60 minutes
+
+    # Detect panic selling (volume > 3x average)
+    is_panic_selling = volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO
+
+    # Detect high volatility
+    is_high_volatility = market_volatility > 0.03  # > 3% volatility
+
+    # Calculate recommended wait time
+    if is_panic_selling:
+        recommended_wait = extended_wait + 15  # 75 minutes in panic
+        wait_reason = "panic selling detected"
+    elif is_high_volatility:
+        recommended_wait = extended_wait  # 60 minutes in high volatility
+        wait_reason = "high volatility"
+    elif volume_ratio < VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
+        recommended_wait = base_wait + 15  # 45 minutes if low volume
+        wait_reason = "low volume confirmation"
+    else:
+        recommended_wait = base_wait  # 30 minutes standard
+        wait_reason = "standard"
+
+    # Check if enough time has passed
+    if minutes_at_floor < recommended_wait:
+        remaining = recommended_wait - minutes_at_floor
+        return (
+            False,
+            f"⏳ Floor bounce wait: {remaining} minutes remaining ({wait_reason})",
+            0.0,
+            recommended_wait,
+        )
+
+    # Volume confirmation check
+    if volume_ratio < VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
+        return (
+            False,
+            f"📉 Floor bounce needs volume confirmation "
+            f"(current: {volume_ratio:.1f}x, need: {VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO}x)",
+            0.0,
+            recommended_wait,
+        )
+
+    if bounce_pct < 1.0:
+        return (
+            False,
+            f"📉 Near floor ({bounce_pct:.1f}% above) - waiting for bounce",
+            0.0,
+            recommended_wait,
+        )
+
+    # Calculate bounce strength with volume confirmation
+    volume_factor = min(2.0, volume_ratio / VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO)
+    bounce_strength = min(1.0, (bounce_pct / 5.0) * volume_factor)
+
+    # Strong bounce signal
+    if bounce_pct >= 3.0 and volume_ratio >= 2.0:
+        return (
+            True,
+            f"🟢 STRONG FLOOR BOUNCE: Hit floor {floor:,.0f}, bounced {bounce_pct:.1f}% "
+            f"with {volume_ratio:.1f}x volume after {minutes_at_floor} min wait",
+            bounce_strength,
+            recommended_wait,
+        )
+    elif bounce_pct >= 2.0 and volume_ratio >= VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
+        return (
+            True,
+            f"📊 Floor bounce confirmed: {bounce_pct:.1f}% with {volume_ratio:.1f}x volume",
+            bounce_strength,
+            recommended_wait,
+        )
+
+    return (
+        False,
+        f"📊 Minor bounce from floor ({bounce_pct:.1f}%) - needs more confirmation",
+        bounce_strength * 0.5,
+        recommended_wait,
+    )
+
+
 def is_friday_afternoon() -> bool:
     """
     Check if current time is Friday afternoon (Vietnam timezone).

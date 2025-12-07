@@ -89,9 +89,14 @@ class PositionSizingConstants:
     DCA_LEVEL_2_DISCOUNT: float = 0.96  # WIDENED: 4% below entry (was 2%)
     DCA_LEVEL_3_DISCOUNT: float = 0.94  # WIDENED: 6% below entry (was 3%)
 
-    # DCA configuration flags
-    DCA_ENABLED: bool = True  # Set False to disable DCA for VN market
-    DCA_MIN_PROFIT_THRESHOLD: float = 0.02  # Min 2% expected profit after costs
+    # DCA configuration flags - IMPROVED v5.1
+    # RISK: DCA not suitable for VN market due to:
+    # 1. High transaction costs (1.48% round trip)
+    # 2. T+2 settlement ties up capital
+    # 3. ±7% daily limit means narrow DCA levels hit too quickly
+    # RECOMMENDATION: Disable DCA or use very wide levels only
+    DCA_ENABLED: bool = False  # DISABLED: High transaction costs make DCA unprofitable
+    DCA_MIN_PROFIT_THRESHOLD: float = 0.03  # TIGHTENED: Min 3% expected profit after costs
 
     # Cache settings
     CORRELATION_CACHE_TTL: int = 3600  # 1 hour

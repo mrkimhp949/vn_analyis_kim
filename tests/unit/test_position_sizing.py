@@ -412,29 +412,45 @@ class TestEnhancedPositionSizer:
         assert adj == PositionSizingConstants.SECTOR_MEDIUM_ADJUSTMENT
 
     # =========================================================================
-    # DCA Entry Tests
+    # DCA Entry Tests - handles both DCA enabled/disabled
     # =========================================================================
 
     def test_dca_entries_structure(self, sizer):
         """Test DCA entries have correct structure."""
+        from src.strategies.position_sizing import PositionSizingConstants
+
         entries = sizer._calculate_dca_entries(80_000, 1000)
 
-        assert len(entries) == 3
-        for entry in entries:
-            assert "level" in entry
-            assert "price" in entry
-            assert "shares" in entry
-            assert "percent" in entry
+        if PositionSizingConstants.DCA_ENABLED:
+            assert len(entries) == 3
+            for entry in entries:
+                assert "level" in entry
+                assert "price" in entry
+                assert "shares" in entry
+                assert "percent" in entry
+        else:
+            # DCA disabled - single entry
+            assert len(entries) == 1
+            assert entries[0]["percent"] == 100
+            assert "DCA disabled" in entries[0].get("note", "")
 
     def test_dca_entries_prices_descending(self, sizer):
-        """Test DCA entry prices are descending."""
+        """Test DCA entry prices are descending (only when DCA enabled)."""
+        from src.strategies.position_sizing import PositionSizingConstants
+
         entries = sizer._calculate_dca_entries(80_000, 1000)
 
-        prices = [e["price"] for e in entries]
-        assert prices[0] > prices[1] > prices[2]
+        if PositionSizingConstants.DCA_ENABLED:
+            prices = [e["price"] for e in entries]
+            assert prices[0] > prices[1] > prices[2]
+        else:
+            # DCA disabled - only one entry, skip price comparison
+            assert len(entries) == 1
 
     def test_dca_entries_shares_sum(self, sizer):
         """Test DCA entry shares approximately sum to total."""
+        from src.strategies.position_sizing import PositionSizingConstants
+
         total_shares = 1000
         entries = sizer._calculate_dca_entries(80_000, total_shares)
 

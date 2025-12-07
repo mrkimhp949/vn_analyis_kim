@@ -435,8 +435,13 @@ VN_CASH_TRADING_AVAILABLE = 2  # T+2 - cash available for trading
 VN_CASH_WITHDRAWAL_AVAILABLE = 2.5  # T+2.5 - cash available for withdrawal
 VN_WITHDRAWAL_CUTOFF_HOUR = 13  # After 13:00 on T+2 for withdrawal
 
-# Floor Bounce Protection
-VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES = 30  # Max wait time for floor bounce
+# Floor Bounce Protection - IMPROVED v5.1
+# RISK: 30 minutes may not be enough in panic selling
+# Solution: Dynamic wait time based on volume + volatility
+VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES = 30  # Base wait time for floor bounce
+VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES = 60  # Extended wait in high volatility
+VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5  # Min volume ratio for valid bounce
+VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO = 3.0  # Volume ratio indicating panic selling
 
 # Circuit Breaker Improvements
 VN_MAX_CONSECUTIVE_WINS = 7  # Pause after 7 consecutive wins (was 5)
@@ -637,8 +642,11 @@ __all__ = [
     "VN_CASH_TRADING_AVAILABLE",
     "VN_CASH_WITHDRAWAL_AVAILABLE",
     "VN_WITHDRAWAL_CUTOFF_HOUR",
-    # NEW v5.0: Floor Bounce Protection
+    # NEW v5.1: Floor Bounce Protection (Enhanced)
     "VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES",
+    "VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES",
+    "VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO",
+    "VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO",
     # NEW v5.0: Circuit Breaker
     "VN_MAX_CONSECUTIVE_WINS",
 ]
