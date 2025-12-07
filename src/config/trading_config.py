@@ -139,7 +139,7 @@ class TradingConfig:
     # Liquidity considerations for Vietnam market
     # NOTE: Aligned with constants.VN_MIN_LIQUIDITY_VALUE for consistency
     vn_min_daily_value: float = (
-        2_000_000_000  # 2B VND - aligned with constants.VN_MIN_LIQUIDITY_VALUE (raised for safety)
+        1_000_000_000  # 1B VND - aligned with constants.VN_MIN_LIQUIDITY_VALUE
     )
     vn_max_position_pct_of_volume: float = 0.05  # Max 5% of daily volume for single position
     vn_require_continuous_trading: bool = True  # Avoid stocks with trading halts
