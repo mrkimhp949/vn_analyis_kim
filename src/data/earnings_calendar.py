@@ -324,10 +324,21 @@ class EarningsCalendarManager:
         return self.get_events(symbol, dividend_types, days_ahead)
 
     def _fetch_events(self, symbol: str) -> None:
-        """Fetch events from external sources"""
-        # Try TCBS
+        """Fetch events from external sources (TCBS, VNDirect, etc.)"""
+        # Try TCBS for real data
+        self._fetch_from_tcbs(symbol)
+
+        # Try VNDirect as backup
+        self._fetch_from_vndirect(symbol)
+
+        # Estimate earnings dates based on Vietnam schedule (fallback)
+        self._estimate_earnings_dates(symbol)
+
+    def _fetch_from_tcbs(self, symbol: str) -> None:
+        """Fetch events from TCBS API"""
         try:
             from src.data.tcbs_provider import get_tcbs_provider
+            import requests
 
             provider = get_tcbs_provider()
 
@@ -338,17 +349,154 @@ class EarningsCalendarManager:
                     symbol=symbol,
                     event_type=EventType.EX_DIVIDEND_CASH,
                     event_date=dividend_info["ex_date"],
-                    dividend_amount=dividend_info.get("dividend_amount"),
+                    dividend_amount=dividend_info.get("cash_dividend"),
                     dividend_yield=dividend_info.get("dividend_yield"),
                     source="TCBS",
                     is_confirmed=True,
                 )
                 self.add_event(event)
-        except Exception as e:
-            logger.debug(f"TCBS event fetch failed: {e}")
 
-        # Estimate earnings dates based on Vietnam schedule
-        self._estimate_earnings_dates(symbol)
+            # Try to get earnings/financial report dates from TCBS
+            self._fetch_tcbs_financial_reports(symbol)
+
+        except Exception as e:
+            logger.debug(f"TCBS event fetch failed for {symbol}: {e}")
+
+    def _fetch_tcbs_financial_reports(self, symbol: str) -> None:
+        """Fetch financial report dates from TCBS API"""
+        try:
+            import requests
+
+            # TCBS financial report API
+            url = f"https://apipubaws.tcbs.com.vn/tcanalysis/v1/finance/{symbol}/financialreport"
+            params = {"yearly": 0, "isAll": False}  # quarterly reports
+
+            response = requests.get(url, params=params, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                reports = data if isinstance(data, list) else []
+
+                for report in reports[:4]:  # Last 4 quarters
+                    try:
+                        # Extract report date
+                        year = report.get("year", 0)
+                        quarter = report.get("quarter", 0)
+
+                        if year and quarter:
+                            # Estimate report release date based on quarter
+                            # Q1: April, Q2: July, Q3: October, Q4: January next year
+                            report_months = {1: 4, 2: 7, 3: 10, 4: 1}
+                            month = report_months.get(quarter, 4)
+                            report_year = year if quarter != 4 else year + 1
+
+                            # Typical release: 20-25th of the month
+                            report_date = datetime(report_year, month, 23)
+
+                            # Only add if in future
+                            if report_date > datetime.now():
+                                event_type = {
+                                    1: EventType.EARNINGS_Q1,
+                                    2: EventType.EARNINGS_Q2,
+                                    3: EventType.EARNINGS_Q3,
+                                    4: EventType.EARNINGS_Q4,
+                                }.get(quarter, EventType.EARNINGS_Q1)
+
+                                event = CorporateEvent(
+                                    symbol=symbol,
+                                    event_type=event_type,
+                                    event_date=report_date,
+                                    fiscal_period=f"Q{quarter} {year}",
+                                    title=f"Q{quarter} {year} Financial Report",
+                                    impact=EventImpact.HIGH,
+                                    is_confirmed=False,  # Estimated from historical pattern
+                                    source="TCBS_ESTIMATED",
+                                )
+
+                                # Check if already exists
+                                if symbol not in self._events:
+                                    self._events[symbol] = []
+
+                                exists = any(
+                                    e.event_type == event_type
+                                    and e.fiscal_period == event.fiscal_period
+                                    for e in self._events[symbol]
+                                )
+
+                                if not exists:
+                                    self._events[symbol].append(event)
+
+                    except Exception as e:
+                        logger.debug(f"Error parsing report: {e}")
+
+        except Exception as e:
+            logger.debug(f"TCBS financial reports fetch failed: {e}")
+
+    def _fetch_from_vndirect(self, symbol: str) -> None:
+        """Fetch events from VNDirect API"""
+        try:
+            import requests
+
+            # VNDirect events API
+            url = "https://finfo-api.vndirect.com.vn/v4/events"
+            params = {"q": f"code:{symbol}", "size": 20, "sort": "eventDate"}
+
+            response = requests.get(url, params=params, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                events = data.get("data", [])
+
+                for item in events:
+                    try:
+                        event_date_str = item.get("eventDate")
+                        event_type_str = item.get("eventType", "").upper()
+
+                        if not event_date_str:
+                            continue
+
+                        # Parse date
+                        try:
+                            event_date = datetime.strptime(event_date_str, "%Y-%m-%d")
+                        except ValueError:
+                            continue
+
+                        # Only future events
+                        if event_date <= datetime.now():
+                            continue
+
+                        # Map event type
+                        event_type = None
+                        if "DIVIDEND" in event_type_str or "CASH" in event_type_str:
+                            event_type = EventType.EX_DIVIDEND_CASH
+                        elif "STOCK" in event_type_str and "DIVIDEND" in event_type_str:
+                            event_type = EventType.EX_DIVIDEND_STOCK
+                        elif "AGM" in event_type_str or "ANNUAL" in event_type_str:
+                            event_type = EventType.AGM
+                        elif "EGM" in event_type_str or "EXTRAORDINARY" in event_type_str:
+                            event_type = EventType.EGM
+                        elif "RIGHTS" in event_type_str:
+                            event_type = EventType.RIGHTS_ISSUE
+
+                        if event_type:
+                            event = CorporateEvent(
+                                symbol=symbol,
+                                event_type=event_type,
+                                event_date=event_date,
+                                title=item.get("eventTitle", ""),
+                                description=item.get("eventContent", ""),
+                                dividend_amount=item.get("cashDividend"),
+                                ratio=item.get("ratio"),
+                                is_confirmed=True,
+                                source="VNDirect",
+                            )
+                            self.add_event(event)
+
+                    except Exception as e:
+                        logger.debug(f"Error parsing VNDirect event: {e}")
+
+        except Exception as e:
+            logger.debug(f"VNDirect events fetch failed: {e}")
 
     def _estimate_earnings_dates(self, symbol: str) -> None:
         """Estimate earnings dates based on Vietnam schedule"""

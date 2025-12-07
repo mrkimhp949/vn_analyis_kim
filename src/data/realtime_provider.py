@@ -8,8 +8,14 @@ Provides real-time market data integration with multiple broker APIs:
 - TCBS (Techcom Securities)
 - WebSocket streaming support
 
+Features:
+- Automatic retry with exponential backoff
+- Circuit breaker pattern for API failures
+- Multi-source failover
+- Connection health monitoring
+
 Author: Trading Bot Team
-Version: 1.0.0
+Version: 2.0.0 - Enhanced Error Handling
 """
 
 import asyncio
@@ -18,14 +24,251 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any, Tuple
 from queue import Queue
+from functools import wraps
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# ERROR HANDLING & RETRY UTILITIES
+# =============================================================================
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for retry behavior"""
+
+    max_retries: int = 3
+    base_delay: float = 1.0  # seconds
+    max_delay: float = 30.0  # seconds
+    exponential_base: float = 2.0
+    jitter: bool = True  # Add random jitter to prevent thundering herd
+
+
+@dataclass
+class CircuitBreakerConfig:
+    """Configuration for circuit breaker"""
+
+    failure_threshold: int = 5  # Failures before opening circuit
+    recovery_timeout: float = 60.0  # Seconds before trying again
+    half_open_requests: int = 3  # Requests to try in half-open state
+
+
+class CircuitState(Enum):
+    """Circuit breaker states"""
+
+    CLOSED = "CLOSED"  # Normal operation
+    OPEN = "OPEN"  # Failing, reject requests
+    HALF_OPEN = "HALF_OPEN"  # Testing if recovered
+
+
+class CircuitBreaker:
+    """
+    Circuit breaker pattern for API calls
+
+    Prevents cascading failures by stopping requests to failing services
+    """
+
+    def __init__(self, name: str, config: Optional[CircuitBreakerConfig] = None):
+        self.name = name
+        self.config = config or CircuitBreakerConfig()
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._success_count = 0
+        self._last_failure_time: Optional[datetime] = None
+        self._half_open_successes = 0
+        self._lock = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                # Check if recovery timeout has passed
+                if self._last_failure_time:
+                    elapsed = (datetime.now() - self._last_failure_time).total_seconds()
+                    if elapsed >= self.config.recovery_timeout:
+                        self._state = CircuitState.HALF_OPEN
+                        self._half_open_successes = 0
+                        logger.info(f"Circuit {self.name}: OPEN -> HALF_OPEN")
+            return self._state
+
+    def can_execute(self) -> bool:
+        """Check if request can be executed"""
+        return self.state != CircuitState.OPEN
+
+    def record_success(self):
+        """Record a successful request"""
+        with self._lock:
+            self._failure_count = 0
+            self._success_count += 1
+
+            if self._state == CircuitState.HALF_OPEN:
+                self._half_open_successes += 1
+                if self._half_open_successes >= self.config.half_open_requests:
+                    self._state = CircuitState.CLOSED
+                    logger.info(f"Circuit {self.name}: HALF_OPEN -> CLOSED (recovered)")
+
+    def record_failure(self):
+        """Record a failed request"""
+        with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = datetime.now()
+
+            if self._state == CircuitState.HALF_OPEN:
+                # Immediately open on failure in half-open state
+                self._state = CircuitState.OPEN
+                logger.warning(f"Circuit {self.name}: HALF_OPEN -> OPEN (still failing)")
+            elif self._failure_count >= self.config.failure_threshold:
+                self._state = CircuitState.OPEN
+                logger.warning(
+                    f"Circuit {self.name}: CLOSED -> OPEN " f"(failures: {self._failure_count})"
+                )
+
+    def get_stats(self) -> Dict:
+        """Get circuit breaker statistics"""
+        return {
+            "name": self.name,
+            "state": self.state.value,
+            "failure_count": self._failure_count,
+            "success_count": self._success_count,
+            "last_failure": (
+                self._last_failure_time.isoformat() if self._last_failure_time else None
+            ),
+        }
+
+
+def retry_with_backoff(
+    config: Optional[RetryConfig] = None,
+    exceptions: Tuple = (Exception,),
+    on_retry: Optional[Callable] = None,
+):
+    """
+    Decorator for retry with exponential backoff
+
+    Args:
+        config: Retry configuration
+        exceptions: Tuple of exceptions to catch
+        on_retry: Callback function on retry (attempt, exception, delay)
+    """
+    config = config or RetryConfig()
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            import random
+
+            last_exception = None
+
+            for attempt in range(config.max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+
+                    if attempt == config.max_retries:
+                        break
+
+                    # Calculate delay with exponential backoff
+                    delay = min(
+                        config.base_delay * (config.exponential_base**attempt), config.max_delay
+                    )
+
+                    # Add jitter
+                    if config.jitter:
+                        delay = delay * (0.5 + random.random())
+
+                    if on_retry:
+                        on_retry(attempt + 1, e, delay)
+                    else:
+                        logger.warning(
+                            f"Retry {attempt + 1}/{config.max_retries} " f"after {delay:.1f}s: {e}"
+                        )
+
+                    time.sleep(delay)
+
+            raise last_exception
+
+        return wrapper
+
+    return decorator
+
+
+class ConnectionHealthMonitor:
+    """Monitor connection health across providers"""
+
+    def __init__(self):
+        self._health: Dict[str, Dict] = {}
+        self._lock = threading.Lock()
+
+    def record_request(self, provider: str, success: bool, latency_ms: float):
+        """Record a request result"""
+        with self._lock:
+            if provider not in self._health:
+                self._health[provider] = {
+                    "total_requests": 0,
+                    "successful_requests": 0,
+                    "failed_requests": 0,
+                    "total_latency_ms": 0,
+                    "last_success": None,
+                    "last_failure": None,
+                }
+
+            stats = self._health[provider]
+            stats["total_requests"] += 1
+            stats["total_latency_ms"] += latency_ms
+
+            if success:
+                stats["successful_requests"] += 1
+                stats["last_success"] = datetime.now()
+            else:
+                stats["failed_requests"] += 1
+                stats["last_failure"] = datetime.now()
+
+    def get_health(self, provider: str) -> Dict:
+        """Get health statistics for a provider"""
+        with self._lock:
+            if provider not in self._health:
+                return {"status": "unknown"}
+
+            stats = self._health[provider]
+            total = stats["total_requests"]
+
+            if total == 0:
+                return {"status": "no_data"}
+
+            success_rate = stats["successful_requests"] / total
+            avg_latency = stats["total_latency_ms"] / total
+
+            # Determine status
+            if success_rate >= 0.95:
+                status = "healthy"
+            elif success_rate >= 0.80:
+                status = "degraded"
+            else:
+                status = "unhealthy"
+
+            return {
+                "status": status,
+                "success_rate": success_rate,
+                "avg_latency_ms": avg_latency,
+                "total_requests": total,
+                "last_success": stats["last_success"],
+                "last_failure": stats["last_failure"],
+            }
+
+    def get_all_health(self) -> Dict[str, Dict]:
+        """Get health for all providers"""
+        return {p: self.get_health(p) for p in self._health.keys()}
+
+
+# Global health monitor
+_health_monitor = ConnectionHealthMonitor()
 
 
 class DataSource(Enum):
@@ -162,7 +405,7 @@ class MarketDepth:
 
 
 class BaseRealtimeProvider(ABC):
-    """Abstract base class for real-time data providers"""
+    """Abstract base class for real-time data providers with enhanced error handling"""
 
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
         self.api_key = api_key
@@ -171,6 +414,22 @@ class BaseRealtimeProvider(ABC):
         self._subscribers: Dict[str, List[Callable]] = {}
         self._quote_cache: Dict[str, RealtimeQuote] = {}
         self._orderbook_cache: Dict[str, OrderBook] = {}
+
+        # Error handling
+        self._retry_config = RetryConfig()
+        self._circuit_breaker = CircuitBreaker(self.__class__.__name__)
+        self._last_error: Optional[str] = None
+        self._error_count = 0
+        self._consecutive_failures = 0
+
+        # Cache settings
+        self._cache_ttl_seconds = 5
+        self._cache_timestamps: Dict[str, datetime] = {}
+
+    @property
+    def provider_name(self) -> str:
+        """Provider name for logging"""
+        return self.__class__.__name__
 
     @abstractmethod
     def connect(self) -> bool:
@@ -215,13 +474,55 @@ class BaseRealtimeProvider(ABC):
                 except Exception as e:
                     logger.error(f"Subscriber callback error: {e}")
 
+    def _is_cache_valid(self, symbol: str) -> bool:
+        """Check if cached data is still valid"""
+        if symbol not in self._cache_timestamps:
+            return False
+        elapsed = (datetime.now() - self._cache_timestamps[symbol]).total_seconds()
+        return elapsed < self._cache_ttl_seconds
+
+    def _update_cache(self, symbol: str, quote: RealtimeQuote):
+        """Update cache with new quote"""
+        self._quote_cache[symbol] = quote
+        self._cache_timestamps[symbol] = datetime.now()
+
+    def _record_success(self):
+        """Record successful request"""
+        self._consecutive_failures = 0
+        self._circuit_breaker.record_success()
+
+    def _record_failure(self, error: str):
+        """Record failed request"""
+        self._consecutive_failures += 1
+        self._error_count += 1
+        self._last_error = error
+        self._circuit_breaker.record_failure()
+
+    def get_health_status(self) -> Dict:
+        """Get provider health status"""
+        return {
+            "provider": self.provider_name,
+            "connected": self._connected,
+            "circuit_state": self._circuit_breaker.state.value,
+            "consecutive_failures": self._consecutive_failures,
+            "total_errors": self._error_count,
+            "last_error": self._last_error,
+            "cache_size": len(self._quote_cache),
+        }
+
 
 class SSIRealtimeProvider(BaseRealtimeProvider):
     """
-    SSI Securities Real-time Data Provider
+    SSI Securities Real-time Data Provider with enhanced error handling
 
     Requires SSI API credentials from:
     https://iboard.ssi.com.vn/
+
+    Features:
+    - Automatic retry with exponential backoff
+    - Circuit breaker for API failures
+    - Token refresh handling
+    - Request caching
     """
 
     def __init__(self, consumer_id: str = "", consumer_secret: str = ""):
@@ -230,6 +531,23 @@ class SSIRealtimeProvider(BaseRealtimeProvider):
         self.ws_url = "wss://fc-data.ssi.com.vn/ws"
         self._access_token: Optional[str] = None
         self._token_expiry: Optional[datetime] = None
+        self._token_refresh_margin = 300  # Refresh 5 min before expiry
+
+        # Request session with connection pooling
+        self._session: Optional[Any] = None
+
+    def _get_session(self):
+        """Get or create requests session"""
+        if self._session is None:
+            import requests
+
+            self._session = requests.Session()
+            # Configure connection pooling
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10, pool_maxsize=10, max_retries=0  # We handle retries ourselves
+            )
+            self._session.mount("https://", adapter)
+        return self._session
 
     def connect(self) -> bool:
         """Connect and authenticate with SSI API"""
@@ -237,98 +555,166 @@ class SSIRealtimeProvider(BaseRealtimeProvider):
             logger.warning("SSI API credentials not provided")
             return False
 
+        # Check circuit breaker
+        if not self._circuit_breaker.can_execute():
+            logger.warning(f"SSI circuit breaker is OPEN, skipping connection")
+            return False
+
         try:
-            # Authenticate
-            self._access_token = self._authenticate()
+            self._access_token = self._authenticate_with_retry()
             if self._access_token:
                 self._connected = True
+                self._record_success()
                 logger.info("✅ Connected to SSI Real-time API")
                 return True
         except Exception as e:
+            self._record_failure(str(e))
             logger.error(f"SSI connection failed: {e}")
 
         return False
 
-    def _authenticate(self) -> Optional[str]:
-        """Authenticate with SSI API"""
-        try:
-            import requests
+    def _authenticate_with_retry(self) -> Optional[str]:
+        """Authenticate with retry logic"""
+        import requests
 
-            auth_url = f"{self.base_url}/api/v2/Market/AccessToken"
-            payload = {"consumerID": self.api_key, "consumerSecret": self.api_secret}
+        last_error = None
 
-            response = requests.post(auth_url, json=payload, timeout=10)
+        for attempt in range(self._retry_config.max_retries + 1):
+            try:
+                start_time = time.time()
 
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == 200:
-                    token = data.get("data", {}).get("accessToken")
-                    logger.info("✅ SSI authentication successful")
-                    return token
+                auth_url = f"{self.base_url}/api/v2/Market/AccessToken"
+                payload = {"consumerID": self.api_key, "consumerSecret": self.api_secret}
 
-            logger.warning(f"SSI auth failed: {response.text}")
-            return None
+                response = self._get_session().post(auth_url, json=payload, timeout=10)
 
-        except Exception as e:
-            logger.error(f"SSI authentication error: {e}")
-            return None
+                latency = (time.time() - start_time) * 1000
+                _health_monitor.record_request("SSI", response.status_code == 200, latency)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == 200:
+                        token = data.get("data", {}).get("accessToken")
+                        # Set token expiry (SSI tokens typically last 1 hour)
+                        self._token_expiry = datetime.now() + timedelta(hours=1)
+                        logger.info("✅ SSI authentication successful")
+                        return token
+
+                last_error = f"Auth failed: {response.status_code} - {response.text[:100]}"
+
+            except requests.exceptions.Timeout:
+                last_error = "Request timeout"
+            except requests.exceptions.ConnectionError as e:
+                last_error = f"Connection error: {e}"
+            except Exception as e:
+                last_error = str(e)
+
+            if attempt < self._retry_config.max_retries:
+                delay = self._retry_config.base_delay * (2**attempt)
+                logger.warning(
+                    f"SSI auth retry {attempt + 1}/{self._retry_config.max_retries} after {delay:.1f}s: {last_error}"
+                )
+                time.sleep(delay)
+
+        logger.error(f"SSI authentication failed after retries: {last_error}")
+        return None
+
+    def _ensure_token_valid(self) -> bool:
+        """Ensure access token is valid, refresh if needed"""
+        if not self._access_token:
+            return self.connect()
+
+        # Check if token needs refresh
+        if self._token_expiry:
+            time_until_expiry = (self._token_expiry - datetime.now()).total_seconds()
+            if time_until_expiry < self._token_refresh_margin:
+                logger.info("SSI token expiring soon, refreshing...")
+                return self.connect()
+
+        return True
 
     def disconnect(self) -> None:
         """Disconnect from SSI API"""
         self._connected = False
         self._access_token = None
+        if self._session:
+            self._session.close()
+            self._session = None
         logger.info("Disconnected from SSI API")
 
     def get_quote(self, symbol: str) -> Optional[RealtimeQuote]:
-        """Get real-time quote from SSI"""
-        if not self._connected:
-            if not self.connect():
-                return None
+        """Get real-time quote from SSI with error handling"""
+        # Check cache first
+        if self._is_cache_valid(symbol):
+            return self._quote_cache.get(symbol)
+
+        # Check circuit breaker
+        if not self._circuit_breaker.can_execute():
+            logger.debug(f"SSI circuit open, returning cached data for {symbol}")
+            return self._quote_cache.get(symbol)
+
+        if not self._ensure_token_valid():
+            return self._quote_cache.get(symbol)
 
         try:
-            import requests
+            start_time = time.time()
 
             url = f"{self.base_url}/api/v2/Market/SecuritiesDetails"
             headers = {"Authorization": f"Bearer {self._access_token}"}
             params = {"market": "HOSE", "symbol": symbol}
 
-            response = requests.get(url, headers=headers, params=params, timeout=5)
+            response = self._get_session().get(url, headers=headers, params=params, timeout=5)
+
+            latency = (time.time() - start_time) * 1000
+            _health_monitor.record_request("SSI", response.status_code == 200, latency)
 
             if response.status_code == 200:
                 data = response.json()
                 if data.get("status") == 200:
-                    item = data.get("data", [{}])[0]
+                    items = data.get("data", [])
+                    if items:
+                        item = items[0]
 
-                    quote = RealtimeQuote(
-                        symbol=symbol,
-                        price=float(item.get("matchedPrice", 0)) * 1000,
-                        change=float(item.get("priceChange", 0)) * 1000,
-                        change_pct=float(item.get("priceChangePercent", 0)),
-                        volume=int(item.get("matchedVolume", 0)),
-                        value=float(item.get("matchedValue", 0)),
-                        bid_price=float(item.get("best1Bid", 0)) * 1000,
-                        bid_volume=int(item.get("best1BidVol", 0)),
-                        ask_price=float(item.get("best1Offer", 0)) * 1000,
-                        ask_volume=int(item.get("best1OfferVol", 0)),
-                        open=float(item.get("openPrice", 0)) * 1000,
-                        high=float(item.get("highestPrice", 0)) * 1000,
-                        low=float(item.get("lowestPrice", 0)) * 1000,
-                        reference=float(item.get("refPrice", 0)) * 1000,
-                        ceiling=float(item.get("ceilingPrice", 0)) * 1000,
-                        floor=float(item.get("floorPrice", 0)) * 1000,
-                        foreign_buy_volume=int(item.get("foreignBuyVolume", 0)),
-                        foreign_sell_volume=int(item.get("foreignSellVolume", 0)),
-                        foreign_room=int(item.get("foreignRoom", 0)),
-                        source="SSI",
-                        timestamp=datetime.now(),
-                    )
+                        quote = RealtimeQuote(
+                            symbol=symbol,
+                            price=float(item.get("matchedPrice", 0)) * 1000,
+                            change=float(item.get("priceChange", 0)) * 1000,
+                            change_pct=float(item.get("priceChangePercent", 0)),
+                            volume=int(item.get("matchedVolume", 0)),
+                            value=float(item.get("matchedValue", 0)),
+                            bid_price=float(item.get("best1Bid", 0)) * 1000,
+                            bid_volume=int(item.get("best1BidVol", 0)),
+                            ask_price=float(item.get("best1Offer", 0)) * 1000,
+                            ask_volume=int(item.get("best1OfferVol", 0)),
+                            open=float(item.get("openPrice", 0)) * 1000,
+                            high=float(item.get("highestPrice", 0)) * 1000,
+                            low=float(item.get("lowestPrice", 0)) * 1000,
+                            reference=float(item.get("refPrice", 0)) * 1000,
+                            ceiling=float(item.get("ceilingPrice", 0)) * 1000,
+                            floor=float(item.get("floorPrice", 0)) * 1000,
+                            foreign_buy_volume=int(item.get("foreignBuyVolume", 0)),
+                            foreign_sell_volume=int(item.get("foreignSellVolume", 0)),
+                            foreign_room=int(item.get("foreignRoom", 0)),
+                            source="SSI",
+                            timestamp=datetime.now(),
+                        )
 
-                    self._quote_cache[symbol] = quote
-                    return quote
+                        self._update_cache(symbol, quote)
+                        self._record_success()
+                        return quote
 
+            elif response.status_code == 401:
+                # Token expired, reconnect
+                logger.info("SSI token expired, reconnecting...")
+                self._access_token = None
+                if self.connect():
+                    return self.get_quote(symbol)
+
+            self._record_failure(f"HTTP {response.status_code}")
             return self._quote_cache.get(symbol)
 
         except Exception as e:
+            self._record_failure(str(e))
             logger.error(f"SSI quote error for {symbol}: {e}")
             return self._quote_cache.get(symbol)
 
@@ -337,7 +723,7 @@ class SSIRealtimeProvider(BaseRealtimeProvider):
         # SSI provides top 3 bid/ask in quote data
         quote = self.get_quote(symbol)
         if not quote:
-            return None
+            return self._orderbook_cache.get(symbol)
 
         # Build order book from quote data
         orderbook = OrderBook(
@@ -372,71 +758,140 @@ class SSIRealtimeProvider(BaseRealtimeProvider):
 
 class VNDirectRealtimeProvider(BaseRealtimeProvider):
     """
-    VNDirect Real-time Data Provider
+    VNDirect Real-time Data Provider with enhanced error handling
 
     Uses VNDirect's public API endpoints
+
+    Features:
+    - Automatic retry with exponential backoff
+    - Circuit breaker for API failures
+    - Request caching
     """
 
     def __init__(self, api_key: str = "", api_secret: str = ""):
         super().__init__(api_key, api_secret)
         self.base_url = "https://finfo-api.vndirect.com.vn"
+        self._session: Optional[Any] = None
+
+    def _get_session(self):
+        """Get or create requests session"""
+        if self._session is None:
+            import requests
+
+            self._session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10, pool_maxsize=10, max_retries=0
+            )
+            self._session.mount("https://", adapter)
+        return self._session
 
     def connect(self) -> bool:
         """Connect to VNDirect API"""
+        # Check circuit breaker
+        if not self._circuit_breaker.can_execute():
+            logger.warning("VNDirect circuit breaker is OPEN")
+            return False
+
         try:
-            # VNDirect has some public endpoints
-            self._connected = True
-            logger.info("✅ Connected to VNDirect API")
-            return True
+            # Test connection with a simple request
+            import requests
+
+            response = self._get_session().get(
+                f"{self.base_url}/v4/stock_prices", params={"q": "code:VNM", "size": 1}, timeout=5
+            )
+
+            if response.status_code == 200:
+                self._connected = True
+                self._record_success()
+                logger.info("✅ Connected to VNDirect API")
+                return True
+
+            self._record_failure(f"HTTP {response.status_code}")
+            return False
+
         except Exception as e:
+            self._record_failure(str(e))
             logger.error(f"VNDirect connection failed: {e}")
             return False
 
     def disconnect(self) -> None:
         self._connected = False
+        if self._session:
+            self._session.close()
+            self._session = None
 
     def get_quote(self, symbol: str) -> Optional[RealtimeQuote]:
-        """Get quote from VNDirect"""
-        try:
-            import requests
-
-            url = f"{self.base_url}/v4/stock_prices"
-            params = {"sort": "date", "q": f"code:{symbol}", "size": 1}
-
-            response = requests.get(url, params=params, timeout=5)
-
-            if response.status_code == 200:
-                data = response.json()
-                items = data.get("data", [])
-
-                if items:
-                    item = items[0]
-
-                    quote = RealtimeQuote(
-                        symbol=symbol,
-                        price=float(item.get("close", 0)) * 1000,
-                        change=float(item.get("change", 0)) * 1000,
-                        change_pct=float(item.get("pctChange", 0)),
-                        volume=int(item.get("nmVolume", 0)),
-                        value=float(item.get("nmValue", 0)),
-                        open=float(item.get("open", 0)) * 1000,
-                        high=float(item.get("high", 0)) * 1000,
-                        low=float(item.get("low", 0)) * 1000,
-                        reference=float(item.get("basicPrice", 0)) * 1000,
-                        ceiling=float(item.get("ceilingPrice", 0)) * 1000,
-                        floor=float(item.get("floorPrice", 0)) * 1000,
-                        source="VNDirect",
-                        timestamp=datetime.now(),
-                    )
-
-                    self._quote_cache[symbol] = quote
-                    return quote
-
+        """Get quote from VNDirect with error handling"""
+        # Check cache first
+        if self._is_cache_valid(symbol):
             return self._quote_cache.get(symbol)
 
-        except Exception as e:
-            logger.error(f"VNDirect quote error: {e}")
+        # Check circuit breaker
+        if not self._circuit_breaker.can_execute():
+            logger.debug(f"VNDirect circuit open, returning cached data for {symbol}")
             return self._quote_cache.get(symbol)
+
+        last_error = None
+
+        for attempt in range(self._retry_config.max_retries + 1):
+            try:
+                start_time = time.time()
+
+                url = f"{self.base_url}/v4/stock_prices"
+                params = {"sort": "date", "q": f"code:{symbol}", "size": 1}
+
+                response = self._get_session().get(url, params=params, timeout=5)
+
+                latency = (time.time() - start_time) * 1000
+                _health_monitor.record_request("VNDirect", response.status_code == 200, latency)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get("data", [])
+
+                    if items:
+                        item = items[0]
+
+                        quote = RealtimeQuote(
+                            symbol=symbol,
+                            price=float(item.get("close", 0)) * 1000,
+                            change=float(item.get("change", 0)) * 1000,
+                            change_pct=float(item.get("pctChange", 0)),
+                            volume=int(item.get("nmVolume", 0)),
+                            value=float(item.get("nmValue", 0)),
+                            open=float(item.get("open", 0)) * 1000,
+                            high=float(item.get("high", 0)) * 1000,
+                            low=float(item.get("low", 0)) * 1000,
+                            reference=float(item.get("basicPrice", 0)) * 1000,
+                            ceiling=float(item.get("ceilingPrice", 0)) * 1000,
+                            floor=float(item.get("floorPrice", 0)) * 1000,
+                            source="VNDirect",
+                            timestamp=datetime.now(),
+                        )
+
+                        self._update_cache(symbol, quote)
+                        self._record_success()
+                        return quote
+
+                elif response.status_code == 429:
+                    # Rate limited
+                    retry_after = int(response.headers.get("Retry-After", 5))
+                    logger.warning(f"VNDirect rate limited, waiting {retry_after}s")
+                    time.sleep(retry_after)
+                    continue
+
+                last_error = f"HTTP {response.status_code}"
+
+            except Exception as e:
+                last_error = str(e)
+                logger.debug(f"VNDirect quote attempt {attempt + 1} failed: {e}")
+
+            if attempt < self._retry_config.max_retries:
+                delay = self._retry_config.base_delay * (2**attempt)
+                time.sleep(delay)
+
+        self._record_failure(last_error or "Unknown error")
+        return self._quote_cache.get(symbol)
 
     def get_orderbook(self, symbol: str, depth: int = 10) -> Optional[OrderBook]:
         """VNDirect doesn't provide public orderbook"""

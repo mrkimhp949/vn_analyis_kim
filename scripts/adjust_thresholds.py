@@ -5,68 +5,71 @@ Adjust Thresholds
 """
 import argparse
 
+# IMPROVED v5.1: Increased minimum confidence thresholds
+# RISK ADDRESSED: 45% confidence too low, creates false signals
+# RECOMMENDATION: Minimum 55% confidence across all profiles
 RECOMMENDED_THRESHOLDS = {
     "conservative": {
         "description": "An toàn, ít signals nhưng chất lượng cao",
         "BULL": {
-            "min_confidence": 60,
-            "min_risk_reward": 1.8,
+            "min_confidence": 65,  # TIGHTENED from 60
+            "min_risk_reward": 2.0,  # TIGHTENED from 1.8
             "require_trend_alignment": True,
-            "require_volume_confirmation": False,
+            "require_volume_confirmation": True,  # ADDED: Volume confirmation
         },
         "SIDEWAYS": {
-            "min_confidence": 65,
-            "min_risk_reward": 2.0,
+            "min_confidence": 70,  # TIGHTENED from 65
+            "min_risk_reward": 2.2,  # TIGHTENED from 2.0
             "require_trend_alignment": True,
-            "require_volume_confirmation": False,
+            "require_volume_confirmation": True,
         },
         "BEAR": {
-            "min_confidence": 75,
-            "min_risk_reward": 2.5,
+            "min_confidence": 80,  # TIGHTENED from 75
+            "min_risk_reward": 2.8,  # TIGHTENED from 2.5
             "require_trend_alignment": True,
-            "require_volume_confirmation": False,
+            "require_volume_confirmation": True,
         },
     },
     "balanced": {
         "description": "Cân bằng giữa số lượng và chất lượng (RECOMMENDED)",
         "BULL": {
-            "min_confidence": 50,
-            "min_risk_reward": 1.5,
+            "min_confidence": 55,  # TIGHTENED from 50
+            "min_risk_reward": 1.8,  # TIGHTENED from 1.5
             "require_trend_alignment": True,
             "require_volume_confirmation": False,
         },
         "SIDEWAYS": {
-            "min_confidence": 55,
-            "min_risk_reward": 1.8,
+            "min_confidence": 60,  # TIGHTENED from 55
+            "min_risk_reward": 2.0,  # TIGHTENED from 1.8
             "require_trend_alignment": True,
             "require_volume_confirmation": False,
         },
         "BEAR": {
-            "min_confidence": 65,
-            "min_risk_reward": 2.0,
+            "min_confidence": 70,  # TIGHTENED from 65
+            "min_risk_reward": 2.2,  # TIGHTENED from 2.0
             "require_trend_alignment": True,
-            "require_volume_confirmation": False,
+            "require_volume_confirmation": True,  # ADDED for bear market
         },
     },
     "aggressive": {
-        "description": "Nhiều signals, cần quản lý risk tốt",
+        "description": "Nhiều signals, cần quản lý risk tốt - MINIMUM 55% confidence",
         "BULL": {
-            "min_confidence": 40,
-            "min_risk_reward": 1.3,
-            "require_trend_alignment": False,
+            "min_confidence": 55,  # TIGHTENED from 40 - CRITICAL FIX
+            "min_risk_reward": 1.5,  # TIGHTENED from 1.3
+            "require_trend_alignment": True,  # CHANGED from False
             "require_volume_confirmation": False,
         },
         "SIDEWAYS": {
-            "min_confidence": 45,
-            "min_risk_reward": 1.5,
-            "require_trend_alignment": False,
+            "min_confidence": 55,  # TIGHTENED from 45 - CRITICAL FIX
+            "min_risk_reward": 1.8,  # TIGHTENED from 1.5
+            "require_trend_alignment": True,  # CHANGED from False
             "require_volume_confirmation": False,
         },
         "BEAR": {
-            "min_confidence": 55,
-            "min_risk_reward": 1.8,
+            "min_confidence": 60,  # TIGHTENED from 55
+            "min_risk_reward": 2.0,  # TIGHTENED from 1.8
             "require_trend_alignment": True,
-            "require_volume_confirmation": False,
+            "require_volume_confirmation": True,  # ADDED
         },
     },
 }
