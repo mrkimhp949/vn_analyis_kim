@@ -435,13 +435,27 @@ VN_CASH_TRADING_AVAILABLE = 2  # T+2 - cash available for trading
 VN_CASH_WITHDRAWAL_AVAILABLE = 2.5  # T+2.5 - cash available for withdrawal
 VN_WITHDRAWAL_CUTOFF_HOUR = 13  # After 13:00 on T+2 for withdrawal
 
-# Floor Bounce Protection - IMPROVED v5.1
-# RISK: 30 minutes may not be enough in panic selling
-# Solution: Dynamic wait time based on volume + volatility
-VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES = 30  # Base wait time for floor bounce
-VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES = 60  # Extended wait in high volatility
+# Floor Bounce Protection - IMPROVED v6.0
+# RISK: Time-only wait may not be enough in panic selling
+# Solution: Volume-based exit triggers combined with time limits
+#
+# Volume-based floor bounce logic:
+# - Volume ratio > 3.0 (panic): Exit immediately, no bounce wait
+# - Volume ratio 1.5-3.0 (elevated): Extended 60-minute wait
+# - Volume ratio < 1.5 (normal): Standard 30-minute wait
+# - Price recovery > 1%: Cancel timer, resume normal monitoring
+#
+VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES = 30  # Base wait time for floor bounce (normal volume)
+VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES = 60  # Extended wait in elevated volume (1.5-2.5x)
 VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5  # Min volume ratio for valid bounce
-VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO = 3.0  # Volume ratio indicating panic selling
+# IMPROVED Priority 1: Increased sensitivity - panic detection at 2.5x instead of 3.0x
+VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO = (
+    2.5  # Volume ratio indicating panic selling - EXIT IMMEDIATELY (was 3.0)
+)
+VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01  # 1% recovery from floor cancels exit timer
+VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME = (
+    2.5  # Volume ratio for immediate exit (no wait) - IMPROVED from 3.0
+)
 
 # Circuit Breaker Improvements
 VN_MAX_CONSECUTIVE_WINS = 7  # Pause after 7 consecutive wins (was 5)
@@ -642,11 +656,13 @@ __all__ = [
     "VN_CASH_TRADING_AVAILABLE",
     "VN_CASH_WITHDRAWAL_AVAILABLE",
     "VN_WITHDRAWAL_CUTOFF_HOUR",
-    # NEW v5.1: Floor Bounce Protection (Enhanced)
+    # NEW v6.0: Floor Bounce Protection (Volume-based)
     "VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES",
     "VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES",
     "VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO",
     "VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO",
+    "VN_FLOOR_BOUNCE_RECOVERY_PCT",
+    "VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME",
     # NEW v5.0: Circuit Breaker
     "VN_MAX_CONSECUTIVE_WINS",
 ]

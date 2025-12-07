@@ -1703,53 +1703,84 @@ class ImprovedEntryLogic:
         """
         Check xem signal có align với trend không
 
-        Trend = EMA20 vs EMA50 vs EMA200
+        Trend = EMA20 vs EMA50 vs EMA200 (adaptive based on available data)
         """
-        if len(df) < 200:
+        data_len = len(df)
+
+        # Tối thiểu cần 20 bars để check trend cơ bản
+        if data_len < 20:
             return {
                 "aligned": True,
-                "reason": "Chưa đủ data để check trend",
+                "reason": "Chưa đủ data để check trend (cần ít nhất 20 bars)",
                 "strength": 50,
             }
 
         ema20 = df["close"].ewm(span=20).mean()
-        ema50 = df["close"].ewm(span=50).mean()
-        ema200 = df["close"].ewm(span=200).mean()
-
         latest_price = safe_get_latest(df, "close", 0)
         latest_ema20 = ema20.iloc[-1]
-        latest_ema50 = ema50.iloc[-1]
-        latest_ema200 = ema200.iloc[-1]
+
+        # Adaptive: dùng EMA50 nếu có đủ data
+        use_ema50 = data_len >= 50
+        if use_ema50:
+            ema50 = df["close"].ewm(span=50).mean()
+            latest_ema50 = ema50.iloc[-1]
+        else:
+            ema50 = None
+            latest_ema50 = None
+
+        # Adaptive: dùng EMA200 nếu có đủ data
+        use_ema200 = data_len >= 200
+        if use_ema200:
+            ema200 = df["close"].ewm(span=200).mean()
+            latest_ema200 = ema200.iloc[-1]
+        else:
+            ema200 = None
+            latest_ema200 = None
 
         if signal_type == "BUY":
-            # Perfect alignment: Price > EMA20 > EMA50 > EMA200
-            perfect = latest_price > latest_ema20 > latest_ema50 > latest_ema200
-            good = latest_price > latest_ema20 > latest_ema50
+            # Adaptive trend check based on available data
             ok = latest_price > latest_ema20
 
+            # Check good/perfect only if we have enough data
+            if use_ema50 and use_ema200:
+                # Full data: Perfect alignment: Price > EMA20 > EMA50 > EMA200
+                perfect = latest_price > latest_ema20 > latest_ema50 > latest_ema200
+                good = latest_price > latest_ema20 > latest_ema50
+            elif use_ema50:
+                # Medium data: Good alignment: Price > EMA20 > EMA50
+                perfect = False
+                good = latest_price > latest_ema20 > latest_ema50
+            else:
+                # Limited data: Only check EMA20
+                perfect = False
+                good = False
+
             # ENHANCEMENT: Check for early reversal signals
-            # Price crossing above EMA (potential reversal)
-            prev_price = df["close"].iloc[-2] if len(df) >= 2 else latest_price
+            prev_price = df["close"].iloc[-2] if data_len >= 2 else latest_price
             prev_ema20 = ema20.iloc[-2] if len(ema20) >= 2 else latest_ema20
-            prev_ema50 = ema50.iloc[-2] if len(ema50) >= 2 else latest_ema50
 
             # Price just crossed above EMA20 (reversal signal)
             price_cross_ema20 = prev_price <= prev_ema20 and latest_price > latest_ema20
-            # EMA20 just crossed above EMA50 (trend turning)
-            ema20_cross_ema50 = prev_ema20 <= prev_ema50 and latest_ema20 > latest_ema50
+
+            # EMA20 just crossed above EMA50 (trend turning) - only if we have EMA50
+            ema20_cross_ema50 = False
+            if use_ema50:
+                prev_ema50 = ema50.iloc[-2] if len(ema50) >= 2 else latest_ema50
+                ema20_cross_ema50 = prev_ema20 <= prev_ema50 and latest_ema20 > latest_ema50
 
             if perfect:
                 strength = 100
                 return {
                     "aligned": True,
-                    "reason": "Perfect uptrend",
+                    "reason": "Perfect uptrend (EMA20>50>200)",
                     "strength": strength,
                 }
             elif good:
                 strength = 75
+                reason = "Strong uptrend (EMA20>50)" if not use_ema200 else "Strong uptrend"
                 return {
                     "aligned": True,
-                    "reason": "Strong uptrend",
+                    "reason": reason,
                     "strength": strength,
                 }
             elif price_cross_ema20 or ema20_cross_ema50:
@@ -1767,9 +1798,10 @@ class ImprovedEntryLogic:
                 }
             elif ok:
                 strength = 50
+                data_note = f" (data: {data_len} bars)" if not use_ema50 else ""
                 return {
                     "aligned": True,
-                    "reason": "Short-term uptrend",
+                    "reason": f"Short-term uptrend{data_note}",
                     "strength": strength,
                 }
             else:
