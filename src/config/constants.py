@@ -317,9 +317,9 @@ MAX_CORRELATION = 0.65  # TIGHTENED: Maximum 0.65 correlation between positions
 DIVERSIFICATION_PENALTY = 25  # TIGHTENED: 25 points deducted per warning
 
 # NEW: Vietnam Market Specific Thresholds - OPTIMIZED v5.0
-# IMPROVED: Tiered liquidity for different market caps - balanced for VN market
-VN_MIN_LIQUIDITY_VALUE = 1_000_000_000  # 1B VND for small caps
-VN_MID_CAP_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for mid caps
+# IMPROVED: Tiered liquidity for different market caps - RAISED for safety
+VN_MIN_LIQUIDITY_VALUE = 2_000_000_000  # 2B VND for small caps (raised for safety)
+VN_MID_CAP_LIQUIDITY_VALUE = 3_000_000_000  # 3B VND for mid caps (raised)
 VN_LARGE_CAP_LIQUIDITY_VALUE = 5_000_000_000  # 5B VND for large caps
 VN_CRITICAL_LIQUIDITY_VALUE = 300_000_000  # LOWERED: 300M VND critical minimum (was 500M)
 VN_MIN_VOLUME = 25_000  # LOWERED: 25K shares minimum (was 50K)
