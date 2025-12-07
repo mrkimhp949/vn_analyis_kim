@@ -187,6 +187,45 @@ class ImprovedEntryLogic:
         - Tiered liquidity for different market caps
     """
 
+    # =========================================================================
+    # ADAPTIVE THRESHOLDS BY MARKET REGIME - IMPROVED v5.0
+    # =========================================================================
+    # These thresholds are dynamically adjusted based on market conditions
+    # to optimize entry quality while maintaining profitability
+    #
+    # BULL: Lower barriers, higher position sizes (market momentum)
+    # SIDEWAYS: Standard thresholds (balanced approach)
+    # BEAR: Higher barriers, smaller positions (capital preservation)
+    # HIGH_VOL: Strictest barriers, smallest positions (risk control)
+    #
+    # Transaction cost 1.48% is factored into all R:R calculations
+    REGIME_THRESHOLDS = {
+        "BULL": {
+            "min_confidence": 50,
+            "min_risk_reward": 1.8,
+            "position_multiplier": 1.2,
+            "max_warnings": 6,
+        },
+        "SIDEWAYS": {
+            "min_confidence": 60,
+            "min_risk_reward": 2.0,
+            "position_multiplier": 1.0,
+            "max_warnings": 5,
+        },
+        "BEAR": {
+            "min_confidence": 70,
+            "min_risk_reward": 2.5,
+            "position_multiplier": 0.6,
+            "max_warnings": 3,
+        },
+        "HIGH_VOLATILITY": {
+            "min_confidence": 75,
+            "min_risk_reward": 3.0,
+            "position_multiplier": 0.5,
+            "max_warnings": 2,
+        },
+    }
+
     def __init__(
         self,
         min_confidence: int = 45,
@@ -232,6 +271,7 @@ class ImprovedEntryLogic:
         # Core settings
         self.min_confidence = min_confidence
         self.base_min_confidence = min_confidence
+        self.base_min_risk_reward = min_risk_reward  # Store base value
         self.min_risk_reward = min_risk_reward
         self.support_distance_percent = support_distance_percent
         self.require_trend_alignment = require_trend_alignment
@@ -258,6 +298,10 @@ class ImprovedEntryLogic:
         # Soft filter mode
         self.soft_filter_mode = soft_filter_mode
         self.max_warnings_allowed = max_warnings_allowed
+        self.base_max_warnings = max_warnings_allowed  # Store base value
+
+        # Regime-aware position multiplier (set by _adjust_thresholds_for_market)
+        self._regime_position_multiplier: float = 1.0
 
         # Internal state
         self._current_symbol: Optional[str] = None
@@ -269,6 +313,56 @@ class ImprovedEntryLogic:
         self._correlation_cache_symbols: Optional[Tuple[str, ...]] = None
         self._correlation_cache_ttl: int = CORRELATION_CACHE_TTL
         self._correlation_cache_portfolio_hash: Optional[str] = None
+
+    def _adjust_thresholds_for_market(self, market_regime: Optional[Dict]) -> None:
+        """
+        Dynamically adjust entry thresholds based on market regime.
+
+        IMPROVED v5.0: Adaptive thresholds for Vietnam market
+        - BULL: Lower barriers to capture momentum
+        - BEAR: Higher barriers for capital preservation
+        - HIGH_VOL: Strictest barriers for risk control
+
+        Transaction cost 1.48% is already factored into R:R calculations.
+        """
+        if not self.regime_aware_filtering or not market_regime:
+            # Reset to base values
+            self.min_confidence = self.base_min_confidence
+            self.min_risk_reward = self.base_min_risk_reward
+            self.max_warnings_allowed = self.base_max_warnings
+            self._regime_position_multiplier = 1.0
+            return
+
+        regime = market_regime.get("regime", "SIDEWAYS")
+        regime_confidence = market_regime.get("confidence", 50)
+
+        # Get thresholds for this regime
+        thresholds = self.REGIME_THRESHOLDS.get(regime, self.REGIME_THRESHOLDS["SIDEWAYS"])
+
+        # Apply thresholds with confidence weighting
+        # Higher regime confidence = stronger threshold adjustment
+        confidence_weight = min(regime_confidence / 100, 1.0)
+
+        # Interpolate between base and regime thresholds
+        self.min_confidence = int(
+            self.base_min_confidence
+            + (thresholds["min_confidence"] - self.base_min_confidence) * confidence_weight
+        )
+        self.min_risk_reward = (
+            self.base_min_risk_reward
+            + (thresholds["min_risk_reward"] - self.base_min_risk_reward) * confidence_weight
+        )
+        self.max_warnings_allowed = int(
+            self.base_max_warnings
+            + (thresholds["max_warnings"] - self.base_max_warnings) * confidence_weight
+        )
+        self._regime_position_multiplier = thresholds["position_multiplier"]
+
+        logger.info(
+            f"📊 Adaptive thresholds for {regime} ({regime_confidence:.0f}% conf): "
+            f"min_conf={self.min_confidence}, min_rr={self.min_risk_reward:.1f}, "
+            f"max_warn={self.max_warnings_allowed}, pos_mult={self._regime_position_multiplier:.1f}"
+        )
 
     def _init_filter_tracker(self) -> None:
         """Initialize filter performance tracker."""
@@ -2645,65 +2739,8 @@ class ImprovedEntryLogic:
         # Clamp
         return max(0.3, min(multiplier, 1.5))
 
-    def _adjust_thresholds_for_market(self, market_regime: Optional[Dict]):
-        """
-        ENHANCEMENT: Dynamically adjust confidence thresholds based on market conditions
-
-        Logic:
-        - BULL market: Lower threshold (more opportunities)
-        - BEAR/HIGH_VOLATILITY: Higher threshold (more selective)
-        - Consider portfolio heat
-        """
-        if not market_regime:
-            self.min_confidence = self.base_min_confidence
-            return
-
-        regime = market_regime.get("regime", "SIDEWAYS")
-        regime_confidence = market_regime.get("confidence", 50)
-
-        # Base adjustment by regime type
-        if regime == "BULL" and regime_confidence >= 70:
-            # Strong bull market - can be less strict
-            adjustment = -5
-        elif regime == "BEAR":
-            # Bear market - be more selective
-            adjustment = +10
-        elif regime == "HIGH_VOLATILITY":
-            # High volatility - require higher confidence
-            adjustment = +15
-        else:
-            # SIDEWAYS or unknown
-            adjustment = 0
-
-        # Portfolio heat adjustment
-        if self.portfolio_manager:
-            try:
-                positions = self.portfolio_manager.get_positions()
-                num_positions = len(positions)
-
-                # If portfolio is getting crowded, be more selective
-                if num_positions >= 8:
-                    adjustment += 10
-                    logger.info(
-                        f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +10"
-                    )
-                elif num_positions >= 5:
-                    adjustment += 5
-                    logger.info(
-                        f"🔥 Portfolio heat: {num_positions} positions. Raising confidence threshold by +5"
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️ Could not check portfolio heat: {e}")
-
-        # Apply adjustment (with limits)
-        # Allow lower bound 40 in favorable regimes to increase opportunities
-        self.min_confidence = max(40, min(80, self.base_min_confidence + adjustment))
-
-        if adjustment != 0:
-            logger.info(
-                f"📊 Dynamic threshold adjustment: {self.base_min_confidence} → {self.min_confidence} "
-                f"(regime: {regime}, adj: {adjustment:+d})"
-            )
+    # NOTE: _adjust_thresholds_for_market is now defined at class level (line ~317)
+    # with REGIME_THRESHOLDS for adaptive threshold adjustment
 
     def _optimize_entry_price(
         self,

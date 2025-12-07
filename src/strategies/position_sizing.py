@@ -71,6 +71,59 @@ class PositionSizingConstants:
     SECTOR_HIGH_ADJUSTMENT: float = 0.70  # Reduce 30%
     SECTOR_MEDIUM_ADJUSTMENT: float = 0.85  # Reduce 15%
 
+    # =========================================================================
+    # LIQUIDITY TIERS - IMPROVED v5.0 for Vietnam Market
+    # =========================================================================
+    # 4-tier system based on stock liquidity and market cap
+    # Higher liquidity = larger position sizes allowed
+    #
+    # VN30: Blue chips with highest liquidity (HPG, VNM, VCB, etc.)
+    # LARGE_CAP: Large caps outside VN30 (> 5B VND daily)
+    # MID_CAP: Mid caps (3-5B VND daily)
+    # SMALL_CAP: Small caps (< 3B VND daily)
+    #
+    # Position limits prevent excessive exposure to illiquid stocks
+    LIQUIDITY_TIERS = {
+        "VN30": {
+            "max_position_pct": 0.15,  # 15% max position for VN30
+            "min_daily_value": 10_000_000_000,  # 10B VND
+            "slippage": 0.003,  # 0.3% slippage
+        },
+        "LARGE_CAP": {
+            "max_position_pct": 0.12,  # 12% max position
+            "min_daily_value": 5_000_000_000,  # 5B VND
+            "slippage": 0.004,  # 0.4% slippage
+        },
+        "MID_CAP": {
+            "max_position_pct": 0.10,  # 10% max position
+            "min_daily_value": 3_000_000_000,  # 3B VND
+            "slippage": 0.006,  # 0.6% slippage
+        },
+        "SMALL_CAP": {
+            "max_position_pct": 0.06,  # 6% max position
+            "min_daily_value": 0,  # Any liquidity
+            "slippage": 0.010,  # 1.0% slippage
+        },
+    }
+
+    # =========================================================================
+    # REGIME-AWARE KELLY ADJUSTMENTS - IMPROVED v5.0
+    # =========================================================================
+    # Kelly fraction adjusted by market regime for risk management
+    # BULL: Full half-Kelly (aggressive)
+    # SIDEWAYS: Standard half-Kelly
+    # BEAR: Quarter-Kelly (defensive)
+    # HIGH_VOL: Eighth-Kelly (very defensive)
+    REGIME_KELLY_FRACTIONS = {
+        "BULL": 0.50,  # Full half-Kelly
+        "SIDEWAYS": 0.40,  # Slightly reduced
+        "BEAR": 0.25,  # Quarter-Kelly
+        "HIGH_VOLATILITY": 0.125,  # Eighth-Kelly
+    }
+
+    # Transaction cost for Kelly adjustment (Vietnam market)
+    VN_TRANSACTION_COST: float = 0.0148  # 1.48% round trip
+
     # DCA levels - IMPROVED v4.2 for Vietnam Market
     # Vietnam market characteristics:
     # - ±7% daily price limit means 1-3% DCA levels can hit within same day
@@ -472,6 +525,13 @@ class EnhancedPositionSizer:
             warnings=warnings,
         )
 
+        # IMPROVED v5.0: Get avg daily value for liquidity tier
+        avg_daily_value = self._get_avg_daily_value(symbol)
+        if avg_daily_value:
+            tier_name, tier_config = self._get_liquidity_tier(symbol, avg_daily_value)
+            adjustments["liquidity_tier"] = tier_name
+            adjustments["tier_max_position"] = tier_config["max_position_pct"]
+
         # Enforce limits and round to lot size
         final_shares = self._enforce_limits(
             shares=adjusted_shares,
@@ -479,6 +539,8 @@ class EnhancedPositionSizer:
             available_capital=available_capital,
             risk_per_share=risk_per_share,
             warnings=warnings,
+            symbol=symbol,
+            avg_daily_value=avg_daily_value,
         )
 
         if final_shares <= 0:
@@ -633,7 +695,14 @@ class EnhancedPositionSizer:
         avg_win_loss_ratio: Optional[float],
         adjustments: Dict[str, float],
     ) -> int:
-        """Calculate base shares using risk-based and Kelly methods."""
+        """
+        Calculate base shares using risk-based and Kelly methods.
+
+        IMPROVED v5.0:
+        - 3-step calculation: Base size → Apply adjustments → Enforce limits
+        - Regime-aware Kelly with cost adjustment
+        - Liquidity tier-based position limits
+        """
 
         # Method 1: Risk-based sizing
         base_risk_amount = self.total_capital * self.max_risk_per_trade
@@ -644,12 +713,24 @@ class EnhancedPositionSizer:
         shares_by_risk = int(adjusted_risk_amount / risk_per_share)
 
         # Method 2: Kelly Criterion (if data available)
+        # IMPROVED v5.0: Pass market regime for regime-aware Kelly
         shares_by_kelly = 0
         kelly_percent = 0.0
 
         if self.use_kelly and win_rate and avg_win_loss_ratio:
-            kelly_percent = self._calculate_kelly(win_rate, avg_win_loss_ratio)
+            # Extract regime string for Kelly calculation
+            market_regime_str = None
+            if regime_info:
+                if isinstance(regime_info, dict):
+                    market_regime_str = regime_info.get("regime")
+                else:
+                    market_regime_str = regime_info.regime
+
+            kelly_percent = self._calculate_kelly(
+                win_rate, avg_win_loss_ratio, market_regime=market_regime_str
+            )
             adjustments["kelly"] = kelly_percent
+            adjustments["kelly_regime"] = market_regime_str or "N/A"
 
             if kelly_percent > 0:
                 kelly_capital = self.total_capital * kelly_percent
@@ -665,14 +746,22 @@ class EnhancedPositionSizer:
         self,
         win_rate: float,
         avg_win_loss_ratio: float,
+        market_regime: Optional[str] = None,
     ) -> float:
         """
-        Calculate Kelly Criterion percentage.
+        Calculate Kelly Criterion percentage with regime-aware adjustment.
 
-        Formula: K = W - (1-W)/R
-        Where: W = win rate, R = average win / average loss
+        IMPROVED v5.0:
+        - Regime-aware Kelly fraction (BULL=0.5, BEAR=0.25, HIGH_VOL=0.125)
+        - Transaction cost adjustment for Vietnam market (1.48%)
+        - Cost-adjusted win/loss ratio for realistic sizing
 
-        Returns half-Kelly for safety, clamped to reasonable range.
+        Formula: K = W - (1-W)/R_adjusted
+        Where:
+            W = win rate
+            R_adjusted = (avg_win - cost) / (avg_loss + cost)
+
+        Returns regime-adjusted Kelly, clamped to reasonable range.
         """
         # Validation
         if avg_win_loss_ratio <= 0:
@@ -689,11 +778,31 @@ class EnhancedPositionSizer:
         if win_rate < 0.3:
             logger.warning(f"⚠️ Low win rate: {win_rate:.1%}. Review strategy.")
 
-        # Calculate Kelly
-        kelly = win_rate - ((1 - win_rate) / avg_win_loss_ratio)
+        # IMPROVED v5.0: Adjust W/L ratio for transaction costs
+        # Assume average win = avg_win_loss_ratio * average_loss
+        # Cost reduces wins and increases losses
+        cost_pct = PositionSizingConstants.VN_TRANSACTION_COST  # 1.48%
+
+        # Cost-adjusted ratio: (win - cost) / (loss + cost)
+        # If avg_win_loss_ratio = 2.0, and cost = 1.48%
+        # Adjusted = (2.0 - 0.0148) / (1.0 + 0.0148) ≈ 1.96
+        cost_adjusted_ratio = (avg_win_loss_ratio - cost_pct) / (1.0 + cost_pct)
+
+        if cost_adjusted_ratio <= 0:
+            logger.warning(
+                f"⚠️ Cost-adjusted W/L ratio <= 0 ({cost_adjusted_ratio:.3f}). "
+                f"Original: {avg_win_loss_ratio:.2f}, cost: {cost_pct:.2%}. "
+                "Transaction costs exceed expected profit."
+            )
+            return PositionSizingConstants.MIN_KELLY_FALLBACK
+
+        # Calculate Kelly with cost-adjusted ratio
+        kelly = win_rate - ((1 - win_rate) / cost_adjusted_ratio)
 
         logger.debug(
-            f"📊 Kelly: win_rate={win_rate:.1%}, " f"W/L={avg_win_loss_ratio:.2f}, raw={kelly:.1%}"
+            f"📊 Kelly: win_rate={win_rate:.1%}, "
+            f"W/L={avg_win_loss_ratio:.2f} (cost-adj: {cost_adjusted_ratio:.2f}), "
+            f"raw={kelly:.1%}"
         )
 
         # Handle negative Kelly (strategy has negative expected value)
@@ -703,20 +812,30 @@ class EnhancedPositionSizer:
                 f"Win rate: {win_rate:.1%}, W/L: {avg_win_loss_ratio:.2f}. "
                 f"Returning minimum {PositionSizingConstants.MIN_KELLY_FALLBACK:.1%} fallback."
             )
-            return PositionSizingConstants.MIN_KELLY_FALLBACK  # v2.0: Return minimum instead of 0
+            return PositionSizingConstants.MIN_KELLY_FALLBACK
 
-        # Apply half-Kelly for safety
-        half_kelly = kelly * self.kelly_fraction
+        # IMPROVED v5.0: Regime-aware Kelly fraction
+        if market_regime:
+            kelly_fraction = PositionSizingConstants.REGIME_KELLY_FRACTIONS.get(
+                market_regime, self.kelly_fraction
+            )
+            logger.debug(f"📊 Regime-aware Kelly fraction: {kelly_fraction:.2f} ({market_regime})")
+        else:
+            kelly_fraction = self.kelly_fraction
+
+        # Apply regime-adjusted Kelly fraction
+        adjusted_kelly = kelly * kelly_fraction
 
         if kelly > 0.5:
             logger.warning(f"⚠️ Very high Kelly ({kelly:.1%}). Clamping to 25%.")
 
         # Clamp to reasonable range
-        final_kelly = max(0.0, min(half_kelly, PositionSizingConstants.MAX_KELLY_PERCENT))
+        final_kelly = max(0.0, min(adjusted_kelly, PositionSizingConstants.MAX_KELLY_PERCENT))
 
         logger.info(
             f"✅ Kelly sizing: {final_kelly:.1%} "
-            f"(win={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
+            f"(win={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f}, "
+            f"regime={market_regime or 'N/A'}, fraction={kelly_fraction:.2f})"
         )
 
         return final_kelly
@@ -995,6 +1114,77 @@ class EnhancedPositionSizer:
     # PRIVATE HELPER METHODS - Limits & Finalization
     # =========================================================================
 
+    def _get_avg_daily_value(self, symbol: str) -> Optional[float]:
+        """
+        Get average daily trading value for a symbol.
+
+        IMPROVED v5.0: Used for liquidity tier determination.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Average daily value in VND, or None if unavailable
+        """
+        try:
+            load_data = self._get_data_loader()
+            df = load_data(symbol, lookback=20)
+
+            if df is None or df.empty or len(df) < 5:
+                logger.debug(f"Insufficient data for {symbol} liquidity calculation")
+                return None
+
+            if "volume" not in df.columns or "close" not in df.columns:
+                return None
+
+            avg_volume = df["volume"].tail(20).mean()
+            avg_price = df["close"].tail(20).mean()
+            avg_daily_value = avg_volume * avg_price
+
+            logger.debug(f"📊 {symbol} avg daily value: {avg_daily_value/1e9:.2f}B VND")
+            return avg_daily_value
+
+        except Exception as e:
+            logger.debug(f"Could not calculate avg daily value for {symbol}: {e}")
+            return None
+
+    def _get_liquidity_tier(
+        self,
+        symbol: str,
+        avg_daily_value: float,
+    ) -> Tuple[str, Dict]:
+        """
+        Determine liquidity tier for a symbol.
+
+        IMPROVED v5.0: 4-tier system for Vietnam market
+        - VN30: Blue chips (highest liquidity)
+        - LARGE_CAP: Large caps outside VN30
+        - MID_CAP: Mid caps
+        - SMALL_CAP: Small caps
+
+        Args:
+            symbol: Stock symbol
+            avg_daily_value: Average daily trading value in VND
+
+        Returns:
+            Tuple of (tier_name, tier_config)
+        """
+        from src.config.constants import VN30_SYMBOLS
+
+        tiers = PositionSizingConstants.LIQUIDITY_TIERS
+
+        # VN30 blue chips get highest tier
+        if symbol.upper() in VN30_SYMBOLS:
+            return ("VN30", tiers["VN30"])
+
+        # Tier by daily trading value
+        if avg_daily_value >= tiers["LARGE_CAP"]["min_daily_value"]:
+            return ("LARGE_CAP", tiers["LARGE_CAP"])
+        elif avg_daily_value >= tiers["MID_CAP"]["min_daily_value"]:
+            return ("MID_CAP", tiers["MID_CAP"])
+        else:
+            return ("SMALL_CAP", tiers["SMALL_CAP"])
+
     def _enforce_limits(
         self,
         shares: int,
@@ -1002,11 +1192,33 @@ class EnhancedPositionSizer:
         available_capital: float,
         risk_per_share: float,
         warnings: List[str],
+        symbol: Optional[str] = None,
+        avg_daily_value: Optional[float] = None,
     ) -> int:
-        """Enforce position limits and round to lot size."""
+        """
+        Enforce position limits and round to lot size.
+
+        IMPROVED v5.0: Liquidity tier-based position limits
+        - VN30: 15% max position
+        - LARGE_CAP: 12% max position
+        - MID_CAP: 10% max position
+        - SMALL_CAP: 6% max position
+        """
+
+        # IMPROVED v5.0: Get liquidity tier-based max position
+        if symbol and avg_daily_value is not None:
+            tier_name, tier_config = self._get_liquidity_tier(symbol, avg_daily_value)
+            tier_max_position = tier_config["max_position_pct"]
+            logger.debug(f"📊 Liquidity tier: {tier_name} → max position {tier_max_position:.0%}")
+        else:
+            tier_name = "DEFAULT"
+            tier_max_position = self.max_position_size
+
+        # Use the more restrictive of tier limit and configured limit
+        effective_max_position = min(tier_max_position, self.max_position_size)
 
         # Calculate limits
-        max_by_capital = int((self.total_capital * self.max_position_size) / entry_price)
+        max_by_capital = int((self.total_capital * effective_max_position) / entry_price)
         max_by_available = int(available_capital / entry_price)
         min_shares = int((self.total_capital * self.min_position_size) / entry_price)
 
@@ -1032,8 +1244,15 @@ class EnhancedPositionSizer:
             final_shares, entry_price, risk_per_share, warnings
         )
 
+        # Add tier info to warnings if position was limited
+        if shares > final_shares and tier_name != "DEFAULT":
+            warnings.append(
+                f"Position limited by {tier_name} tier (max {effective_max_position:.0%})"
+            )
+
         logger.debug(
-            f"✅ Final: {final_shares} shares " f"({final_shares // VIETNAM_LOT_SIZE} lots)"
+            f"✅ Final: {final_shares} shares "
+            f"({final_shares // VIETNAM_LOT_SIZE} lots, tier={tier_name})"
         )
 
         return final_shares
