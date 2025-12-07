@@ -62,7 +62,7 @@ ODD_LOT_MIN_COMMISSION = 11_000  # 11,000 VND minimum
 class WarrantInfo:
     """
     Warrant information with pricing model.
-    
+
     IMPROVED v2.0: Added Black-Scholes pricing and Greeks calculation.
     """
 
@@ -73,7 +73,7 @@ class WarrantInfo:
     exercise_ratio: float  # e.g., 1:1, 2:1
     expiry_date: datetime
     warrant_type: str  # "CALL" or "PUT"
-    
+
     # Market data
     underlying_price: float = 0.0
     warrant_price: float = 0.0
@@ -83,13 +83,13 @@ class WarrantInfo:
     days_to_expiry: int = 0
     intrinsic_value: float = 0.0
     time_value: float = 0.0
-    
+
     # Greeks (NEW v2.0)
     delta: float = 0.0
     gamma: float = 0.0
     theta: float = 0.0
     vega: float = 0.0
-    
+
     # Fair value (NEW v2.0)
     theoretical_value: float = 0.0
     premium_discount: float = 0.0  # % above/below fair value
@@ -98,72 +98,84 @@ class WarrantInfo:
         self.days_to_expiry = (self.expiry_date - datetime.now()).days
         if self.underlying_price > 0:
             self._calculate_values()
-    
+
     def _calculate_values(self):
         """Calculate intrinsic value, time value, and Greeks."""
         # Intrinsic value
         if self.warrant_type == "CALL":
-            self.intrinsic_value = max(0, (self.underlying_price - self.exercise_price) * self.exercise_ratio)
+            self.intrinsic_value = max(
+                0, (self.underlying_price - self.exercise_price) * self.exercise_ratio
+            )
         else:  # PUT
-            self.intrinsic_value = max(0, (self.exercise_price - self.underlying_price) * self.exercise_ratio)
-        
+            self.intrinsic_value = max(
+                0, (self.exercise_price - self.underlying_price) * self.exercise_ratio
+            )
+
         # Time value
         if self.warrant_price > 0:
             self.time_value = max(0, self.warrant_price - self.intrinsic_value)
-        
+
         # Calculate theoretical value using simplified Black-Scholes
         if self.days_to_expiry > 0 and self.underlying_price > 0:
             self._calculate_black_scholes()
-    
+
     def _calculate_black_scholes(self):
         """
         Simplified Black-Scholes pricing for warrants.
-        
+
         Note: This is a simplified model. Real warrant pricing should consider:
         - Dilution effect
         - Dividend adjustments
         - American vs European exercise
         """
         import math
-        
+
         S = self.underlying_price
         K = self.exercise_price
         T = self.days_to_expiry / 365.0
         r = 0.05  # Risk-free rate (5%)
         sigma = self.underlying_volatility
-        
+
         if T <= 0 or sigma <= 0:
             return
-        
+
         try:
             # d1 and d2
-            d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+            d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
             d2 = d1 - sigma * math.sqrt(T)
-            
+
             # Cumulative normal distribution (approximation)
             def norm_cdf(x):
                 return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-            
+
             def norm_pdf(x):
-                return math.exp(-0.5 * x ** 2) / math.sqrt(2 * math.pi)
-            
+                return math.exp(-0.5 * x**2) / math.sqrt(2 * math.pi)
+
             # Option price
             if self.warrant_type == "CALL":
-                self.theoretical_value = (S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)) * self.exercise_ratio
+                self.theoretical_value = (
+                    S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
+                ) * self.exercise_ratio
                 self.delta = norm_cdf(d1) * self.exercise_ratio
             else:  # PUT
-                self.theoretical_value = (K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)) * self.exercise_ratio
+                self.theoretical_value = (
+                    K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
+                ) * self.exercise_ratio
                 self.delta = -norm_cdf(-d1) * self.exercise_ratio
-            
+
             # Greeks
             self.gamma = norm_pdf(d1) / (S * sigma * math.sqrt(T)) * self.exercise_ratio
-            self.theta = -(S * norm_pdf(d1) * sigma) / (2 * math.sqrt(T)) * self.exercise_ratio / 365
+            self.theta = (
+                -(S * norm_pdf(d1) * sigma) / (2 * math.sqrt(T)) * self.exercise_ratio / 365
+            )
             self.vega = S * math.sqrt(T) * norm_pdf(d1) * self.exercise_ratio / 100
-            
+
             # Premium/discount to fair value
             if self.theoretical_value > 0 and self.warrant_price > 0:
-                self.premium_discount = (self.warrant_price - self.theoretical_value) / self.theoretical_value
-                
+                self.premium_discount = (
+                    self.warrant_price - self.theoretical_value
+                ) / self.theoretical_value
+
         except (ValueError, ZeroDivisionError) as e:
             logger.debug(f"Black-Scholes calculation error: {e}")
 
@@ -171,7 +183,7 @@ class WarrantInfo:
 class WarrantTradingLogic:
     """
     Warrant Trading Logic for Vietnam Market
-    
+
     IMPROVED v2.0:
     - Black-Scholes fair value calculation
     - Greeks-based risk management
@@ -206,7 +218,7 @@ class WarrantTradingLogic:
         "CVCB": "VCB",
         "CMWG": "MWG",
     }
-    
+
     # Warrant risk thresholds
     MAX_PREMIUM_PCT = 0.30  # Max 30% premium to fair value
     MAX_TIME_DECAY_DAILY = 0.05  # Max 5% daily time decay
@@ -257,7 +269,7 @@ class WarrantTradingLogic:
     ) -> Tuple[bool, List[str]]:
         """
         Check if warrant is tradeable.
-        
+
         IMPROVED v2.0: Added Greeks-based checks and fair value analysis.
 
         Returns:
@@ -280,7 +292,7 @@ class WarrantTradingLogic:
         # Check 3: Time value decay
         if warrant_info.days_to_expiry < 14:
             warnings.append("⚠️ High time decay risk (< 14 days)")
-        
+
         # NEW v2.0: Check 4 - Premium to fair value
         if warrant_info.premium_discount > self.max_premium_pct:
             blocking_reasons.append(
@@ -288,25 +300,19 @@ class WarrantTradingLogic:
                 f"(max: {self.max_premium_pct:.0%})"
             )
         elif warrant_info.premium_discount > self.max_premium_pct * 0.7:
-            warnings.append(
-                f"⚠️ High premium: {warrant_info.premium_discount:.1%} above fair value"
-            )
+            warnings.append(f"⚠️ High premium: {warrant_info.premium_discount:.1%} above fair value")
         elif warrant_info.premium_discount < -0.10:
             warnings.append(
                 f"✅ Discount: {abs(warrant_info.premium_discount):.1%} below fair value"
             )
-        
+
         # NEW v2.0: Check 5 - Delta (moneyness)
         if warrant_info.delta > 0:
             if warrant_info.delta < self.MIN_DELTA:
-                warnings.append(
-                    f"⚠️ Low delta ({warrant_info.delta:.2f}): Far OTM, high risk"
-                )
+                warnings.append(f"⚠️ Low delta ({warrant_info.delta:.2f}): Far OTM, high risk")
             elif warrant_info.delta > self.MAX_DELTA:
-                warnings.append(
-                    f"⚠️ High delta ({warrant_info.delta:.2f}): Deep ITM, expensive"
-                )
-        
+                warnings.append(f"⚠️ High delta ({warrant_info.delta:.2f}): Deep ITM, expensive")
+
         # NEW v2.0: Check 6 - Theta (time decay)
         if warrant_info.theta < 0:
             daily_decay_pct = abs(warrant_info.theta) / current_price if current_price > 0 else 0
@@ -315,7 +321,7 @@ class WarrantTradingLogic:
                     f"⚠️ High time decay: {daily_decay_pct:.1%}/day "
                     f"({abs(warrant_info.theta):,.0f} VND/day)"
                 )
-        
+
         # NEW v2.0: Check 7 - Theoretical value sanity check
         if warrant_info.theoretical_value > 0 and current_price > 0:
             if current_price > warrant_info.theoretical_value * 2:
@@ -323,19 +329,19 @@ class WarrantTradingLogic:
                     f"❌ Price ({current_price:,.0f}) > 2x fair value "
                     f"({warrant_info.theoretical_value:,.0f})"
                 )
-        
+
         if blocking_reasons:
             return False, blocking_reasons
 
         return True, warnings
-    
+
     def analyze_warrant(
         self,
         warrant_info: WarrantInfo,
     ) -> Dict:
         """
         Comprehensive warrant analysis.
-        
+
         NEW v2.0: Returns detailed analysis including Greeks and recommendations.
         """
         analysis = {
@@ -344,27 +350,28 @@ class WarrantTradingLogic:
             "type": warrant_info.warrant_type,
             "days_to_expiry": warrant_info.days_to_expiry,
             "moneyness": "ITM" if warrant_info.intrinsic_value > 0 else "OTM",
-            
             # Values
             "intrinsic_value": warrant_info.intrinsic_value,
             "time_value": warrant_info.time_value,
             "theoretical_value": warrant_info.theoretical_value,
             "premium_discount": warrant_info.premium_discount,
-            
             # Greeks
             "delta": warrant_info.delta,
             "gamma": warrant_info.gamma,
             "theta": warrant_info.theta,
             "vega": warrant_info.vega,
-            
             # Risk metrics
-            "leverage": warrant_info.underlying_price / warrant_info.warrant_price if warrant_info.warrant_price > 0 else 0,
-            "break_even": warrant_info.exercise_price + warrant_info.warrant_price / warrant_info.exercise_ratio,
-            
+            "leverage": (
+                warrant_info.underlying_price / warrant_info.warrant_price
+                if warrant_info.warrant_price > 0
+                else 0
+            ),
+            "break_even": warrant_info.exercise_price
+            + warrant_info.warrant_price / warrant_info.exercise_ratio,
             # Recommendations
             "recommendations": [],
         }
-        
+
         # Generate recommendations
         if warrant_info.premium_discount < -0.05:
             analysis["recommendations"].append("✅ Trading at discount - potential value")
@@ -376,7 +383,7 @@ class WarrantTradingLogic:
             analysis["recommendations"].append("⚠️ High theta decay - consider exit")
         if warrant_info.intrinsic_value <= 0 and warrant_info.days_to_expiry < 30:
             analysis["recommendations"].append("🚨 OTM with <30 days - high risk of total loss")
-        
+
         return analysis
 
     def calculate_position_size(
@@ -460,7 +467,7 @@ class ETFInfo:
 class ETFTradingLogic:
     """
     ETF Trading Logic for Vietnam Market
-    
+
     IMPROVED v2.0:
     - Complete ETF database with NAV tracking
     - Short selling logic with margin requirements
@@ -531,7 +538,7 @@ class ETFTradingLogic:
             "type": "BOND",
         },
     }
-    
+
     # Short selling parameters
     SHORT_MARGIN_REQUIREMENT = 0.50  # 50% margin for shorts
     SHORT_BORROW_RATE = 0.08  # 8% annual borrow rate
@@ -546,7 +553,7 @@ class ETFTradingLogic:
         self.max_premium_discount = max_premium_discount
         self.min_volume = min_volume
         self.enable_short_selling = enable_short_selling
-        
+
         # NAV tracking cache
         self._nav_cache: Dict[str, Dict] = {}
         self._nav_cache_time: Optional[datetime] = None
@@ -606,7 +613,7 @@ class ETFTradingLogic:
         shares = (shares // ETF_LOT_SIZE) * ETF_LOT_SIZE
 
         return max(0, shares)
-    
+
     def analyze_short_opportunity(
         self,
         symbol: str,
@@ -615,15 +622,15 @@ class ETFTradingLogic:
     ) -> Dict:
         """
         Analyze short selling opportunity for ETF.
-        
+
         NEW v2.0: Comprehensive short analysis with risk metrics.
         """
         if not self.enable_short_selling:
             return {"can_short": False, "reason": "Short selling disabled"}
-        
+
         if not self.can_short(symbol):
             return {"can_short": False, "reason": f"{symbol} does not allow short selling"}
-        
+
         analysis = {
             "symbol": symbol,
             "can_short": True,
@@ -633,7 +640,7 @@ class ETFTradingLogic:
             "signals": [],
             "risk_score": 50,  # 0-100, higher = more risky
         }
-        
+
         # Signal 1: Premium to NAV (short when premium)
         if etf_info.premium_discount > 0.02:
             analysis["signals"].append(
@@ -645,7 +652,7 @@ class ETFTradingLogic:
                 f"⚠️ Trading at {abs(etf_info.premium_discount):.1%} discount - avoid short"
             )
             analysis["risk_score"] += 20
-        
+
         # Signal 2: Market regime
         if market_regime:
             regime = market_regime.get("regime", "SIDEWAYS")
@@ -655,14 +662,12 @@ class ETFTradingLogic:
             elif regime == "BULL":
                 analysis["signals"].append("⚠️ Bull market - risky for shorts")
                 analysis["risk_score"] += 25
-        
+
         # Signal 3: Volume
         if etf_info.avg_volume < self.min_volume:
-            analysis["signals"].append(
-                f"⚠️ Low volume ({etf_info.avg_volume:,}) - hard to cover"
-            )
+            analysis["signals"].append(f"⚠️ Low volume ({etf_info.avg_volume:,}) - hard to cover")
             analysis["risk_score"] += 15
-        
+
         # Break-even calculation
         days_to_breakeven = 0
         if etf_info.premium_discount > 0:
@@ -672,7 +677,7 @@ class ETFTradingLogic:
             analysis["signals"].append(
                 f"ℹ️ Break-even in {days_to_breakeven} days (borrow cost vs premium)"
             )
-        
+
         # Final recommendation
         if analysis["risk_score"] < 40:
             analysis["recommendation"] = "FAVORABLE"
@@ -680,9 +685,9 @@ class ETFTradingLogic:
             analysis["recommendation"] = "NEUTRAL"
         else:
             analysis["recommendation"] = "AVOID"
-        
+
         return analysis
-    
+
     def calculate_nav_premium_discount(
         self,
         symbol: str,
@@ -691,14 +696,14 @@ class ETFTradingLogic:
     ) -> Dict:
         """
         Calculate premium/discount to NAV.
-        
+
         NEW v2.0: Detailed NAV analysis with arbitrage detection.
         """
         if nav <= 0:
             return {"error": "Invalid NAV"}
-        
+
         premium_discount = (market_price - nav) / nav
-        
+
         result = {
             "symbol": symbol,
             "market_price": market_price,
@@ -708,7 +713,7 @@ class ETFTradingLogic:
             "status": "FAIR",
             "arbitrage_opportunity": False,
         }
-        
+
         # Classify status
         if premium_discount > 0.03:
             result["status"] = "SIGNIFICANT_PREMIUM"
@@ -722,16 +727,16 @@ class ETFTradingLogic:
             result["arbitrage_action"] = "BUY ETF, SHORT UNDERLYING"
         elif premium_discount < -0.01:
             result["status"] = "DISCOUNT"
-        
+
         return result
-    
+
     def get_sector_etf_for_rotation(
         self,
         target_sector: str,
     ) -> Optional[str]:
         """
         Get ETF symbol for sector rotation strategy.
-        
+
         NEW v2.0: Maps sectors to available ETFs.
         """
         sector_mapping = {
@@ -742,7 +747,7 @@ class ETFTradingLogic:
             "MID_CAP": "FUESSV50",
             "GROWTH": "FUEVFVND",
         }
-        
+
         return sector_mapping.get(target_sector.upper())
 
 

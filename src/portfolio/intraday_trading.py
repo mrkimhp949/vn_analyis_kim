@@ -148,33 +148,33 @@ class IntradayStats:
 class WashTradeDetector:
     """
     Wash Trade Detection and Prevention for Vietnam Market.
-    
+
     Wash trading is illegal and involves buying and selling the same security
     to create artificial activity. This detector prevents:
     - Rapid buy-sell cycles (< 5 minutes)
     - Same price buy-sell (no economic purpose)
     - Excessive round trips in short period
     - Pattern-based wash trade detection
-    
+
     Vietnam regulations:
     - Circular 203/2015/TT-BTC prohibits wash trading
     - Penalties: Fines up to 5x profit + trading ban
     """
-    
+
     # Detection thresholds
-    MIN_HOLDING_MINUTES = 5          # Minimum hold time
-    MIN_PRICE_CHANGE_PCT = 0.005     # Minimum 0.5% price change for valid trade
-    MAX_ROUND_TRIPS_PER_HOUR = 3     # Max buy-sell cycles per hour
-    MAX_ROUND_TRIPS_PER_DAY = 10     # Max buy-sell cycles per day
-    PATTERN_LOOKBACK_TRADES = 20    # Trades to analyze for patterns
-    
+    MIN_HOLDING_MINUTES = 5  # Minimum hold time
+    MIN_PRICE_CHANGE_PCT = 0.005  # Minimum 0.5% price change for valid trade
+    MAX_ROUND_TRIPS_PER_HOUR = 3  # Max buy-sell cycles per hour
+    MAX_ROUND_TRIPS_PER_DAY = 10  # Max buy-sell cycles per day
+    PATTERN_LOOKBACK_TRADES = 20  # Trades to analyze for patterns
+
     def __init__(self):
         self._trade_history: List[Dict] = []
         self._round_trip_count: int = 0
         self._hourly_round_trips: Dict[int, int] = {}  # hour -> count
         self._flagged_symbols: set = set()
         self._last_reset_date: Optional[date] = None
-    
+
     def _reset_if_new_day(self):
         """Reset counters for new trading day."""
         today = date.today()
@@ -184,7 +184,7 @@ class WashTradeDetector:
             self._hourly_round_trips.clear()
             self._flagged_symbols.clear()
             self._last_reset_date = today
-    
+
     def check_wash_trade(
         self,
         symbol: str,
@@ -196,7 +196,7 @@ class WashTradeDetector:
     ) -> Tuple[bool, str]:
         """
         Check if a trade might be a wash trade.
-        
+
         Args:
             symbol: Stock symbol
             side: "BUY" or "SELL"
@@ -204,16 +204,16 @@ class WashTradeDetector:
             price: Trade price
             last_trade_time: Time of last trade for this symbol
             last_trade_price: Price of last trade for this symbol
-            
+
         Returns:
             (is_wash_trade, reason)
         """
         self._reset_if_new_day()
-        
+
         # Check 1: Symbol already flagged
         if symbol in self._flagged_symbols:
             return True, f"⚠️ {symbol} flagged for suspicious activity - trading paused"
-        
+
         # Check 2: Minimum holding time
         if last_trade_time:
             minutes_held = (datetime.now() - last_trade_time).total_seconds() / 60
@@ -222,14 +222,17 @@ class WashTradeDetector:
                     f"⚠️ Wash trade risk: Only {minutes_held:.1f} min since last trade "
                     f"(min: {self.MIN_HOLDING_MINUTES} min)"
                 )
-        
+
         # Check 3: Same price (no economic purpose)
-        if last_trade_price and abs(price - last_trade_price) / last_trade_price < self.MIN_PRICE_CHANGE_PCT:
+        if (
+            last_trade_price
+            and abs(price - last_trade_price) / last_trade_price < self.MIN_PRICE_CHANGE_PCT
+        ):
             return True, (
                 f"⚠️ Wash trade risk: Price unchanged from last trade "
                 f"({price:,.0f} ≈ {last_trade_price:,.0f})"
             )
-        
+
         # Check 4: Hourly round trip limit
         current_hour = datetime.now().hour
         hourly_count = self._hourly_round_trips.get(current_hour, 0)
@@ -238,62 +241,70 @@ class WashTradeDetector:
                 f"⚠️ Wash trade risk: {hourly_count} round trips this hour "
                 f"(max: {self.MAX_ROUND_TRIPS_PER_HOUR})"
             )
-        
+
         # Check 5: Daily round trip limit
         if self._round_trip_count >= self.MAX_ROUND_TRIPS_PER_DAY:
             return True, (
                 f"⚠️ Wash trade risk: {self._round_trip_count} round trips today "
                 f"(max: {self.MAX_ROUND_TRIPS_PER_DAY})"
             )
-        
+
         # Check 6: Pattern detection (alternating buy-sell on same symbol)
         if len(self._trade_history) >= 4:
-            recent = [t for t in self._trade_history[-10:] if t['symbol'] == symbol]
+            recent = [t for t in self._trade_history[-10:] if t["symbol"] == symbol]
             if len(recent) >= 4:
                 # Check for alternating pattern
-                sides = [t['side'] for t in recent[-4:]]
-                if sides == ['BUY', 'SELL', 'BUY', 'SELL'] or sides == ['SELL', 'BUY', 'SELL', 'BUY']:
+                sides = [t["side"] for t in recent[-4:]]
+                if sides == ["BUY", "SELL", "BUY", "SELL"] or sides == [
+                    "SELL",
+                    "BUY",
+                    "SELL",
+                    "BUY",
+                ]:
                     self._flagged_symbols.add(symbol)
                     return True, f"⚠️ Wash trade pattern detected for {symbol} - flagged"
-        
+
         return False, "OK"
-    
+
     def record_trade(self, symbol: str, side: str, quantity: int, price: float):
         """Record a trade for pattern analysis."""
         self._reset_if_new_day()
-        
-        self._trade_history.append({
-            'symbol': symbol,
-            'side': side,
-            'quantity': quantity,
-            'price': price,
-            'timestamp': datetime.now(),
-        })
-        
+
+        self._trade_history.append(
+            {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": price,
+                "timestamp": datetime.now(),
+            }
+        )
+
         # Trim history
         if len(self._trade_history) > self.PATTERN_LOOKBACK_TRADES:
-            self._trade_history = self._trade_history[-self.PATTERN_LOOKBACK_TRADES:]
-        
+            self._trade_history = self._trade_history[-self.PATTERN_LOOKBACK_TRADES :]
+
         # Update round trip count if this completes a cycle
-        if side == 'SELL':
+        if side == "SELL":
             # Check if there was a recent buy
             recent_buys = [
-                t for t in self._trade_history[:-1]
-                if t['symbol'] == symbol and t['side'] == 'BUY'
+                t for t in self._trade_history[:-1] if t["symbol"] == symbol and t["side"] == "BUY"
             ]
             if recent_buys:
                 self._round_trip_count += 1
                 current_hour = datetime.now().hour
-                self._hourly_round_trips[current_hour] = self._hourly_round_trips.get(current_hour, 0) + 1
-    
+                self._hourly_round_trips[current_hour] = (
+                    self._hourly_round_trips.get(current_hour, 0) + 1
+                )
+
     def get_stats(self) -> Dict:
         """Get wash trade detection statistics."""
         return {
-            'total_trades_tracked': len(self._trade_history),
-            'round_trips_today': self._round_trip_count,
-            'hourly_round_trips': dict(self._hourly_round_trips),
-            'flagged_symbols': list(self._flagged_symbols),
-            'max_round_trips_per_day': self.MAX_ROUND_TRIPS_PER_DAY,
+            "total_trades_tracked": len(self._trade_history),
+            "round_trips_today": self._round_trip_count,
+            "hourly_round_trips": dict(self._hourly_round_trips),
+            "flagged_symbols": list(self._flagged_symbols),
+            "max_round_trips_per_day": self.MAX_ROUND_TRIPS_PER_DAY,
         }
 
 
@@ -307,7 +318,7 @@ class IntradayTracker:
     - Subject to margin requirements
     - ATO/ATC sessions have higher volatility
     - Price limits (±7%) still apply
-    
+
     IMPROVED v2.0:
     - Wash trade detection and prevention
     - Pattern-based suspicious activity detection
@@ -333,7 +344,7 @@ class IntradayTracker:
     MAX_INTRADAY_TRADES = 20  # Max trades per day (prevent overtrading)
     MAX_INTRADAY_LOSS_PCT = 0.02  # Stop trading if -2% intraday loss
     MIN_HOLDING_MINUTES = 5  # Minimum holding time (avoid wash trades)
-    
+
     # NEW v2.0: Additional limits
     MAX_SYMBOL_TRADES_PER_DAY = 6  # Max trades per symbol per day
     COOLING_OFF_MINUTES = 15  # Cooling off after loss
@@ -366,13 +377,13 @@ class IntradayTracker:
         self._positions: Dict[str, IntradayPosition] = {}
         self._today_trades: List[IntradayTrade] = []
         self._stats: IntradayStats = IntradayStats(date=date.today())
-        
+
         # NEW v2.0: Wash trade detector
         self._wash_trade_detector = WashTradeDetector() if enable_wash_trade_detection else None
-        
+
         # NEW v2.0: Per-symbol trade count
         self._symbol_trade_counts: Dict[str, int] = {}
-        
+
         # NEW v2.0: Cooling off tracking (after losses)
         self._cooling_off_until: Optional[datetime] = None
         self._last_loss_symbol: Optional[str] = None
@@ -491,7 +502,7 @@ class IntradayTracker:
     def can_sell_intraday(self, symbol: str, quantity: int, price: float = 0) -> Tuple[bool, str]:
         """
         Check if an intraday sell is allowed.
-        
+
         IMPROVED v2.0: Added wash trade detection and cooling off period.
 
         Args:
@@ -538,25 +549,25 @@ class IntradayTracker:
             # Check daily loss limit
             if self._stats.net_pnl < -self.margin_buying_power * self.MAX_INTRADAY_LOSS_PCT:
                 return (False, f"Daily loss limit reached. Net P&L: {self._stats.net_pnl:,.0f} VND")
-            
+
             # NEW v2.0: Check per-symbol trade limit
             symbol_trades = self._symbol_trade_counts.get(symbol, 0)
             if symbol_trades >= self.MAX_SYMBOL_TRADES_PER_DAY:
                 return (
                     False,
                     f"Per-symbol trade limit reached for {symbol} "
-                    f"({symbol_trades}/{self.MAX_SYMBOL_TRADES_PER_DAY})"
+                    f"({symbol_trades}/{self.MAX_SYMBOL_TRADES_PER_DAY})",
                 )
-            
+
             # NEW v2.0: Check cooling off period
             if self._cooling_off_until and datetime.now() < self._cooling_off_until:
                 remaining = (self._cooling_off_until - datetime.now()).total_seconds() / 60
                 return (
                     False,
                     f"Cooling off period active. Wait {remaining:.0f} more minutes "
-                    f"(after loss on {self._last_loss_symbol})"
+                    f"(after loss on {self._last_loss_symbol})",
                 )
-            
+
             # NEW v2.0: Wash trade detection
             if self._wash_trade_detector and price > 0:
                 # Get last trade info for this symbol
@@ -565,7 +576,7 @@ class IntradayTracker:
                     if trade.side == "BUY":
                         last_trade = trade
                         break
-                
+
                 is_wash, reason = self._wash_trade_detector.check_wash_trade(
                     symbol=symbol,
                     side="SELL",
@@ -574,7 +585,7 @@ class IntradayTracker:
                     last_trade_time=last_trade.timestamp if last_trade else None,
                     last_trade_price=last_trade.price if last_trade else None,
                 )
-                
+
                 if is_wash:
                     return False, reason
 
@@ -662,15 +673,17 @@ class IntradayTracker:
                 self._stats.loss_trades += 1
                 self._stats.largest_loss = min(self._stats.largest_loss, realized_pnl)
                 # NEW v2.0: Activate cooling off period after loss
-                self._cooling_off_until = datetime.now() + timedelta(minutes=self.COOLING_OFF_MINUTES)
+                self._cooling_off_until = datetime.now() + timedelta(
+                    minutes=self.COOLING_OFF_MINUTES
+                )
                 self._last_loss_symbol = symbol
                 logger.warning(
                     f"⏸️ Cooling off activated for {self.COOLING_OFF_MINUTES} min after loss on {symbol}"
                 )
-            
+
             # NEW v2.0: Update per-symbol trade count
             self._symbol_trade_counts[symbol] = self._symbol_trade_counts.get(symbol, 0) + 1
-            
+
             # NEW v2.0: Record trade for wash trade detection
             if self._wash_trade_detector:
                 self._wash_trade_detector.record_trade(symbol, "SELL", quantity, price)

@@ -1684,14 +1684,14 @@ def check_floor_bounce_enhanced(
 ) -> Tuple[bool, str, float, int]:
     """
     IMPROVED v5.1: Enhanced floor bounce check with volume confirmation and dynamic wait time.
-    
+
     ADDRESSES RISK: 30 minutes may not be enough in panic selling.
-    
+
     Improvements:
     1. Volume confirmation required for valid bounce
     2. Extended wait time in high volatility / panic selling
     3. Panic selling detection (volume > 3x average)
-    
+
     Args:
         current_price: Current stock price
         day_low: Day's low price
@@ -1700,7 +1700,7 @@ def check_floor_bounce_enhanced(
         volume_ratio: Current volume / average volume
         minutes_at_floor: Minutes since price hit floor
         market_volatility: Market volatility (ATR/Price ratio)
-    
+
     Returns:
         Tuple of (is_valid_bounce, message, bounce_strength, recommended_wait_minutes)
     """
@@ -1710,29 +1710,29 @@ def check_floor_bounce_enhanced(
         VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO,
         VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO,
     )
-    
+
     limit = get_price_limit(symbol)
     floor = reference_price * (1 - limit)
-    
+
     # Check if day low was at or near floor (within 0.5%)
     hit_floor = day_low <= floor * 1.005
-    
+
     if not hit_floor:
         return False, "", 0.0, 0
-    
+
     # Calculate bounce from floor
     bounce_pct = (current_price - floor) / floor * 100
-    
+
     # Determine wait time based on conditions
     base_wait = VN_FLOOR_BOUNCE_MAX_WAIT_MINUTES  # 30 minutes
     extended_wait = VN_FLOOR_BOUNCE_EXTENDED_WAIT_MINUTES  # 60 minutes
-    
+
     # Detect panic selling (volume > 3x average)
     is_panic_selling = volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO
-    
+
     # Detect high volatility
     is_high_volatility = market_volatility > 0.03  # > 3% volatility
-    
+
     # Calculate recommended wait time
     if is_panic_selling:
         recommended_wait = extended_wait + 15  # 75 minutes in panic
@@ -1746,7 +1746,7 @@ def check_floor_bounce_enhanced(
     else:
         recommended_wait = base_wait  # 30 minutes standard
         wait_reason = "standard"
-    
+
     # Check if enough time has passed
     if minutes_at_floor < recommended_wait:
         remaining = recommended_wait - minutes_at_floor
@@ -1756,7 +1756,7 @@ def check_floor_bounce_enhanced(
             0.0,
             recommended_wait,
         )
-    
+
     # Volume confirmation check
     if volume_ratio < VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
         return (
@@ -1766,7 +1766,7 @@ def check_floor_bounce_enhanced(
             0.0,
             recommended_wait,
         )
-    
+
     if bounce_pct < 1.0:
         return (
             False,
@@ -1774,11 +1774,11 @@ def check_floor_bounce_enhanced(
             0.0,
             recommended_wait,
         )
-    
+
     # Calculate bounce strength with volume confirmation
     volume_factor = min(2.0, volume_ratio / VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO)
     bounce_strength = min(1.0, (bounce_pct / 5.0) * volume_factor)
-    
+
     # Strong bounce signal
     if bounce_pct >= 3.0 and volume_ratio >= 2.0:
         return (
@@ -1795,7 +1795,7 @@ def check_floor_bounce_enhanced(
             bounce_strength,
             recommended_wait,
         )
-    
+
     return (
         False,
         f"📊 Minor bounce from floor ({bounce_pct:.1f}%) - needs more confirmation",

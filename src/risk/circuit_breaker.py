@@ -876,27 +876,28 @@ class CircuitBreaker:
     def update_market_regime(self, regime: str):
         """
         IMPROVED v5.1: Update market regime and adjust consecutive loss limit.
-        
+
         ADDRESSES RISK: Max 3 consecutive losses too aggressive in sideways market,
         may miss mean-reversion opportunities.
-        
+
         Regime-aware limits:
         - BULL: 4 losses (more lenient - trend continuation expected)
         - SIDEWAYS: 3 losses (standard - allows mean-reversion plays)
         - BEAR: 2 losses (strict - protect capital)
         - HIGH_VOLATILITY: 2 losses (very strict)
-        
+
         Args:
             regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
         """
         if not self.use_regime_aware_limits:
             return
-        
+
         self._current_regime = regime.upper()
-        
+
         # Import regime-aware limits
         try:
             from src.risk.circuit_breaker_db import get_regime_aware_loss_limit
+
             new_limit = get_regime_aware_loss_limit(regime)
         except ImportError:
             # Fallback to inline limits
@@ -907,20 +908,19 @@ class CircuitBreaker:
                 "HIGH_VOLATILITY": 2,
             }
             new_limit = regime_limits.get(regime.upper(), self.base_max_consecutive_losses)
-        
+
         old_limit = self.max_consecutive_losses
         self.max_consecutive_losses = new_limit
-        
+
         if old_limit != new_limit:
             logger.info(
-                f"📊 Consecutive loss limit adjusted for {regime}: "
-                f"{old_limit} → {new_limit}"
+                f"📊 Consecutive loss limit adjusted for {regime}: " f"{old_limit} → {new_limit}"
             )
 
     def get_regime_adjusted_limit(self) -> Dict:
         """
         Get current regime-adjusted consecutive loss limit info.
-        
+
         Returns:
             Dict with regime, limit, and base_limit
         """
