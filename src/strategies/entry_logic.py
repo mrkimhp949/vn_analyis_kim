@@ -294,6 +294,7 @@ class ImprovedEntryLogic:
         self.use_sector_strength_filter = use_sector_strength_filter
         self.use_market_breadth_filter = use_market_breadth_filter
         self.use_monthly_timeframe = use_monthly_timeframe
+        self.use_sentiment_filter = True  # NLP sentiment analysis (Phase 2/3)
 
         # Soft filter mode
         self.soft_filter_mode = soft_filter_mode
@@ -987,6 +988,81 @@ class ImprovedEntryLogic:
 
         # Foreign Flow (Smart Money)
         self._apply_foreign_flow_filter(reasons, warnings, adjustments, adjustment_breakdown)
+
+        # NLP Sentiment Analysis (Phase 2/3)
+        if self.use_sentiment_filter:
+            self._apply_sentiment_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
+
+    def _apply_sentiment_filter(
+        self,
+        df: pd.DataFrame,
+        reasons: List[str],
+        warnings: List[str],
+        adjustments: List[int],
+        adjustment_breakdown: List[Dict],
+    ) -> None:
+        """
+        Apply NLP sentiment filter using PhoBERT/FinBERT analysis.
+
+        Phase 2/3 Implementation:
+        - Scrapes Vietnamese financial news (CafeF, VnExpress, VietStock)
+        - Analyzes sentiment using PhoBERT (Vietnamese) / FinBERT (English)
+        - Adjusts confidence based on sentiment:
+            VERY_POSITIVE: +10
+            POSITIVE: +5
+            NEUTRAL: 0
+            NEGATIVE: -10
+            VERY_NEGATIVE: -20
+        """
+        if not self._current_symbol:
+            return
+
+        try:
+            from src.nlp.multimodal_fusion import get_sentiment_adjustment
+
+            sentiment_data = get_sentiment_adjustment(self._current_symbol, df)
+
+            adjustment = sentiment_data["adjustment"]
+            sentiment = sentiment_data["sentiment"]
+            score = sentiment_data["score"]
+            news_count = sentiment_data["news_count"]
+
+            if news_count == 0:
+                # No news available - skip filter
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sentiment_nlp",
+                    0,
+                    "No recent news found",
+                )
+                return
+
+            # Apply sentiment adjustment
+            if adjustment > 0:
+                reason_msg = f"📰 {sentiment} sentiment ({news_count} articles, score={score:.2f})"
+                reasons.append(f"✅ {reason_msg}")
+            elif adjustment < 0:
+                warning_msg = f"📰 {sentiment} sentiment ({news_count} articles, score={score:.2f})"
+                warnings.append(f"⚠️ {warning_msg}")
+            else:
+                reason_msg = f"📰 Neutral sentiment ({news_count} articles)"
+
+            self._add_adjustment(
+                adjustments,
+                adjustment_breakdown,
+                "sentiment_nlp",
+                adjustment,
+                f"{sentiment} ({score:.2f}, {news_count} articles)",
+            )
+
+            # Track filter performance
+            self._track_filter("sentiment_nlp", adjustment >= 0, self._current_symbol)
+
+        except ImportError:
+            logger.debug("NLP module not available - skipping sentiment filter")
+        except Exception as e:
+            logger.warning(f"Sentiment filter error: {e}")
 
     def _apply_price_action_filter(
         self,

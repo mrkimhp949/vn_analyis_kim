@@ -160,9 +160,13 @@ def test_kelly_low_win_rate_warning(sizer, caplog):
 
 def test_kelly_edge_case_50_50(sizer):
     """Test Kelly with 50% win rate and 1:1 win/loss ratio"""
-    # Kelly = 0.5 - (0.5 / 1.0) = 0
+    # Pure Kelly = 0.5 - (0.5 / 1.0) = 0
+    # But with 1.48% transaction cost adjustment:
+    # cost_adjusted_ratio = (1.0 - 0.0148) / (1.0 + 0.0148) ≈ 0.971
+    # kelly = 0.5 - (0.5 / 0.971) ≈ -0.015 (negative)
+    # v5.0 returns MIN_KELLY_FALLBACK (0.01) for negative Kelly
     kelly = sizer._calculate_kelly(win_rate=0.5, avg_win_loss_ratio=1.0)
-    assert kelly == 0.0
+    assert kelly == 0.01  # MIN_KELLY_FALLBACK for negative EV after costs
 
 
 # =============================================================================
