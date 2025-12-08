@@ -92,6 +92,140 @@ SECTOR_CHARACTERISTICS = {
 }
 
 
+# =============================================================================
+# NEW v7.0: SECTOR LEADING INDICATORS
+# =============================================================================
+# Leading indicators help predict sector rotation before price moves
+# Each sector has specific macro/micro indicators that lead price by N days
+#
+# Usage:
+#   from src.market.sector_rotation import SECTOR_LEADING_INDICATORS
+#   banking_indicators = SECTOR_LEADING_INDICATORS["BANKING"]
+#   lead_time = banking_indicators["lead_time_days"]  # 30 days
+#
+SECTOR_LEADING_INDICATORS = {
+    "BANKING": {
+        "indicators": [
+            "interest_rate",  # SBV policy rate changes
+            "credit_growth",  # System-wide credit growth
+            "npl_ratio",  # Non-performing loan ratio
+            "deposit_growth",  # Deposit mobilization
+            "nim_trend",  # Net Interest Margin trend
+        ],
+        "lead_time_days": 30,  # Banking leads market by ~30 days
+        "correlation_with_market": 0.85,
+        "best_entry_regime": "EARLY_BULL",  # Best to enter early in bull cycle
+        "warning_signals": [
+            "rising_npl",  # NPL > 3% is warning
+            "credit_tightening",  # SBV credit growth cap
+            "foreign_selling",  # Consecutive foreign net sell
+        ],
+    },
+    "REAL_ESTATE": {
+        "indicators": [
+            "bond_yield",  # Government bond yield (inverse correlation)
+            "policy_news",  # Land law, housing policy changes
+            "land_price_index",  # Land auction prices
+            "mortgage_rate",  # Home loan interest rates
+            "inventory_level",  # Unsold inventory
+        ],
+        "lead_time_days": 60,  # Real estate leads by ~60 days (slow cycle)
+        "correlation_with_market": 0.75,
+        "best_entry_regime": "LATE_BEAR",  # Best to accumulate late in bear
+        "warning_signals": [
+            "rising_bond_yield",  # Bond yield > 10% is warning
+            "policy_tightening",  # Credit restrictions for RE
+            "high_inventory",  # Inventory > 2 years supply
+        ],
+    },
+    "SECURITIES": {
+        "indicators": [
+            "trading_volume",  # Market trading volume
+            "new_accounts",  # New trading accounts opened
+            "margin_debt",  # System-wide margin debt
+            "ipo_activity",  # IPO/listing pipeline
+            "foreign_flow",  # Foreign net buy/sell
+        ],
+        "lead_time_days": 0,  # Coincident indicator (moves with market)
+        "correlation_with_market": 0.95,
+        "best_entry_regime": "EARLY_BULL",  # High beta, enter early
+        "warning_signals": [
+            "margin_debt_peak",  # Margin debt > 100T VND
+            "volume_divergence",  # Price up but volume down
+            "excessive_ipo",  # Too many IPOs = market top
+        ],
+    },
+    "TECHNOLOGY": {
+        "indicators": [
+            "global_tech_index",  # NASDAQ, global tech trends
+            "fdi_inflow",  # Foreign direct investment
+            "digital_adoption",  # E-commerce, fintech growth
+            "it_spending",  # Corporate IT spending
+            "talent_market",  # Tech salary trends
+        ],
+        "lead_time_days": 45,  # Tech leads by ~45 days (global correlation)
+        "correlation_with_market": 0.60,
+        "best_entry_regime": "ANY",  # Defensive, can enter anytime
+        "warning_signals": [
+            "global_tech_crash",  # NASDAQ correction > 10%
+            "fdi_slowdown",  # FDI growth < 5%
+            "margin_compression",  # Sector margin declining
+        ],
+    },
+    "CONSUMER": {
+        "indicators": [
+            "cpi_inflation",  # Consumer price index
+            "retail_sales",  # Retail sales growth
+            "consumer_confidence",  # Consumer confidence index
+            "disposable_income",  # Income growth
+            "unemployment",  # Unemployment rate
+        ],
+        "lead_time_days": 30,  # Consumer leads by ~30 days
+        "correlation_with_market": 0.50,
+        "best_entry_regime": "LATE_BULL",  # Defensive, hold in late cycle
+        "warning_signals": [
+            "high_inflation",  # CPI > 5% is warning
+            "falling_confidence",  # Consumer confidence declining
+            "rising_unemployment",  # Unemployment > 3%
+        ],
+    },
+    "ENERGY": {
+        "indicators": [
+            "oil_price",  # Brent crude price
+            "gas_price",  # Natural gas price
+            "electricity_demand",  # Power consumption growth
+            "policy_support",  # Energy policy, subsidies
+            "capacity_addition",  # New power plant capacity
+        ],
+        "lead_time_days": 20,  # Energy leads by ~20 days
+        "correlation_with_market": 0.70,
+        "best_entry_regime": "EARLY_BULL",
+        "warning_signals": [
+            "oil_price_crash",  # Oil < $60/barrel
+            "policy_change",  # Subsidy removal
+            "overcapacity",  # Power oversupply
+        ],
+    },
+    "INDUSTRIAL": {
+        "indicators": [
+            "pmi_index",  # Purchasing Managers Index
+            "export_growth",  # Export value growth
+            "steel_price",  # Steel/commodity prices
+            "construction_index",  # Construction activity
+            "fdi_manufacturing",  # FDI into manufacturing
+        ],
+        "lead_time_days": 25,  # Industrial leads by ~25 days
+        "correlation_with_market": 0.80,
+        "best_entry_regime": "EARLY_BULL",
+        "warning_signals": [
+            "pmi_contraction",  # PMI < 50
+            "export_decline",  # Export growth < 0%
+            "commodity_crash",  # Steel price crash > 20%
+        ],
+    },
+}
+
+
 @dataclass
 class SectorMomentum:
     """Sector momentum data"""
@@ -457,3 +591,312 @@ def get_sector_rotation_analyzer() -> SectorRotationAnalyzer:
     if _analyzer_instance is None:
         _analyzer_instance = SectorRotationAnalyzer()
     return _analyzer_instance
+
+
+# =============================================================================
+# NEW v7.0: LEADING INDICATOR ANALYZER
+# =============================================================================
+
+
+@dataclass
+class LeadingIndicatorSignal:
+    """Signal from leading indicator analysis"""
+
+    sector: str
+    signal_type: str  # "BULLISH", "BEARISH", "NEUTRAL"
+    confidence: float  # 0-100
+    lead_time_days: int
+    triggered_indicators: List[str]
+    warning_signals: List[str]
+    recommendation: str
+    timestamp: str
+
+
+class SectorLeadingIndicatorAnalyzer:
+    """
+    Analyze sector leading indicators for early rotation signals.
+
+    NEW v7.0: Uses macro/micro indicators to predict sector rotation
+    before price moves. Each sector has specific indicators with
+    different lead times.
+
+    Usage:
+        analyzer = SectorLeadingIndicatorAnalyzer()
+        signal = analyzer.analyze_sector("BANKING")
+        if signal.signal_type == "BULLISH":
+            print(f"Banking sector bullish in {signal.lead_time_days} days")
+    """
+
+    def __init__(self, cache_ttl_seconds: int = 3600):
+        self.cache_ttl = cache_ttl_seconds
+        self._cache: Dict[str, LeadingIndicatorSignal] = {}
+        self._cache_time: Optional[datetime] = None
+
+    def analyze_sector(self, sector: str) -> Optional[LeadingIndicatorSignal]:
+        """
+        Analyze leading indicators for a specific sector.
+
+        Args:
+            sector: Sector name (e.g., "BANKING", "REAL_ESTATE")
+
+        Returns:
+            LeadingIndicatorSignal with prediction, or None if sector not found
+        """
+        sector = sector.upper()
+        if sector not in SECTOR_LEADING_INDICATORS:
+            logger.warning(f"Unknown sector: {sector}")
+            return None
+
+        # Check cache
+        if self._is_cache_valid() and sector in self._cache:
+            return self._cache[sector]
+
+        try:
+            config = SECTOR_LEADING_INDICATORS[sector]
+
+            # Analyze each indicator
+            bullish_count = 0
+            bearish_count = 0
+            triggered_indicators = []
+            warning_signals = []
+
+            for indicator in config["indicators"]:
+                result = self._check_indicator(sector, indicator)
+                if result == "BULLISH":
+                    bullish_count += 1
+                    triggered_indicators.append(f"✅ {indicator}")
+                elif result == "BEARISH":
+                    bearish_count += 1
+                    triggered_indicators.append(f"❌ {indicator}")
+
+            # Check warning signals
+            for warning in config.get("warning_signals", []):
+                if self._check_warning_signal(sector, warning):
+                    warning_signals.append(f"⚠️ {warning}")
+
+            # Determine overall signal
+            total_indicators = len(config["indicators"])
+            if bullish_count > total_indicators * 0.6:
+                signal_type = "BULLISH"
+                confidence = min(100, (bullish_count / total_indicators) * 100)
+            elif bearish_count > total_indicators * 0.6:
+                signal_type = "BEARISH"
+                confidence = min(100, (bearish_count / total_indicators) * 100)
+            else:
+                signal_type = "NEUTRAL"
+                confidence = 50
+
+            # Reduce confidence if warning signals present
+            if warning_signals:
+                confidence *= 0.8
+
+            # Generate recommendation
+            recommendation = self._generate_recommendation(
+                sector, signal_type, config, warning_signals
+            )
+
+            signal = LeadingIndicatorSignal(
+                sector=sector,
+                signal_type=signal_type,
+                confidence=confidence,
+                lead_time_days=config["lead_time_days"],
+                triggered_indicators=triggered_indicators,
+                warning_signals=warning_signals,
+                recommendation=recommendation,
+                timestamp=datetime.now().isoformat(),
+            )
+
+            # Cache result
+            self._cache[sector] = signal
+            self._cache_time = datetime.now()
+
+            return signal
+
+        except Exception as e:
+            logger.error(f"Leading indicator analysis failed for {sector}: {e}")
+            return None
+
+    def analyze_all_sectors(self) -> Dict[str, LeadingIndicatorSignal]:
+        """Analyze leading indicators for all sectors."""
+        results = {}
+        for sector in SECTOR_LEADING_INDICATORS.keys():
+            signal = self.analyze_sector(sector)
+            if signal:
+                results[sector] = signal
+        return results
+
+    def get_rotation_prediction(self) -> Dict:
+        """
+        Get sector rotation prediction based on leading indicators.
+
+        Returns:
+            Dict with:
+            - rotate_into: List of sectors to increase exposure
+            - rotate_out: List of sectors to decrease exposure
+            - timeline_days: Expected time for rotation
+            - confidence: Overall confidence
+        """
+        all_signals = self.analyze_all_sectors()
+
+        rotate_into = []
+        rotate_out = []
+
+        for sector, signal in all_signals.items():
+            if signal.signal_type == "BULLISH" and signal.confidence >= 60:
+                rotate_into.append(
+                    {
+                        "sector": sector,
+                        "confidence": signal.confidence,
+                        "lead_time": signal.lead_time_days,
+                    }
+                )
+            elif signal.signal_type == "BEARISH" and signal.confidence >= 60:
+                rotate_out.append(
+                    {
+                        "sector": sector,
+                        "confidence": signal.confidence,
+                        "lead_time": signal.lead_time_days,
+                    }
+                )
+
+        # Sort by confidence
+        rotate_into.sort(key=lambda x: x["confidence"], reverse=True)
+        rotate_out.sort(key=lambda x: x["confidence"], reverse=True)
+
+        # Calculate average timeline
+        if rotate_into:
+            avg_lead_time = sum(s["lead_time"] for s in rotate_into) / len(rotate_into)
+        else:
+            avg_lead_time = 30
+
+        # Overall confidence
+        if rotate_into or rotate_out:
+            all_conf = [s["confidence"] for s in rotate_into + rotate_out]
+            overall_confidence = sum(all_conf) / len(all_conf)
+        else:
+            overall_confidence = 30
+
+        return {
+            "rotate_into": [s["sector"] for s in rotate_into[:3]],
+            "rotate_out": [s["sector"] for s in rotate_out[:3]],
+            "timeline_days": int(avg_lead_time),
+            "confidence": overall_confidence,
+            "details": {
+                "bullish_sectors": rotate_into,
+                "bearish_sectors": rotate_out,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _check_indicator(self, sector: str, indicator: str) -> str:
+        """
+        Check a specific indicator for a sector.
+
+        Returns: "BULLISH", "BEARISH", or "NEUTRAL"
+
+        Note: This is a simplified implementation. In production,
+        you would connect to actual data sources for each indicator.
+        """
+        # Placeholder implementation - returns NEUTRAL by default
+        # In production, implement actual indicator checks:
+        # - interest_rate: Check SBV policy rate
+        # - credit_growth: Check banking system credit growth
+        # - pmi_index: Check Vietnam PMI
+        # etc.
+
+        try:
+            # Try to get indicator data from external sources
+            indicator_value = self._get_indicator_value(sector, indicator)
+            if indicator_value is None:
+                return "NEUTRAL"
+
+            # Evaluate based on indicator type
+            threshold = self._get_indicator_threshold(indicator)
+            if indicator_value > threshold["bullish"]:
+                return "BULLISH"
+            elif indicator_value < threshold["bearish"]:
+                return "BEARISH"
+            return "NEUTRAL"
+
+        except Exception:
+            return "NEUTRAL"
+
+    def _get_indicator_value(self, sector: str, indicator: str) -> Optional[float]:
+        """Get current value for an indicator. Override in production."""
+        # Placeholder - return None to indicate no data
+        # In production, connect to:
+        # - SBV API for interest rates
+        # - GSO for economic indicators
+        # - Bloomberg/Reuters for market data
+        return None
+
+    def _get_indicator_threshold(self, indicator: str) -> Dict[str, float]:
+        """Get bullish/bearish thresholds for an indicator."""
+        # Default thresholds - customize per indicator
+        thresholds = {
+            "interest_rate": {"bullish": -0.25, "bearish": 0.25},  # Rate change
+            "credit_growth": {"bullish": 12, "bearish": 8},  # % growth
+            "pmi_index": {"bullish": 52, "bearish": 48},  # PMI value
+            "cpi_inflation": {"bullish": 3, "bearish": 5},  # % inflation
+            "oil_price": {"bullish": 70, "bearish": 50},  # USD/barrel
+        }
+        return thresholds.get(indicator, {"bullish": 0.5, "bearish": -0.5})
+
+    def _check_warning_signal(self, sector: str, warning: str) -> bool:
+        """Check if a warning signal is triggered."""
+        # Placeholder - implement actual warning checks
+        return False
+
+    def _generate_recommendation(
+        self,
+        sector: str,
+        signal_type: str,
+        config: Dict,
+        warnings: List[str],
+    ) -> str:
+        """Generate human-readable recommendation."""
+        lead_time = config["lead_time_days"]
+        best_regime = config.get("best_entry_regime", "ANY")
+
+        if signal_type == "BULLISH":
+            if warnings:
+                return (
+                    f"🟡 {sector}: Bullish signals but with warnings. "
+                    f"Consider gradual accumulation over {lead_time} days. "
+                    f"Best entry in {best_regime} regime."
+                )
+            return (
+                f"🟢 {sector}: Strong bullish signals. "
+                f"Expected move in ~{lead_time} days. "
+                f"Best entry in {best_regime} regime."
+            )
+        elif signal_type == "BEARISH":
+            return (
+                f"🔴 {sector}: Bearish signals detected. "
+                f"Consider reducing exposure over {lead_time} days. "
+                f"Warnings: {len(warnings)}"
+            )
+        else:
+            return (
+                f"⚪ {sector}: Neutral signals. "
+                f"No clear direction. Monitor for {lead_time} days."
+            )
+
+    def _is_cache_valid(self) -> bool:
+        """Check if cache is still valid."""
+        if self._cache_time is None:
+            return False
+        age = (datetime.now() - self._cache_time).total_seconds()
+        return age < self.cache_ttl
+
+
+# Singleton instance for leading indicator analyzer
+_leading_indicator_instance: Optional[SectorLeadingIndicatorAnalyzer] = None
+
+
+def get_leading_indicator_analyzer() -> SectorLeadingIndicatorAnalyzer:
+    """Get singleton instance of leading indicator analyzer."""
+    global _leading_indicator_instance
+    if _leading_indicator_instance is None:
+        _leading_indicator_instance = SectorLeadingIndicatorAnalyzer()
+    return _leading_indicator_instance

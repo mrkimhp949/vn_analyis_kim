@@ -1101,6 +1101,156 @@ class CircuitBreaker:
             "regime_aware_enabled": self.use_regime_aware_limits,
         }
 
+    # ========================================================================
+    # NEW v7.0: Market Breadth Circuit Breaker
+    # ========================================================================
+
+    def check_market_breadth_circuit_breaker(
+        self,
+        advancing: int = 0,
+        declining: int = 0,
+        floor_hits: int = 0,
+        vn30_advancing: int = 0,
+        vn30_total: int = 30,
+    ) -> Tuple[bool, str]:
+        """
+        Check market breadth and trip circuit breaker if market-wide selling.
+
+        IMPROVED v7.0: Market breadth protection for Vietnam market.
+
+        Trip conditions:
+        - > 70% stocks declining (market-wide selling)
+        - > 50 stocks hit floor price (panic)
+        - VN30 breadth < 20% (< 6/30 stocks advancing)
+
+        Args:
+            advancing: Number of advancing stocks
+            declining: Number of declining stocks
+            floor_hits: Number of stocks hitting floor price
+            vn30_advancing: Number of VN30 stocks advancing
+            vn30_total: Total VN30 stocks (default 30)
+
+        Returns:
+            (can_trade: bool, reason: str)
+        """
+        total_stocks = advancing + declining
+        if total_stocks == 0:
+            return (True, "No breadth data available")
+
+        # Calculate breadth metrics
+        decline_ratio = declining / total_stocks
+        vn30_breadth = vn30_advancing / vn30_total if vn30_total > 0 else 0.5
+
+        # Check 1: Market-wide selling (> 70% declining)
+        if decline_ratio > 0.70:
+            if not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 Market breadth circuit breaker: "
+                    f"{decline_ratio*100:.0f}% stocks declining (> 70%)"
+                )
+                self._save_stats()
+            return (
+                False,
+                f"🚫 Market-wide selling: {decline_ratio*100:.0f}% declining",
+            )
+
+        # Check 2: Panic selling (> 50 floor hits)
+        if floor_hits > 50:
+            if not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 Floor hit circuit breaker: " f"{floor_hits} stocks at floor price (> 50)"
+                )
+                self._save_stats()
+            return (
+                False,
+                f"🚫 Panic selling: {floor_hits} stocks at floor",
+            )
+
+        # Check 3: VN30 breadth < 20%
+        if vn30_breadth < 0.20:
+            if not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 VN30 breadth circuit breaker: "
+                    f"Only {vn30_advancing}/{vn30_total} advancing (< 20%)"
+                )
+                self._save_stats()
+            return (
+                False,
+                f"🚫 VN30 weakness: Only {vn30_advancing}/{vn30_total} advancing",
+            )
+
+        # Warning levels
+        if decline_ratio > 0.60:
+            return (
+                True,
+                f"⚠️ High decline ratio: {decline_ratio*100:.0f}% - reduce position sizes",
+            )
+
+        if vn30_breadth < 0.30:
+            return (
+                True,
+                f"⚠️ Weak VN30 breadth: {vn30_advancing}/{vn30_total} - caution advised",
+            )
+
+        return (True, f"✅ Market breadth OK: {advancing} advancing, {declining} declining")
+
+    def get_market_breadth_status(
+        self,
+        advancing: int = 0,
+        declining: int = 0,
+        floor_hits: int = 0,
+        ceiling_hits: int = 0,
+    ) -> Dict:
+        """
+        Get detailed market breadth status.
+
+        Returns:
+            Dict with breadth metrics and recommendations
+        """
+        total = advancing + declining
+        if total == 0:
+            return {"status": "NO_DATA", "recommendation": "Wait for market data"}
+
+        advance_ratio = advancing / total
+        decline_ratio = declining / total
+
+        # Determine market condition
+        if advance_ratio > 0.60:
+            condition = "BULLISH"
+            recommendation = "Normal trading - market breadth positive"
+        elif decline_ratio > 0.60:
+            condition = "BEARISH"
+            recommendation = "Reduce exposure - market breadth negative"
+        else:
+            condition = "NEUTRAL"
+            recommendation = "Selective trading - mixed breadth"
+
+        # Position size multiplier based on breadth
+        if advance_ratio > 0.70:
+            multiplier = 1.2  # Increase size in strong breadth
+        elif decline_ratio > 0.70:
+            multiplier = 0.3  # Heavily reduce in weak breadth
+        elif decline_ratio > 0.60:
+            multiplier = 0.5  # Reduce in moderately weak breadth
+        else:
+            multiplier = 1.0  # Normal
+
+        return {
+            "advancing": advancing,
+            "declining": declining,
+            "total": total,
+            "advance_ratio": advance_ratio,
+            "decline_ratio": decline_ratio,
+            "floor_hits": floor_hits,
+            "ceiling_hits": ceiling_hits,
+            "condition": condition,
+            "recommendation": recommendation,
+            "position_size_multiplier": multiplier,
+        }
+
 
 # Global instance
 _circuit_breaker = None

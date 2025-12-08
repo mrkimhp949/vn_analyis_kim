@@ -960,6 +960,179 @@ class MarginManager:
 
         return "\n".join(lines)
 
+    # =============================================================================
+    # INTEGRATION METHODS (NEW v7.0)
+    # =============================================================================
+
+    def check_and_block_if_margin_call(self) -> Tuple[bool, str]:
+        """
+        Check margin status and block new BUY orders if margin call active.
+
+        IMPROVED v7.0: Integration method for entry logic
+
+        This method should be called before any new BUY order to ensure
+        the account is not in margin call status.
+
+        Returns:
+            (can_trade, reason)
+            - (True, "OK") if trading allowed
+            - (False, reason) if trading blocked
+        """
+        with self._lock:
+            state = self.get_account_state()
+
+            if state.status == MarginStatus.FORCE_LIQUIDATION:
+                return (
+                    False,
+                    f"🚨 BLOCKED: Force liquidation active! "
+                    f"Equity: {state.equity_ratio:.1%} < {self.force_liquidation_level:.0%}. "
+                    f"Reduce positions immediately.",
+                )
+
+            if state.status == MarginStatus.MARGIN_CALL:
+                return (
+                    False,
+                    f"⚠️ BLOCKED: Margin call active! "
+                    f"Equity: {state.equity_ratio:.1%} < {self.margin_call_level:.0%}. "
+                    f"Deposit funds or reduce positions.",
+                )
+
+            if state.status == MarginStatus.WARNING:
+                # Allow trading but with warning
+                return (
+                    True,
+                    f"⚠️ WARNING: Approaching margin call. "
+                    f"Equity: {state.equity_ratio:.1%}. Consider reducing exposure.",
+                )
+
+            return (True, "OK")
+
+    def get_safe_position_size(
+        self,
+        symbol: str,
+        price: float,
+        target_position_value: float,
+    ) -> Tuple[int, float, str]:
+        """
+        Calculate safe position size considering margin constraints.
+
+        IMPROVED v7.0: Margin-aware position sizing
+
+        Args:
+            symbol: Stock symbol
+            price: Entry price
+            target_position_value: Desired position value
+
+        Returns:
+            (safe_quantity, safe_value, reason)
+        """
+        with self._lock:
+            state = self.get_account_state()
+
+            # Calculate maximum position that maintains healthy margin
+            # Target: Keep equity ratio above maintenance margin + 10% buffer
+            target_equity_ratio = self.maintenance_margin + 0.10  # 45%
+
+            # Available equity for new position
+            current_equity = state.total_equity
+            current_market_value = state.total_market_value
+
+            # Calculate max new position that keeps equity ratio >= target
+            # equity_ratio = equity / (market_value + new_position)
+            # target = equity / (market_value + max_new)
+            # max_new = (equity / target) - market_value
+            if target_equity_ratio > 0:
+                max_new_position = (current_equity / target_equity_ratio) - current_market_value
+            else:
+                max_new_position = 0
+
+            # Also constrain by buying power
+            max_by_buying_power = state.buying_power
+
+            # Take minimum of constraints
+            max_position_value = min(max_new_position, max_by_buying_power, target_position_value)
+            max_position_value = max(0, max_position_value)
+
+            # Calculate quantity (round to lot size)
+            safe_quantity = int(max_position_value / price)
+            safe_quantity = (safe_quantity // 100) * 100  # Round to lot
+
+            safe_value = safe_quantity * price
+
+            if safe_quantity <= 0:
+                return (
+                    0,
+                    0,
+                    f"Cannot open position: Insufficient margin. "
+                    f"Buying power: {state.buying_power:,.0f}, "
+                    f"Equity ratio: {state.equity_ratio:.1%}",
+                )
+
+            if safe_value < target_position_value:
+                return (
+                    safe_quantity,
+                    safe_value,
+                    f"Position reduced for margin safety: "
+                    f"{safe_value:,.0f} / {target_position_value:,.0f} "
+                    f"({safe_value/target_position_value*100:.0f}%)",
+                )
+
+            return (safe_quantity, safe_value, "OK")
+
+    def get_liquidation_priority_list(self) -> List[Dict]:
+        """
+        Get prioritized list of positions to liquidate if needed.
+
+        IMPROVED v7.0: Smart liquidation ordering
+
+        Priority order:
+        1. Largest unrealized loss (cut losers first)
+        2. Highest margin ratio (most leveraged)
+        3. Lowest liquidity (harder to exit later)
+
+        Returns:
+            List of positions with liquidation priority
+        """
+        with self._lock:
+            if not self._positions:
+                return []
+
+            # Score each position
+            scored_positions = []
+            for symbol, pos in self._positions.items():
+                # Loss score (higher = more loss = higher priority)
+                loss_score = -pos.unrealized_pnl / pos.cost_basis if pos.cost_basis > 0 else 0
+
+                # Margin score (higher margin ratio = higher priority)
+                margin_score = pos.margin_ratio
+
+                # Combined score (weighted)
+                priority_score = loss_score * 0.6 + margin_score * 0.4
+
+                scored_positions.append(
+                    {
+                        "symbol": symbol,
+                        "quantity": pos.quantity,
+                        "market_value": pos.market_value,
+                        "unrealized_pnl": pos.unrealized_pnl,
+                        "unrealized_pnl_pct": (
+                            pos.unrealized_pnl / pos.cost_basis * 100 if pos.cost_basis > 0 else 0
+                        ),
+                        "margin_ratio": pos.margin_ratio,
+                        "priority_score": priority_score,
+                        "recommendation": (
+                            "SELL FIRST"
+                            if priority_score > 0.3
+                            else "SELL IF NEEDED" if priority_score > 0 else "HOLD"
+                        ),
+                    }
+                )
+
+            # Sort by priority score (highest first)
+            scored_positions.sort(key=lambda x: x["priority_score"], reverse=True)
+
+            return scored_positions
+
 
 # =============================================================================
 # SINGLETON & HELPERS
@@ -980,6 +1153,24 @@ def get_margin_manager(
             margin_limit=margin_limit,
         )
     return _margin_manager
+
+
+def check_margin_before_entry() -> Tuple[bool, str]:
+    """
+    Quick helper to check margin status before entry.
+
+    Usage in entry_logic.py:
+        from src.risk.margin_manager import check_margin_before_entry
+        can_trade, reason = check_margin_before_entry()
+        if not can_trade:
+            return EntrySignal(should_enter=False, ...)
+    """
+    try:
+        manager = get_margin_manager()
+        return manager.check_and_block_if_margin_call()
+    except Exception as e:
+        logger.warning(f"Margin check failed: {e}")
+        return (True, "Margin check unavailable")
 
 
 # =============================================================================

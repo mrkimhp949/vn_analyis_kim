@@ -324,6 +324,186 @@ class SettlementTracker:
             self._save_state()
             return count
 
+    # =========================================================================
+    # NEW v7.0: CASH FLOW PREDICTION
+    # =========================================================================
+
+    def predict_cash_availability(
+        self,
+        total_cash: float,
+        days_ahead: int = 5,
+    ) -> Dict[str, Dict]:
+        """
+        Predict cash availability for each day in the next N days.
+
+        IMPROVED v7.0: Cash flow prediction for better position planning.
+
+        This helps traders plan position sizes by knowing when cash
+        will become available from pending settlements.
+
+        Args:
+            total_cash: Current total cash balance
+            days_ahead: Number of days to predict (default: 5)
+
+        Returns:
+            Dict of {date_str: {
+                "available_cash": float,
+                "settling_today": float,
+                "pending_after": float,
+                "can_trade_value": float,
+            }}
+        """
+        with self._lock:
+            today = date.today()
+            predictions = {}
+
+            # Get all pending settlements
+            pending_by_date = {}
+            for record in self._records:
+                if record.status != "PENDING" or record.side != "BUY":
+                    continue
+
+                try:
+                    settlement_str = record.settlement_date
+                    if "T" in settlement_str:
+                        settlement_date = datetime.fromisoformat(settlement_str).date()
+                    else:
+                        settlement_date = date.fromisoformat(settlement_str)
+
+                    if settlement_date not in pending_by_date:
+                        pending_by_date[settlement_date] = 0
+                    pending_by_date[settlement_date] += record.amount
+                except (ValueError, AttributeError):
+                    continue
+
+            # Calculate for each day
+            cumulative_settled = 0
+            total_pending = sum(pending_by_date.values())
+
+            for i in range(days_ahead + 1):
+                check_date = today + timedelta(days=i)
+
+                # Skip weekends
+                if check_date.weekday() >= 5:
+                    continue
+
+                # Amount settling on this day
+                settling_today = pending_by_date.get(check_date, 0)
+                cumulative_settled += settling_today
+
+                # Remaining pending after this day
+                pending_after = total_pending - cumulative_settled
+
+                # Available cash = total - pending + buffer
+                buffer = pending_after * 0.10
+                available = max(0, total_cash - pending_after - buffer)
+
+                # Can trade value (with 50% initial margin)
+                can_trade_value = available / 0.50  # 50% margin
+
+                predictions[check_date.isoformat()] = {
+                    "date": check_date.isoformat(),
+                    "day_name": check_date.strftime("%A"),
+                    "available_cash": available,
+                    "settling_today": settling_today,
+                    "pending_after": pending_after,
+                    "can_trade_value": can_trade_value,
+                    "utilization_pct": (
+                        (total_cash - available) / total_cash * 100 if total_cash > 0 else 0
+                    ),
+                }
+
+            return predictions
+
+    def get_optimal_entry_day(
+        self,
+        total_cash: float,
+        required_amount: float,
+        max_days_wait: int = 5,
+    ) -> Tuple[Optional[str], str]:
+        """
+        Find the optimal day to enter a position based on cash availability.
+
+        IMPROVED v7.0: Smart entry timing based on settlement schedule.
+
+        Args:
+            total_cash: Current total cash balance
+            required_amount: Amount needed for the position
+            max_days_wait: Maximum days willing to wait
+
+        Returns:
+            (optimal_date, reason)
+            - (date_str, "OK") if found
+            - (None, reason) if not possible within timeframe
+        """
+        predictions = self.predict_cash_availability(total_cash, max_days_wait)
+
+        for date_str, info in predictions.items():
+            if info["available_cash"] >= required_amount:
+                if date_str == date.today().isoformat():
+                    return (date_str, "Cash available today")
+                else:
+                    return (
+                        date_str,
+                        f"Cash available on {info['day_name']} "
+                        f"(settling: {info['settling_today']:,.0f} VND)",
+                    )
+
+        # Not possible within timeframe
+        max_available = max(p["available_cash"] for p in predictions.values())
+        return (
+            None,
+            f"Insufficient cash within {max_days_wait} days. "
+            f"Max available: {max_available:,.0f}, Need: {required_amount:,.0f}",
+        )
+
+    def get_cash_flow_report(self, total_cash: float) -> str:
+        """
+        Generate a formatted cash flow report.
+
+        Args:
+            total_cash: Current total cash balance
+
+        Returns:
+            Formatted string report
+        """
+        predictions = self.predict_cash_availability(total_cash, days_ahead=5)
+        summary = self.get_settlement_summary()
+
+        lines = [
+            "=" * 60,
+            "💰 T+2 CASH FLOW PREDICTION REPORT",
+            "=" * 60,
+            f"Total Cash Balance: {total_cash:>15,.0f} VND",
+            f"Pending Settlements: {summary['pending_buy_amount']:>14,.0f} VND",
+            f"Net Pending: {summary['net_pending']:>22,.0f} VND",
+            "-" * 60,
+            "📅 DAILY CASH AVAILABILITY:",
+            "-" * 60,
+        ]
+
+        for date_str, info in predictions.items():
+            emoji = "🟢" if info["available_cash"] > total_cash * 0.5 else "🟡"
+            lines.append(
+                f"   {emoji} {info['day_name'][:3]} {date_str}: "
+                f"{info['available_cash']:>12,.0f} VND available "
+                f"(+{info['settling_today']:,.0f} settling)"
+            )
+
+        lines.append("-" * 60)
+        lines.append("📊 PENDING SETTLEMENTS:")
+
+        for record in self._records:
+            if record.status == "PENDING":
+                lines.append(
+                    f"   • {record.side} {record.symbol}: {record.amount:,.0f} VND "
+                    f"→ {record.settlement_date}"
+                )
+
+        lines.append("=" * 60)
+
+        return "\n".join(lines)
+
 
 # Singleton instance
 _tracker_instance: Optional[SettlementTracker] = None

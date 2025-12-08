@@ -661,3 +661,423 @@ def get_auction_strategy() -> AuctionStrategy:
     if _strategy_instance is None:
         _strategy_instance = AuctionStrategy()
     return _strategy_instance
+
+
+# =============================================================================
+# NEW v7.0: INSTITUTIONAL FLOW DETECTION
+# =============================================================================
+
+
+@dataclass
+class InstitutionalFlowSignal:
+    """Signal from institutional flow analysis"""
+
+    symbol: str
+    flow_type: str  # "ACCUMULATION", "DISTRIBUTION", "NEUTRAL"
+    confidence: float  # 0-100
+    large_block_count: int
+    large_block_volume: int
+    order_book_imbalance: float  # -1 to +1 (negative = more sells)
+    foreign_flow_direction: str  # "BUY", "SELL", "NEUTRAL"
+    etf_rebalancing_impact: float  # -1 to +1
+    proprietary_trading_signal: str  # "BUY", "SELL", "NEUTRAL"
+    reasons: List[str]
+    timestamp: str
+
+
+class InstitutionalFlowAnalyzer:
+    """
+    Detect institutional activity in Vietnam market.
+
+    NEW v7.0: Analyzes multiple signals to detect smart money:
+    - Large block orders (> 10,000 shares)
+    - Order book imbalance
+    - Foreign fund flows
+    - ETF rebalancing (VN30 ETF, VFMVN30)
+    - Proprietary trading from securities companies
+
+    Vietnam-specific considerations:
+    - Foreign ownership limits (30% for banks, 49% for others)
+    - T+2 settlement affects institutional behavior
+    - ATO/ATC sessions have higher institutional participation
+
+    Usage:
+        analyzer = InstitutionalFlowAnalyzer()
+        signal = analyzer.analyze_institutional_flow("VNM")
+        if signal.flow_type == "ACCUMULATION":
+            print("Institutional buying detected")
+    """
+
+    # Thresholds
+    LARGE_BLOCK_THRESHOLD = 10_000  # 10,000 shares = large block
+    VERY_LARGE_BLOCK_THRESHOLD = 50_000  # 50,000 shares = very large
+    IMBALANCE_THRESHOLD = 0.3  # 30% imbalance = significant
+    HIGH_CONFIDENCE_THRESHOLD = 70
+
+    # VN30 ETF symbols for rebalancing detection
+    VN30_ETF_SYMBOLS = ["E1VFVN30", "FUEVFVND", "FUESSVFL"]
+
+    def __init__(
+        self,
+        large_block_threshold: int = 10_000,
+        use_foreign_flow: bool = True,
+        use_etf_rebalancing: bool = True,
+        cache_ttl_seconds: int = 300,  # 5 minutes
+    ):
+        self.large_block_threshold = large_block_threshold
+        self.use_foreign_flow = use_foreign_flow
+        self.use_etf_rebalancing = use_etf_rebalancing
+        self.cache_ttl = cache_ttl_seconds
+
+        # Cache
+        self._cache: Dict[str, InstitutionalFlowSignal] = {}
+        self._cache_time: Dict[str, datetime] = {}
+
+    def analyze_institutional_flow(
+        self,
+        symbol: str,
+        df: Optional[pd.DataFrame] = None,
+        order_book: Optional[Dict] = None,
+        foreign_flow: Optional[Dict] = None,
+    ) -> InstitutionalFlowSignal:
+        """
+        Analyze institutional flow for a symbol.
+
+        Args:
+            symbol: Stock symbol
+            df: Historical price/volume data
+            order_book: Current order book data (bid/ask)
+            foreign_flow: Foreign investor flow data
+
+        Returns:
+            InstitutionalFlowSignal with analysis results
+        """
+        symbol = symbol.upper()
+
+        # Check cache
+        if self._is_cache_valid(symbol):
+            return self._cache[symbol]
+
+        reasons = []
+        confidence = 50.0
+
+        # 1. Analyze large block orders
+        large_block_count, large_block_volume = self._analyze_large_blocks(df)
+        if large_block_count > 0:
+            confidence += min(20, large_block_count * 5)
+            reasons.append(f"Large blocks: {large_block_count} ({large_block_volume:,} shares)")
+
+        # 2. Analyze order book imbalance
+        order_book_imbalance = self._analyze_order_book_imbalance(order_book)
+        if abs(order_book_imbalance) > self.IMBALANCE_THRESHOLD:
+            direction = "BUY" if order_book_imbalance > 0 else "SELL"
+            confidence += 10
+            reasons.append(f"Order book imbalance: {direction} ({order_book_imbalance:+.2f})")
+
+        # 3. Analyze foreign flow
+        foreign_flow_direction = "NEUTRAL"
+        if self.use_foreign_flow and foreign_flow:
+            foreign_flow_direction = self._analyze_foreign_flow(foreign_flow)
+            if foreign_flow_direction != "NEUTRAL":
+                confidence += 15
+                reasons.append(f"Foreign flow: {foreign_flow_direction}")
+
+        # 4. Check ETF rebalancing impact
+        etf_impact = 0.0
+        if self.use_etf_rebalancing:
+            etf_impact = self._check_etf_rebalancing_impact(symbol)
+            if abs(etf_impact) > 0.1:
+                direction = "BUY" if etf_impact > 0 else "SELL"
+                confidence += 10
+                reasons.append(f"ETF rebalancing: {direction} impact")
+
+        # 5. Detect proprietary trading signals
+        prop_trading_signal = self._detect_proprietary_trading(df)
+        if prop_trading_signal != "NEUTRAL":
+            confidence += 10
+            reasons.append(f"Proprietary trading: {prop_trading_signal}")
+
+        # 6. Determine overall flow type
+        flow_type = self._determine_flow_type(
+            order_book_imbalance,
+            foreign_flow_direction,
+            etf_impact,
+            prop_trading_signal,
+            large_block_count,
+        )
+
+        # Adjust confidence based on flow clarity
+        if flow_type == "NEUTRAL":
+            confidence = min(confidence, 50)
+
+        signal = InstitutionalFlowSignal(
+            symbol=symbol,
+            flow_type=flow_type,
+            confidence=min(100, confidence),
+            large_block_count=large_block_count,
+            large_block_volume=large_block_volume,
+            order_book_imbalance=order_book_imbalance,
+            foreign_flow_direction=foreign_flow_direction,
+            etf_rebalancing_impact=etf_impact,
+            proprietary_trading_signal=prop_trading_signal,
+            reasons=reasons,
+            timestamp=datetime.now().isoformat(),
+        )
+
+        # Cache result
+        self._cache[symbol] = signal
+        self._cache_time[symbol] = datetime.now()
+
+        return signal
+
+    def _analyze_large_blocks(
+        self,
+        df: Optional[pd.DataFrame],
+    ) -> Tuple[int, int]:
+        """
+        Analyze large block orders from volume data.
+
+        Returns:
+            Tuple of (block_count, total_block_volume)
+        """
+        if df is None or df.empty or "volume" not in df.columns:
+            return 0, 0
+
+        try:
+            # Look at recent volume spikes
+            recent_volume = df["volume"].tail(5)
+            avg_volume = df["volume"].tail(20).mean()
+
+            # Count bars with volume > 2x average (proxy for large blocks)
+            large_block_count = sum(recent_volume > avg_volume * 2)
+            large_block_volume = int(recent_volume[recent_volume > avg_volume * 2].sum())
+
+            return large_block_count, large_block_volume
+
+        except Exception as e:
+            logger.debug(f"Large block analysis failed: {e}")
+            return 0, 0
+
+    def _analyze_order_book_imbalance(
+        self,
+        order_book: Optional[Dict],
+    ) -> float:
+        """
+        Analyze order book imbalance.
+
+        Returns:
+            Imbalance ratio from -1 (all sells) to +1 (all buys)
+        """
+        if not order_book:
+            return 0.0
+
+        try:
+            bid_volume = order_book.get("total_bid_volume", 0)
+            ask_volume = order_book.get("total_ask_volume", 0)
+
+            total = bid_volume + ask_volume
+            if total == 0:
+                return 0.0
+
+            # Positive = more bids (buying pressure)
+            # Negative = more asks (selling pressure)
+            imbalance = (bid_volume - ask_volume) / total
+            return max(-1, min(1, imbalance))
+
+        except Exception as e:
+            logger.debug(f"Order book analysis failed: {e}")
+            return 0.0
+
+    def _analyze_foreign_flow(self, foreign_flow: Dict) -> str:
+        """Analyze foreign investor flow direction."""
+        try:
+            score = foreign_flow.get("score", 0)
+            net_value = foreign_flow.get("net_value", 0)
+            consecutive_days = foreign_flow.get("consecutive_days", 0)
+
+            # Strong signal if consecutive days
+            if consecutive_days >= 3:
+                if score > 0.3 or net_value > 0:
+                    return "BUY"
+                elif score < -0.3 or net_value < 0:
+                    return "SELL"
+
+            # Single day signal
+            if score > 0.5:
+                return "BUY"
+            elif score < -0.5:
+                return "SELL"
+
+            return "NEUTRAL"
+
+        except Exception:
+            return "NEUTRAL"
+
+    def _check_etf_rebalancing_impact(self, symbol: str) -> float:
+        """
+        Check if symbol is affected by ETF rebalancing.
+
+        VN30 ETF rebalancing happens quarterly and can cause
+        significant price impact for constituent stocks.
+
+        Returns:
+            Impact from -1 (selling pressure) to +1 (buying pressure)
+        """
+        try:
+            # Check if symbol is in VN30
+            from src.config.constants import VN30_SYMBOLS
+
+            if symbol not in VN30_SYMBOLS:
+                return 0.0
+
+            # Check if near rebalancing date (quarterly)
+            now = datetime.now()
+            # Rebalancing typically happens in Jan, Apr, Jul, Oct
+            rebalancing_months = [1, 4, 7, 10]
+
+            # If within 2 weeks of rebalancing month start
+            if now.month in rebalancing_months and now.day <= 14:
+                # Placeholder - in production, check actual rebalancing data
+                # to determine if stock is being added/removed
+                return 0.1  # Slight positive bias during rebalancing
+
+            return 0.0
+
+        except Exception:
+            return 0.0
+
+    def _detect_proprietary_trading(
+        self,
+        df: Optional[pd.DataFrame],
+    ) -> str:
+        """
+        Detect proprietary trading signals from securities companies.
+
+        Proprietary desks often trade at specific times:
+        - ATO/ATC sessions
+        - End of month/quarter
+        - Before earnings announcements
+
+        Returns:
+            "BUY", "SELL", or "NEUTRAL"
+        """
+        if df is None or df.empty:
+            return "NEUTRAL"
+
+        try:
+            # Check for unusual volume patterns
+            # Proprietary trading often shows up as volume spikes
+            # at specific times
+
+            recent_volume = df["volume"].tail(3).mean()
+            avg_volume = df["volume"].tail(20).mean()
+
+            # Check price direction with volume
+            recent_close = df["close"].iloc[-1]
+            prev_close = df["close"].iloc[-2] if len(df) >= 2 else recent_close
+
+            volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
+            price_change = (recent_close - prev_close) / prev_close if prev_close > 0 else 0
+
+            # High volume + price up = institutional buying
+            if volume_ratio > 1.5 and price_change > 0.01:
+                return "BUY"
+            # High volume + price down = institutional selling
+            elif volume_ratio > 1.5 and price_change < -0.01:
+                return "SELL"
+
+            return "NEUTRAL"
+
+        except Exception:
+            return "NEUTRAL"
+
+    def _determine_flow_type(
+        self,
+        order_book_imbalance: float,
+        foreign_flow: str,
+        etf_impact: float,
+        prop_trading: str,
+        large_blocks: int,
+    ) -> str:
+        """Determine overall institutional flow type."""
+        buy_signals = 0
+        sell_signals = 0
+
+        # Order book
+        if order_book_imbalance > self.IMBALANCE_THRESHOLD:
+            buy_signals += 1
+        elif order_book_imbalance < -self.IMBALANCE_THRESHOLD:
+            sell_signals += 1
+
+        # Foreign flow
+        if foreign_flow == "BUY":
+            buy_signals += 2  # Higher weight
+        elif foreign_flow == "SELL":
+            sell_signals += 2
+
+        # ETF impact
+        if etf_impact > 0.1:
+            buy_signals += 1
+        elif etf_impact < -0.1:
+            sell_signals += 1
+
+        # Proprietary trading
+        if prop_trading == "BUY":
+            buy_signals += 1
+        elif prop_trading == "SELL":
+            sell_signals += 1
+
+        # Large blocks (neutral indicator, just adds confidence)
+
+        # Determine type
+        if buy_signals >= 3 and buy_signals > sell_signals:
+            return "ACCUMULATION"
+        elif sell_signals >= 3 and sell_signals > buy_signals:
+            return "DISTRIBUTION"
+        else:
+            return "NEUTRAL"
+
+    def _is_cache_valid(self, symbol: str) -> bool:
+        """Check if cache is valid for a symbol."""
+        if symbol not in self._cache or symbol not in self._cache_time:
+            return False
+        age = (datetime.now() - self._cache_time[symbol]).total_seconds()
+        return age < self.cache_ttl
+
+    def get_entry_adjustment(
+        self,
+        symbol: str,
+        df: Optional[pd.DataFrame] = None,
+        foreign_flow: Optional[Dict] = None,
+    ) -> Tuple[int, str]:
+        """
+        Get confidence adjustment for entry based on institutional flow.
+
+        Returns:
+            Tuple of (adjustment, reason)
+            adjustment: -20 to +20 confidence points
+        """
+        signal = self.analyze_institutional_flow(symbol, df, foreign_flow=foreign_flow)
+
+        if signal.flow_type == "ACCUMULATION" and signal.confidence >= 70:
+            return +15, f"Institutional accumulation detected ({signal.confidence:.0f}% conf)"
+        elif signal.flow_type == "ACCUMULATION":
+            return +8, f"Possible institutional buying ({signal.confidence:.0f}% conf)"
+        elif signal.flow_type == "DISTRIBUTION" and signal.confidence >= 70:
+            return -15, f"Institutional distribution detected ({signal.confidence:.0f}% conf)"
+        elif signal.flow_type == "DISTRIBUTION":
+            return -8, f"Possible institutional selling ({signal.confidence:.0f}% conf)"
+        else:
+            return 0, "No clear institutional signal"
+
+
+# Singleton instance
+_institutional_flow_instance: Optional[InstitutionalFlowAnalyzer] = None
+
+
+def get_institutional_flow_analyzer() -> InstitutionalFlowAnalyzer:
+    """Get singleton instance of institutional flow analyzer."""
+    global _institutional_flow_instance
+    if _institutional_flow_instance is None:
+        _institutional_flow_instance = InstitutionalFlowAnalyzer()
+    return _institutional_flow_instance
