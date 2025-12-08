@@ -175,25 +175,105 @@ VIETNAM_FIXED_HOLIDAYS = {
     (9, 2): "National Day",
 }
 
-# Lunar calendar holidays - Tết Nguyên Đán (Vietnamese New Year)
-# These dates change each year based on lunar calendar
-# Format: year -> list of (month, day) tuples for Tết holidays
+# =============================================================================
+# LUNAR CALENDAR HOLIDAYS - Updated 2024-2030
+# Source: Vietnamese Government, Ministry of Labor announcements
+# =============================================================================
+
+# Tết Nguyên Đán (Vietnamese New Year) - varies by lunar calendar
+# Format: year -> list of (month, day) tuples for Tết holidays (including Eve + 5 days off)
 VIETNAM_TET_HOLIDAYS = {
     2024: [(2, 8), (2, 9), (2, 10), (2, 11), (2, 12), (2, 13), (2, 14)],  # Year of Dragon
     2025: [(1, 27), (1, 28), (1, 29), (1, 30), (1, 31), (2, 1), (2, 2)],  # Year of Snake
-    2026: [(2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (2, 20), (2, 21)],  # Year of Horse
+    2026: [(2, 14), (2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (2, 20)],  # Year of Horse
     2027: [(2, 5), (2, 6), (2, 7), (2, 8), (2, 9), (2, 10), (2, 11)],  # Year of Goat
     2028: [(1, 25), (1, 26), (1, 27), (1, 28), (1, 29), (1, 30), (1, 31)],  # Year of Monkey
+    2029: [(2, 12), (2, 13), (2, 14), (2, 15), (2, 16), (2, 17), (2, 18)],  # Year of Rooster
+    2030: [(2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8)],  # Year of Dog
 }
 
-# Hung Kings' Commemoration Day (10th day of 3rd lunar month)
+# Giỗ Tổ Hùng Vương (10th day of 3rd lunar month)
+# This is a national holiday - stock market closed
 VIETNAM_HUNG_KINGS_DAY = {
     2024: (4, 18),
     2025: (4, 7),
     2026: (4, 26),
     2027: (4, 15),
     2028: (4, 4),
+    2029: (4, 23),
+    2030: (4, 12),
 }
+
+
+def get_lunar_holidays_for_year(year: int) -> list:
+    """
+    Get lunar holidays (Tết + Giỗ Tổ Hùng Vương) for a specific year.
+
+    Args:
+        year: Year to get holidays for
+
+    Returns:
+        List of (month, day) tuples for lunar holidays
+    """
+    holidays = []
+
+    # Tết holidays
+    if year in VIETNAM_TET_HOLIDAYS:
+        holidays.extend(VIETNAM_TET_HOLIDAYS[year])
+    else:
+        # Fallback: use approximate dates if year not defined
+        logger.warning(f"Tết holidays for {year} not defined, using approximate dates")
+        holidays.extend([(1, 28), (1, 29), (1, 30), (1, 31), (2, 1), (2, 2), (2, 3)])
+
+    # Giỗ Tổ Hùng Vương
+    if year in VIETNAM_HUNG_KINGS_DAY:
+        holidays.append(VIETNAM_HUNG_KINGS_DAY[year])
+    else:
+        # Typically mid-April
+        logger.warning(f"Hung Kings Day for {year} not defined, using April 10")
+        holidays.append((4, 10))
+
+    return holidays
+
+
+def is_vietnam_public_holiday(dt: Optional[datetime] = None) -> Tuple[bool, str]:
+    """
+    Check if date is a Vietnam public holiday with holiday name.
+
+    Args:
+        dt: Datetime to check (None = today)
+
+    Returns:
+        Tuple of (is_holiday, holiday_name)
+    """
+    if dt is None:
+        try:
+            import pytz
+
+            vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+            dt = datetime.now(vn_tz)
+        except ImportError:
+            dt = datetime.now()
+
+    year = dt.year
+    month_day = (dt.month, dt.day)
+
+    # Check fixed holidays
+    if month_day in VIETNAM_FIXED_HOLIDAYS:
+        return True, VIETNAM_FIXED_HOLIDAYS[month_day]
+
+    # Check Tết holidays
+    if year in VIETNAM_TET_HOLIDAYS:
+        if month_day in VIETNAM_TET_HOLIDAYS[year]:
+            return True, "Tết Nguyên Đán"
+
+    # Check Hung Kings Day
+    if year in VIETNAM_HUNG_KINGS_DAY:
+        if month_day == VIETNAM_HUNG_KINGS_DAY[year]:
+            return True, "Giỗ Tổ Hùng Vương"
+
+    return False, ""
+
 
 # Foreign ownership limits by sector (approximate)
 VN_FOREIGN_LIMITS = {
@@ -2002,14 +2082,35 @@ def get_vietnam_market_validator() -> VietnamMarketValidator:
 
 
 # =============================================================================
-# NEW v5.0: MARKET HALT DETECTION (Vietnam Market Circuit Breaker)
+# MARKET CIRCUIT BREAKER - Vietnam (Updated per SSC Circular 120/2020/TT-BTC)
+# =============================================================================
+#
+# Theo Thông tư 120/2020/TT-BTC của Bộ Tài chính:
+# - Áp dụng cho HOSE với chỉ số VN-Index
+# - Các ngưỡng dựa trên biến động so với giá tham chiếu
+#
+# SSC Circuit Breaker Rules (effective 2020):
+# - Level 1 (-5%): Cảnh báo, tăng cường giám sát
+# - Level 2 (-7%): Tạm ngừng giao dịch 15 phút
+# - Level 3 (-10%): Tạm ngừng giao dịch 30 phút, có thể đóng cửa sớm
+#
+# Note: HNX có quy định tương tự với HNX-Index
 # =============================================================================
 
-# Vietnam market circuit breaker thresholds
 VN_MARKET_CIRCUIT_BREAKER = {
-    "LEVEL_1": -5.0,  # -5% VNINDEX: Warning, increased monitoring
-    "LEVEL_2": -7.0,  # -7% VNINDEX: Trading halt 15 minutes
-    "LEVEL_3": -10.0,  # -10% VNINDEX: Trading halt 30 minutes, may close early
+    # Threshold levels (percentage drop from reference price)
+    "LEVEL_1": -5.0,  # Warning level - increased monitoring, reduce positions
+    "LEVEL_2": -7.0,  # Trading halt 15 minutes
+    "LEVEL_3": -10.0,  # Trading halt 30 minutes, possible early close
+    # Halt durations (minutes)
+    "HALT_DURATION_L2": 15,
+    "HALT_DURATION_L3": 30,
+    # Actions
+    "L1_ACTION": "REDUCE_POSITION_SIZE",  # Giảm size position
+    "L2_ACTION": "HALT_NEW_ORDERS",  # Không đặt lệnh mới
+    "L3_ACTION": "EMERGENCY_EXIT",  # Xem xét thoát vị thế
+    # Recovery behavior
+    "RESUME_DELAY_MINUTES": 5,  # Chờ 5 phút sau khi resume để trade
 }
 
 
@@ -2020,17 +2121,17 @@ def check_market_halt_status(
     """
     Check if Vietnam market circuit breaker is triggered.
 
-    Vietnam market has circuit breaker rules:
-    - Level 1 (-5%): Warning, increased monitoring
-    - Level 2 (-7%): Trading halt 15 minutes
-    - Level 3 (-10%): Trading halt 30 minutes, may close early
+    Theo Thông tư 120/2020/TT-BTC của Bộ Tài chính:
+    - Level 1 (-5%): Cảnh báo, giảm position size 50%
+    - Level 2 (-7%): Tạm ngừng giao dịch 15 phút, không đặt lệnh mới
+    - Level 3 (-10%): Tạm ngừng 30 phút, xem xét đóng cửa sớm
 
     Args:
         vnindex_change_pct: VNINDEX change percentage (e.g., -5.0 for -5%)
         current_time: Current time (optional)
 
     Returns:
-        Dict with halt status, level, message, and trading_allowed
+        Dict with halt status, level, message, trading_allowed, and recommended_action
     """
     result = {
         "halt_triggered": False,
@@ -2039,6 +2140,8 @@ def check_market_halt_status(
         "trading_allowed": True,
         "message": "✅ Market trading normally",
         "vnindex_change": vnindex_change_pct,
+        "recommended_action": None,
+        "position_size_multiplier": 1.0,  # Full position size allowed
     }
 
     if vnindex_change_pct >= VN_MARKET_CIRCUIT_BREAKER["LEVEL_1"]:
@@ -2046,11 +2149,13 @@ def check_market_halt_status(
         return result
 
     if vnindex_change_pct >= VN_MARKET_CIRCUIT_BREAKER["LEVEL_2"]:
-        # Level 1: Warning
+        # Level 1: Warning - reduce position sizes
         result["halt_level"] = 1
+        result["position_size_multiplier"] = 0.5  # Reduce to 50%
+        result["recommended_action"] = VN_MARKET_CIRCUIT_BREAKER["L1_ACTION"]
         result["message"] = (
-            f"⚠️ MARKET WARNING: VNINDEX {vnindex_change_pct:+.2f}% - "
-            f"Approaching circuit breaker level. Reduce position sizes."
+            f"⚠️ CẢNH BÁO THỊ TRƯỜNG: VNINDEX {vnindex_change_pct:+.2f}% - "
+            f"Gần ngưỡng circuit breaker. Giảm position size 50%."
         )
         return result
 
@@ -2058,23 +2163,28 @@ def check_market_halt_status(
         # Level 2: Trading halt 15 minutes
         result["halt_triggered"] = True
         result["halt_level"] = 2
-        result["halt_duration_minutes"] = 15
+        result["halt_duration_minutes"] = VN_MARKET_CIRCUIT_BREAKER["HALT_DURATION_L2"]
         result["trading_allowed"] = False
+        result["position_size_multiplier"] = 0.0  # No new positions
+        result["recommended_action"] = VN_MARKET_CIRCUIT_BREAKER["L2_ACTION"]
         result["message"] = (
-            f"🚫 MARKET HALT LEVEL 2: VNINDEX {vnindex_change_pct:+.2f}% - "
-            f"Trading halted for 15 minutes. DO NOT place orders."
+            f"🚫 TẠM NGỪNG GIAO DỊCH CẤP 2: VNINDEX {vnindex_change_pct:+.2f}% - "
+            f"Sàn tạm ngừng {VN_MARKET_CIRCUIT_BREAKER['HALT_DURATION_L2']} phút. "
+            f"KHÔNG đặt lệnh mới."
         )
         return result
 
     # Level 3: Trading halt 30 minutes, may close early
     result["halt_triggered"] = True
     result["halt_level"] = 3
-    result["halt_duration_minutes"] = 30
+    result["halt_duration_minutes"] = VN_MARKET_CIRCUIT_BREAKER["HALT_DURATION_L3"]
     result["trading_allowed"] = False
+    result["position_size_multiplier"] = 0.0
+    result["recommended_action"] = VN_MARKET_CIRCUIT_BREAKER["L3_ACTION"]
     result["message"] = (
-        f"🚨 MARKET HALT LEVEL 3: VNINDEX {vnindex_change_pct:+.2f}% - "
-        f"Trading halted for 30 minutes. Market may close early. "
-        f"CRITICAL: Review all positions immediately."
+        f"🚨 TẠM NGỪNG CẤP 3: VNINDEX {vnindex_change_pct:+.2f}% - "
+        f"Sàn tạm ngừng {VN_MARKET_CIRCUIT_BREAKER['HALT_DURATION_L3']} phút. "
+        f"Có thể đóng cửa sớm. XEM XÉT THOÁT VỊ THẾ ngay."
     )
     return result
 

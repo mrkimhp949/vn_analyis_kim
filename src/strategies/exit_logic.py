@@ -1262,15 +1262,62 @@ class ImprovedExitStrategy:
                     },
                 )
 
-            # GAP UP PROFIT TAKING: Gap up > 4% - consider partial exit
-            if gap_percent >= VN_GAP_UP_PROFIT_TAKE_THRESHOLD and pnl_percent > 3.0:
-                # Don't force exit, but log recommendation
-                logger.info(
-                    f"📈 {symbol}: Gap UP {gap_percent_display:.1f}% with {pnl_percent:+.2f}% profit. "
-                    f"Consider partial profit taking (gap may reverse)."
+            # GAP UP PROFIT TAKING: Gap up > 4% - IMPROVED v7.0
+            # VN market: Strong gap up near ceiling often reverses
+            # Take partial profit to lock in gains
+            VN_GAP_UP_PARTIAL_THRESHOLD = 0.04  # +4% gap → partial exit (50%)
+            VN_GAP_UP_FULL_THRESHOLD = 0.06  # +6% gap → full exit (near ceiling)
+
+            if gap_percent >= VN_GAP_UP_FULL_THRESHOLD and pnl_percent > 3.0:
+                # Near ceiling (+6-7%) - exit fully to lock in gains
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.TAKE_PROFIT_2,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📈 GAP UP NEAR CEILING: {gap_percent_display:.1f}% gap - "
+                        f"chốt toàn bộ {pnl_percent:+.2f}% (near ±7% limit)"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "gap_percent": gap_percent_display,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "gap_up_near_ceiling",
+                    },
                 )
-                # Return None - let user decide, but metadata will be available
-                ctx["gap_up_profit_take_recommended"] = True
+
+            if gap_percent >= VN_GAP_UP_PARTIAL_THRESHOLD and pnl_percent > 2.0:
+                # Check if partial exit already done
+                partial_exits = ctx.get("partial_exits", [])
+                if not partial_exits:  # No partial exit yet
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.TAKE_PROFIT_1,
+                        exit_type="PARTIAL_50%",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"📈 GAP UP PROFIT TAKE: {gap_percent_display:.1f}% gap - "
+                            f"chốt 50% với {pnl_percent:+.2f}% profit (gap may reverse)"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "gap_percent": gap_percent_display,
+                            "prev_close": prev_close,
+                            "today_open": today_open,
+                            "trigger": "gap_up_profit_taking",
+                        },
+                    )
+                else:
+                    logger.info(
+                        f"📈 {symbol}: Gap UP {gap_percent_display:.1f}% but partial exit already done. "
+                        f"Holding remaining position."
+                    )
 
             # Log significant gaps for monitoring
             if gap_percent <= -0.02:  # -2%

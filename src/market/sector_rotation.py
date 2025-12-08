@@ -255,6 +255,18 @@ class RotationSignal:
     rationale: str
 
 
+@dataclass
+class SectorAnalysisResult:
+    """Result from sector rotation analysis for regime detector integration."""
+
+    score: float  # -1 to +1 overall sector rotation score
+    leading_sectors: List[str]  # Sectors with strong momentum (overweight)
+    lagging_sectors: List[str]  # Sectors with weak momentum (underweight)
+    phase: str  # Market phase: EARLY_BULL, LATE_BULL, EARLY_BEAR, LATE_BEAR, ROTATION
+    confidence: float  # 0-100
+    timestamp: str
+
+
 class SectorRotationAnalyzer:
     """
     Analyze sector momentum for rotation strategy.
@@ -542,6 +554,92 @@ class SectorRotationAnalyzer:
 
         return " | ".join(parts) if parts else "No clear rotation signal"
 
+    def analyze(self, force_refresh: bool = False) -> SectorAnalysisResult:
+        """
+        Analyze sector rotation and return standardized result.
+
+        This method is used by regime_detector.py for market regime analysis.
+
+        Returns:
+            SectorAnalysisResult with score, leading/lagging sectors, and phase
+        """
+        signal = self.get_rotation_signal(force_refresh)
+        momentum_data = self.get_sector_momentum(force_refresh)
+
+        # Calculate overall rotation score
+        if momentum_data:
+            scores = [m.momentum_score for m in momentum_data.values()]
+            avg_score = sum(scores) / len(scores)
+
+            # Adjust score based on rotation clarity
+            if signal.overweight and signal.underweight:
+                # Clear rotation happening
+                spread = len(signal.overweight) + len(signal.underweight)
+                rotation_bonus = min(0.2, spread * 0.05)
+                score = avg_score + rotation_bonus
+            else:
+                score = avg_score
+
+            score = max(-1.0, min(1.0, score))
+        else:
+            score = 0.0
+
+        # Determine market phase based on sector leadership
+        phase = self._determine_phase(signal, momentum_data)
+
+        return SectorAnalysisResult(
+            score=score,
+            leading_sectors=signal.overweight,
+            lagging_sectors=signal.underweight,
+            phase=phase,
+            confidence=signal.confidence,
+            timestamp=signal.timestamp,
+        )
+
+    def _determine_phase(
+        self, signal: RotationSignal, momentum_data: Dict[str, SectorMomentum]
+    ) -> str:
+        """
+        Determine market phase based on sector leadership patterns.
+
+        Vietnam market phases:
+        - EARLY_BULL: Banking/Securities lead, broad participation
+        - LATE_BULL: Real Estate/Consumer lead, narrowing breadth
+        - EARLY_BEAR: Defensive (Consumer/Tech) lead, cyclicals weaken
+        - LATE_BEAR: All sectors weak, capitulation
+        - ROTATION: Mixed leadership, sector-specific moves
+        """
+        if not momentum_data or not signal.overweight:
+            return "UNKNOWN"
+
+        leading = set(signal.overweight)
+        lagging = set(signal.underweight)
+
+        # Check for early bull: Banking/Securities leading
+        early_bull_leaders = {"BANKING", "SECURITIES"}
+        if leading & early_bull_leaders and len(signal.overweight) >= 2:
+            return "EARLY_BULL"
+
+        # Check for late bull: Real Estate/Consumer leading
+        late_bull_leaders = {"REAL_ESTATE", "CONSUMER"}
+        if leading & late_bull_leaders and "BANKING" in lagging:
+            return "LATE_BULL"
+
+        # Check for early bear: Defensive leading, cyclicals lagging
+        defensive = {"CONSUMER", "TECHNOLOGY", "UTILITIES"}
+        cyclicals = {"SECURITIES", "REAL_ESTATE", "INDUSTRIAL"}
+        if leading & defensive and lagging & cyclicals:
+            return "EARLY_BEAR"
+
+        # Check for late bear: Most sectors negative
+        if momentum_data:
+            negative_count = sum(1 for m in momentum_data.values() if m.momentum_score < -0.2)
+            if negative_count >= len(momentum_data) * 0.7:
+                return "LATE_BEAR"
+
+        # Default: Rotation phase
+        return "ROTATION"
+
     def get_sector_for_symbol(self, symbol: str) -> Optional[str]:
         """Get sector for a given symbol"""
         symbol = symbol.upper()
@@ -591,6 +689,54 @@ def get_sector_rotation_analyzer() -> SectorRotationAnalyzer:
     if _analyzer_instance is None:
         _analyzer_instance = SectorRotationAnalyzer()
     return _analyzer_instance
+
+
+# Alias for backward compatibility
+get_sector_analyzer = get_sector_rotation_analyzer
+
+
+def get_symbol_sector_info(symbol: str) -> Dict:
+    """
+    Get sector information for a symbol.
+
+    Convenience function that uses the singleton analyzer.
+
+    Args:
+        symbol: Stock symbol (e.g., "VNM", "VCB")
+
+    Returns:
+        Dict with sector_id, is_leading, is_lagging, momentum_score
+    """
+    analyzer = get_sector_rotation_analyzer()
+    sector = analyzer.get_sector_for_symbol(symbol)
+
+    if not sector:
+        return {
+            "sector_id": "unknown",
+            "is_leading": False,
+            "is_lagging": False,
+            "momentum_score": 0.0,
+        }
+
+    momentum_data = analyzer.get_sector_momentum()
+    sector_momentum = momentum_data.get(sector)
+
+    if sector_momentum:
+        return {
+            "sector_id": sector.lower(),
+            "is_leading": sector_momentum.rank <= 2,  # Top 2 = leading
+            "is_lagging": sector_momentum.rank >= len(momentum_data) - 1,  # Bottom 2 = lagging
+            "momentum_score": sector_momentum.momentum_score,
+            "return_1m": sector_momentum.return_1m,
+            "trend": sector_momentum.trend,
+        }
+
+    return {
+        "sector_id": sector.lower(),
+        "is_leading": False,
+        "is_lagging": False,
+        "momentum_score": 0.0,
+    }
 
 
 # =============================================================================

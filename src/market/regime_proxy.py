@@ -1,13 +1,26 @@
-# market_regime_proxy.py
+# -*- coding: utf-8 -*-
+"""
+Market Regime Proxy - Caching wrapper for MarketRegimeDetector
+
+Provides a singleton pattern with TTL-based caching to avoid
+expensive regime calculations on every request.
+
+Author: Trading Bot Team
+Version: 1.1.0
+"""
+
 import logging
 import os
 import sys
+import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Type
 
 import pandas as pd
 
-# Fix encoding
+logger = logging.getLogger(__name__)
+
+# Fix encoding for Windows
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -17,8 +30,8 @@ if sys.platform == "win32":
         pass
 
 
-def safe_print(message):
-    """Print an toàn"""
+def safe_print(message: str) -> None:
+    """Print safely handling Unicode encoding errors."""
     try:
         print(message)
     except UnicodeEncodeError:
@@ -26,104 +39,208 @@ def safe_print(message):
         print(clean_message)
 
 
+class SimpleCache:
+    """
+    Simple in-memory cache with TTL expiration.
+
+    Attributes:
+        default_ttl: Default time-to-live in seconds
+    """
+
+    def __init__(self, default_ttl: int = 3600):
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self.default_ttl = default_ttl
+
+    def get(self, key: str) -> Optional[Any]:
+        """
+        Get value from cache if not expired.
+
+        Args:
+            key: Cache key
+
+        Returns:
+            Cached value or None if expired/missing
+        """
+        if key not in self._cache:
+            return None
+
+        entry = self._cache[key]
+        if time.time() > entry["expires_at"]:
+            # Expired - remove and return None
+            del self._cache[key]
+            return None
+
+        return entry["value"]
+
+    def set(self, key: str, value: Any, timeout: Optional[int] = None) -> None:
+        """
+        Set value in cache with TTL.
+
+        Args:
+            key: Cache key
+            value: Value to cache
+            timeout: TTL in seconds (uses default if not specified)
+        """
+        ttl = timeout if timeout is not None else self.default_ttl
+        self._cache[key] = {
+            "value": value,
+            "expires_at": time.time() + ttl,
+            "created_at": time.time(),
+        }
+
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        self._cache.clear()
+
+    def remove(self, key: str) -> bool:
+        """
+        Remove specific cache entry.
+
+        Args:
+            key: Cache key to remove
+
+        Returns:
+            True if entry was removed, False if not found
+        """
+        if key in self._cache:
+            del self._cache[key]
+            return True
+        return False
+
+
 class ProxyMarketRegimeAnalyzer:
     """
-    Lớp Proxy để quản lý và cache kết quả từ MarketRegimeAnalyzer.
+    Proxy wrapper for MarketRegimeDetector with caching.
+
+    Singleton pattern ensures only one instance exists.
+    Caching reduces expensive regime calculations.
     """
 
-    _instance = None
+    _instance: Optional["ProxyMarketRegimeAnalyzer"] = None
+    _cache: SimpleCache = SimpleCache(default_ttl=3600)  # 1 hour default
 
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        cls.cache = SimpleCache()
-
-        # Tạo instance nếu chưa tồn tại
+    def __new__(cls, *args, **kwargs) -> "ProxyMarketRegimeAnalyzer":
         if cls._instance is None:
-            cls._instance = instance
-
+            cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, analyzer_class=None, **kwargs):
-        if not hasattr(self, "initialized"):
-            self.initialized = True  # Set this first to prevent re-entry
+    def __init__(
+        self,
+        analyzer_class: Optional[Type] = None,
+        cache_ttl: int = 3600,
+        **kwargs,
+    ):
+        """
+        Initialize the proxy analyzer.
 
-            # Initialize the actual analyzer
-            if analyzer_class:
-                self.analyzer = analyzer_class(**kwargs)
-            else:
-                # Fallback to default if not provided
-                from src.market.regime_detector import MarketRegimeDetector
+        Args:
+            analyzer_class: Optional custom analyzer class
+            cache_ttl: Cache time-to-live in seconds
+            **kwargs: Arguments passed to analyzer
+        """
+        if hasattr(self, "_initialized") and self._initialized:
+            return
 
-                self.analyzer = MarketRegimeDetector()
-                logging.info("📊 Khởi tạo Market Regime Detector.")
+        self._initialized = True
+        self._cache = SimpleCache(default_ttl=cache_ttl)
 
-            # Initialize cache
-            self.cache = SimpleCache()
-            logging.info("✅ Market analyzer initialized")
+        # Initialize the actual analyzer
+        if analyzer_class:
+            self.analyzer = analyzer_class(**kwargs)
+        else:
+            from src.market.regime_detector import MarketRegimeDetector
+
+            self.analyzer = MarketRegimeDetector(**kwargs)
+            logger.info("📊 Initialized MarketRegimeDetector")
+
+        logger.info("✅ ProxyMarketRegimeAnalyzer initialized")
 
     def analyze_market_regime(self, vnindex_df: Optional[pd.DataFrame] = None) -> Dict:
         """
-        Phân tích trạng thái thị trường.
-        Sử dụng cache nếu có.
-        Có thể nhận vnindex_df đã được tải sẵn để tránh tải lại.
+        Analyze market regime with caching.
+
+        Args:
+            vnindex_df: Optional pre-loaded VNINDEX data
+
+        Returns:
+            Dict with regime analysis results
         """
-        cache_key = f"market_regime_{datetime.now().strftime('%Y-%m-%d')}"
-        cached_data = self.cache.get(cache_key)
-        if cached_data:
-            logging.info("✅ Lấy trạng thái thị trường từ cache.")
+        cache_key = f"market_regime_{datetime.now().strftime('%Y-%m-%d_%H')}"
+
+        # Check cache
+        cached_data = self._cache.get(cache_key)
+        if cached_data is not None:
+            logger.debug("✅ Returning cached market regime")
             return cached_data
 
-        logging.info("🔧 Phân tích trạng thái thị trường (không có cache)...")
+        logger.info("🔧 Analyzing market regime (cache miss)...")
+
         try:
-            if self.analyzer:
-                # Nếu analyzer cần vnindex_df, truyền nó vào
-                if "vnindex_df" in self.analyzer.analyze_market_regime.__code__.co_varnames:
-                    regime = self.analyzer.analyze_market_regime(vnindex_df=vnindex_df)
-                else:
-                    # Giữ tương thích với analyzer cũ không cần df
-                    regime = self.analyzer.analyze_market_regime()
+            if self.analyzer is None:
+                return self._default_regime("No analyzer available")
 
-                self.cache.set(cache_key, regime, timeout=3600)  # Cache 1 giờ
-                return regime
+            # Call analyzer with vnindex_df if supported
+            if hasattr(self.analyzer, "analyze_market_regime"):
+                regime = self.analyzer.analyze_market_regime(vnindex_df=vnindex_df)
             else:
-                # Fallback nếu không có analyzer - trả về SIDEWAYS thận trọng
-                logging.warning("⚠️ No analyzer available, using default cautious regime")
-                return {
-                    "regime": "SIDEWAYS",
-                    "confidence": 30,
-                    "tradeable": False,
-                    "message": "No analyzer available - using cautious default",
-                }
-        except Exception:
-            logging.error("Lỗi khi phân tích trạng thái thị trường", exc_info=True)
-            # Trả về SIDEWAYS thay vì ERROR
-            return {
-                "regime": "SIDEWAYS",
-                "confidence": 20,
-                "tradeable": False,
-                "message": "Error in regime detection - using very cautious default",
-            }
+                regime = self._default_regime("Analyzer missing analyze_market_regime method")
+
+            # Cache result
+            self._cache.set(cache_key, regime)
+            return regime
+
+        except Exception as e:
+            logger.error(f"Regime analysis failed: {e}", exc_info=True)
+            return self._default_regime(f"Error: {str(e)}")
+
+    def invalidate_cache(self) -> None:
+        """Invalidate all cached regime data."""
+        self._cache.clear()
+        logger.info("🗑️ Regime cache invalidated")
+
+    @staticmethod
+    def _default_regime(message: str) -> Dict:
+        """
+        Return default cautious regime.
+
+        Args:
+            message: Reason for using default
+
+        Returns:
+            Cautious SIDEWAYS regime dict
+        """
+        return {
+            "regime": "SIDEWAYS",
+            "confidence": 20,
+            "tradeable": False,
+            "details": {"reason": message},
+            "message": message,
+        }
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset singleton instance. Useful for testing."""
+        cls._instance = None
 
 
-class SimpleCache:
-    def __init__(self):
-        self.cache = {}
+def get_proxy_analyzer(**kwargs) -> ProxyMarketRegimeAnalyzer:
+    """
+    Get singleton instance of ProxyMarketRegimeAnalyzer.
 
-    def get(self, key):
-        return self.cache.get(key)
+    Args:
+        **kwargs: Arguments passed to ProxyMarketRegimeAnalyzer
 
-    def set(self, key, value, timeout=3600):
-        self.cache[key] = value
-
-
-class Config:
-    TICKERS = ["VND", "VNDX", "VNDY", "VNDZ", "VNDW"]
+    Returns:
+        ProxyMarketRegimeAnalyzer singleton
+    """
+    return ProxyMarketRegimeAnalyzer(**kwargs)
 
 
-def main():
-    analyzer = ProxyMarketRegimeAnalyzer()
+def main() -> None:
+    """Demo/test the proxy analyzer."""
+    analyzer = get_proxy_analyzer()
     result = analyzer.analyze_market_regime()
-    print(result)
+    safe_print(f"Regime: {result}")
 
 
 if __name__ == "__main__":

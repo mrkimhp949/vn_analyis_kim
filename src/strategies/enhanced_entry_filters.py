@@ -12,7 +12,7 @@ INTEGRATIONS:
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -102,7 +102,7 @@ class EnhancedEntryFilters:
     def analyze(
         self,
         symbol: str,
-        df: pd.DataFrame,
+        df: Optional[pd.DataFrame] = None,
         vnindex_df: Optional[pd.DataFrame] = None,
         vn30_df: Optional[pd.DataFrame] = None,
         hnx_df: Optional[pd.DataFrame] = None,
@@ -114,7 +114,7 @@ class EnhancedEntryFilters:
 
         Args:
             symbol: Stock symbol
-            df: Stock OHLCV data
+            df: Stock OHLCV data (reserved for future technical confirmation)
             vnindex_df: VNINDEX data for regime detection
             vn30_df: VN30 data (optional)
             hnx_df: HNX data (optional)
@@ -124,6 +124,9 @@ class EnhancedEntryFilters:
         Returns:
             EnhancedEntryResult
         """
+        # Note: df parameter reserved for future technical analysis integration
+        _ = df  # Suppress unused variable warning
+
         reasons = []
         warnings = []
         confidence_adjustment = 0
@@ -200,7 +203,7 @@ class EnhancedEntryFilters:
         vnindex_df: Optional[pd.DataFrame],
         vn30_df: Optional[pd.DataFrame],
         hnx_df: Optional[pd.DataFrame],
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Check enhanced market regime"""
         result = {
             "adjustment": 0,
@@ -263,7 +266,7 @@ class EnhancedEntryFilters:
 
         return result
 
-    def _check_session_timing(self, urgency: str) -> Dict:
+    def _check_session_timing(self, urgency: str) -> Dict[str, Any]:
         """Check session timing"""
         result = {
             "adjustment": 0,
@@ -322,7 +325,7 @@ class EnhancedEntryFilters:
 
         return result
 
-    def _check_fundamentals(self, symbol: str, sector: Optional[str]) -> Dict:
+    def _check_fundamentals(self, symbol: str, sector: Optional[str]) -> Dict[str, Any]:
         """Check fundamental analysis"""
         result = {
             "adjustment": 0,
@@ -371,7 +374,7 @@ class EnhancedEntryFilters:
 
         return result
 
-    def _check_earnings_calendar(self, symbol: str) -> Dict:
+    def _check_earnings_calendar(self, symbol: str) -> Dict[str, Any]:
         """Check earnings calendar"""
         result = {
             "adjustment": 0,
@@ -402,9 +405,9 @@ class EnhancedEntryFilters:
 
         return result
 
-    def _check_ex_dividend(self, symbol: str) -> Dict:
+    def _check_ex_dividend(self, symbol: str) -> Dict[str, Any]:
         """
-        Check ex-dividend calendar (NEW).
+        Check ex-dividend calendar.
 
         Avoid buying right before ex-dividend date as price will drop.
         Can be opportunity after ex-date.
@@ -457,16 +460,46 @@ def get_enhanced_entry_filters() -> EnhancedEntryFilters:
     return _enhanced_filters
 
 
-# Convenience function
+def reset_enhanced_filters() -> None:
+    """Reset singleton instance (useful for testing)"""
+    global _enhanced_filters
+    _enhanced_filters = None
+
+
 def run_enhanced_entry_analysis(
     symbol: str,
-    df: pd.DataFrame,
+    df: Optional[pd.DataFrame] = None,
     vnindex_df: Optional[pd.DataFrame] = None,
+    vn30_df: Optional[pd.DataFrame] = None,
+    hnx_df: Optional[pd.DataFrame] = None,
     sector: Optional[str] = None,
+    urgency: str = "NORMAL",
 ) -> EnhancedEntryResult:
-    """Run enhanced entry analysis"""
+    """
+    Run enhanced entry analysis (convenience function).
+
+    Args:
+        symbol: Stock symbol
+        df: Stock OHLCV data (reserved for future use)
+        vnindex_df: VNINDEX data for regime detection
+        vn30_df: VN30 data (optional)
+        hnx_df: HNX data (optional)
+        sector: Stock sector
+        urgency: Trade urgency (LOW, NORMAL, HIGH)
+
+    Returns:
+        EnhancedEntryResult
+    """
     filters = get_enhanced_entry_filters()
-    return filters.analyze(symbol, df, vnindex_df, sector=sector)
+    return filters.analyze(
+        symbol=symbol,
+        df=df,
+        vnindex_df=vnindex_df,
+        vn30_df=vn30_df,
+        hnx_df=hnx_df,
+        sector=sector,
+        urgency=urgency,
+    )
 
 
 # Test

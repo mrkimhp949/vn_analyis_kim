@@ -58,6 +58,7 @@ class SettlementTracker:
 
     SETTLEMENT_DAYS = 2  # T+2 for Vietnam
     STATE_FILE = "settlement_state.json"
+    INITIAL_MARGIN_RATIO = 0.50  # 50% initial margin for position sizing
 
     def __init__(self, state_file: str = STATE_FILE):
         self.state_file = state_file
@@ -143,6 +144,18 @@ class SettlementTracker:
                 logger.info(f"🧹 Cleaned up {removed} old settlement records")
                 self._save_state()
 
+    def _parse_settlement_date(self, settlement_str: str) -> Optional[date]:
+        """Parse settlement date string to date object"""
+        try:
+            if "T" in settlement_str:
+                # datetime format: "2025-12-10T00:00:00"
+                return datetime.fromisoformat(settlement_str).date()
+            else:
+                # date format: "2025-12-10"
+                return date.fromisoformat(settlement_str)
+        except (ValueError, AttributeError):
+            return None
+
     def record_trade(
         self,
         symbol: str,
@@ -204,16 +217,9 @@ class SettlementTracker:
                 if record.status != "PENDING":
                     continue
 
-                # Parse settlement date (handle both date and datetime formats)
-                try:
-                    settlement_str = record.settlement_date
-                    if "T" in settlement_str:
-                        # datetime format: "2025-12-10T00:00:00"
-                        settlement_date = datetime.fromisoformat(settlement_str).date()
-                    else:
-                        # date format: "2025-12-10"
-                        settlement_date = date.fromisoformat(settlement_str)
-                except (ValueError, AttributeError):
+                # Parse settlement date
+                settlement_date = self._parse_settlement_date(record.settlement_date)
+                if settlement_date is None:
                     continue
 
                 if settlement_date > today and record.side == "BUY":
@@ -301,8 +307,8 @@ class SettlementTracker:
             next_settlement = None
             for record in self._records:
                 if record.status == "PENDING":
-                    settlement_date = date.fromisoformat(record.settlement_date)
-                    if settlement_date > today:
+                    settlement_date = self._parse_settlement_date(record.settlement_date)
+                    if settlement_date and settlement_date > today:
                         if next_settlement is None or settlement_date < next_settlement:
                             next_settlement = settlement_date
 
@@ -363,18 +369,13 @@ class SettlementTracker:
                 if record.status != "PENDING" or record.side != "BUY":
                     continue
 
-                try:
-                    settlement_str = record.settlement_date
-                    if "T" in settlement_str:
-                        settlement_date = datetime.fromisoformat(settlement_str).date()
-                    else:
-                        settlement_date = date.fromisoformat(settlement_str)
-
-                    if settlement_date not in pending_by_date:
-                        pending_by_date[settlement_date] = 0
-                    pending_by_date[settlement_date] += record.amount
-                except (ValueError, AttributeError):
+                settlement_date = self._parse_settlement_date(record.settlement_date)
+                if settlement_date is None:
                     continue
+
+                if settlement_date not in pending_by_date:
+                    pending_by_date[settlement_date] = 0
+                pending_by_date[settlement_date] += record.amount
 
             # Calculate for each day
             cumulative_settled = 0
@@ -398,8 +399,8 @@ class SettlementTracker:
                 buffer = pending_after * 0.10
                 available = max(0, total_cash - pending_after - buffer)
 
-                # Can trade value (with 50% initial margin)
-                can_trade_value = available / 0.50  # 50% margin
+                # Can trade value (with initial margin)
+                can_trade_value = available / self.INITIAL_MARGIN_RATIO
 
                 predictions[check_date.isoformat()] = {
                     "date": check_date.isoformat(),
@@ -515,3 +516,9 @@ def get_settlement_tracker() -> SettlementTracker:
     if _tracker_instance is None:
         _tracker_instance = SettlementTracker()
     return _tracker_instance
+
+
+def reset_settlement_tracker() -> None:
+    """Reset singleton instance (useful for testing)"""
+    global _tracker_instance
+    _tracker_instance = None

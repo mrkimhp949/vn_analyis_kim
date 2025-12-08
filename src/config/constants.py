@@ -423,13 +423,6 @@ VN_MARGIN_WARNING_LEVEL = 0.40  # 40% - warning level
 VN_MARGIN_CALL_LEVEL = 0.30  # 30% - margin call trigger
 VN_FORCE_LIQUIDATION_LEVEL = 0.25  # 25% - force liquidation
 
-# T+0 Intraday Trading Constants
-VN_T0_ENABLED = True  # T+0 enabled for margin accounts
-VN_T0_MIN_ACCOUNT_VALUE = 50_000_000  # 50M VND minimum for T+0
-VN_T0_MAX_TRADES_PER_DAY = 20  # Max intraday trades
-VN_T0_MAX_LOSS_PCT = 0.02  # Stop T+0 trading at -2% daily loss
-VN_T0_MIN_HOLDING_MINUTES = 5  # Min holding time (prevent wash trades)
-
 # Odd-Lot Trading Constants
 VN_ODD_LOT_ENABLED = True  # Odd-lot trading enabled since 2021
 VN_ODD_LOT_MIN_QTY = 1  # Minimum 1 share
@@ -663,12 +656,6 @@ __all__ = [
     "VN_MARGIN_WARNING_LEVEL",
     "VN_MARGIN_CALL_LEVEL",
     "VN_FORCE_LIQUIDATION_LEVEL",
-    # NEW v5.0: T+0 Intraday Trading
-    "VN_T0_ENABLED",
-    "VN_T0_MIN_ACCOUNT_VALUE",
-    "VN_T0_MAX_TRADES_PER_DAY",
-    "VN_T0_MAX_LOSS_PCT",
-    "VN_T0_MIN_HOLDING_MINUTES",
     # NEW v5.0: Odd-Lot Trading
     "VN_ODD_LOT_ENABLED",
     "VN_ODD_LOT_MIN_QTY",

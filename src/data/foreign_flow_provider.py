@@ -30,6 +30,10 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Suppress vnstock INFO logs (e.g., "Not a stock" warnings for indices)
+logging.getLogger("vnstock").setLevel(logging.WARNING)
+logging.getLogger("vnstock.common.data").setLevel(logging.WARNING)
+
 
 @dataclass
 class ForeignFlowRecord:

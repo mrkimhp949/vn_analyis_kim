@@ -566,11 +566,13 @@ class ImprovedEntryLogic:
             adjustment_breakdown,
         )
         if blocked:
-            adjustment_breakdown.append({
-                "filter": "core_filter_block",
-                "delta": None,
-                "note": block_msg,
-            })
+            adjustment_breakdown.append(
+                {
+                    "filter": "core_filter_block",
+                    "delta": None,
+                    "note": block_msg,
+                }
+            )
             return (False, [], [], [], adjustment_breakdown)
 
         # Run optional filters
@@ -586,11 +588,13 @@ class ImprovedEntryLogic:
         # IMPROVED v8.0: Dynamic warning threshold check
         max_warnings = self._get_dynamic_max_warnings(market_regime)
         if len(warnings) > max_warnings:
-            adjustment_breakdown.append({
-                "filter": "warning_threshold",
-                "delta": None,
-                "note": f"Too many warnings ({len(warnings)} > {max_warnings})",
-            })
+            adjustment_breakdown.append(
+                {
+                    "filter": "warning_threshold",
+                    "delta": None,
+                    "note": f"Too many warnings ({len(warnings)} > {max_warnings})",
+                }
+            )
             return (False, reasons, warnings, adjustments, adjustment_breakdown)
 
         return (True, reasons, warnings, adjustments, adjustment_breakdown)
@@ -658,6 +662,31 @@ class ImprovedEntryLogic:
         Returns:
             Tuple of (passed, block_reason)
         """
+        # FILTER 0: Per-Symbol Circuit Breaker (IMPROVED v8.1)
+        # Block trading if symbol has consecutive losses or poor win rate
+        if self._current_symbol:
+            try:
+                from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
+
+                cb = get_per_symbol_circuit_breaker()
+                can_trade, reason = cb.can_trade(self._current_symbol)
+
+                if not can_trade:
+                    adjustment_breakdown.append(
+                        {
+                            "filter": "per_symbol_circuit_breaker",
+                            "delta": None,
+                            "note": reason,
+                        }
+                    )
+                    self._track_filter("per_symbol_circuit_breaker", False, self._current_symbol)
+                    return (False, f"Symbol blocked by circuit breaker: {reason}")
+
+            except ImportError:
+                logger.debug("Per-symbol circuit breaker not available")
+            except Exception as e:
+                logger.debug(f"Per-symbol circuit breaker check failed: {e}")
+
         # FILTER 1: Market Regime
         if market_regime and not market_regime.get("tradeable", True):
             adjustment_breakdown.append(
@@ -809,8 +838,10 @@ class ImprovedEntryLogic:
         # Volatility check
         self._apply_volatility_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
 
-        # RSI check
-        self._apply_rsi_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
+        # RSI check (with market regime for trend confirmation)
+        self._apply_rsi_filter(
+            df, reasons, warnings, adjustments, adjustment_breakdown, market_regime
+        )
 
         # Portfolio correlation
         self._apply_correlation_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
@@ -1041,17 +1072,71 @@ class ImprovedEntryLogic:
         warnings: List[str],
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
+        market_regime: Optional[Dict] = None,
     ) -> None:
-        """Apply RSI check filter."""
+        """
+        Apply RSI check filter.
+
+        IMPROVED v8.1: Add trend confirmation before giving RSI oversold bonus.
+        In bear markets, oversold can become "more oversold" - need trend filter.
+        """
         rsi_check = self._check_rsi(df)
+
+        # Get current regime
+        regime = "SIDEWAYS"
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
 
         if rsi_check["overbought"]:
             warning_msg = f"⚠️ RSI overbought: {rsi_check['value']:.1f}"
             warnings.append(warning_msg)
             self._add_adjustment(adjustments, adjustment_breakdown, "rsi", -10, warning_msg)
         elif rsi_check["oversold"]:
-            reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (strong buy)")
-            self._add_adjustment(adjustments, adjustment_breakdown, "rsi", +15, "Oversold RSI")
+            # IMPROVED v8.1: Check trend before giving oversold bonus
+            # In bear market, require trend confirmation
+            trend_check = self._check_trend_alignment(df, "BUY")
+
+            if regime == "BEAR":
+                # Bear market: Only give bonus if trend is turning up
+                if trend_check.get("aligned", False):
+                    reasons.append(f"✅ RSI oversold + trend confirm: {rsi_check['value']:.1f}")
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "rsi",
+                        +10,
+                        "Oversold RSI (trend confirmed)",
+                    )
+                else:
+                    # Oversold in bear without trend confirmation - small bonus only
+                    reasons.append(f"⚠️ RSI oversold (no trend): {rsi_check['value']:.1f}")
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "rsi",
+                        +3,
+                        "Oversold RSI (bear market, no trend)",
+                    )
+            elif regime == "HIGH_VOLATILITY":
+                # High volatility: Be cautious with oversold
+                if trend_check.get("aligned", False):
+                    reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (high vol)")
+                    self._add_adjustment(
+                        adjustments, adjustment_breakdown, "rsi", +8, "Oversold RSI (high vol)"
+                    )
+                else:
+                    warnings.append(f"⚠️ RSI oversold in high vol: {rsi_check['value']:.1f}")
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "rsi",
+                        0,
+                        "Oversold RSI (high vol, no trend)",
+                    )
+            else:
+                # Bull/Sideways: Full bonus for oversold
+                reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (strong buy)")
+                self._add_adjustment(adjustments, adjustment_breakdown, "rsi", +15, "Oversold RSI")
         elif rsi_check["optimal"]:
             reasons.append(f"✅ RSI: {rsi_check['value']:.1f}")
             self._add_adjustment(adjustments, adjustment_breakdown, "rsi", +5, "Optimal RSI")
@@ -1229,14 +1314,24 @@ class ImprovedEntryLogic:
         """
         Calculate sentiment proxy from price action when NLP is unavailable.
 
-        IMPROVED v8.0: Price-based sentiment fallback
+        IMPROVED v8.1: Enhanced with volume profile analysis
         =====================================================================
-        Uses recent price momentum and volume patterns as sentiment proxy:
-        - Strong uptrend + high volume = POSITIVE (+5)
-        - Weak uptrend = SLIGHTLY_POSITIVE (+2)
-        - Sideways = NEUTRAL (0)
-        - Weak downtrend = SLIGHTLY_NEGATIVE (-3)
-        - Strong downtrend + high volume = NEGATIVE (-8)
+        Uses recent price momentum, volume patterns, and volume profile as sentiment proxy:
+
+        Scoring System:
+        - Price momentum (5d, 20d returns)
+        - Volume confirmation (current vs average)
+        - Volume profile: Accumulation/Distribution pattern
+        - OBV trend (if available)
+
+        Final sentiment:
+        - VERY_POSITIVE: score >= 4 (+8)
+        - POSITIVE: score >= 2 (+5)
+        - SLIGHTLY_POSITIVE: score >= 1 (+2)
+        - NEUTRAL: score around 0 (0)
+        - SLIGHTLY_NEGATIVE: score <= -1 (-3)
+        - NEGATIVE: score <= -2 (-5)
+        - VERY_NEGATIVE: score <= -4 (-10)
         =====================================================================
         """
         if len(df) < 20:
@@ -1246,48 +1341,117 @@ class ImprovedEntryLogic:
             close = df["close"]
             volume = df["volume"] if "volume" in df.columns else None
 
-            # Calculate 5-day and 20-day returns
+            score = 0
+            components = []
+
+            # 1. Price momentum (5-day and 20-day returns)
             ret_5d = (close.iloc[-1] / close.iloc[-5] - 1) * 100 if len(df) >= 5 else 0
             ret_20d = (close.iloc[-1] / close.iloc[-20] - 1) * 100 if len(df) >= 20 else 0
 
-            # Volume ratio
-            vol_ratio = 1.0
+            if ret_5d > 3:
+                score += 1
+                components.append(f"+{ret_5d:.1f}% 5d")
+            elif ret_5d > 1:
+                score += 0.5
+                components.append(f"+{ret_5d:.1f}% 5d")
+            elif ret_5d < -3:
+                score -= 1
+                components.append(f"{ret_5d:.1f}% 5d")
+            elif ret_5d < -1:
+                score -= 0.5
+                components.append(f"{ret_5d:.1f}% 5d")
+
+            if ret_20d > 5:
+                score += 1
+                components.append(f"+{ret_20d:.1f}% 20d")
+            elif ret_20d > 2:
+                score += 0.5
+            elif ret_20d < -5:
+                score -= 1
+                components.append(f"{ret_20d:.1f}% 20d")
+            elif ret_20d < -2:
+                score -= 0.5
+
+            # 2. Volume profile analysis (NEW v8.1)
             if volume is not None and len(volume) >= 20:
                 avg_vol = volume.tail(20).mean()
                 current_vol = volume.iloc[-1]
                 vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
 
-            # Determine sentiment
-            if ret_5d > 3 and ret_20d > 5 and vol_ratio > 1.2:
-                return {
-                    "sentiment": "POSITIVE",
-                    "adjustment": 5,
-                    "reason": f"Strong momentum (+{ret_5d:.1f}% 5d, +{ret_20d:.1f}% 20d)",
-                }
-            elif ret_5d > 1 and ret_20d > 2:
-                return {
-                    "sentiment": "SLIGHTLY_POSITIVE",
-                    "adjustment": 2,
-                    "reason": f"Uptrend (+{ret_5d:.1f}% 5d)",
-                }
-            elif ret_5d < -3 and ret_20d < -5 and vol_ratio > 1.2:
-                return {
-                    "sentiment": "NEGATIVE",
-                    "adjustment": -8,
-                    "reason": f"Strong selling ({ret_5d:.1f}% 5d, {ret_20d:.1f}% 20d)",
-                }
-            elif ret_5d < -1 and ret_20d < -2:
-                return {
-                    "sentiment": "SLIGHTLY_NEGATIVE",
-                    "adjustment": -3,
-                    "reason": f"Downtrend ({ret_5d:.1f}% 5d)",
-                }
+                # Volume surge with price movement
+                if vol_ratio > 1.5:
+                    if ret_5d > 0:
+                        score += 1
+                        components.append("vol surge↑")
+                    elif ret_5d < 0:
+                        score -= 1
+                        components.append("vol surge↓")
+                elif vol_ratio > 1.2:
+                    if ret_5d > 0:
+                        score += 0.5
+                        components.append("vol confirm↑")
+                    elif ret_5d < 0:
+                        score -= 0.5
+                        components.append("vol confirm↓")
+
+                # Volume trend analysis (accumulation/distribution)
+                vol_5d_avg = volume.tail(5).mean()
+                vol_10d_avg = volume.tail(10).mean()
+
+                if vol_5d_avg > vol_10d_avg * 1.2:
+                    # Increasing volume
+                    if ret_5d > 0:
+                        score += 0.5  # Accumulation
+                        components.append("accumulation")
+                    elif ret_5d < 0:
+                        score -= 0.5  # Distribution
+                        components.append("distribution")
+
+                # Price-volume divergence check
+                price_up = close.iloc[-1] > close.iloc[-5]
+                vol_declining = vol_5d_avg < vol_10d_avg * 0.8
+
+                if price_up and vol_declining:
+                    score -= 0.5  # Weak rally
+                    components.append("weak rally")
+                elif not price_up and vol_declining:
+                    score += 0.5  # Selling exhaustion
+                    components.append("exhaustion")
+
+            # 3. OBV trend (if available)
+            if "obv" in df.columns:
+                obv = df["obv"]
+                obv_5d = obv.tail(5)
+                obv_trend = (
+                    (obv_5d.iloc[-1] - obv_5d.iloc[0]) / abs(obv_5d.iloc[0]) * 100
+                    if obv_5d.iloc[0] != 0
+                    else 0
+                )
+
+                if obv_trend > 5:
+                    score += 0.5
+                    components.append("OBV↑")
+                elif obv_trend < -5:
+                    score -= 0.5
+                    components.append("OBV↓")
+
+            # Determine sentiment from final score
+            reason = " | ".join(components) if components else f"Price: {ret_5d:+.1f}% 5d"
+
+            if score >= 4:
+                return {"sentiment": "VERY_POSITIVE", "adjustment": 8, "reason": reason}
+            elif score >= 2:
+                return {"sentiment": "POSITIVE", "adjustment": 5, "reason": reason}
+            elif score >= 1:
+                return {"sentiment": "SLIGHTLY_POSITIVE", "adjustment": 2, "reason": reason}
+            elif score <= -4:
+                return {"sentiment": "VERY_NEGATIVE", "adjustment": -10, "reason": reason}
+            elif score <= -2:
+                return {"sentiment": "NEGATIVE", "adjustment": -5, "reason": reason}
+            elif score <= -1:
+                return {"sentiment": "SLIGHTLY_NEGATIVE", "adjustment": -3, "reason": reason}
             else:
-                return {
-                    "sentiment": "NEUTRAL",
-                    "adjustment": 0,
-                    "reason": f"Sideways ({ret_5d:+.1f}% 5d)",
-                }
+                return {"sentiment": "NEUTRAL", "adjustment": 0, "reason": reason}
 
         except Exception as e:
             logger.debug(f"Price-based sentiment calculation failed: {e}")
@@ -2658,7 +2822,7 @@ class ImprovedEntryLogic:
             # Check for NaN values
             if df["close"].isna().any() or df["volume"].isna().any():
                 logger.warning("OBV calculation: NaN values detected, filling forward")
-                df = df.fillna(method="ffill")
+                df = df.ffill()
 
             # Check for sufficient data
             if len(df) < 2:
@@ -3069,24 +3233,39 @@ class ImprovedEntryLogic:
 
         # Try to use SectorRotationAnalyzer first
         try:
-            from src.market.sector_rotation import get_sector_analyzer
-
-            analyzer = get_sector_analyzer()
+            from src.market.sector_rotation import (
+                get_sector_rotation_analyzer,
+                get_symbol_sector_info,
+            )
 
             # Get sector for current symbol
             if self._current_symbol:
-                sector_info = analyzer.get_symbol_sector_info(self._current_symbol)
+                sector_info = get_symbol_sector_info(self._current_symbol)
                 result["sector_id"] = sector_info.get("sector_id", "unknown")
                 result["is_leading"] = sector_info.get("is_leading", False)
                 result["is_lagging"] = sector_info.get("is_lagging", False)
 
                 # Get rotation analysis
-                rotation = analyzer.analyze()
-                result["rotation_phase"] = rotation.phase
+                analyzer = get_sector_rotation_analyzer()
+                rotation = analyzer.get_rotation_signal()
+
+                # Determine rotation phase based on overweight sectors
+                if any(s in rotation.overweight for s in ["BANKING", "SECURITIES"]):
+                    result["rotation_phase"] = "EARLY"
+                elif any(s in rotation.overweight for s in ["TECHNOLOGY", "REAL_ESTATE"]):
+                    result["rotation_phase"] = "MID"
+                elif any(s in rotation.overweight for s in ["ENERGY", "INDUSTRIAL"]):
+                    result["rotation_phase"] = "LATE"
+                elif any(s in rotation.overweight for s in ["CONSUMER", "UTILITIES"]):
+                    result["rotation_phase"] = "RECESSION"
+                else:
+                    result["rotation_phase"] = "UNKNOWN"
 
                 # Get sector performance if available
-                if result["sector_id"] in rotation.sector_performances:
-                    perf = rotation.sector_performances[result["sector_id"]]
+                momentum_data = analyzer.get_sector_momentum()
+                sector_upper = result["sector_id"].upper()
+                if sector_upper in momentum_data:
+                    perf = momentum_data[sector_upper]
                     result["sector_perf"] = perf.return_1m * 100  # Convert to percentage
 
                 logger.debug(
@@ -3912,21 +4091,70 @@ class ImprovedEntryLogic:
 
     def _get_technical_signal(self, df: pd.DataFrame) -> str:
         """
-        Determine signal type from technical analysis
+        Determine signal type from technical analysis.
+        IMPROVED v8.1: Multi-indicator check instead of simple 2-candle comparison.
+
         Returns: "BUY", "SELL", or "HOLD"
+
+        Scoring System (need >= 3 points for BUY, <= -3 for SELL):
+        - EMA20 > EMA50: +2 (trend alignment)
+        - RSI < 40: +1 (not overbought)
+        - Price > EMA20: +1 (above short-term MA)
+        - Volume > 20-day avg: +1 (volume confirmation)
+        - MACD > 0 or MACD crossover: +1 (momentum)
         """
         if len(df) < 50:
             return "HOLD"
 
         from utils.dataframe_utils import safe_get_latest
 
-        current_price = safe_get_latest(df, "close", 0)
-        prev_price = df["close"].iloc[-2] if len(df) >= 2 else current_price
+        score = 0
 
-        # Simple trend following
-        if current_price > prev_price:
+        # Get indicators
+        current_price = safe_get_latest(df, "close", 0)
+        ema20 = safe_get_latest(df, "ema20", 0)
+        ema50 = safe_get_latest(df, "ema50", 0)
+        rsi = safe_get_latest(df, "rsi", 50)
+        current_volume = safe_get_latest(df, "volume", 0)
+        avg_volume = df["volume"].tail(20).mean() if "volume" in df.columns else 0
+
+        # 1. EMA alignment (most important - 2 points)
+        if ema20 > 0 and ema50 > 0:
+            if ema20 > ema50:
+                score += 2  # Bullish trend
+            elif ema20 < ema50 * 0.98:  # 2% below
+                score -= 2  # Bearish trend
+
+        # 2. RSI check (1 point)
+        if 30 <= rsi <= 65:
+            score += 1  # Healthy RSI zone for buying
+        elif rsi > 70:
+            score -= 1  # Overbought
+        elif rsi < 25:
+            score += 1  # Deep oversold - potential reversal
+
+        # 3. Price vs EMA20 (1 point)
+        if ema20 > 0 and current_price > ema20:
+            score += 1  # Price above short-term MA
+        elif ema20 > 0 and current_price < ema20 * 0.97:
+            score -= 1  # Price significantly below MA
+
+        # 4. Volume confirmation (1 point)
+        if avg_volume > 0 and current_volume > avg_volume * 1.1:
+            score += 1  # Above average volume
+
+        # 5. MACD momentum (1 point)
+        macd = safe_get_latest(df, "macd", 0)
+        macd_signal = safe_get_latest(df, "macd_signal", 0)
+        if macd > macd_signal and macd > 0:
+            score += 1  # Bullish MACD
+        elif macd < macd_signal and macd < 0:
+            score -= 1  # Bearish MACD
+
+        # Decision: need >= 3 points for BUY, <= -3 for SELL
+        if score >= 3:
             return "BUY"
-        elif current_price < prev_price:
+        elif score <= -3:
             return "SELL"
         else:
             return "HOLD"

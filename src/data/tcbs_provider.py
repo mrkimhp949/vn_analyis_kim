@@ -20,6 +20,10 @@ from src.data.fundamental_data import FundamentalData, FundamentalDataProvider
 
 logger = logging.getLogger(__name__)
 
+# Suppress vnstock INFO logs (e.g., "Not a stock" warnings for indices)
+logging.getLogger("vnstock").setLevel(logging.WARNING)
+logging.getLogger("vnstock.common.data").setLevel(logging.WARNING)
+
 
 class TCBSProvider(FundamentalDataProvider):
     """
@@ -47,6 +51,51 @@ class TCBSProvider(FundamentalDataProvider):
         self.vnstock = Vnstock()
         logger.info(f"📊 TCBS Provider initialized with source: {source}")
 
+    @staticmethod
+    def is_stock_symbol(symbol: str) -> bool:
+        """
+        Check if symbol is a stock (not an index or ETF).
+
+        Args:
+            symbol: Symbol to check
+
+        Returns:
+            True if it's a stock symbol, False for indices/ETFs
+        """
+        # Known indices
+        indices = {
+            "VNINDEX",
+            "VN30",
+            "VN100",
+            "HNXINDEX",
+            "HNX30",
+            "UPINDEX",
+            "VNXALL",
+            "VN30F1M",
+            "VN30F2M",
+        }
+
+        # ETF patterns
+        etf_patterns = ["ETF", "E1VFVN30", "FUEVFVND", "FUESSVFL"]
+
+        symbol_upper = symbol.upper()
+
+        # Check if index
+        if symbol_upper in indices:
+            return False
+
+        # Check if ETF
+        for pattern in etf_patterns:
+            if pattern in symbol_upper:
+                return False
+
+        # Check if futures (contains F and numbers)
+        if "F" in symbol_upper and any(c.isdigit() for c in symbol_upper):
+            if len(symbol_upper) > 5:  # Futures typically longer
+                return False
+
+        return True
+
     def get_fundamental_data(self, symbol: str) -> Optional[FundamentalData]:
         """
         Get fundamental data using vnstock
@@ -57,6 +106,11 @@ class TCBSProvider(FundamentalDataProvider):
         Returns:
             FundamentalData object or None if unavailable
         """
+        # Skip non-stock symbols to avoid vnstock warnings
+        if not self.is_stock_symbol(symbol):
+            logger.debug(f"Skipping {symbol}: not a stock (index/ETF/futures)")
+            return None
+
         try:
             # Initialize stock object
             stock = self.vnstock.stock(symbol=symbol, source=self.source)
