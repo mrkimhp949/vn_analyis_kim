@@ -849,6 +849,17 @@ class EnhancedPositionSizer:
         else:
             kelly_fraction = self.kelly_fraction
 
+        # IMPROVED v6.1: Performance-based Kelly adjustment
+        # Reduce Kelly if recent performance is poor
+        performance_factor = self._get_performance_based_kelly_factor(win_rate, avg_win_loss_ratio)
+        kelly_fraction *= performance_factor
+
+        if performance_factor < 1.0:
+            logger.info(
+                f"📉 Performance-based Kelly reduction: {performance_factor:.2f}x "
+                f"(win_rate={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
+            )
+
         # Apply regime-adjusted Kelly fraction
         adjusted_kelly = kelly * kelly_fraction
 
@@ -865,6 +876,52 @@ class EnhancedPositionSizer:
         )
 
         return final_kelly
+
+    def _get_performance_based_kelly_factor(
+        self,
+        win_rate: float,
+        avg_win_loss_ratio: float,
+    ) -> float:
+        """
+        Get Kelly adjustment factor based on recent performance.
+
+        IMPROVED v6.1: Performance-based Kelly adjustment for Vietnam market.
+
+        Rationale:
+        - If win rate < 40%, reduce Kelly by 30% (underperforming)
+        - If W/L ratio < 1.5, reduce Kelly by 20% (poor R:R)
+        - If both conditions, reduce by 44% (0.7 * 0.8)
+        - Never increase Kelly based on performance (avoid overconfidence)
+
+        Args:
+            win_rate: Recent win rate (0-1)
+            avg_win_loss_ratio: Recent average win/loss ratio
+
+        Returns:
+            Factor to multiply Kelly by (0.56 to 1.0)
+        """
+        factor = 1.0
+
+        # Reduce if win rate is poor
+        if win_rate < 0.40:
+            factor *= 0.7  # -30%
+            logger.debug(f"📉 Low win rate ({win_rate:.1%}): Kelly factor -30%")
+        elif win_rate < 0.45:
+            factor *= 0.85  # -15%
+            logger.debug(f"📉 Below-average win rate ({win_rate:.1%}): Kelly factor -15%")
+
+        # Reduce if R:R is poor
+        if avg_win_loss_ratio < 1.5:
+            factor *= 0.8  # -20%
+            logger.debug(f"📉 Low W/L ratio ({avg_win_loss_ratio:.2f}): Kelly factor -20%")
+        elif avg_win_loss_ratio < 1.8:
+            factor *= 0.9  # -10%
+            logger.debug(
+                f"📉 Below-average W/L ratio ({avg_win_loss_ratio:.2f}): Kelly factor -10%"
+            )
+
+        # Minimum factor to prevent over-reduction
+        return max(0.5, factor)
 
     def _calculate_risk_multiplier(
         self,

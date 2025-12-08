@@ -141,7 +141,7 @@ class ExitConfig:
     Tất cả thresholds có thể config được.
     """
 
-    # Take Profit levels - IMPROVED v4.2 for VN market shorter cycles
+    # Take Profit levels - IMPROVED v6.1 for VN market shorter cycles
     # Vietnam market characteristics:
     # - Shorter cycles (2-4 weeks typical)
     # - Higher volatility (±7% daily limit)
@@ -151,6 +151,16 @@ class ExitConfig:
     # Net profit after costs: ~4.5%, ~8.5%, ~13.5%
     # With SL ~4%, R:R = 6/4 = 1.5 (minimum acceptable)
     take_profit_levels: Tuple[float, float, float] = (0.06, 0.10, 0.15)
+
+    # IMPROVED v6.1: Dynamic TP levels by market regime
+    # BULL: Wider targets to capture momentum
+    # BEAR: Tighter targets to lock profits quickly
+    # SIDEWAYS: Standard targets
+    use_dynamic_tp_levels: bool = True
+    tp_levels_bull: Tuple[float, float, float] = (0.08, 0.15, 0.25)
+    tp_levels_bear: Tuple[float, float, float] = (0.04, 0.07, 0.10)
+    tp_levels_sideways: Tuple[float, float, float] = (0.06, 0.10, 0.15)
+    tp_levels_high_volatility: Tuple[float, float, float] = (0.05, 0.08, 0.12)
 
     # Stop Loss - IMPROVED v4.1 with transaction cost awareness
     # Must account for ~1.5% round trip cost
@@ -697,6 +707,129 @@ class ImprovedExitStrategy:
             logger.debug(f"Volume ratio calculation failed: {e}")
             return 1.0
 
+    def _calculate_price_momentum(self, df: pd.DataFrame, lookback: int = 5) -> float:
+        """
+        Calculate short-term price momentum for floor bounce decision.
+
+        IMPROVED v6.1: Price action confirmation for floor bounce logic.
+
+        Used in combination with volume ratio:
+        - Volume ratio > 2.0 AND momentum < -0.5% → EXIT (panic + downtrend)
+        - Volume ratio > 2.5 → EXIT (panic regardless of momentum)
+        - Momentum > 1% → HOLD (bounce confirmed)
+
+        Args:
+            df: DataFrame with 'close' column
+            lookback: Number of periods for momentum calculation
+
+        Returns:
+            Price momentum as decimal (e.g., -0.005 for -0.5%). Returns 0.0 if calculation fails.
+        """
+        try:
+            if df is None or df.empty or "close" not in df.columns:
+                return 0.0
+
+            if len(df) < lookback + 1:
+                lookback = max(1, len(df) - 1)
+
+            current_close = safe_iloc(df, -1, "close")
+            lookback_close = safe_iloc(df, -(lookback + 1), "close")
+
+            if current_close is None or lookback_close is None or lookback_close <= 0:
+                return 0.0
+
+            momentum = (current_close - lookback_close) / lookback_close
+            return momentum
+
+        except Exception as e:
+            logger.debug(f"Price momentum calculation failed: {e}")
+            return 0.0
+
+    def _check_floor_bounce_with_momentum(
+        self,
+        symbol: str,
+        current_price: float,
+        floor_price: float,
+        volume_ratio: float,
+        price_momentum: float,
+    ) -> tuple:
+        """
+        Multi-factor floor bounce decision combining volume and price momentum.
+
+        IMPROVED v6.1: Enhanced floor bounce logic for Vietnam market.
+
+        Decision matrix:
+        1. Volume ratio >= 2.5 (panic) → EXIT immediately
+        2. Volume ratio >= 2.0 AND momentum < -0.5% → EXIT (high vol + downtrend)
+        3. Momentum > 1% → HOLD (bounce confirmed, cancel timer)
+        4. Otherwise → Continue monitoring with timer
+
+        Args:
+            symbol: Stock symbol
+            current_price: Current price
+            floor_price: Calculated floor price (-7% from prev close)
+            volume_ratio: Current volume / average volume
+            price_momentum: Short-term price momentum
+
+        Returns:
+            Tuple of (should_exit: bool, reason: str, action: str)
+            action: "EXIT", "HOLD", "MONITOR"
+        """
+        # Import thresholds
+        try:
+            from src.config.constants import (
+                VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO,
+                VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO,
+                VN_FLOOR_BOUNCE_RECOVERY_PCT,
+            )
+        except ImportError:
+            VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO = 2.5
+            VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5
+            VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01
+
+        # Thresholds for momentum-based decision
+        MOMENTUM_EXIT_THRESHOLD = -0.005  # -0.5% momentum = downtrend
+        MOMENTUM_RECOVERY_THRESHOLD = 0.01  # +1% momentum = bounce confirmed
+        VOLUME_MOMENTUM_EXIT_THRESHOLD = 2.0  # Volume ratio for momentum-based exit
+
+        # Case 1: Panic selling (volume >= 2.5x) → EXIT immediately
+        if volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO:
+            reason = (
+                f"PANIC SELLING: Volume {volume_ratio:.1f}x >= {VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO}x threshold. "
+                f"Momentum: {price_momentum*100:+.2f}%"
+            )
+            logger.warning(f"🚨 {symbol}: {reason}")
+            return True, reason, "EXIT"
+
+        # Case 2: High volume + negative momentum → EXIT
+        if (
+            volume_ratio >= VOLUME_MOMENTUM_EXIT_THRESHOLD
+            and price_momentum < MOMENTUM_EXIT_THRESHOLD
+        ):
+            reason = (
+                f"HIGH VOLUME + DOWNTREND: Volume {volume_ratio:.1f}x with momentum {price_momentum*100:+.2f}% "
+                f"(< {MOMENTUM_EXIT_THRESHOLD*100:.1f}% threshold)"
+            )
+            logger.warning(f"📉 {symbol}: {reason}")
+            return True, reason, "EXIT"
+
+        # Case 3: Price recovery confirmed → HOLD (cancel timer)
+        if price_momentum >= MOMENTUM_RECOVERY_THRESHOLD:
+            reason = (
+                f"BOUNCE CONFIRMED: Momentum {price_momentum*100:+.2f}% >= {MOMENTUM_RECOVERY_THRESHOLD*100:.1f}% threshold. "
+                f"Volume: {volume_ratio:.1f}x"
+            )
+            logger.info(f"✅ {symbol}: {reason}")
+            return False, reason, "HOLD"
+
+        # Case 4: Continue monitoring
+        reason = (
+            f"MONITORING: Volume {volume_ratio:.1f}x, Momentum {price_momentum*100:+.2f}%. "
+            f"Waiting for clearer signal."
+        )
+        logger.debug(f"📊 {symbol}: {reason}")
+        return False, reason, "MONITOR"
+
     # =========================================================================
     # EXIT CHECK #1: STOP LOSS (IMPROVED v6.0 - Vietnam Market Specific)
     # =========================================================================
@@ -775,13 +908,19 @@ class ImprovedExitStrategy:
                             VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5
                             VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01
 
-                        # PANIC SELLING: Volume > 3x average → EXIT IMMEDIATELY
-                        if volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO:
-                            logger.warning(
-                                f"🚨 {symbol}: PANIC SELLING detected at floor! "
-                                f"Volume ratio: {volume_ratio:.1f}x (>= {VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO}x). "
-                                f"Triggering immediate exit - no bounce wait."
-                            )
+                        # IMPROVED v6.1: Multi-factor floor bounce decision
+                        # Combines volume ratio AND price momentum for better accuracy
+                        price_momentum = self._calculate_price_momentum(df, lookback=5)
+
+                        should_exit, exit_reason, action = self._check_floor_bounce_with_momentum(
+                            symbol=symbol,
+                            current_price=current_price,
+                            floor_price=floor_price,
+                            volume_ratio=volume_ratio,
+                            price_momentum=price_momentum,
+                        )
+
+                        if action == "EXIT":
                             # Clear any existing floor wait tracking
                             floor_wait_key = f"floor_wait_{symbol}"
                             if (
@@ -789,9 +928,33 @@ class ImprovedExitStrategy:
                                 and floor_wait_key in self._floor_wait_times
                             ):
                                 del self._floor_wait_times[floor_wait_key]
-                            # Return None to fall through to stop loss check below
-                            # (don't return exit decision here, let stop loss handle it)
-                        else:
+
+                            # Return exit decision for panic/high-volume-downtrend
+                            return ExitDecision(
+                                should_exit=True,
+                                exit_reason=ExitReason.PANIC_SELLING,
+                                exit_type="FULL",
+                                exit_price=current_price,
+                                expected_pnl=pnl_amount,
+                                expected_pnl_percent=pnl_percent,
+                                message=f"🚨 FLOOR EXIT: {exit_reason}",
+                                urgency=5,
+                                metadata={
+                                    "volume_ratio": volume_ratio,
+                                    "price_momentum": price_momentum,
+                                    "floor_price": floor_price,
+                                },
+                            )
+                        elif action == "HOLD":
+                            # Bounce confirmed - clear tracking and continue normal monitoring
+                            floor_wait_key = f"floor_wait_{symbol}"
+                            if (
+                                hasattr(self, "_floor_wait_times")
+                                and floor_wait_key in self._floor_wait_times
+                            ):
+                                del self._floor_wait_times[floor_wait_key]
+                            return None  # Continue to other checks
+                        else:  # action == "MONITOR"
                             # Determine wait time based on volume
                             if volume_ratio >= VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
                                 max_floor_wait_minutes = (
@@ -1225,9 +1388,55 @@ class ImprovedExitStrategy:
     # EXIT CHECK #4: TAKE PROFIT
     # =========================================================================
 
+    def _get_dynamic_tp_levels(self, market_regime: Optional[Dict]) -> Tuple[float, float, float]:
+        """
+        Get dynamic take profit levels based on market regime.
+
+        IMPROVED v6.1: Adaptive TP levels for Vietnam market.
+
+        Rationale:
+        - BULL: Wider targets (8%, 15%, 25%) to capture momentum
+        - BEAR: Tighter targets (4%, 7%, 10%) to lock profits quickly
+        - SIDEWAYS: Standard targets (6%, 10%, 15%)
+        - HIGH_VOLATILITY: Moderate targets (5%, 8%, 12%) with quick exits
+
+        Args:
+            market_regime: Market regime dict with 'regime' key
+
+        Returns:
+            Tuple of (TP1, TP2, TP3) percentages as decimals
+        """
+        if not self.config.use_dynamic_tp_levels or market_regime is None:
+            return self.config.take_profit_levels
+
+        regime = market_regime.get("regime", "SIDEWAYS")
+        confidence = market_regime.get("confidence", 50)
+
+        # Only apply dynamic levels if regime confidence is high enough
+        if confidence < 60:
+            logger.debug(f"📊 Regime confidence {confidence:.0f}% < 60%, using default TP levels")
+            return self.config.take_profit_levels
+
+        if regime == "BULL":
+            tp_levels = self.config.tp_levels_bull
+            logger.debug(f"📈 BULL regime: Using wider TP levels {tp_levels}")
+        elif regime == "BEAR":
+            tp_levels = self.config.tp_levels_bear
+            logger.debug(f"📉 BEAR regime: Using tighter TP levels {tp_levels}")
+        elif regime == "HIGH_VOLATILITY":
+            tp_levels = self.config.tp_levels_high_volatility
+            logger.debug(f"⚡ HIGH_VOL regime: Using moderate TP levels {tp_levels}")
+        else:  # SIDEWAYS or unknown
+            tp_levels = self.config.tp_levels_sideways
+            logger.debug(f"↔️ SIDEWAYS regime: Using standard TP levels {tp_levels}")
+
+        return tp_levels
+
     def _check_take_profit(self, ctx: Dict) -> Optional[ExitDecision]:
         """
         Check take profit levels.
+
+        IMPROVED v6.1: Dynamic TP levels based on market regime.
 
         Strategy (simplified to 2 levels):
         - TP1: Partial exit (default 50%)
@@ -1239,9 +1448,27 @@ class ImprovedExitStrategy:
         partial_exits = ctx["partial_exits"]
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
+        market_regime = ctx.get("market_regime")
+        entry_price = ctx["entry_price"]
 
         if not tp_targets:
             return None
+
+        # IMPROVED v6.1: Get dynamic TP levels based on regime
+        dynamic_tp_pcts = self._get_dynamic_tp_levels(market_regime)
+
+        # Calculate dynamic TP prices from entry price
+        dynamic_tp_targets = [entry_price * (1 + tp_pct) for tp_pct in dynamic_tp_pcts]
+
+        # Use dynamic targets if they differ significantly from provided targets
+        # This allows override from caller while still benefiting from regime adjustment
+        if tp_targets and len(tp_targets) >= 2:
+            # Check if provided targets are close to default (within 1%)
+            default_tp1 = entry_price * (1 + self.config.take_profit_levels[0])
+            if abs(tp_targets[0] - default_tp1) / default_tp1 < 0.01:
+                # Provided targets are default, use dynamic instead
+                tp_targets = dynamic_tp_targets
+                logger.debug(f"📊 Using dynamic TP targets: {[f'{t:,.0f}' for t in tp_targets]}")
 
         num_targets = len(tp_targets)
         num_partial_exits = len(partial_exits)

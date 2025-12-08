@@ -2,604 +2,456 @@
 """
 Sector Rotation Analysis for Vietnam Stock Market
 
-Identifies market phase based on sector leadership patterns.
-Helps determine optimal sectors for investment based on economic cycle.
-
-Sector Rotation Theory (adapted for Vietnam):
-- Early Recovery: Financials (Banks), Consumer Discretionary
-- Mid Expansion: Technology, Industrials, Real Estate
-- Late Expansion: Materials (Steel), Energy
-- Recession: Utilities, Healthcare, Consumer Staples (Defensive)
-
-Vietnam Market Sectors:
-- Banking: VCB, BID, CTG, TCB, MBB, ACB, VPB, STB
-- Real Estate: VHM, VIC, NVL, DXG, KDH, PDR
-- Technology: FPT, CMG
-- Retail: MWG, PNJ, DGW, FRT
-- Materials: HPG, HSG, NKG, TLH
-- Energy: GAS, PLX, PVD, PVS
-- Utilities: POW, REE, NT2, PC1
-- Food & Beverage: VNM, SAB, MSN
+Analyzes sector momentum to identify rotation opportunities.
+Vietnam market has distinct sector cycles driven by:
+- Banking: Interest rate cycles, credit growth
+- Real Estate: Policy changes, interest rates
+- Technology: Global tech trends, FDI
+- Consumer: Domestic consumption, inflation
 
 Usage:
-    from src.market.sector_rotation import get_sector_analyzer
+    from src.market.sector_rotation import get_sector_rotation_analyzer
     
-    analyzer = get_sector_analyzer()
-    rotation = analyzer.analyze()
-    print(f"Market phase: {rotation['phase']}")
-    print(f"Leading sectors: {rotation['leading']}")
+    analyzer = get_sector_rotation_analyzer()
+    signal = analyzer.get_rotation_signal()
+    print(f"Overweight: {signal['overweight']}")
+    print(f"Underweight: {signal['underweight']}")
+
+Author: Trading Bot Team
+Version: 1.0.0
 """
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-# Vietnam market sector definitions - EXPANDED v4.0
-VIETNAM_SECTORS = {
-    "banking": {
-        "name": "Ngân hàng",
-        "symbols": [
-            "VCB",
-            "BID",
-            "CTG",
-            "TCB",
-            "MBB",
-            "ACB",
-            "VPB",
-            "STB",
-            "HDB",
-            "TPB",
-            "LPB",
-            "EIB",
-            "SHB",
-            "MSB",
-            "OCB",
-        ],
-        "cycle_phase": "EARLY",  # Leads in early recovery
-        "defensive": False,
+# Sector representative stocks (top 3-5 by market cap)
+SECTOR_REPRESENTATIVES = {
+    "BANKING": ["VCB", "BID", "CTG", "TCB", "MBB", "ACB", "VPB", "HDB"],
+    "REAL_ESTATE": ["VHM", "VIC", "NVL", "VRE", "KDH", "DXG"],
+    "TECHNOLOGY": ["FPT", "CMG", "ELC"],
+    "CONSUMER": ["VNM", "MSN", "MWG", "SAB", "PNJ"],
+    "ENERGY": ["GAS", "PLX", "PVD", "PVS"],
+    "INDUSTRIAL": ["HPG", "HSG", "NKG", "GVR"],
+    "SECURITIES": ["SSI", "VCI", "HCM", "VND"],
+    "UTILITIES": ["POW", "NT2", "PPC"],
+    "AVIATION": ["VJC", "HVN"],
+    "INSURANCE": ["BVH", "PVI", "BMI"],
+}
+
+# Sector characteristics for Vietnam market
+SECTOR_CHARACTERISTICS = {
+    "BANKING": {
+        "beta": 1.2,  # High correlation with market
+        "cycle_sensitivity": "HIGH",  # Sensitive to interest rate cycles
+        "foreign_limit": 0.30,  # 30% foreign ownership limit
+        "typical_pe": 8,  # Typical P/E ratio
     },
-    "real_estate": {
-        "name": "Bất động sản",
-        "symbols": [
-            "VHM",
-            "VIC",
-            "NVL",
-            "DXG",
-            "KDH",
-            "PDR",
-            "DIG",
-            "NLG",
-            "HDG",
-            "CEO",
-            "IJC",
-            "SCR",
-            "LDG",
-            "NBB",
-        ],
-        "cycle_phase": "MID",
-        "defensive": False,
+    "REAL_ESTATE": {
+        "beta": 1.4,  # Very volatile
+        "cycle_sensitivity": "VERY_HIGH",
+        "foreign_limit": 0.49,
+        "typical_pe": 12,
     },
-    "technology": {
-        "name": "Công nghệ",
-        "symbols": ["FPT", "CMG", "VGI", "ELC", "ITD"],
-        "cycle_phase": "MID",
-        "defensive": False,
+    "TECHNOLOGY": {
+        "beta": 0.9,  # Less correlated
+        "cycle_sensitivity": "LOW",
+        "foreign_limit": 1.00,  # No limit
+        "typical_pe": 18,
     },
-    "retail": {
-        "name": "Bán lẻ",
-        "symbols": ["MWG", "PNJ", "DGW", "FRT", "VRE"],
-        "cycle_phase": "EARLY",
-        "defensive": False,
+    "CONSUMER": {
+        "beta": 0.8,  # Defensive
+        "cycle_sensitivity": "LOW",
+        "foreign_limit": 0.49,
+        "typical_pe": 20,
     },
-    "materials": {
-        "name": "Vật liệu (Thép)",
-        "symbols": ["HPG", "HSG", "NKG", "TLH", "SMC", "POM", "VGS", "DTL"],
-        "cycle_phase": "LATE",
-        "defensive": False,
+    "ENERGY": {
+        "beta": 1.1,
+        "cycle_sensitivity": "MEDIUM",
+        "foreign_limit": 0.49,
+        "typical_pe": 10,
     },
-    "energy": {
-        "name": "Năng lượng",
-        "symbols": ["GAS", "PLX", "PVD", "PVS", "BSR", "PVT", "OIL", "PVC"],
-        "cycle_phase": "LATE",
-        "defensive": False,
+    "INDUSTRIAL": {
+        "beta": 1.3,
+        "cycle_sensitivity": "HIGH",
+        "foreign_limit": 0.49,
+        "typical_pe": 8,
     },
-    "utilities": {
-        "name": "Tiện ích",
-        "symbols": ["POW", "REE", "NT2", "PC1", "PPC", "GEG", "BCG", "HDC"],
-        "cycle_phase": "RECESSION",
-        "defensive": True,
-    },
-    "food_beverage": {
-        "name": "Thực phẩm & Đồ uống",
-        "symbols": ["VNM", "SAB", "MSN", "QNS", "KDC", "MCH", "VHC", "ANV"],
-        "cycle_phase": "RECESSION",
-        "defensive": True,
-    },
-    "healthcare": {
-        "name": "Y tế",
-        "symbols": ["DHG", "DMC", "IMP", "DBD", "TRA", "PME", "DCL"],
-        "cycle_phase": "RECESSION",
-        "defensive": True,
-    },
-    "securities": {
-        "name": "Chứng khoán",
-        "symbols": ["SSI", "VND", "HCM", "VCI", "SHS", "MBS", "VIX", "BSI", "CTS", "FTS"],
-        "cycle_phase": "EARLY",
-        "defensive": False,
-    },
-    "manufacturing": {
-        "name": "Sản xuất",
-        "symbols": ["GEX", "HAX", "GMD", "TCM", "TNG", "VGT", "STK"],
-        "cycle_phase": "MID",
-        "defensive": False,
-    },
-    "agriculture": {
-        "name": "Nông nghiệp",
-        "symbols": ["HAG", "HNG", "BAF", "DBC", "PAN", "LTG"],
-        "cycle_phase": "RECESSION",
-        "defensive": True,
+    "SECURITIES": {
+        "beta": 1.5,  # Highest beta
+        "cycle_sensitivity": "VERY_HIGH",
+        "foreign_limit": 0.49,
+        "typical_pe": 12,
     },
 }
 
-# Reverse mapping: symbol -> sector_id for quick lookup
-VN_SYMBOL_TO_SECTOR = {}
-for sector_id, sector_info in VIETNAM_SECTORS.items():
-    for symbol in sector_info["symbols"]:
-        VN_SYMBOL_TO_SECTOR[symbol] = sector_id
-
 
 @dataclass
-class SectorPerformance:
-    """Performance metrics for a sector"""
+class SectorMomentum:
+    """Sector momentum data"""
 
-    sector_id: str
-    name: str
-    return_1w: float  # 1-week return
-    return_1m: float  # 1-month return
-    return_3m: float  # 3-month return
+    sector: str
+    momentum_score: float  # -1 to +1
+    return_1w: float
+    return_1m: float
+    return_3m: float
     relative_strength: float  # vs VNINDEX
-    momentum_score: float  # Combined momentum
-    is_leading: bool
-    is_lagging: bool
+    volume_trend: str  # INCREASING, DECREASING, STABLE
+    trend: str  # BULLISH, BEARISH, NEUTRAL
+    rank: int  # 1 = strongest
 
 
 @dataclass
-class SectorRotationResult:
-    """Result of sector rotation analysis"""
+class RotationSignal:
+    """Sector rotation recommendation"""
 
-    date: str
-    phase: str  # EARLY, MID, LATE, RECESSION, UNKNOWN
+    timestamp: str
+    overweight: List[str]  # Sectors to increase exposure
+    underweight: List[str]  # Sectors to decrease exposure
+    neutral: List[str]  # Sectors to maintain
+    top_picks: Dict[str, List[str]]  # Top stocks per overweight sector
+    avoid_list: Dict[str, List[str]]  # Stocks to avoid per underweight sector
     confidence: float  # 0-100
-    leading_sectors: List[str]
-    lagging_sectors: List[str]
-    sector_performances: Dict[str, SectorPerformance]
-    recommendation: str
-    score: float  # -1 to +1 for regime detection
+    rationale: str
 
 
 class SectorRotationAnalyzer:
     """
-    Analyze sector rotation to identify market phase.
+    Analyze sector momentum for rotation strategy.
 
-    Methodology:
-    1. Calculate relative strength of each sector vs VNINDEX
-    2. Identify leading and lagging sectors
-    3. Match pattern to economic cycle phase
-    4. Generate investment recommendations
+    Rotation Logic:
+    1. Calculate momentum for each sector (1W, 1M, 3M returns)
+    2. Calculate relative strength vs VNINDEX
+    3. Rank sectors by combined score
+    4. Overweight top 2-3 sectors, underweight bottom 2-3
+
+    Vietnam-specific considerations:
+    - Banking sector leads in bull markets
+    - Real Estate is most volatile
+    - Consumer/Tech are defensive
+    - Securities amplify market moves
     """
 
     def __init__(
         self,
-        lookback_weeks: int = 4,
-        leading_threshold: float = 0.05,  # 5% outperformance = leading
-        lagging_threshold: float = -0.05,  # 5% underperformance = lagging
-        cache_ttl_seconds: int = 3600,  # 1 hour cache
+        lookback_days: int = 60,
+        momentum_weights: Dict[str, float] = None,
+        overweight_threshold: float = 0.5,
+        underweight_threshold: float = -0.3,
+        cache_ttl_seconds: int = 3600,  # 1 hour
     ):
-        self.lookback_weeks = lookback_weeks
-        self.leading_threshold = leading_threshold
-        self.lagging_threshold = lagging_threshold
+        self.lookback_days = lookback_days
+        self.momentum_weights = momentum_weights or {
+            "1w": 0.3,
+            "1m": 0.4,
+            "3m": 0.3,
+        }
+        self.overweight_threshold = overweight_threshold
+        self.underweight_threshold = underweight_threshold
         self.cache_ttl = cache_ttl_seconds
 
         # Cache
-        self._cache: Optional[SectorRotationResult] = None
+        self._cache: Optional[Dict[str, SectorMomentum]] = None
         self._cache_time: Optional[datetime] = None
 
-        # Sector data cache
-        self._sector_data: Dict[str, pd.DataFrame] = {}
-
-    def analyze(self, vnindex_df: Optional[pd.DataFrame] = None) -> SectorRotationResult:
+    def get_sector_momentum(self, force_refresh: bool = False) -> Dict[str, SectorMomentum]:
         """
-        Analyze current sector rotation.
-
-        Args:
-            vnindex_df: VNINDEX data for relative strength calculation
+        Calculate momentum score for each sector.
 
         Returns:
-            SectorRotationResult with analysis
+            Dict of {sector_name: SectorMomentum}
         """
         # Check cache
-        if self._is_cache_valid():
+        if not force_refresh and self._is_cache_valid():
             return self._cache
 
         try:
-            # Calculate sector performances
-            performances = self._calculate_sector_performances(vnindex_df)
+            momentum_data = {}
 
-            # Identify leading/lagging
-            leading = [s for s, p in performances.items() if p.is_leading]
-            lagging = [s for s, p in performances.items() if p.is_lagging]
+            for sector, symbols in SECTOR_REPRESENTATIVES.items():
+                sector_momentum = self._calculate_sector_momentum(sector, symbols)
+                if sector_momentum:
+                    momentum_data[sector] = sector_momentum
 
-            # Determine market phase
-            phase, confidence = self._determine_phase(leading, lagging)
-
-            # Generate recommendation
-            recommendation = self._generate_recommendation(phase, leading)
-
-            # Calculate score for regime detection
-            score = self._calculate_rotation_score(performances, phase)
-
-            result = SectorRotationResult(
-                date=datetime.now().isoformat(),
-                phase=phase,
-                confidence=confidence,
-                leading_sectors=leading,
-                lagging_sectors=lagging,
-                sector_performances=performances,
-                recommendation=recommendation,
-                score=score,
+            # Rank sectors
+            sorted_sectors = sorted(
+                momentum_data.values(), key=lambda x: x.momentum_score, reverse=True
             )
+            for rank, sector_data in enumerate(sorted_sectors, 1):
+                sector_data.rank = rank
 
             # Update cache
-            self._cache = result
+            self._cache = momentum_data
             self._cache_time = datetime.now()
 
-            logger.info(
-                f"📊 Sector Rotation: Phase={phase} ({confidence:.0f}% conf), "
-                f"Leading: {leading}, Lagging: {lagging}"
-            )
-
-            return result
+            return momentum_data
 
         except Exception as e:
-            logger.error(f"Sector rotation analysis failed: {e}", exc_info=True)
-            return self._default_result(f"Error: {str(e)}")
+            logger.error(f"Sector momentum calculation failed: {e}", exc_info=True)
+            return {}
 
-    def _calculate_sector_performances(
-        self, vnindex_df: Optional[pd.DataFrame]
-    ) -> Dict[str, SectorPerformance]:
-        """Calculate performance metrics for each sector"""
+    def _calculate_sector_momentum(
+        self, sector: str, symbols: List[str]
+    ) -> Optional[SectorMomentum]:
+        """Calculate momentum for a single sector"""
+        try:
+            returns_1w = []
+            returns_1m = []
+            returns_3m = []
+            volume_changes = []
 
-        performances = {}
-
-        # Get VNINDEX returns for relative strength
-        vnindex_return_1m = 0.0
-        if vnindex_df is not None and len(vnindex_df) >= 20:
-            vnindex_return_1m = vnindex_df["close"].iloc[-1] / vnindex_df["close"].iloc[-20] - 1
-
-        for sector_id, sector_info in VIETNAM_SECTORS.items():
-            try:
-                # Calculate sector return (average of constituent stocks)
-                # PLACEHOLDER: Would fetch real data in production
-                sector_return_1m = self._get_sector_return(sector_id, days=20)
-                sector_return_1w = self._get_sector_return(sector_id, days=5)
-                sector_return_3m = self._get_sector_return(sector_id, days=60)
-
-                # Relative strength vs VNINDEX
-                relative_strength = sector_return_1m - vnindex_return_1m
-
-                # Momentum score (weighted average of returns)
-                momentum = sector_return_1w * 0.4 + sector_return_1m * 0.4 + sector_return_3m * 0.2
-
-                # Determine if leading/lagging
-                is_leading = relative_strength >= self.leading_threshold
-                is_lagging = relative_strength <= self.lagging_threshold
-
-                performances[sector_id] = SectorPerformance(
-                    sector_id=sector_id,
-                    name=sector_info["name"],
-                    return_1w=sector_return_1w,
-                    return_1m=sector_return_1m,
-                    return_3m=sector_return_3m,
-                    relative_strength=relative_strength,
-                    momentum_score=momentum,
-                    is_leading=is_leading,
-                    is_lagging=is_lagging,
-                )
-
-            except Exception as e:
-                logger.warning(f"Failed to calculate {sector_id} performance: {e}")
-                continue
-
-        return performances
-
-    def _get_sector_return(self, sector_id: str, days: int) -> float:
-        """
-        Get sector return over specified days.
-
-        Calculates equal-weighted average return of sector constituents.
-        Uses cached data when available for performance.
-
-        Args:
-            sector_id: Sector identifier (e.g., 'banking', 'real_estate')
-            days: Number of trading days to calculate return
-
-        Returns:
-            Average return as decimal (e.g., 0.05 = 5%)
-        """
-        if sector_id not in VIETNAM_SECTORS:
-            return 0.0
-
-        symbols = VIETNAM_SECTORS[sector_id]["symbols"]
-        if not symbols:
-            return 0.0
-
-        returns = []
-
-        for symbol in symbols:
-            try:
-                # Try to get data from cache first
-                if symbol in self._sector_data:
-                    df = self._sector_data[symbol]
-                else:
-                    # Fetch from data loader
-                    try:
-                        from src.data.loader import load_data
-
-                        df = load_data(symbol, lookback=days + 10, use_cache=True)
-                        if df is not None and not df.empty:
-                            self._sector_data[symbol] = df
-                    except ImportError:
-                        logger.debug(f"Data loader not available for {symbol}")
-                        continue
-                    except Exception as e:
-                        logger.debug(f"Failed to load data for {symbol}: {e}")
-                        continue
-
-                if df is None or len(df) < days:
+            for symbol in symbols[:5]:  # Top 5 stocks
+                df = self._load_stock_data(symbol)
+                if df is None or len(df) < 60:
                     continue
 
-                # Calculate return
-                df_period = df.tail(days)
-                if len(df_period) >= 2:
-                    start_price = df_period["close"].iloc[0]
-                    end_price = df_period["close"].iloc[-1]
-                    if start_price > 0:
-                        stock_return = (end_price - start_price) / start_price
-                        returns.append(stock_return)
+                # Calculate returns
+                current_price = df["close"].iloc[-1]
+                price_1w = df["close"].iloc[-5] if len(df) >= 5 else current_price
+                price_1m = df["close"].iloc[-20] if len(df) >= 20 else current_price
+                price_3m = df["close"].iloc[-60] if len(df) >= 60 else current_price
 
-            except Exception as e:
-                logger.debug(f"Error calculating return for {symbol}: {e}")
-                continue
+                returns_1w.append((current_price - price_1w) / price_1w)
+                returns_1m.append((current_price - price_1m) / price_1m)
+                returns_3m.append((current_price - price_3m) / price_3m)
 
-        if not returns:
-            return 0.0
+                # Volume trend
+                recent_vol = df["volume"].tail(5).mean()
+                avg_vol = df["volume"].tail(20).mean()
+                volume_changes.append(recent_vol / avg_vol if avg_vol > 0 else 1)
 
-        # Return equal-weighted average
-        return sum(returns) / len(returns)
+            if not returns_1w:
+                return None
 
-    def _determine_phase(self, leading: List[str], lagging: List[str]) -> Tuple[str, float]:
-        """
-        Determine market phase based on sector leadership.
+            # Average returns
+            avg_1w = sum(returns_1w) / len(returns_1w)
+            avg_1m = sum(returns_1m) / len(returns_1m)
+            avg_3m = sum(returns_3m) / len(returns_3m)
 
-        Returns:
-            (phase, confidence)
-        """
-        # Count sectors by cycle phase
-        phase_scores = {
-            "EARLY": 0,
-            "MID": 0,
-            "LATE": 0,
-            "RECESSION": 0,
-        }
+            # Weighted momentum score
+            momentum_score = (
+                avg_1w * self.momentum_weights["1w"]
+                + avg_1m * self.momentum_weights["1m"]
+                + avg_3m * self.momentum_weights["3m"]
+            )
 
-        for sector_id in leading:
-            if sector_id in VIETNAM_SECTORS:
-                phase = VIETNAM_SECTORS[sector_id]["cycle_phase"]
-                phase_scores[phase] += 2  # Leading = +2
+            # Normalize to -1 to +1 range
+            momentum_score = max(-1, min(1, momentum_score * 5))
 
-        for sector_id in lagging:
-            if sector_id in VIETNAM_SECTORS:
-                phase = VIETNAM_SECTORS[sector_id]["cycle_phase"]
-                phase_scores[phase] -= 1  # Lagging = -1
+            # Calculate relative strength vs VNINDEX
+            vnindex_return = self._get_vnindex_return()
+            relative_strength = avg_1m - vnindex_return if vnindex_return else avg_1m
 
-        # Find dominant phase
-        if not any(phase_scores.values()):
-            return "UNKNOWN", 30.0
+            # Volume trend
+            avg_volume_change = sum(volume_changes) / len(volume_changes)
+            if avg_volume_change > 1.2:
+                volume_trend = "INCREASING"
+            elif avg_volume_change < 0.8:
+                volume_trend = "DECREASING"
+            else:
+                volume_trend = "STABLE"
 
-        max_phase = max(phase_scores, key=phase_scores.get)
-        max_score = phase_scores[max_phase]
-        total_score = sum(abs(s) for s in phase_scores.values())
+            # Trend determination
+            if momentum_score > 0.3:
+                trend = "BULLISH"
+            elif momentum_score < -0.3:
+                trend = "BEARISH"
+            else:
+                trend = "NEUTRAL"
 
-        confidence = (max_score / total_score * 100) if total_score > 0 else 30.0
-        confidence = min(confidence, 90.0)  # Cap at 90%
+            return SectorMomentum(
+                sector=sector,
+                momentum_score=momentum_score,
+                return_1w=avg_1w,
+                return_1m=avg_1m,
+                return_3m=avg_3m,
+                relative_strength=relative_strength,
+                volume_trend=volume_trend,
+                trend=trend,
+                rank=0,  # Will be set later
+            )
 
-        return max_phase, confidence
+        except Exception as e:
+            logger.warning(f"Failed to calculate momentum for {sector}: {e}")
+            return None
 
-    def _generate_recommendation(self, phase: str, leading: List[str]) -> str:
-        """Generate investment recommendation based on phase"""
+    def _load_stock_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Load stock data for a symbol"""
+        try:
+            from src.data.loader import load_data
 
-        recommendations = {
-            "EARLY": (
-                "🟢 Early Recovery: Focus on Banking, Retail sectors. "
-                "Consider cyclical stocks with strong balance sheets."
-            ),
-            "MID": (
-                "🟡 Mid Expansion: Technology, Real Estate leading. "
-                "Growth stocks favored, but watch for overvaluation."
-            ),
-            "LATE": (
-                "🟠 Late Expansion: Materials, Energy leading. "
-                "Consider taking profits on growth, rotate to value."
-            ),
-            "RECESSION": (
-                "🔴 Defensive Phase: Utilities, Healthcare, F&B leading. "
-                "Reduce exposure, focus on dividend stocks and cash."
-            ),
-            "UNKNOWN": (
-                "⚪ Unclear Phase: Mixed signals. "
-                "Maintain balanced portfolio, avoid aggressive positions."
-            ),
-        }
+            return load_data(symbol, lookback=self.lookback_days + 10)
+        except Exception as e:
+            logger.debug(f"Failed to load data for {symbol}: {e}")
+            return None
 
-        base_rec = recommendations.get(phase, recommendations["UNKNOWN"])
+    def _get_vnindex_return(self) -> float:
+        """Get VNINDEX 1-month return"""
+        try:
+            from src.data.vnindex_cache import get_cached_vnindex
 
-        if leading:
-            leading_names = [VIETNAM_SECTORS.get(s, {}).get("name", s) for s in leading[:3]]
-            base_rec += f"\n   Leading: {', '.join(leading_names)}"
-
-        return base_rec
-
-    def _calculate_rotation_score(
-        self, performances: Dict[str, SectorPerformance], phase: str
-    ) -> float:
-        """
-        Calculate rotation score for regime detection.
-
-        Score interpretation:
-        - +1.0: Strong risk-on (cyclicals leading)
-        - 0.0: Neutral
-        - -1.0: Strong risk-off (defensives leading)
-        """
-        if not performances:
-            return 0.0
-
-        # Calculate weighted score based on sector type
-        cyclical_score = 0.0
-        defensive_score = 0.0
-
-        for sector_id, perf in performances.items():
-            if sector_id not in VIETNAM_SECTORS:
-                continue
-
-            is_defensive = VIETNAM_SECTORS[sector_id]["defensive"]
-
-            if perf.is_leading:
-                if is_defensive:
-                    defensive_score += 1
-                else:
-                    cyclical_score += 1
-            elif perf.is_lagging:
-                if is_defensive:
-                    cyclical_score += 0.5  # Defensive lagging = bullish
-                else:
-                    defensive_score += 0.5  # Cyclical lagging = bearish
-
-        total = cyclical_score + defensive_score
-        if total == 0:
-            return 0.0
-
-        # Score: positive = risk-on, negative = risk-off
-        score = (cyclical_score - defensive_score) / total
-        return np.clip(score, -1.0, 1.0)
+            df = get_cached_vnindex(lookback=30)
+            if df is not None and len(df) >= 20:
+                return (df["close"].iloc[-1] - df["close"].iloc[-20]) / df["close"].iloc[-20]
+        except Exception:
+            pass
+        return 0.0
 
     def _is_cache_valid(self) -> bool:
         """Check if cache is still valid"""
         if self._cache is None or self._cache_time is None:
             return False
-
         age = (datetime.now() - self._cache_time).total_seconds()
         return age < self.cache_ttl
 
-    def _default_result(self, reason: str) -> SectorRotationResult:
-        """Return default neutral result"""
-        return SectorRotationResult(
-            date=datetime.now().isoformat(),
-            phase="UNKNOWN",
-            confidence=0.0,
-            leading_sectors=[],
-            lagging_sectors=[],
-            sector_performances={},
-            recommendation=f"Analysis unavailable: {reason}",
-            score=0.0,
+    def get_rotation_signal(self, force_refresh: bool = False) -> RotationSignal:
+        """
+        Get sector rotation recommendation.
+
+        Returns:
+            RotationSignal with overweight/underweight recommendations
+        """
+        momentum_data = self.get_sector_momentum(force_refresh)
+
+        if not momentum_data:
+            return RotationSignal(
+                timestamp=datetime.now().isoformat(),
+                overweight=[],
+                underweight=[],
+                neutral=list(SECTOR_REPRESENTATIVES.keys()),
+                top_picks={},
+                avoid_list={},
+                confidence=0,
+                rationale="Insufficient data for sector rotation analysis",
+            )
+
+        overweight = []
+        underweight = []
+        neutral = []
+        top_picks = {}
+        avoid_list = {}
+
+        for sector, data in momentum_data.items():
+            if data.momentum_score >= self.overweight_threshold:
+                overweight.append(sector)
+                # Get top 3 stocks in sector
+                top_picks[sector] = SECTOR_REPRESENTATIVES.get(sector, [])[:3]
+            elif data.momentum_score <= self.underweight_threshold:
+                underweight.append(sector)
+                avoid_list[sector] = SECTOR_REPRESENTATIVES.get(sector, [])[:3]
+            else:
+                neutral.append(sector)
+
+        # Calculate confidence based on signal clarity
+        if overweight and underweight:
+            # Clear rotation signal
+            avg_overweight = sum(momentum_data[s].momentum_score for s in overweight) / len(
+                overweight
+            )
+            avg_underweight = sum(momentum_data[s].momentum_score for s in underweight) / len(
+                underweight
+            )
+            spread = avg_overweight - avg_underweight
+            confidence = min(100, spread * 100)
+        else:
+            confidence = 30  # Low confidence if no clear rotation
+
+        # Generate rationale
+        rationale = self._generate_rationale(momentum_data, overweight, underweight)
+
+        return RotationSignal(
+            timestamp=datetime.now().isoformat(),
+            overweight=overweight,
+            underweight=underweight,
+            neutral=neutral,
+            top_picks=top_picks,
+            avoid_list=avoid_list,
+            confidence=confidence,
+            rationale=rationale,
         )
 
-    def get_sector_symbols(self, sector_id: str) -> List[str]:
-        """Get list of symbols for a sector"""
-        return VIETNAM_SECTORS.get(sector_id, {}).get("symbols", [])
+    def _generate_rationale(
+        self,
+        momentum_data: Dict[str, SectorMomentum],
+        overweight: List[str],
+        underweight: List[str],
+    ) -> str:
+        """Generate human-readable rationale"""
+        parts = []
 
-    def get_all_sectors(self) -> Dict:
-        """Get all sector definitions"""
-        return VIETNAM_SECTORS
+        if overweight:
+            top_sector = overweight[0]
+            top_data = momentum_data.get(top_sector)
+            if top_data:
+                parts.append(
+                    f"OVERWEIGHT {top_sector}: "
+                    f"Momentum {top_data.momentum_score:.2f}, "
+                    f"1M return {top_data.return_1m*100:+.1f}%, "
+                    f"Volume {top_data.volume_trend}"
+                )
 
-    def get_symbol_sector(self, symbol: str) -> str:
+        if underweight:
+            bottom_sector = underweight[-1]
+            bottom_data = momentum_data.get(bottom_sector)
+            if bottom_data:
+                parts.append(
+                    f"UNDERWEIGHT {bottom_sector}: "
+                    f"Momentum {bottom_data.momentum_score:.2f}, "
+                    f"1M return {bottom_data.return_1m*100:+.1f}%"
+                )
+
+        return " | ".join(parts) if parts else "No clear rotation signal"
+
+    def get_sector_for_symbol(self, symbol: str) -> Optional[str]:
+        """Get sector for a given symbol"""
+        symbol = symbol.upper()
+        for sector, symbols in SECTOR_REPRESENTATIVES.items():
+            if symbol in symbols:
+                return sector
+
+        # Try VN30 sectors mapping
+        try:
+            from src.utils.vietnam_market import VN30_SECTORS
+
+            return VN30_SECTORS.get(symbol)
+        except ImportError:
+            pass
+
+        return None
+
+    def should_trade_symbol(self, symbol: str) -> Tuple[bool, str, float]:
         """
-        Get sector ID for a given symbol.
-
-        Args:
-            symbol: Stock symbol (e.g., 'VCB', 'FPT')
+        Check if should trade a symbol based on sector rotation.
 
         Returns:
-            Sector ID (e.g., 'banking', 'technology') or 'unknown'
+            (should_trade, reason, adjustment_factor)
+            adjustment_factor: 1.2 for overweight, 0.7 for underweight, 1.0 for neutral
         """
-        return VN_SYMBOL_TO_SECTOR.get(symbol, "unknown")
+        sector = self.get_sector_for_symbol(symbol)
+        if not sector:
+            return True, "Unknown sector - neutral", 1.0
 
-    def get_symbol_sector_info(self, symbol: str) -> Dict:
-        """
-        Get full sector information for a symbol.
+        signal = self.get_rotation_signal()
 
-        Args:
-            symbol: Stock symbol
-
-        Returns:
-            Dict with sector_id, name, cycle_phase, defensive, is_leading, is_lagging
-        """
-        sector_id = self.get_symbol_sector(symbol)
-        if sector_id == "unknown":
-            return {
-                "sector_id": "unknown",
-                "name": "Unknown",
-                "cycle_phase": "UNKNOWN",
-                "defensive": False,
-                "is_leading": False,
-                "is_lagging": False,
-            }
-
-        sector_info = VIETNAM_SECTORS.get(sector_id, {})
-
-        # Get current rotation status
-        rotation = self._cache if self._cache else self.analyze()
-        is_leading = sector_id in rotation.leading_sectors
-        is_lagging = sector_id in rotation.lagging_sectors
-
-        return {
-            "sector_id": sector_id,
-            "name": sector_info.get("name", "Unknown"),
-            "cycle_phase": sector_info.get("cycle_phase", "UNKNOWN"),
-            "defensive": sector_info.get("defensive", False),
-            "is_leading": is_leading,
-            "is_lagging": is_lagging,
-        }
-
-    def is_sector_leading(self, sector_id: str) -> bool:
-        """Check if a sector is currently leading"""
-        rotation = self._cache if self._cache else self.analyze()
-        return sector_id in rotation.leading_sectors
-
-    def is_sector_lagging(self, sector_id: str) -> bool:
-        """Check if a sector is currently lagging"""
-        rotation = self._cache if self._cache else self.analyze()
-        return sector_id in rotation.lagging_sectors
-
-    def clear_cache(self) -> None:
-        """Clear all cached data"""
-        self._cache = None
-        self._cache_time = None
-        self._sector_data.clear()
-        logger.info("Sector rotation cache cleared")
+        if sector in signal.overweight:
+            return True, f"Sector {sector} is OVERWEIGHT - favorable", 1.2
+        elif sector in signal.underweight:
+            return False, f"Sector {sector} is UNDERWEIGHT - avoid", 0.7
+        else:
+            return True, f"Sector {sector} is NEUTRAL", 1.0
 
 
 # Singleton instance
 _analyzer_instance: Optional[SectorRotationAnalyzer] = None
 
 
-def get_sector_analyzer() -> SectorRotationAnalyzer:
+def get_sector_rotation_analyzer() -> SectorRotationAnalyzer:
     """Get singleton instance of sector rotation analyzer"""
     global _analyzer_instance
     if _analyzer_instance is None:
