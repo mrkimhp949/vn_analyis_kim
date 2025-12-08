@@ -5,15 +5,13 @@ import pandas as pd
 
 # Try to use enhanced features first, fallback to basic features
 try:
-    from src.ml.features.enhanced import add_enhanced_features as add_ml_features
-    from src.ml.features.enhanced import get_feature_columns
+    from src.ml.features.enhanced_v2 import add_enhanced_features as add_ml_features
+    from src.ml.features.enhanced_v2 import get_feature_columns
 
     logging.getLogger(__name__).info("✅ Using ENHANCED features (28+ features)")
     use_enhanced_features = True
 except ImportError:
-    from src.ml.features.technical import add_ml_features, get_feature_columns
-
-    logging.getLogger(__name__).warning("⚠️ Using BASIC features (28 features)")
+    logging.getLogger(__name__).error("❌ Failed to import enhanced_v2 features")
     use_enhanced_features = False
 
 from src.ml.models.predictor import MLPredictor

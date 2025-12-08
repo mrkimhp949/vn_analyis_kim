@@ -564,14 +564,14 @@ class PortfolioManager:
                     print(f"⚠️ Calculated 0 shares to sell for {symbol} with type {exit_type}")
 
             except (ValueError, TypeError):
-                print("❌ Invalid exit_type format: {exit_type}.")
+                print(f"❌ Invalid exit_type format: {exit_type}.")
 
     def close_position(self, symbol: str, exit_price: float, reason: str = "Exit signal"):
         """Close a position entirely."""
         positions = self.db.get_positions()
 
         if symbol not in positions:
-            print("⚠️ Position {symbol} not found to close.")
+            print(f"⚠️ Position {symbol} not found to close.")
             return
 
         pos = positions[symbol]
@@ -772,7 +772,7 @@ class PortfolioManager:
             num_positions=portfolio["num_positions"],
         )
 
-        print("📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
+        print(f"📸 Saved portfolio snapshot: {portfolio['total_value']:,.0f} VNĐ")
 
     def get_rebalancing_suggestions(self, target_position_size: float = 0.10) -> Dict:
         """

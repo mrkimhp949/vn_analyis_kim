@@ -10,16 +10,20 @@ Features:
 - Market regime awareness
 - Circuit breaker integration
 - Vietnam market compliance (lot size 100)
+
+Module Structure (v5.0):
+- position_sizing/constants.py: Configuration constants
+- position_sizing/protocols.py: DI interfaces
+- position_sizing/models.py: Data classes
+- position_sizing/cache.py: Correlation cache
+- position_sizing/sizer.py: Main EnhancedPositionSizer (this file)
 """
 
 from __future__ import annotations
 
 import logging
-import threading
-import time
-from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import TYPE_CHECKING, Dict, List, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -36,322 +40,37 @@ from src.config.constants import (
 )
 from src.config.exceptions import RiskManagementError
 
+# Import from same package using relative imports
+from .cache import CorrelationCache
+from .constants import PositionSizingConstants
+from .models import (
+    EnhancedPositionSize,
+    MarketRegimeInfo,
+    PositionSize,
+)
+from .protocols import (
+    CircuitBreakerProtocol,
+    DataLoaderProtocol,
+    RegimeDetectorProtocol,
+)
+
 if TYPE_CHECKING:
     from src.risk.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# CONSTANTS - Position Sizing Specific
-# =============================================================================
-
-
-class PositionSizingConstants:
-    """Centralized constants for position sizing calculations."""
-
-    # Risk thresholds
-    MIN_RISK_PERCENT: float = 0.01  # 1% minimum risk per share
-    DEFAULT_RISK_PERCENT: float = 0.02  # 2% default risk if stop too tight
-
-    # Kelly Criterion
-    MAX_KELLY_PERCENT: float = 0.25  # Max 25% of capital via Kelly
-    DEFAULT_KELLY_FRACTION: float = 0.5  # Half-Kelly for safety
-    MIN_KELLY_FALLBACK: float = 0.01  # 1% minimum for negative Kelly (v2.0 behavior)
-
-    # Correlation
-    HIGH_CORRELATION_THRESHOLD: float = 0.70
-    MEDIUM_CORRELATION_THRESHOLD: float = 0.50
-    HIGH_CORRELATION_ADJUSTMENT: float = 0.50  # Reduce 50%
-    MEDIUM_CORRELATION_ADJUSTMENT: float = 0.75  # Reduce 25%
-
-    # Sector limits
-    SECTOR_HIGH_COUNT: int = 3  # 3+ positions = high concentration
-    SECTOR_MEDIUM_COUNT: int = 2  # 2 positions = medium concentration
-    SECTOR_HIGH_ADJUSTMENT: float = 0.70  # Reduce 30%
-    SECTOR_MEDIUM_ADJUSTMENT: float = 0.85  # Reduce 15%
-
-    # =========================================================================
-    # LIQUIDITY TIERS - IMPROVED v5.0 for Vietnam Market
-    # =========================================================================
-    # 4-tier system based on stock liquidity and market cap
-    # Higher liquidity = larger position sizes allowed
-    #
-    # VN30: Blue chips with highest liquidity (HPG, VNM, VCB, etc.)
-    # LARGE_CAP: Large caps outside VN30 (> 5B VND daily)
-    # MID_CAP: Mid caps (3-5B VND daily)
-    # SMALL_CAP: Small caps (< 3B VND daily)
-    #
-    # Position limits prevent excessive exposure to illiquid stocks
-    LIQUIDITY_TIERS = {
-        "VN30": {
-            "max_position_pct": 0.15,  # 15% max position for VN30
-            "min_daily_value": 10_000_000_000,  # 10B VND
-            "slippage": 0.003,  # 0.3% slippage
-        },
-        "LARGE_CAP": {
-            "max_position_pct": 0.12,  # 12% max position
-            "min_daily_value": 5_000_000_000,  # 5B VND
-            "slippage": 0.004,  # 0.4% slippage
-        },
-        "MID_CAP": {
-            "max_position_pct": 0.10,  # 10% max position
-            "min_daily_value": 3_000_000_000,  # 3B VND
-            "slippage": 0.006,  # 0.6% slippage
-        },
-        "SMALL_CAP": {
-            "max_position_pct": 0.06,  # 6% max position
-            "min_daily_value": 0,  # Any liquidity
-            "slippage": 0.010,  # 1.0% slippage
-        },
-    }
-
-    # =========================================================================
-    # REGIME-AWARE KELLY ADJUSTMENTS - IMPROVED v5.0
-    # =========================================================================
-    # Kelly fraction adjusted by market regime for risk management
-    # BULL: Full half-Kelly (aggressive)
-    # SIDEWAYS: Standard half-Kelly
-    # BEAR: Quarter-Kelly (defensive)
-    # HIGH_VOL: Eighth-Kelly (very defensive)
-    REGIME_KELLY_FRACTIONS = {
-        "BULL": 0.50,  # Full half-Kelly
-        "SIDEWAYS": 0.40,  # Slightly reduced
-        "BEAR": 0.25,  # Quarter-Kelly
-        "HIGH_VOLATILITY": 0.125,  # Eighth-Kelly
-    }
-
-    # Transaction cost for Kelly adjustment (Vietnam market)
-    VN_TRANSACTION_COST: float = 0.0148  # 1.48% round trip
-
-    # DCA levels - IMPROVED v4.2 for Vietnam Market
-    # Vietnam market characteristics:
-    # - ±7% daily price limit means 1-3% DCA levels can hit within same day
-    # - Transaction cost ~1.48% round trip reduces DCA effectiveness
-    # - Wider levels (2%, 4%, 6%) provide better cost-adjusted entries
-    # - Each DCA level should exceed transaction cost to be profitable
-    #
-    # RECOMMENDATION: Consider disabling DCA for VN market due to:
-    # 1. High transaction costs (1.48% round trip)
-    # 2. T+2 settlement ties up capital
-    # 3. Narrow DCA levels get hit too quickly in volatile market
-    DCA_LEVEL_1_PERCENT: float = 0.50  # 50% at first level
-    DCA_LEVEL_2_PERCENT: float = 0.30  # 30% at second level
-    DCA_LEVEL_3_PERCENT: float = 0.20  # 20% at third level
-    DCA_LEVEL_1_DISCOUNT: float = 0.98  # WIDENED: 2% below entry (was 1%)
-    DCA_LEVEL_2_DISCOUNT: float = 0.96  # WIDENED: 4% below entry (was 2%)
-    DCA_LEVEL_3_DISCOUNT: float = 0.94  # WIDENED: 6% below entry (was 3%)
-
-    # =========================================================================
-    # DCA (Dollar Cost Averaging) Configuration - IMPROVED v6.0
-    # =========================================================================
-    # DCA is DISABLED for Vietnam market due to unfavorable cost structure
-    #
-    # RATIONALE - Why DCA doesn't work well for VN market:
-    #
-    # 1. HIGH TRANSACTION COSTS (1.48% round trip)
-    #    - Each DCA buy costs ~0.70% (brokerage + fees + slippage)
-    #    - Each sell costs ~0.78% (includes 0.1% government tax)
-    #    - Total round trip: 1.48%
-    #    - DCA level must exceed 1.48% to be profitable
-    #
-    # 2. T+2 SETTLEMENT TIES UP CAPITAL
-    #    - Buy on T0 → Cash locked until T+2
-    #    - Multiple DCA buys = multiple capital lockups
-    #    - Reduces flexibility for other opportunities
-    #
-    # 3. ±7% DAILY LIMIT MAKES DCA LEVELS HIT TOO QUICKLY
-    #    - Traditional DCA levels (1%, 2%, 3%) can all hit in one day
-    #    - No time to assess if drop is temporary or trend change
-    #    - Wider levels (2%, 4%, 6%) recommended if DCA is used
-    #
-    # 4. COST-BENEFIT ANALYSIS
-    #    - 3 DCA buys at 2%, 4%, 6% below entry
-    #    - Total transaction cost: 3 × 0.70% = 2.1% on buys
-    #    - Plus 0.78% on final sell = 2.88% total
-    #    - Average entry improvement: ~4%
-    #    - Net benefit: 4% - 2.88% = 1.12% (marginal)
-    #
-    # RECOMMENDATION: Use single entry with proper position sizing instead
-    # =========================================================================
-    DCA_ENABLED: bool = False  # DISABLED: High transaction costs make DCA unprofitable
-    DCA_MIN_PROFIT_THRESHOLD: float = 0.03  # TIGHTENED: Min 3% expected profit after costs
-
-    # Cache settings
-    CORRELATION_CACHE_TTL: int = 3600  # 1 hour
-    CORRELATION_CACHE_MAXSIZE: int = 500
-
-    # Risk multiplier bounds - DOCUMENTED v4.2
-    # These bounds control position size scaling based on signal quality
-    #
-    # MIN_RISK_MULTIPLIER = 0.5 rationale:
-    # - Even weak signals get 50% of base position
-    # - Prevents over-reduction that makes positions too small
-    # - 50% of 1.5% risk = 0.75% risk per trade (still meaningful)
-    # - Allows participation in uncertain markets with reduced exposure
-    #
-    # MAX_RISK_MULTIPLIER = 1.2 rationale:
-    # - Strong signals get max 20% boost over base position
-    # - Conservative cap prevents overconfidence in any single trade
-    # - 120% of 1.5% risk = 1.8% risk per trade (within 2% guideline)
-    # - Balances conviction with risk management
-    #
-    # Combined with Kelly Criterion, actual position sizes are further
-    # constrained by win rate and risk/reward statistics.
-    MIN_RISK_MULTIPLIER: float = 0.5
-    MAX_RISK_MULTIPLIER: float = 1.2
-
-    # Circuit breaker
-    CAUTION_MODE_MULTIPLIER: float = 0.5  # Reduce 50% in caution mode
-
-
-# =============================================================================
-# PROTOCOLS - Dependency Injection Interfaces
-# =============================================================================
-
-
-class DataLoaderProtocol(Protocol):
-    """Protocol for data loading dependency."""
-
-    def __call__(self, symbol: str, lookback: int = 60) -> Optional[pd.DataFrame]: ...
-
-
-class RegimeDetectorProtocol(Protocol):
-    """Protocol for market regime detection."""
-
-    def __call__(self, df: pd.DataFrame) -> object: ...
-
-
-class CircuitBreakerProtocol(Protocol):
-    """Protocol for circuit breaker."""
-
-    def is_caution_mode(self) -> bool: ...
-
-
-# =============================================================================
-# DATA CLASSES
-# =============================================================================
-
-
-@dataclass
-class EnhancedPositionSize:
-    """Container cho kết quả position sizing với Kelly."""
-
-    shares: int
-    value: float
-    risk_amount: float
-    risk_percent: float
-    max_loss: float
-    position_percent: float
-    kelly_percent: float
-    recommended_entries: List[Dict] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    adjustments: Dict[str, float] = field(default_factory=dict)
-
-    def is_valid(self) -> bool:
-        """Check if position is valid for trading."""
-        return self.shares > 0 and self.shares >= VIETNAM_LOT_SIZE
-
-
-@dataclass
-class MarketRegimeInfo:
-    """Structured market regime information."""
-
-    regime: str = "SIDEWAYS"
-    confidence: float = 50.0
-    tradeable: bool = True
-    description: str = ""
-
-    @classmethod
-    def from_dict(cls, data: Optional[Dict]) -> "MarketRegimeInfo":
-        """Create from dictionary."""
-        if not data:
-            return cls()
-        return cls(
-            regime=data.get("regime", "SIDEWAYS"),
-            confidence=data.get("confidence", 50.0),
-            tradeable=data.get("tradeable", True),
-            description=data.get("description", ""),
-        )
-
-
-# =============================================================================
-# CORRELATION CACHE - Thread-safe LRU Cache
-# =============================================================================
-
-
-class CorrelationCache:
-    """Thread-safe LRU cache for correlation values."""
-
-    def __init__(
-        self,
-        ttl: int = PositionSizingConstants.CORRELATION_CACHE_TTL,
-        maxsize: int = PositionSizingConstants.CORRELATION_CACHE_MAXSIZE,
-    ):
-        self._cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
-        self._lock = threading.RLock()
-        self._ttl = ttl
-        self._maxsize = maxsize
-        self._hits = 0
-        self._misses = 0
-
-    def _make_key(self, symbol1: str, symbol2: str) -> Tuple[str, str]:
-        """Create order-independent cache key."""
-        return tuple(sorted([symbol1, symbol2]))
-
-    def get(self, symbol1: str, symbol2: str) -> Optional[float]:
-        """Get cached correlation if valid."""
-        key = self._make_key(symbol1, symbol2)
-
-        with self._lock:
-            if key in self._cache:
-                corr, timestamp = self._cache[key]
-                if time.time() - timestamp < self._ttl:
-                    self._hits += 1
-                    return corr
-                # Expired - remove
-                del self._cache[key]
-
-            self._misses += 1
-            return None
-
-    def set(self, symbol1: str, symbol2: str, correlation: float) -> None:
-        """Store correlation in cache."""
-        key = self._make_key(symbol1, symbol2)
-
-        with self._lock:
-            self._cache[key] = (correlation, time.time())
-            self._prune_if_needed()
-
-    def _prune_if_needed(self) -> None:
-        """Prune cache if over maxsize (must hold lock)."""
-        if len(self._cache) <= self._maxsize:
-            return
-
-        current_time = time.time()
-
-        # Remove expired first
-        expired = [k for k, (_, ts) in self._cache.items() if current_time - ts > self._ttl]
-        for k in expired:
-            del self._cache[k]
-
-        # If still over, remove oldest
-        while len(self._cache) > self._maxsize:
-            oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][1])
-            del self._cache[oldest_key]
-
-    @property
-    def hit_rate(self) -> float:
-        """Calculate cache hit rate."""
-        total = self._hits + self._misses
-        return self._hits / total if total > 0 else 0.0
-
-    def clear(self) -> None:
-        """Clear all cached values."""
-        with self._lock:
-            self._cache.clear()
-            self._hits = 0
-            self._misses = 0
+# Re-export all for backward compatibility
+__all__ = [
+    "PositionSizingConstants",
+    "DataLoaderProtocol",
+    "RegimeDetectorProtocol",
+    "CircuitBreakerProtocol",
+    "EnhancedPositionSize",
+    "MarketRegimeInfo",
+    "PositionSize",
+    "CorrelationCache",
+    "EnhancedPositionSizer",
+]
 
 
 # =============================================================================
@@ -849,6 +568,17 @@ class EnhancedPositionSizer:
         else:
             kelly_fraction = self.kelly_fraction
 
+        # IMPROVED v6.1: Performance-based Kelly adjustment
+        # Reduce Kelly if recent performance is poor
+        performance_factor = self._get_performance_based_kelly_factor(win_rate, avg_win_loss_ratio)
+        kelly_fraction *= performance_factor
+
+        if performance_factor < 1.0:
+            logger.info(
+                f"📉 Performance-based Kelly reduction: {performance_factor:.2f}x "
+                f"(win_rate={win_rate:.1%}, W/L={avg_win_loss_ratio:.2f})"
+            )
+
         # Apply regime-adjusted Kelly fraction
         adjusted_kelly = kelly * kelly_fraction
 
@@ -865,6 +595,52 @@ class EnhancedPositionSizer:
         )
 
         return final_kelly
+
+    def _get_performance_based_kelly_factor(
+        self,
+        win_rate: float,
+        avg_win_loss_ratio: float,
+    ) -> float:
+        """
+        Get Kelly adjustment factor based on recent performance.
+
+        IMPROVED v6.1: Performance-based Kelly adjustment for Vietnam market.
+
+        Rationale:
+        - If win rate < 40%, reduce Kelly by 30% (underperforming)
+        - If W/L ratio < 1.5, reduce Kelly by 20% (poor R:R)
+        - If both conditions, reduce by 44% (0.7 * 0.8)
+        - Never increase Kelly based on performance (avoid overconfidence)
+
+        Args:
+            win_rate: Recent win rate (0-1)
+            avg_win_loss_ratio: Recent average win/loss ratio
+
+        Returns:
+            Factor to multiply Kelly by (0.56 to 1.0)
+        """
+        factor = 1.0
+
+        # Reduce if win rate is poor
+        if win_rate < 0.40:
+            factor *= 0.7  # -30%
+            logger.debug(f"📉 Low win rate ({win_rate:.1%}): Kelly factor -30%")
+        elif win_rate < 0.45:
+            factor *= 0.85  # -15%
+            logger.debug(f"📉 Below-average win rate ({win_rate:.1%}): Kelly factor -15%")
+
+        # Reduce if R:R is poor
+        if avg_win_loss_ratio < 1.5:
+            factor *= 0.8  # -20%
+            logger.debug(f"📉 Low W/L ratio ({avg_win_loss_ratio:.2f}): Kelly factor -20%")
+        elif avg_win_loss_ratio < 1.8:
+            factor *= 0.9  # -10%
+            logger.debug(
+                f"📉 Below-average W/L ratio ({avg_win_loss_ratio:.2f}): Kelly factor -10%"
+            )
+
+        # Minimum factor to prevent over-reduction
+        return max(0.5, factor)
 
     def _calculate_risk_multiplier(
         self,

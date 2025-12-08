@@ -2,10 +2,12 @@
 Circuit Breaker - Giới hạn trades và loss per day
 Bảo vệ khỏi lỗi logic hoặc market anomaly
 
-IMPROVED v5.1:
+IMPROVED v6.1:
 - Database-backed storage option (see circuit_breaker_db.py)
 - Regime-aware consecutive loss limits
 - Distributed locking for multiple bots
+- Sector-specific circuit breakers (Banking, Real Estate more sensitive)
+- Enhanced gradual response system
 """
 
 import json
@@ -17,6 +19,68 @@ from threading import RLock
 from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# SECTOR-SPECIFIC THRESHOLDS - IMPROVED v6.1
+# =============================================================================
+# Different sectors have different risk profiles in Vietnam market:
+# - BANKING: Most sensitive to market drops, high correlation with VNINDEX
+# - REAL_ESTATE: High volatility, can drop faster than market
+# - TECHNOLOGY: Can recover quickly, more resilient
+# - CONSUMER: Defensive, less volatile
+# =============================================================================
+
+SECTOR_CIRCUIT_BREAKER_THRESHOLDS = {
+    "BANKING": {
+        "vnindex_drop_threshold": -0.015,  # -1.5% (stricter - banks drop faster)
+        "max_consecutive_losses": 2,  # Stricter
+        "max_sector_exposure": 0.25,  # 25% max exposure to banking
+        "description": "Banking sector - high correlation with market",
+    },
+    "REAL_ESTATE": {
+        "vnindex_drop_threshold": -0.025,  # -2.5% (more volatile)
+        "max_consecutive_losses": 2,  # Stricter
+        "max_sector_exposure": 0.20,  # 20% max exposure to RE
+        "description": "Real Estate - high volatility sector",
+    },
+    "SECURITIES": {
+        "vnindex_drop_threshold": -0.015,  # -1.5% (very sensitive)
+        "max_consecutive_losses": 2,  # Stricter
+        "max_sector_exposure": 0.15,  # 15% max exposure
+        "description": "Securities - extremely sensitive to market",
+    },
+    "TECHNOLOGY": {
+        "vnindex_drop_threshold": -0.030,  # -3.0% (more resilient)
+        "max_consecutive_losses": 4,  # More lenient
+        "max_sector_exposure": 0.30,  # 30% max exposure
+        "description": "Technology - can recover quickly",
+    },
+    "CONSUMER": {
+        "vnindex_drop_threshold": -0.030,  # -3.0% (defensive)
+        "max_consecutive_losses": 4,  # More lenient
+        "max_sector_exposure": 0.30,  # 30% max exposure
+        "description": "Consumer - defensive sector",
+    },
+    "ENERGY": {
+        "vnindex_drop_threshold": -0.025,  # -2.5% (standard)
+        "max_consecutive_losses": 3,  # Standard
+        "max_sector_exposure": 0.25,  # 25% max exposure
+        "description": "Energy - moderate volatility",
+    },
+    "INDUSTRIAL": {
+        "vnindex_drop_threshold": -0.025,  # -2.5% (standard)
+        "max_consecutive_losses": 3,  # Standard
+        "max_sector_exposure": 0.25,  # 25% max exposure
+        "description": "Industrial - cyclical sector",
+    },
+    "DEFAULT": {
+        "vnindex_drop_threshold": -0.020,  # -2.0% (conservative default)
+        "max_consecutive_losses": 3,  # Standard
+        "max_sector_exposure": 0.25,  # 25% max exposure
+        "description": "Default sector settings",
+    },
+}
 
 
 @dataclass
@@ -576,11 +640,86 @@ class CircuitBreaker:
             return 0.5
         return 1.0
 
+    def check_sector_circuit_breaker(
+        self, sector: str, sector_change_pct: float, current_sector_exposure: float = 0.0
+    ) -> Tuple[bool, str]:
+        """
+        Check sector-specific circuit breaker.
+
+        IMPROVED v6.1: Sector-specific thresholds for Vietnam market.
+
+        Different sectors have different risk profiles:
+        - BANKING: Most sensitive (-1.5% threshold)
+        - REAL_ESTATE: High volatility (-2.5% threshold)
+        - SECURITIES: Extremely sensitive (-1.5% threshold)
+        - TECHNOLOGY: More resilient (-3.0% threshold)
+        - CONSUMER: Defensive (-3.0% threshold)
+
+        Args:
+            sector: Sector name (BANKING, REAL_ESTATE, etc.)
+            sector_change_pct: Sector index change percentage (e.g., -0.02 for -2%)
+            current_sector_exposure: Current exposure to this sector (0-1)
+
+        Returns:
+            (can_trade: bool, reason: str)
+        """
+        # Get sector-specific thresholds
+        sector_upper = sector.upper() if sector else "DEFAULT"
+        sector_config = SECTOR_CIRCUIT_BREAKER_THRESHOLDS.get(
+            sector_upper, SECTOR_CIRCUIT_BREAKER_THRESHOLDS["DEFAULT"]
+        )
+
+        threshold = sector_config["vnindex_drop_threshold"]
+        max_exposure = sector_config["max_sector_exposure"]
+        description = sector_config["description"]
+
+        # Check 1: Sector index drop
+        if sector_change_pct < threshold:
+            return (
+                False,
+                f"🚫 {sector_upper} sector circuit breaker: "
+                f"Sector down {sector_change_pct*100:.1f}% (threshold: {threshold*100:.1f}%). "
+                f"{description}",
+            )
+
+        # Check 2: Sector exposure limit
+        if current_sector_exposure >= max_exposure:
+            return (
+                False,
+                f"🚫 {sector_upper} sector exposure limit: "
+                f"Current {current_sector_exposure*100:.1f}% >= max {max_exposure*100:.1f}%. "
+                f"{description}",
+            )
+
+        # Check 3: Warning if approaching limit
+        if current_sector_exposure >= max_exposure * 0.8:
+            logger.warning(
+                f"⚠️ {sector_upper} sector exposure warning: "
+                f"{current_sector_exposure*100:.1f}% approaching limit {max_exposure*100:.1f}%"
+            )
+
+        return True, f"✅ {sector_upper} sector OK"
+
+    def get_sector_thresholds(self, sector: str) -> Dict:
+        """
+        Get sector-specific thresholds for a given sector.
+
+        Args:
+            sector: Sector name
+
+        Returns:
+            Dict with sector thresholds
+        """
+        sector_upper = sector.upper() if sector else "DEFAULT"
+        return SECTOR_CIRCUIT_BREAKER_THRESHOLDS.get(
+            sector_upper, SECTOR_CIRCUIT_BREAKER_THRESHOLDS["DEFAULT"]
+        )
+
     def can_trade(self) -> Tuple[bool, str]:
         """
         Check xem có thể vào lệnh mới không.
 
-        IMPROVED v4.2: Includes session limits and winning streak checks.
+        IMPROVED v6.1: Includes session limits, winning streak, and sector checks.
 
         Returns:
             (can_trade: bool, reason: str)
@@ -613,6 +752,36 @@ class CircuitBreaker:
             return False, streak_msg
 
         return True, "✅ OK to trade"
+
+    def can_trade_sector(
+        self, sector: str, sector_change_pct: float = 0.0, current_sector_exposure: float = 0.0
+    ) -> Tuple[bool, str]:
+        """
+        Check if can trade a specific sector.
+
+        IMPROVED v6.1: Combined check for general and sector-specific limits.
+
+        Args:
+            sector: Sector name
+            sector_change_pct: Sector index change percentage
+            current_sector_exposure: Current exposure to this sector
+
+        Returns:
+            (can_trade: bool, reason: str)
+        """
+        # First check general circuit breaker
+        general_ok, general_msg = self.can_trade()
+        if not general_ok:
+            return False, general_msg
+
+        # Then check sector-specific
+        sector_ok, sector_msg = self.check_sector_circuit_breaker(
+            sector, sector_change_pct, current_sector_exposure
+        )
+        if not sector_ok:
+            return False, sector_msg
+
+        return True, f"✅ OK to trade {sector}"
 
     def record_trade(self, pnl: float):
         """
@@ -930,6 +1099,156 @@ class CircuitBreaker:
             "base_limit": self.base_max_consecutive_losses,
             "current_losses": self.stats.get("consecutive_losses", 0),
             "regime_aware_enabled": self.use_regime_aware_limits,
+        }
+
+    # ========================================================================
+    # NEW v7.0: Market Breadth Circuit Breaker
+    # ========================================================================
+
+    def check_market_breadth_circuit_breaker(
+        self,
+        advancing: int = 0,
+        declining: int = 0,
+        floor_hits: int = 0,
+        vn30_advancing: int = 0,
+        vn30_total: int = 30,
+    ) -> Tuple[bool, str]:
+        """
+        Check market breadth and trip circuit breaker if market-wide selling.
+
+        IMPROVED v7.0: Market breadth protection for Vietnam market.
+
+        Trip conditions:
+        - > 70% stocks declining (market-wide selling)
+        - > 50 stocks hit floor price (panic)
+        - VN30 breadth < 20% (< 6/30 stocks advancing)
+
+        Args:
+            advancing: Number of advancing stocks
+            declining: Number of declining stocks
+            floor_hits: Number of stocks hitting floor price
+            vn30_advancing: Number of VN30 stocks advancing
+            vn30_total: Total VN30 stocks (default 30)
+
+        Returns:
+            (can_trade: bool, reason: str)
+        """
+        total_stocks = advancing + declining
+        if total_stocks == 0:
+            return (True, "No breadth data available")
+
+        # Calculate breadth metrics
+        decline_ratio = declining / total_stocks
+        vn30_breadth = vn30_advancing / vn30_total if vn30_total > 0 else 0.5
+
+        # Check 1: Market-wide selling (> 70% declining)
+        if decline_ratio > 0.70:
+            if not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 Market breadth circuit breaker: "
+                    f"{decline_ratio*100:.0f}% stocks declining (> 70%)"
+                )
+                self._save_stats()
+            return (
+                False,
+                f"🚫 Market-wide selling: {decline_ratio*100:.0f}% declining",
+            )
+
+        # Check 2: Panic selling (> 50 floor hits)
+        if floor_hits > 50:
+            if not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 Floor hit circuit breaker: " f"{floor_hits} stocks at floor price (> 50)"
+                )
+                self._save_stats()
+            return (
+                False,
+                f"🚫 Panic selling: {floor_hits} stocks at floor",
+            )
+
+        # Check 3: VN30 breadth < 20%
+        if vn30_breadth < 0.20:
+            if not self.tripped:
+                self.tripped = True
+                self.tripped_reason = (
+                    f"🚨 VN30 breadth circuit breaker: "
+                    f"Only {vn30_advancing}/{vn30_total} advancing (< 20%)"
+                )
+                self._save_stats()
+            return (
+                False,
+                f"🚫 VN30 weakness: Only {vn30_advancing}/{vn30_total} advancing",
+            )
+
+        # Warning levels
+        if decline_ratio > 0.60:
+            return (
+                True,
+                f"⚠️ High decline ratio: {decline_ratio*100:.0f}% - reduce position sizes",
+            )
+
+        if vn30_breadth < 0.30:
+            return (
+                True,
+                f"⚠️ Weak VN30 breadth: {vn30_advancing}/{vn30_total} - caution advised",
+            )
+
+        return (True, f"✅ Market breadth OK: {advancing} advancing, {declining} declining")
+
+    def get_market_breadth_status(
+        self,
+        advancing: int = 0,
+        declining: int = 0,
+        floor_hits: int = 0,
+        ceiling_hits: int = 0,
+    ) -> Dict:
+        """
+        Get detailed market breadth status.
+
+        Returns:
+            Dict with breadth metrics and recommendations
+        """
+        total = advancing + declining
+        if total == 0:
+            return {"status": "NO_DATA", "recommendation": "Wait for market data"}
+
+        advance_ratio = advancing / total
+        decline_ratio = declining / total
+
+        # Determine market condition
+        if advance_ratio > 0.60:
+            condition = "BULLISH"
+            recommendation = "Normal trading - market breadth positive"
+        elif decline_ratio > 0.60:
+            condition = "BEARISH"
+            recommendation = "Reduce exposure - market breadth negative"
+        else:
+            condition = "NEUTRAL"
+            recommendation = "Selective trading - mixed breadth"
+
+        # Position size multiplier based on breadth
+        if advance_ratio > 0.70:
+            multiplier = 1.2  # Increase size in strong breadth
+        elif decline_ratio > 0.70:
+            multiplier = 0.3  # Heavily reduce in weak breadth
+        elif decline_ratio > 0.60:
+            multiplier = 0.5  # Reduce in moderately weak breadth
+        else:
+            multiplier = 1.0  # Normal
+
+        return {
+            "advancing": advancing,
+            "declining": declining,
+            "total": total,
+            "advance_ratio": advance_ratio,
+            "decline_ratio": decline_ratio,
+            "floor_hits": floor_hits,
+            "ceiling_hits": ceiling_hits,
+            "condition": condition,
+            "recommendation": recommendation,
+            "position_size_multiplier": multiplier,
         }
 
 

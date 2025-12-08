@@ -9,17 +9,68 @@ FEATURES:
 - Optimal entry timing windows
 - Session-specific risk adjustments
 - Order type recommendations (ATO/ATC/LO/MP)
+
+IMPROVEMENTS v2.0:
+- Added constants for magic numbers
+- Thread-safe singleton
+- Added __all__ export list
 """
 
 import logging
+import threading
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import pytz
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "SessionType",
+    "OrderType",
+    "SessionInfo",
+    "EntryTimingResult",
+    "SessionTradingManager",
+    "get_session_manager",
+    "get_current_session",
+    "analyze_entry_timing",
+    "is_optimal_entry_time",
+]
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Quality score thresholds
+QUALITY_SCORE_OPTIMAL = 85.0
+QUALITY_SCORE_ACCEPTABLE = 60.0
+QUALITY_SCORE_AVOID = 20.0
+QUALITY_SCORE_CLOSED = 0.0
+QUALITY_SCORE_BASE = 50.0
+
+# Quality bonuses/penalties
+QUALITY_BONUS_SWEET_SPOT = 10
+QUALITY_PENALTY_PRE_LUNCH = 15
+QUALITY_PENALTY_EARLY_AFTERNOON = 5
+QUALITY_BONUS_HIGH_URGENCY = 20
+
+# Position size multipliers
+SIZE_MULTIPLIER_EXCELLENT = 1.0
+SIZE_MULTIPLIER_GOOD = 0.8
+SIZE_MULTIPLIER_ACCEPTABLE = 0.6
+SIZE_MULTIPLIER_POOR = 0.5
+
+# Thresholds
+OPTIMAL_QUALITY_THRESHOLD = 70
+STRONG_SIGNAL_THRESHOLD = 80
+LARGE_POSITION_THRESHOLD = 0.15  # 15% of portfolio
+
+# Quality score boundaries for position sizing
+QUALITY_EXCELLENT_THRESHOLD = 80
+QUALITY_GOOD_THRESHOLD = 60
+QUALITY_ACCEPTABLE_THRESHOLD = 40
 
 # Vietnam timezone
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -133,8 +184,7 @@ class SessionTradingManager:
     ]
 
     def __init__(self):
-        self._last_session_check = None
-        self._cached_session_info = None
+        pass  # Stateless manager - no caching needed
 
     def get_current_session(self, dt: Optional[datetime] = None) -> SessionInfo:
         """
@@ -352,49 +402,49 @@ class SessionTradingManager:
         current_time = dt.time()
 
         # Base quality score
-        quality_score = 50.0
+        quality_score = QUALITY_SCORE_BASE
         reasons = []
         warnings = []
 
         # Session-based scoring
         if session_info.entry_quality == "OPTIMAL":
-            quality_score = 85.0
+            quality_score = QUALITY_SCORE_OPTIMAL
             reasons.append("✅ Optimal entry window")
         elif session_info.entry_quality == "ACCEPTABLE":
-            quality_score = 60.0
+            quality_score = QUALITY_SCORE_ACCEPTABLE
             reasons.append("📊 Acceptable entry window")
         elif session_info.entry_quality == "AVOID":
-            quality_score = 20.0
+            quality_score = QUALITY_SCORE_AVOID
             warnings.append("⚠️ Suboptimal entry timing")
         elif session_info.entry_quality == "CLOSED":
-            quality_score = 0.0
+            quality_score = QUALITY_SCORE_CLOSED
             warnings.append("🚫 Market closed")
 
         # Time-specific adjustments
         if session_info.session_type == SessionType.MORNING_CONTINUOUS:
             # Best: 9:30-10:30
             if time(9, 30) <= current_time <= time(10, 30):
-                quality_score += 10
+                quality_score += QUALITY_BONUS_SWEET_SPOT
                 reasons.append("🌅 Morning sweet spot (9:30-10:30)")
             # Avoid: 11:00-11:30
             elif time(11, 0) <= current_time:
-                quality_score -= 15
+                quality_score -= QUALITY_PENALTY_PRE_LUNCH
                 warnings.append("⚠️ Pre-lunch selling pressure zone")
 
         elif session_info.session_type == SessionType.AFTERNOON_CONTINUOUS:
             # Best: 13:30-14:15
             if time(13, 30) <= current_time <= time(14, 15):
-                quality_score += 10
+                quality_score += QUALITY_BONUS_SWEET_SPOT
                 reasons.append("🌆 Afternoon sweet spot (13:30-14:15)")
             # Early afternoon gap risk
             elif current_time < time(13, 30):
-                quality_score -= 5
+                quality_score -= QUALITY_PENALTY_EARLY_AFTERNOON
                 warnings.append("📊 Early afternoon - watch for gap fill")
 
         # Urgency adjustments
         if urgency == "HIGH":
             # High urgency = accept lower quality
-            quality_score = min(quality_score + 20, 100)
+            quality_score = min(quality_score + QUALITY_BONUS_HIGH_URGENCY, 100)
             reasons.append("⚡ High urgency trade")
         elif urgency == "LOW":
             # Low urgency = be more selective
@@ -402,17 +452,19 @@ class SessionTradingManager:
                 warnings.append("💡 Consider waiting for better timing")
 
         # Position size multiplier based on timing
-        if quality_score >= 80:
-            size_multiplier = 1.0
-        elif quality_score >= 60:
-            size_multiplier = 0.8
-        elif quality_score >= 40:
-            size_multiplier = 0.6
+        if quality_score >= QUALITY_EXCELLENT_THRESHOLD:
+            size_multiplier = SIZE_MULTIPLIER_EXCELLENT
+        elif quality_score >= QUALITY_GOOD_THRESHOLD:
+            size_multiplier = SIZE_MULTIPLIER_GOOD
+        elif quality_score >= QUALITY_ACCEPTABLE_THRESHOLD:
+            size_multiplier = SIZE_MULTIPLIER_ACCEPTABLE
         else:
-            size_multiplier = 0.5
+            size_multiplier = SIZE_MULTIPLIER_POOR
 
         # Determine if optimal
-        is_optimal = quality_score >= 70 and session_info.entry_quality != "AVOID"
+        is_optimal = (
+            quality_score >= OPTIMAL_QUALITY_THRESHOLD and session_info.entry_quality != "AVOID"
+        )
 
         return EntryTimingResult(
             is_optimal=is_optimal,
@@ -478,7 +530,7 @@ class SessionTradingManager:
             (should_use, reason)
         """
         # ATO orders are risky - only use for strong signals
-        if signal_strength < 80:
+        if signal_strength < STRONG_SIGNAL_THRESHOLD:
             return False, "Signal not strong enough for ATO order"
 
         if overnight_gap_expected:
@@ -509,22 +561,25 @@ class SessionTradingManager:
             return True, "High urgency exit - ATC ensures execution"
 
         # Large positions may benefit from ATC liquidity
-        if position_size_pct > 0.15:
+        if position_size_pct > LARGE_POSITION_THRESHOLD:
             return True, "Large position - ATC provides better liquidity"
 
         # Default: prefer continuous session
         return False, "Use limit order in continuous session for better price"
 
 
-# Singleton instance
+# Singleton instance with thread-safe initialization
 _session_manager = None
+_session_manager_lock = threading.Lock()
 
 
 def get_session_manager() -> SessionTradingManager:
-    """Get singleton instance"""
+    """Get singleton instance (thread-safe)"""
     global _session_manager
     if _session_manager is None:
-        _session_manager = SessionTradingManager()
+        with _session_manager_lock:
+            if _session_manager is None:
+                _session_manager = SessionTradingManager()
     return _session_manager
 
 

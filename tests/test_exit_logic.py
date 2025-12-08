@@ -105,8 +105,9 @@ def test_exit_strategy_init_default():
     """Test default initialization (v4.2 - refactored with ExitConfig)"""
     strategy = ImprovedExitStrategy()
 
-    # v4.2: Uses ExitConfig with VN market optimized defaults
-    assert strategy.tp_levels == [0.04, 0.08, 0.15]  # 3 TP levels (4%, 8%, 15%)
+    # v6.1: Uses ExitConfig with VN market optimized defaults
+    # IMPROVED: 6%, 10%, 15% for better R:R ratio (net ~4.5%, ~8.5%, ~13.5% after costs)
+    assert strategy.tp_levels == [0.06, 0.10, 0.15]  # 3 TP levels (6%, 10%, 15%)
     assert strategy.trailing_activation == 0.025  # v4.1: Tightened to 2.5%
     assert strategy.trailing_distance == 0.02  # v4.1: Tightened to 2%
     assert strategy.max_holding_days == 20  # v4.1: 20 days max
@@ -314,7 +315,9 @@ def test_check_take_profit_levels_skip_taken(sample_stock_data):
     strategy = ImprovedExitStrategy()
 
     # v3.0: _check_take_profit now uses ctx dict
+    # v6.1: entry_price required for dynamic TP level calculation
     ctx = {
+        "entry_price": 10000,
         "current_price": 11100,
         "take_profit_targets": [11000, 11500, 12500],
         "partial_exits": [11100],  # TP1 taken

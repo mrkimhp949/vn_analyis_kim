@@ -36,7 +36,7 @@ if str(project_root) not in sys.path:
 import pandas as pd
 from src.config.legacy_config import TICKERS
 from src.data.loader import load_data
-from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+from src.ml.features.enhanced_v2 import add_enhanced_features, get_feature_columns
 from src.ml.models.predictor import MLPredictor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

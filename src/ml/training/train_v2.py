@@ -9,6 +9,12 @@ Key improvements:
 5. NEW: SMOTE for class balancing
 6. NEW: Recursive feature elimination
 7. NEW: Hyperparameter tuning
+
+IMPROVEMENTS v2.1:
+- Added constants for magic numbers
+- Removed unused imports
+- Added __all__ export list
+- Fixed bare except clauses
 """
 
 import logging
@@ -20,7 +26,6 @@ from typing import Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     RandomForestClassifier,
@@ -36,10 +41,97 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.feature_selection import SelectFromModel, RFE
+from sklearn.preprocessing import RobustScaler
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "MLTrainerV2",
+    "main",
+]
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Target thresholds
+TARGET_ACCURACY = 0.65
+GOOD_ACCURACY = 0.62
+RANDOM_BASELINE = 0.5
+
+# Default parameters
+DEFAULT_N_SPLITS = 5
+DEFAULT_MIN_TRAIN_SIZE = 500
+DEFAULT_N_TOP_FEATURES = 40
+DEFAULT_LOOKBACK = 500
+MIN_BARS_FOR_FEATURES = 60
+MIN_BARS_FOR_TRAINING = 50
+DEFAULT_REQUIRED_BARS = 20
+
+# Random Forest hyperparameters
+RF_N_ESTIMATORS = 300
+RF_MAX_DEPTH = 10
+RF_MIN_SAMPLES_LEAF = 15
+RF_MIN_SAMPLES_SPLIT = 30
+RF_MAX_FEATURES = 0.3
+
+# Gradient Boosting hyperparameters
+GB_N_ESTIMATORS = 200
+GB_MAX_DEPTH = 5
+GB_LEARNING_RATE = 0.03
+GB_MIN_SAMPLES_LEAF = 15
+GB_MIN_SAMPLES_SPLIT = 30
+GB_SUBSAMPLE = 0.8
+GB_MAX_FEATURES = 0.5
+GB_VALIDATION_FRACTION = 0.1
+GB_N_ITER_NO_CHANGE = 20
+
+# XGBoost hyperparameters
+XGB_N_ESTIMATORS = 300
+XGB_MAX_DEPTH = 6
+XGB_LEARNING_RATE = 0.03
+XGB_SUBSAMPLE = 0.8
+XGB_COLSAMPLE_BYTREE = 0.6
+XGB_COLSAMPLE_BYLEVEL = 0.8
+XGB_REG_ALPHA = 0.5
+XGB_REG_LAMBDA = 2.0
+XGB_GAMMA = 0.1
+XGB_MIN_CHILD_WEIGHT = 5
+XGB_EARLY_STOPPING = 20
+
+# LightGBM hyperparameters
+LGB_N_ESTIMATORS = 300
+LGB_MAX_DEPTH = 6
+LGB_LEARNING_RATE = 0.03
+LGB_NUM_LEAVES = 31
+LGB_SUBSAMPLE = 0.8
+LGB_COLSAMPLE_BYTREE = 0.6
+LGB_REG_ALPHA = 0.5
+LGB_REG_LAMBDA = 2.0
+LGB_MIN_CHILD_SAMPLES = 20
+
+# Logistic Regression hyperparameters
+LR_C = 0.5
+LR_MAX_ITER = 2000
+LR_L1_RATIO = 0.5
+
+# Feature selection
+FEATURE_SELECTOR_N_ESTIMATORS = 100
+FEATURE_SELECTOR_MAX_DEPTH = 8
+
+# Ensemble weights
+ENSEMBLE_ACCURACY_WEIGHT = 0.4
+ENSEMBLE_F1_WEIGHT = 0.3
+ENSEMBLE_AUC_WEIGHT = 0.3
+ENSEMBLE_TOP_MODELS = 3
+
+# Stacking
+STACKING_CV = 3
+STACKING_META_C = 1.0
+STACKING_META_MAX_ITER = 1000
+
+# AUC fallback
+AUC_FALLBACK = 0.5
 
 # Try importing optional dependencies
 try:
@@ -74,11 +166,11 @@ class MLTrainerV2:
     def __init__(
         self,
         models_dir: str = "models",
-        n_splits: int = 5,
-        min_train_size: int = 500,
+        n_splits: int = DEFAULT_N_SPLITS,
+        min_train_size: int = DEFAULT_MIN_TRAIN_SIZE,
         use_feature_selection: bool = True,
         use_class_balancing: bool = True,
-        n_top_features: int = 40,
+        n_top_features: int = DEFAULT_N_TOP_FEATURES,
     ):
         self.models_dir = models_dir
         self.n_splits = n_splits
@@ -96,7 +188,7 @@ class MLTrainerV2:
         os.makedirs(models_dir, exist_ok=True)
 
     def load_training_data(
-        self, symbols: List[str], lookback: int = 500
+        self, symbols: List[str], lookback: int = DEFAULT_LOOKBACK
     ) -> Tuple[pd.DataFrame, pd.Series, List[str]]:
         """Load and prepare training data from multiple symbols."""
         from src.data.loader import load_data
@@ -112,17 +204,20 @@ class MLTrainerV2:
 
         for symbol in symbols:
             try:
-                # Use required_bars=20 to accept shorter data from API
-                df = load_data(symbol, lookback=lookback, required_bars=20)
-                if df is None or len(df) < 60:  # Need at least 60 bars for features
+                # Use required_bars to accept shorter data from API
+                df = load_data(symbol, lookback=lookback, required_bars=DEFAULT_REQUIRED_BARS)
+                if df is None or len(df) < MIN_BARS_FOR_FEATURES:
                     continue
 
                 # Load index
                 try:
                     index_df = load_data(
-                        "VNINDEX", lookback=lookback, is_index=True, required_bars=20
+                        "VNINDEX",
+                        lookback=lookback,
+                        is_index=True,
+                        required_bars=DEFAULT_REQUIRED_BARS,
                     )
-                except:
+                except Exception:
                     index_df = None
 
                 # Add features with improved target
@@ -131,7 +226,7 @@ class MLTrainerV2:
                 # Filter valid rows
                 df = df.dropna(subset=feature_cols + ["target"])
 
-                if len(df) >= 50:
+                if len(df) >= MIN_BARS_FOR_TRAINING:
                     df["symbol"] = symbol
                     all_data.append(df)
                     logger.info(f"  ✅ {symbol}: {len(df)} rows")
@@ -162,11 +257,11 @@ class MLTrainerV2:
 
         # Random Forest - tuned for better generalization
         models["rf"] = RandomForestClassifier(
-            n_estimators=300,
-            max_depth=10,
-            min_samples_leaf=15,
-            min_samples_split=30,
-            max_features=0.3,  # Use 30% of features per tree
+            n_estimators=RF_N_ESTIMATORS,
+            max_depth=RF_MAX_DEPTH,
+            min_samples_leaf=RF_MIN_SAMPLES_LEAF,
+            min_samples_split=RF_MIN_SAMPLES_SPLIT,
+            max_features=RF_MAX_FEATURES,
             class_weight="balanced_subsample",
             bootstrap=True,
             oob_score=True,
@@ -176,50 +271,50 @@ class MLTrainerV2:
 
         # Gradient Boosting - tuned
         models["gb"] = GradientBoostingClassifier(
-            n_estimators=200,
-            max_depth=5,
-            learning_rate=0.03,
-            min_samples_leaf=15,
-            min_samples_split=30,
-            subsample=0.8,
-            max_features=0.5,
-            validation_fraction=0.1,
-            n_iter_no_change=20,
+            n_estimators=GB_N_ESTIMATORS,
+            max_depth=GB_MAX_DEPTH,
+            learning_rate=GB_LEARNING_RATE,
+            min_samples_leaf=GB_MIN_SAMPLES_LEAF,
+            min_samples_split=GB_MIN_SAMPLES_SPLIT,
+            subsample=GB_SUBSAMPLE,
+            max_features=GB_MAX_FEATURES,
+            validation_fraction=GB_VALIDATION_FRACTION,
+            n_iter_no_change=GB_N_ITER_NO_CHANGE,
             random_state=42,
         )
 
         # XGBoost - tuned for accuracy
         if XGB_AVAILABLE:
             models["xgb"] = xgb.XGBClassifier(
-                n_estimators=300,
-                max_depth=6,
-                learning_rate=0.03,
-                subsample=0.8,
-                colsample_bytree=0.6,
-                colsample_bylevel=0.8,
-                reg_alpha=0.5,
-                reg_lambda=2.0,
-                gamma=0.1,
-                min_child_weight=5,
+                n_estimators=XGB_N_ESTIMATORS,
+                max_depth=XGB_MAX_DEPTH,
+                learning_rate=XGB_LEARNING_RATE,
+                subsample=XGB_SUBSAMPLE,
+                colsample_bytree=XGB_COLSAMPLE_BYTREE,
+                colsample_bylevel=XGB_COLSAMPLE_BYLEVEL,
+                reg_alpha=XGB_REG_ALPHA,
+                reg_lambda=XGB_REG_LAMBDA,
+                gamma=XGB_GAMMA,
+                min_child_weight=XGB_MIN_CHILD_WEIGHT,
                 scale_pos_weight=1,
                 random_state=42,
                 n_jobs=-1,
                 verbosity=0,
-                early_stopping_rounds=20,
+                early_stopping_rounds=XGB_EARLY_STOPPING,
             )
 
         # LightGBM - tuned for accuracy
         if LGB_AVAILABLE:
             models["lgb"] = lgb.LGBMClassifier(
-                n_estimators=300,
-                max_depth=6,
-                learning_rate=0.03,
-                num_leaves=31,
-                subsample=0.8,
-                colsample_bytree=0.6,
-                reg_alpha=0.5,
-                reg_lambda=2.0,
-                min_child_samples=20,
+                n_estimators=LGB_N_ESTIMATORS,
+                max_depth=LGB_MAX_DEPTH,
+                learning_rate=LGB_LEARNING_RATE,
+                num_leaves=LGB_NUM_LEAVES,
+                subsample=LGB_SUBSAMPLE,
+                colsample_bytree=LGB_COLSAMPLE_BYTREE,
+                reg_alpha=LGB_REG_ALPHA,
+                reg_lambda=LGB_REG_LAMBDA,
+                min_child_samples=LGB_MIN_CHILD_SAMPLES,
                 random_state=42,
                 n_jobs=-1,
                 verbose=-1,
@@ -228,12 +323,12 @@ class MLTrainerV2:
 
         # Logistic Regression - baseline
         models["lr"] = LogisticRegression(
-            C=0.5,
-            max_iter=2000,
+            C=LR_C,
+            max_iter=LR_MAX_ITER,
             class_weight="balanced",
             solver="saga",
             penalty="elasticnet",
-            l1_ratio=0.5,
+            l1_ratio=LR_L1_RATIO,
             random_state=42,
         )
 
@@ -253,8 +348,8 @@ class MLTrainerV2:
 
         # Use RF for initial feature importance
         rf_selector = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=8,
+            n_estimators=FEATURE_SELECTOR_N_ESTIMATORS,
+            max_depth=FEATURE_SELECTOR_MAX_DEPTH,
             random_state=42,
             n_jobs=-1,
         )
@@ -364,8 +459,8 @@ class MLTrainerV2:
                     f1 = f1_score(y_test, y_pred, zero_division=0)
                     try:
                         auc = roc_auc_score(y_test, y_proba)
-                    except:
-                        auc = 0.5
+                    except ValueError:
+                        auc = AUC_FALLBACK
 
                     results[name]["accuracy"].append(acc)
                     results[name]["precision"].append(prec)
@@ -470,10 +565,16 @@ class MLTrainerV2:
                     acc = np.mean(self.cv_results[name]["accuracy"])
                     f1 = np.mean(self.cv_results[name]["f1"])
                     auc = np.mean(self.cv_results[name]["auc"])
-                    model_scores[name] = 0.4 * acc + 0.3 * f1 + 0.3 * auc
+                    model_scores[name] = (
+                        ENSEMBLE_ACCURACY_WEIGHT * acc
+                        + ENSEMBLE_F1_WEIGHT * f1
+                        + ENSEMBLE_AUC_WEIGHT * auc
+                    )
 
-            # Use top 3 models
-            top_models = sorted(model_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+            # Use top N models
+            top_models = sorted(model_scores.items(), key=lambda x: x[1], reverse=True)[
+                :ENSEMBLE_TOP_MODELS
+            ]
             logger.info(f"  Top models: {[m[0] for m in top_models]}")
         else:
             top_models = [(name, 0) for name in list(self.models.keys())[:3]]
@@ -506,8 +607,10 @@ class MLTrainerV2:
                 # Use LogisticRegression as meta-learner
                 self.models["stacking"] = StackingClassifier(
                     estimators=base_estimators,
-                    final_estimator=LogisticRegression(C=1.0, max_iter=1000),
-                    cv=3,
+                    final_estimator=LogisticRegression(
+                        C=STACKING_META_C, max_iter=STACKING_META_MAX_ITER
+                    ),
+                    cv=STACKING_CV,
                     stack_method="predict_proba",
                     passthrough=False,
                 )
@@ -617,7 +720,7 @@ class MLTrainerV2:
             "best_accuracy": best_model[1]["accuracy_mean"],
             "best_f1": best_model[1]["f1_mean"],
             "best_auc": best_model[1]["auc_mean"],
-            "edge_vs_random": (best_model[1]["accuracy_mean"] - 0.5) * 100,
+            "edge_vs_random": (best_model[1]["accuracy_mean"] - RANDOM_BASELINE) * 100,
             "cv_summary": cv_summary,
             "n_samples": len(X),
             "n_features": len(feature_cols),
@@ -634,9 +737,9 @@ class MLTrainerV2:
         logger.info(f"Edge vs random: {results['edge_vs_random']:+.2f}%")
 
         # Check target
-        if results["best_accuracy"] >= 0.65:
+        if results["best_accuracy"] >= TARGET_ACCURACY:
             logger.info("\n🎯 TARGET ACHIEVED: Accuracy >= 65%!")
-        elif results["best_accuracy"] >= 0.62:
+        elif results["best_accuracy"] >= GOOD_ACCURACY:
             logger.info("\n📈 GOOD PROGRESS: Accuracy >= 62%")
         else:
             logger.info(f"\n⚠️ Need improvement. Current: {results['best_accuracy']:.1%}")
@@ -723,9 +826,9 @@ def main():
     print(f"AUC: {results['best_auc']:.4f}")
     print(f"Edge: {results['edge_vs_random']:+.2f}%")
 
-    if results["best_accuracy"] >= 0.65:
+    if results["best_accuracy"] >= TARGET_ACCURACY:
         print("\n🎯 TARGET ACHIEVED: Accuracy >= 65%!")
-    elif results["best_accuracy"] >= 0.62:
+    elif results["best_accuracy"] >= GOOD_ACCURACY:
         print(f"\n📈 GOOD PROGRESS: {results['best_accuracy']:.1%}")
     else:
         print(f"\n⚠️ Need improvement. Current: {results['best_accuracy']:.1%}")

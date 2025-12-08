@@ -1,5 +1,3 @@
-# [file name]: portfolio_analyzer.py
-# [file content begin]
 # -*- coding: utf-8 -*-
 """
 Portfolio Analyzer - Phân tích danh mục hiện tại
@@ -198,8 +196,8 @@ class PortfolioAnalyzer:
                 "entry_value": entry_value,
                 "pnl_amount": pnl_amount,
                 "pnl_percent": pnl_percent,
-                "ml_signal": ml_signal["signal"],
-                "ml_confidence": ml_signal["confidence"],
+                "ml_signal": ml_signal["signal"] if ml_signal else None,
+                "ml_confidence": ml_signal["confidence"] if ml_signal else 0,
                 # Chỉ lấy thông tin từ exit_decision, không lưu object
                 "should_exit": exit_decision.should_exit,
                 "exit_reason": (
@@ -214,8 +212,8 @@ class PortfolioAnalyzer:
                 ),
             }
 
-        except Exception:
-            return self._create_error_analysis(symbol, str(e))  # noqa: F821
+        except Exception as e:
+            return self._create_error_analysis(symbol, str(e))
 
     def _find_new_buy_opportunities(self, current_holdings, market_regime, max_recommendations=20):
         """Tìm cổ phiếu mới nên mua - CHỈ dùng mã từ config"""
@@ -224,7 +222,7 @@ class PortfolioAnalyzer:
         try:
             from src.config.legacy_config import TICKERS
 
-            safe_print("   📊 Tổng mã trong config: {len(TICKERS)}")
+            safe_print(f"   📊 Tổng mã trong config: {len(TICKERS)}")
             safe_print(
                 f"   📦 Mã đang nắm: {len(current_holdings)} - {list(current_holdings.keys())}"
             )
@@ -255,7 +253,7 @@ class PortfolioAnalyzer:
                         continue
 
                     if df.empty or len(df) < 50:
-                        safe_print("       ⚠️ {symbol}: Không đủ dữ liệu")
+                        safe_print(f"       ⚠️ {symbol}: Không đủ dữ liệu")
                         continue
 
                     # ML analysis với error handling
@@ -353,11 +351,13 @@ class PortfolioAnalyzer:
 
         sector_exposure = calculate_sector_exposure(current_holdings) if current_holdings else {}
 
-        regime_adjustment = self.regime_adjuster.evaluate_adjustment(
-            current_holdings,
-            market_regime=market_regime,
-            current_cash=current_cash or 0.0,
-        )
+        regime_adjustment = None
+        if self.regime_adjuster:
+            regime_adjustment = self.regime_adjuster.evaluate_adjustment(
+                current_holdings,
+                market_regime=market_regime,
+                current_cash=current_cash or 0.0,
+            )
 
         optimal_allocation = None
         try:
@@ -386,14 +386,18 @@ class PortfolioAnalyzer:
             "sell_recommendations_count": sell_recommendations,
             "hold_recommendations_count": hold_recommendations,
             "sector_exposure": sector_exposure,
-            "regime_adjustment": {
-                "regime": regime_adjustment.regime,
-                "target_cash_ratio": regime_adjustment.target_cash_ratio,
-                "target_exposure_ratio": regime_adjustment.target_exposure_ratio,
-                "required_cash_increase": regime_adjustment.required_cash_increase,
-                "suggested_sales": regime_adjustment.suggested_sales,
-                "notes": regime_adjustment.notes,
-            },
+            "regime_adjustment": (
+                {
+                    "regime": regime_adjustment.regime,
+                    "target_cash_ratio": regime_adjustment.target_cash_ratio,
+                    "target_exposure_ratio": regime_adjustment.target_exposure_ratio,
+                    "required_cash_increase": regime_adjustment.required_cash_increase,
+                    "suggested_sales": regime_adjustment.suggested_sales,
+                    "notes": regime_adjustment.notes,
+                }
+                if regime_adjustment
+                else None
+            ),
             "optimal_allocation": optimal_allocation,
         }
 
@@ -553,4 +557,3 @@ if __name__ == "__main__":
     result = analyzer.analyze_current_portfolio(sample_portfolio)
     report = analyzer.format_analysis_report(result)
     print(report)
-# [file content end]

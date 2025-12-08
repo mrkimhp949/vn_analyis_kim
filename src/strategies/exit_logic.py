@@ -141,7 +141,7 @@ class ExitConfig:
     Tất cả thresholds có thể config được.
     """
 
-    # Take Profit levels - IMPROVED v4.2 for VN market shorter cycles
+    # Take Profit levels - IMPROVED v6.1 for VN market shorter cycles
     # Vietnam market characteristics:
     # - Shorter cycles (2-4 weeks typical)
     # - Higher volatility (±7% daily limit)
@@ -151,6 +151,16 @@ class ExitConfig:
     # Net profit after costs: ~4.5%, ~8.5%, ~13.5%
     # With SL ~4%, R:R = 6/4 = 1.5 (minimum acceptable)
     take_profit_levels: Tuple[float, float, float] = (0.06, 0.10, 0.15)
+
+    # IMPROVED v6.1: Dynamic TP levels by market regime
+    # BULL: Wider targets to capture momentum
+    # BEAR: Tighter targets to lock profits quickly
+    # SIDEWAYS: Standard targets
+    use_dynamic_tp_levels: bool = True
+    tp_levels_bull: Tuple[float, float, float] = (0.08, 0.15, 0.25)
+    tp_levels_bear: Tuple[float, float, float] = (0.04, 0.07, 0.10)
+    tp_levels_sideways: Tuple[float, float, float] = (0.06, 0.10, 0.15)
+    tp_levels_high_volatility: Tuple[float, float, float] = (0.05, 0.08, 0.12)
 
     # Stop Loss - IMPROVED v4.1 with transaction cost awareness
     # Must account for ~1.5% round trip cost
@@ -697,6 +707,129 @@ class ImprovedExitStrategy:
             logger.debug(f"Volume ratio calculation failed: {e}")
             return 1.0
 
+    def _calculate_price_momentum(self, df: pd.DataFrame, lookback: int = 5) -> float:
+        """
+        Calculate short-term price momentum for floor bounce decision.
+
+        IMPROVED v6.1: Price action confirmation for floor bounce logic.
+
+        Used in combination with volume ratio:
+        - Volume ratio > 2.0 AND momentum < -0.5% → EXIT (panic + downtrend)
+        - Volume ratio > 2.5 → EXIT (panic regardless of momentum)
+        - Momentum > 1% → HOLD (bounce confirmed)
+
+        Args:
+            df: DataFrame with 'close' column
+            lookback: Number of periods for momentum calculation
+
+        Returns:
+            Price momentum as decimal (e.g., -0.005 for -0.5%). Returns 0.0 if calculation fails.
+        """
+        try:
+            if df is None or df.empty or "close" not in df.columns:
+                return 0.0
+
+            if len(df) < lookback + 1:
+                lookback = max(1, len(df) - 1)
+
+            current_close = safe_iloc(df, -1, "close")
+            lookback_close = safe_iloc(df, -(lookback + 1), "close")
+
+            if current_close is None or lookback_close is None or lookback_close <= 0:
+                return 0.0
+
+            momentum = (current_close - lookback_close) / lookback_close
+            return momentum
+
+        except Exception as e:
+            logger.debug(f"Price momentum calculation failed: {e}")
+            return 0.0
+
+    def _check_floor_bounce_with_momentum(
+        self,
+        symbol: str,
+        current_price: float,
+        floor_price: float,
+        volume_ratio: float,
+        price_momentum: float,
+    ) -> tuple:
+        """
+        Multi-factor floor bounce decision combining volume and price momentum.
+
+        IMPROVED v6.1: Enhanced floor bounce logic for Vietnam market.
+
+        Decision matrix:
+        1. Volume ratio >= 2.5 (panic) → EXIT immediately
+        2. Volume ratio >= 2.0 AND momentum < -0.5% → EXIT (high vol + downtrend)
+        3. Momentum > 1% → HOLD (bounce confirmed, cancel timer)
+        4. Otherwise → Continue monitoring with timer
+
+        Args:
+            symbol: Stock symbol
+            current_price: Current price
+            floor_price: Calculated floor price (-7% from prev close)
+            volume_ratio: Current volume / average volume
+            price_momentum: Short-term price momentum
+
+        Returns:
+            Tuple of (should_exit: bool, reason: str, action: str)
+            action: "EXIT", "HOLD", "MONITOR"
+        """
+        # Import thresholds
+        try:
+            from src.config.constants import (
+                VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO,
+                VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO,
+                VN_FLOOR_BOUNCE_RECOVERY_PCT,
+            )
+        except ImportError:
+            VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO = 2.5
+            VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5
+            VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01
+
+        # Thresholds for momentum-based decision
+        MOMENTUM_EXIT_THRESHOLD = -0.005  # -0.5% momentum = downtrend
+        MOMENTUM_RECOVERY_THRESHOLD = 0.01  # +1% momentum = bounce confirmed
+        VOLUME_MOMENTUM_EXIT_THRESHOLD = 2.0  # Volume ratio for momentum-based exit
+
+        # Case 1: Panic selling (volume >= 2.5x) → EXIT immediately
+        if volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO:
+            reason = (
+                f"PANIC SELLING: Volume {volume_ratio:.1f}x >= {VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO}x threshold. "
+                f"Momentum: {price_momentum*100:+.2f}%"
+            )
+            logger.warning(f"🚨 {symbol}: {reason}")
+            return True, reason, "EXIT"
+
+        # Case 2: High volume + negative momentum → EXIT
+        if (
+            volume_ratio >= VOLUME_MOMENTUM_EXIT_THRESHOLD
+            and price_momentum < MOMENTUM_EXIT_THRESHOLD
+        ):
+            reason = (
+                f"HIGH VOLUME + DOWNTREND: Volume {volume_ratio:.1f}x with momentum {price_momentum*100:+.2f}% "
+                f"(< {MOMENTUM_EXIT_THRESHOLD*100:.1f}% threshold)"
+            )
+            logger.warning(f"📉 {symbol}: {reason}")
+            return True, reason, "EXIT"
+
+        # Case 3: Price recovery confirmed → HOLD (cancel timer)
+        if price_momentum >= MOMENTUM_RECOVERY_THRESHOLD:
+            reason = (
+                f"BOUNCE CONFIRMED: Momentum {price_momentum*100:+.2f}% >= {MOMENTUM_RECOVERY_THRESHOLD*100:.1f}% threshold. "
+                f"Volume: {volume_ratio:.1f}x"
+            )
+            logger.info(f"✅ {symbol}: {reason}")
+            return False, reason, "HOLD"
+
+        # Case 4: Continue monitoring
+        reason = (
+            f"MONITORING: Volume {volume_ratio:.1f}x, Momentum {price_momentum*100:+.2f}%. "
+            f"Waiting for clearer signal."
+        )
+        logger.debug(f"📊 {symbol}: {reason}")
+        return False, reason, "MONITOR"
+
     # =========================================================================
     # EXIT CHECK #1: STOP LOSS (IMPROVED v6.0 - Vietnam Market Specific)
     # =========================================================================
@@ -775,13 +908,19 @@ class ImprovedExitStrategy:
                             VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO = 1.5
                             VN_FLOOR_BOUNCE_RECOVERY_PCT = 0.01
 
-                        # PANIC SELLING: Volume > 3x average → EXIT IMMEDIATELY
-                        if volume_ratio >= VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO:
-                            logger.warning(
-                                f"🚨 {symbol}: PANIC SELLING detected at floor! "
-                                f"Volume ratio: {volume_ratio:.1f}x (>= {VN_FLOOR_BOUNCE_PANIC_VOLUME_RATIO}x). "
-                                f"Triggering immediate exit - no bounce wait."
-                            )
+                        # IMPROVED v6.1: Multi-factor floor bounce decision
+                        # Combines volume ratio AND price momentum for better accuracy
+                        price_momentum = self._calculate_price_momentum(df, lookback=5)
+
+                        should_exit, exit_reason, action = self._check_floor_bounce_with_momentum(
+                            symbol=symbol,
+                            current_price=current_price,
+                            floor_price=floor_price,
+                            volume_ratio=volume_ratio,
+                            price_momentum=price_momentum,
+                        )
+
+                        if action == "EXIT":
                             # Clear any existing floor wait tracking
                             floor_wait_key = f"floor_wait_{symbol}"
                             if (
@@ -789,9 +928,33 @@ class ImprovedExitStrategy:
                                 and floor_wait_key in self._floor_wait_times
                             ):
                                 del self._floor_wait_times[floor_wait_key]
-                            # Return None to fall through to stop loss check below
-                            # (don't return exit decision here, let stop loss handle it)
-                        else:
+
+                            # Return exit decision for panic/high-volume-downtrend
+                            return ExitDecision(
+                                should_exit=True,
+                                exit_reason=ExitReason.PANIC_SELLING,
+                                exit_type="FULL",
+                                exit_price=current_price,
+                                expected_pnl=pnl_amount,
+                                expected_pnl_percent=pnl_percent,
+                                message=f"🚨 FLOOR EXIT: {exit_reason}",
+                                urgency=5,
+                                metadata={
+                                    "volume_ratio": volume_ratio,
+                                    "price_momentum": price_momentum,
+                                    "floor_price": floor_price,
+                                },
+                            )
+                        elif action == "HOLD":
+                            # Bounce confirmed - clear tracking and continue normal monitoring
+                            floor_wait_key = f"floor_wait_{symbol}"
+                            if (
+                                hasattr(self, "_floor_wait_times")
+                                and floor_wait_key in self._floor_wait_times
+                            ):
+                                del self._floor_wait_times[floor_wait_key]
+                            return None  # Continue to other checks
+                        else:  # action == "MONITOR"
                             # Determine wait time based on volume
                             if volume_ratio >= VN_FLOOR_BOUNCE_MIN_VOLUME_RATIO:
                                 max_floor_wait_minutes = (
@@ -971,7 +1134,7 @@ class ImprovedExitStrategy:
         """
         Check for significant gap down and exit to protect capital.
 
-        IMPROVED v6.0: Enhanced gap protection for Vietnam market
+        IMPROVED v7.0: Enhanced gap protection with VOLUME CONFIRMATION
 
         Vietnam market gaps are significant due to:
         - Overnight news (global markets, company announcements)
@@ -979,10 +1142,15 @@ class ImprovedExitStrategy:
         - Regulatory changes
         - VN market can gap up to ±7% (full daily limit)
 
-        Exit rules (TIGHTENED):
+        Exit rules (TIGHTENED v7.0):
         - Gap down > 4%: EMERGENCY EXIT regardless of P&L
         - Gap down 2.5-4% AND profitable: Profit protection exit
+        - Gap down 2-2.5% + Volume > 2x: Distribution detected - EXIT
         - Gap up > 4%: Consider partial profit taking
+
+        NEW v7.0: Volume confirmation for gap detection
+        - High volume gap down = institutional selling = EXIT immediately
+        - Low volume gap down = may recover = monitor
         """
         df = ctx.get("df")
         if df is None or len(df) < 2:
@@ -1062,15 +1230,94 @@ class ImprovedExitStrategy:
                     },
                 )
 
-            # GAP UP PROFIT TAKING: Gap up > 4% - consider partial exit
-            if gap_percent >= VN_GAP_UP_PROFIT_TAKE_THRESHOLD and pnl_percent > 3.0:
-                # Don't force exit, but log recommendation
-                logger.info(
-                    f"📈 {symbol}: Gap UP {gap_percent_display:.1f}% with {pnl_percent:+.2f}% profit. "
-                    f"Consider partial profit taking (gap may reverse)."
+            # NEW v7.0: VOLUME-CONFIRMED GAP DOWN (Distribution Detection)
+            # Gap down 2-2.5% + High volume = institutional distribution = EXIT
+            volume_ratio = self._calculate_volume_ratio(df, lookback=20)
+            gap_with_volume_threshold = -0.02  # -2%
+            volume_multiplier_threshold = 2.0  # 2x average volume
+
+            if (
+                gap_percent <= gap_with_volume_threshold
+                and gap_percent > VN_GAP_DOWN_EXIT_THRESHOLD
+                and volume_ratio >= volume_multiplier_threshold
+            ):
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.GAP_DOWN_EMERGENCY,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"🚨 DISTRIBUTION DETECTED: {gap_percent_display:.1f}% gap "
+                        f"+ {volume_ratio:.1f}x volume - institutional selling"
+                    ),
+                    urgency=5,
+                    metadata={
+                        "gap_percent": gap_percent_display,
+                        "volume_ratio": volume_ratio,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "volume_confirmed_gap_down",
+                    },
                 )
-                # Return None - let user decide, but metadata will be available
-                ctx["gap_up_profit_take_recommended"] = True
+
+            # GAP UP PROFIT TAKING: Gap up > 4% - IMPROVED v7.0
+            # VN market: Strong gap up near ceiling often reverses
+            # Take partial profit to lock in gains
+            VN_GAP_UP_PARTIAL_THRESHOLD = 0.04  # +4% gap → partial exit (50%)
+            VN_GAP_UP_FULL_THRESHOLD = 0.06  # +6% gap → full exit (near ceiling)
+
+            if gap_percent >= VN_GAP_UP_FULL_THRESHOLD and pnl_percent > 3.0:
+                # Near ceiling (+6-7%) - exit fully to lock in gains
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.TAKE_PROFIT_2,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📈 GAP UP NEAR CEILING: {gap_percent_display:.1f}% gap - "
+                        f"chốt toàn bộ {pnl_percent:+.2f}% (near ±7% limit)"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "gap_percent": gap_percent_display,
+                        "prev_close": prev_close,
+                        "today_open": today_open,
+                        "trigger": "gap_up_near_ceiling",
+                    },
+                )
+
+            if gap_percent >= VN_GAP_UP_PARTIAL_THRESHOLD and pnl_percent > 2.0:
+                # Check if partial exit already done
+                partial_exits = ctx.get("partial_exits", [])
+                if not partial_exits:  # No partial exit yet
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.TAKE_PROFIT_1,
+                        exit_type="PARTIAL_50%",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"📈 GAP UP PROFIT TAKE: {gap_percent_display:.1f}% gap - "
+                            f"chốt 50% với {pnl_percent:+.2f}% profit (gap may reverse)"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "gap_percent": gap_percent_display,
+                            "prev_close": prev_close,
+                            "today_open": today_open,
+                            "trigger": "gap_up_profit_taking",
+                        },
+                    )
+                else:
+                    logger.info(
+                        f"📈 {symbol}: Gap UP {gap_percent_display:.1f}% but partial exit already done. "
+                        f"Holding remaining position."
+                    )
 
             # Log significant gaps for monitoring
             if gap_percent <= -0.02:  # -2%
@@ -1225,9 +1472,55 @@ class ImprovedExitStrategy:
     # EXIT CHECK #4: TAKE PROFIT
     # =========================================================================
 
+    def _get_dynamic_tp_levels(self, market_regime: Optional[Dict]) -> Tuple[float, float, float]:
+        """
+        Get dynamic take profit levels based on market regime.
+
+        IMPROVED v6.1: Adaptive TP levels for Vietnam market.
+
+        Rationale:
+        - BULL: Wider targets (8%, 15%, 25%) to capture momentum
+        - BEAR: Tighter targets (4%, 7%, 10%) to lock profits quickly
+        - SIDEWAYS: Standard targets (6%, 10%, 15%)
+        - HIGH_VOLATILITY: Moderate targets (5%, 8%, 12%) with quick exits
+
+        Args:
+            market_regime: Market regime dict with 'regime' key
+
+        Returns:
+            Tuple of (TP1, TP2, TP3) percentages as decimals
+        """
+        if not self.config.use_dynamic_tp_levels or market_regime is None:
+            return self.config.take_profit_levels
+
+        regime = market_regime.get("regime", "SIDEWAYS")
+        confidence = market_regime.get("confidence", 50)
+
+        # Only apply dynamic levels if regime confidence is high enough
+        if confidence < 60:
+            logger.debug(f"📊 Regime confidence {confidence:.0f}% < 60%, using default TP levels")
+            return self.config.take_profit_levels
+
+        if regime == "BULL":
+            tp_levels = self.config.tp_levels_bull
+            logger.debug(f"📈 BULL regime: Using wider TP levels {tp_levels}")
+        elif regime == "BEAR":
+            tp_levels = self.config.tp_levels_bear
+            logger.debug(f"📉 BEAR regime: Using tighter TP levels {tp_levels}")
+        elif regime == "HIGH_VOLATILITY":
+            tp_levels = self.config.tp_levels_high_volatility
+            logger.debug(f"⚡ HIGH_VOL regime: Using moderate TP levels {tp_levels}")
+        else:  # SIDEWAYS or unknown
+            tp_levels = self.config.tp_levels_sideways
+            logger.debug(f"↔️ SIDEWAYS regime: Using standard TP levels {tp_levels}")
+
+        return tp_levels
+
     def _check_take_profit(self, ctx: Dict) -> Optional[ExitDecision]:
         """
         Check take profit levels.
+
+        IMPROVED v6.1: Dynamic TP levels based on market regime.
 
         Strategy (simplified to 2 levels):
         - TP1: Partial exit (default 50%)
@@ -1239,9 +1532,27 @@ class ImprovedExitStrategy:
         partial_exits = ctx["partial_exits"]
         pnl_percent = ctx["pnl_percent"]
         pnl_amount = ctx["pnl_amount"]
+        market_regime = ctx.get("market_regime")
+        entry_price = ctx["entry_price"]
 
         if not tp_targets:
             return None
+
+        # IMPROVED v6.1: Get dynamic TP levels based on regime
+        dynamic_tp_pcts = self._get_dynamic_tp_levels(market_regime)
+
+        # Calculate dynamic TP prices from entry price
+        dynamic_tp_targets = [entry_price * (1 + tp_pct) for tp_pct in dynamic_tp_pcts]
+
+        # Use dynamic targets if they differ significantly from provided targets
+        # This allows override from caller while still benefiting from regime adjustment
+        if tp_targets and len(tp_targets) >= 2:
+            # Check if provided targets are close to default (within 1%)
+            default_tp1 = entry_price * (1 + self.config.take_profit_levels[0])
+            if abs(tp_targets[0] - default_tp1) / default_tp1 < 0.01:
+                # Provided targets are default, use dynamic instead
+                tp_targets = dynamic_tp_targets
+                logger.debug(f"📊 Using dynamic TP targets: {[f'{t:,.0f}' for t in tp_targets]}")
 
         num_targets = len(tp_targets)
         num_partial_exits = len(partial_exits)
@@ -2204,6 +2515,347 @@ def create_exit_strategy(config: Optional[ExitConfig] = None, **kwargs) -> Impro
         Configured ImprovedExitStrategy instance
     """
     return ImprovedExitStrategy(config=config, **kwargs)
+
+
+# =============================================================================
+# NEW v7.0: PROFIT LOCK MECHANISM
+# =============================================================================
+
+
+@dataclass
+class ProfitLockLevel:
+    """Configuration for a profit lock level"""
+
+    profit_threshold: float  # Profit % to trigger this level
+    lock_percent: float  # % of profit to lock
+    guaranteed_profit: float  # Minimum guaranteed profit %
+    description: str
+
+
+@dataclass
+class ProfitLockStatus:
+    """Current profit lock status for a position"""
+
+    symbol: str
+    current_profit_pct: float
+    active_level: Optional[int]  # 0, 1, 2, 3 or None
+    locked_profit_pct: float
+    guaranteed_profit_pct: float
+    stop_loss_price: float
+    original_entry_price: float
+    message: str
+    should_update_stop: bool
+
+
+class ProfitLockMechanism:
+    """
+    Lock profit at milestones to protect gains.
+
+    NEW v7.0: Milestone-based profit protection for Vietnam market.
+
+    Problem: Trailing stops can get whipsawed in volatile VN market (±7% daily limit).
+    Solution: Lock profit at specific milestones with guaranteed minimum returns.
+
+    Default Milestones:
+    - Level 1: +5% profit → Lock 50% → Guaranteed +2.5%
+    - Level 2: +10% profit → Lock 60% → Guaranteed +6%
+    - Level 3: +15% profit → Lock 70% → Guaranteed +10.5%
+
+    Vietnam-specific adjustments:
+    - Account for ±7% daily limit
+    - Wider locks for volatile stocks (beta > 1.2)
+    - Tighter locks for defensive stocks (beta < 0.8)
+    - Transaction costs (~1.5%) factored into guaranteed profit
+
+    Usage:
+        lock_mechanism = ProfitLockMechanism()
+        status = lock_mechanism.check_profit_lock(
+            symbol="VNM",
+            entry_price=100000,
+            current_price=110000,
+            current_stop_loss=95000,
+        )
+        if status.should_update_stop:
+            new_stop = status.stop_loss_price
+    """
+
+    # Default profit lock levels
+    DEFAULT_LEVELS = [
+        ProfitLockLevel(
+            profit_threshold=5.0,
+            lock_percent=50.0,
+            guaranteed_profit=2.5,
+            description="Level 1: Lock 50% at +5%",
+        ),
+        ProfitLockLevel(
+            profit_threshold=10.0,
+            lock_percent=60.0,
+            guaranteed_profit=6.0,
+            description="Level 2: Lock 60% at +10%",
+        ),
+        ProfitLockLevel(
+            profit_threshold=15.0,
+            lock_percent=70.0,
+            guaranteed_profit=10.5,
+            description="Level 3: Lock 70% at +15%",
+        ),
+    ]
+
+    # Beta-adjusted levels for volatile stocks
+    HIGH_BETA_LEVELS = [
+        ProfitLockLevel(
+            profit_threshold=6.0,
+            lock_percent=45.0,
+            guaranteed_profit=2.7,
+            description="High Beta L1: Lock 45% at +6%",
+        ),
+        ProfitLockLevel(
+            profit_threshold=12.0,
+            lock_percent=55.0,
+            guaranteed_profit=6.6,
+            description="High Beta L2: Lock 55% at +12%",
+        ),
+        ProfitLockLevel(
+            profit_threshold=18.0,
+            lock_percent=65.0,
+            guaranteed_profit=11.7,
+            description="High Beta L3: Lock 65% at +18%",
+        ),
+    ]
+
+    # Tighter levels for defensive stocks
+    LOW_BETA_LEVELS = [
+        ProfitLockLevel(
+            profit_threshold=4.0,
+            lock_percent=55.0,
+            guaranteed_profit=2.2,
+            description="Low Beta L1: Lock 55% at +4%",
+        ),
+        ProfitLockLevel(
+            profit_threshold=8.0,
+            lock_percent=65.0,
+            guaranteed_profit=5.2,
+            description="Low Beta L2: Lock 65% at +8%",
+        ),
+        ProfitLockLevel(
+            profit_threshold=12.0,
+            lock_percent=75.0,
+            guaranteed_profit=9.0,
+            description="Low Beta L3: Lock 75% at +12%",
+        ),
+    ]
+
+    def __init__(
+        self,
+        levels: Optional[List[ProfitLockLevel]] = None,
+        use_beta_adjustment: bool = True,
+        high_beta_threshold: float = 1.2,
+        low_beta_threshold: float = 0.8,
+        transaction_cost: float = 0.015,  # 1.5% round trip
+    ):
+        """
+        Initialize profit lock mechanism.
+
+        Args:
+            levels: Custom profit lock levels (uses DEFAULT_LEVELS if None)
+            use_beta_adjustment: Adjust levels based on stock beta
+            high_beta_threshold: Beta threshold for wider locks
+            low_beta_threshold: Beta threshold for tighter locks
+            transaction_cost: Transaction cost to factor into guaranteed profit
+        """
+        self.default_levels = levels or self.DEFAULT_LEVELS
+        self.use_beta_adjustment = use_beta_adjustment
+        self.high_beta_threshold = high_beta_threshold
+        self.low_beta_threshold = low_beta_threshold
+        self.transaction_cost = transaction_cost
+
+        # Track active locks per symbol
+        self._active_locks: Dict[str, int] = {}  # symbol -> highest level achieved
+
+    def check_profit_lock(
+        self,
+        symbol: str,
+        entry_price: float,
+        current_price: float,
+        current_stop_loss: float,
+        beta: Optional[float] = None,
+    ) -> ProfitLockStatus:
+        """
+        Check if profit lock should be activated or updated.
+
+        Args:
+            symbol: Stock symbol
+            entry_price: Original entry price
+            current_price: Current market price
+            current_stop_loss: Current stop loss price
+            beta: Stock beta (optional, for level adjustment)
+
+        Returns:
+            ProfitLockStatus with lock details and new stop loss if applicable
+        """
+        symbol = symbol.upper()
+
+        # Calculate current profit
+        if entry_price <= 0:
+            return self._create_status(
+                symbol, 0, None, 0, 0, current_stop_loss, entry_price, "Invalid entry price", False
+            )
+
+        current_profit_pct = ((current_price - entry_price) / entry_price) * 100
+
+        # Get appropriate levels based on beta
+        levels = self._get_levels_for_beta(beta)
+
+        # Get current active level
+        current_level = self._active_locks.get(symbol, -1)
+
+        # Find highest applicable level
+        new_level = -1
+        for i, level in enumerate(levels):
+            if current_profit_pct >= level.profit_threshold:
+                new_level = i
+
+        # No level triggered
+        if new_level < 0:
+            return self._create_status(
+                symbol,
+                current_profit_pct,
+                None,
+                0,
+                0,
+                current_stop_loss,
+                entry_price,
+                f"Profit {current_profit_pct:+.2f}% - no lock triggered yet",
+                False,
+            )
+
+        # Get the active level
+        active_level = levels[new_level]
+
+        # Calculate locked profit and guaranteed profit
+        locked_profit_pct = current_profit_pct * (active_level.lock_percent / 100)
+        guaranteed_profit_pct = active_level.guaranteed_profit - (self.transaction_cost * 100)
+
+        # Calculate new stop loss price
+        new_stop_loss = entry_price * (1 + guaranteed_profit_pct / 100)
+
+        # Check if we should update stop loss
+        should_update = False
+        message = ""
+
+        if new_level > current_level:
+            # New level achieved
+            self._active_locks[symbol] = new_level
+            should_update = new_stop_loss > current_stop_loss
+            message = (
+                f"🔒 PROFIT LOCK {new_level + 1}: {active_level.description} | "
+                f"Profit: {current_profit_pct:+.2f}% | "
+                f"Guaranteed: {guaranteed_profit_pct:+.2f}% (after costs)"
+            )
+            logger.info(f"{symbol}: {message}")
+        elif new_level == current_level:
+            # Same level, check if stop should be raised
+            should_update = new_stop_loss > current_stop_loss
+            if should_update:
+                message = (
+                    f"📈 LOCK UPDATE: Raising stop to lock {locked_profit_pct:.1f}% profit | "
+                    f"Guaranteed: {guaranteed_profit_pct:+.2f}%"
+                )
+            else:
+                message = (
+                    f"✅ LOCK ACTIVE: Level {new_level + 1} | "
+                    f"Profit: {current_profit_pct:+.2f}% | "
+                    f"Guaranteed: {guaranteed_profit_pct:+.2f}%"
+                )
+
+        return self._create_status(
+            symbol=symbol,
+            current_profit_pct=current_profit_pct,
+            active_level=new_level,
+            locked_profit_pct=locked_profit_pct,
+            guaranteed_profit_pct=guaranteed_profit_pct,
+            stop_loss_price=new_stop_loss if should_update else current_stop_loss,
+            original_entry_price=entry_price,
+            message=message,
+            should_update_stop=should_update,
+        )
+
+    def _get_levels_for_beta(self, beta: Optional[float]) -> List[ProfitLockLevel]:
+        """Get appropriate profit lock levels based on beta."""
+        if not self.use_beta_adjustment or beta is None:
+            return self.default_levels
+
+        if beta > self.high_beta_threshold:
+            return self.HIGH_BETA_LEVELS
+        elif beta < self.low_beta_threshold:
+            return self.LOW_BETA_LEVELS
+        else:
+            return self.default_levels
+
+    def _create_status(
+        self,
+        symbol: str,
+        current_profit_pct: float,
+        active_level: Optional[int],
+        locked_profit_pct: float,
+        guaranteed_profit_pct: float,
+        stop_loss_price: float,
+        original_entry_price: float,
+        message: str,
+        should_update_stop: bool,
+    ) -> ProfitLockStatus:
+        """Create a ProfitLockStatus object."""
+        return ProfitLockStatus(
+            symbol=symbol,
+            current_profit_pct=current_profit_pct,
+            active_level=active_level,
+            locked_profit_pct=locked_profit_pct,
+            guaranteed_profit_pct=guaranteed_profit_pct,
+            stop_loss_price=stop_loss_price,
+            original_entry_price=original_entry_price,
+            message=message,
+            should_update_stop=should_update_stop,
+        )
+
+    def get_lock_status(self, symbol: str) -> Optional[int]:
+        """Get current lock level for a symbol."""
+        return self._active_locks.get(symbol.upper())
+
+    def clear_lock(self, symbol: str) -> None:
+        """Clear lock tracking for a symbol (after position closed)."""
+        symbol = symbol.upper()
+        if symbol in self._active_locks:
+            del self._active_locks[symbol]
+            logger.debug(f"Cleared profit lock for {symbol}")
+
+    def clear_all_locks(self) -> int:
+        """Clear all lock tracking. Returns count of cleared locks."""
+        count = len(self._active_locks)
+        self._active_locks.clear()
+        return count
+
+    def get_all_active_locks(self) -> Dict[str, int]:
+        """Get all active locks."""
+        return self._active_locks.copy()
+
+    def get_level_info(self, level: int, beta: Optional[float] = None) -> Optional[ProfitLockLevel]:
+        """Get information about a specific lock level."""
+        levels = self._get_levels_for_beta(beta)
+        if 0 <= level < len(levels):
+            return levels[level]
+        return None
+
+
+# Singleton instance
+_profit_lock_instance: Optional[ProfitLockMechanism] = None
+
+
+def get_profit_lock_mechanism() -> ProfitLockMechanism:
+    """Get singleton instance of profit lock mechanism."""
+    global _profit_lock_instance
+    if _profit_lock_instance is None:
+        _profit_lock_instance = ProfitLockMechanism()
+    return _profit_lock_instance
 
 
 # =============================================================================

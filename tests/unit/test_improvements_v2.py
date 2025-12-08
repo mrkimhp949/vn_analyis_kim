@@ -2,8 +2,7 @@
 """
 Unit Tests for V2 Improvements:
 1. Margin Trading with Margin Call Simulation
-2. T+0 Intraday with Wash Trade Prevention
-3. Warrant/ETF Enhanced Trading Logic
+2. Warrant/ETF Enhanced Trading Logic
 
 Author: Trading Bot Team
 Version: 2.0.0
@@ -134,141 +133,7 @@ class TestMarginManager:
 
 
 # =============================================================================
-# TEST 2: T+0 INTRADAY WITH WASH TRADE PREVENTION
-# =============================================================================
-
-
-class TestWashTradeDetector:
-    """Test wash trade detection."""
-
-    @pytest.fixture
-    def detector(self):
-        """Create wash trade detector."""
-        from src.portfolio.intraday_trading import WashTradeDetector
-
-        return WashTradeDetector()
-
-    def test_minimum_holding_time(self, detector):
-        """Test minimum holding time check."""
-        last_trade_time = datetime.now() - timedelta(minutes=2)
-
-        is_wash, reason = detector.check_wash_trade(
-            symbol="VNM",
-            side="SELL",
-            quantity=100,
-            price=80_000,
-            last_trade_time=last_trade_time,
-            last_trade_price=79_000,
-        )
-
-        assert is_wash is True
-        assert "min" in reason.lower()
-
-    def test_same_price_detection(self, detector):
-        """Test same price wash trade detection."""
-        last_trade_time = datetime.now() - timedelta(minutes=10)
-
-        is_wash, reason = detector.check_wash_trade(
-            symbol="VNM",
-            side="SELL",
-            quantity=100,
-            price=80_000,
-            last_trade_time=last_trade_time,
-            last_trade_price=80_000,  # Same price
-        )
-
-        assert is_wash is True
-        assert "unchanged" in reason.lower()
-
-    def test_valid_trade_passes(self, detector):
-        """Test that valid trades pass detection."""
-        last_trade_time = datetime.now() - timedelta(minutes=30)
-
-        is_wash, reason = detector.check_wash_trade(
-            symbol="VNM",
-            side="SELL",
-            quantity=100,
-            price=82_000,  # 2.5% higher
-            last_trade_time=last_trade_time,
-            last_trade_price=80_000,
-        )
-
-        assert is_wash is False
-        assert reason == "OK"
-
-    def test_round_trip_limit(self, detector):
-        """Test daily round trip limit."""
-        # Record many round trips
-        for i in range(15):
-            detector.record_trade("VNM", "BUY", 100, 80_000)
-            detector.record_trade("VNM", "SELL", 100, 81_000)
-
-        # Next trade should be blocked
-        is_wash, reason = detector.check_wash_trade(
-            symbol="VNM",
-            side="SELL",
-            quantity=100,
-            price=82_000,
-            last_trade_time=datetime.now() - timedelta(minutes=30),
-            last_trade_price=80_000,
-        )
-
-        assert is_wash is True
-        assert "round trip" in reason.lower()
-
-
-class TestIntradayTracker:
-    """Test intraday tracker with wash trade prevention."""
-
-    @pytest.fixture
-    def tracker(self):
-        """Create intraday tracker."""
-        from src.portfolio.intraday_trading import IntradayTracker, TradingMode
-
-        return IntradayTracker(
-            mode=TradingMode.MARGIN_T0,
-            margin_buying_power=100_000_000,
-            enable_t0=True,
-            enable_wash_trade_detection=True,
-        )
-
-    def test_cooling_off_after_loss(self, tracker):
-        """Test cooling off period after loss."""
-        # Temporarily disable minimum holding time for test
-        tracker.MIN_HOLDING_MINUTES = 0
-
-        # Record buy
-        tracker.record_buy("VNM", 100, 80_000)
-
-        # Record sell at loss
-        tracker.record_sell("VNM", 100, 75_000)
-
-        # Try to sell again immediately - should be in cooling off
-        tracker.record_buy("HPG", 100, 25_000)
-        can_sell, reason = tracker.can_sell_intraday("HPG", 100, 26_000)
-
-        # Should be blocked by cooling off
-        assert "cooling" in reason.lower() or can_sell is True  # May pass if cooling off expired
-
-    def test_per_symbol_trade_limit(self, tracker):
-        """Test per-symbol trade limit."""
-        tracker.MIN_HOLDING_MINUTES = 0
-
-        # Trade same symbol many times
-        for i in range(7):
-            tracker.record_buy("VNM", 100, 80_000 + i * 100)
-            if i < 6:
-                tracker.record_sell("VNM", 100, 80_500 + i * 100)
-
-        # Should hit per-symbol limit
-        can_sell, reason = tracker.can_sell_intraday("VNM", 100, 82_000)
-
-        # Either blocked by symbol limit or other reason
-        assert can_sell is False or "limit" in reason.lower() or "OK" in reason
-
-
-# =============================================================================
-# TEST 3: WARRANT/ETF ENHANCED TRADING
+# TEST 2: WARRANT/ETF ENHANCED TRADING
 # =============================================================================
 
 
@@ -442,11 +307,10 @@ class TestETFTradingLogic:
 class TestIntegration:
     """Integration tests for all improvements."""
 
-    def test_margin_with_intraday(self):
-        """Test margin trading with intraday T+0."""
+    def test_margin_trading_workflow(self):
+        """Test margin trading workflow."""
         import os
         from src.risk.margin_manager import MarginManager
-        from src.portfolio.intraday_trading import IntradayTracker, TradingMode
 
         # Clean up state file
         state_file = "test_integration_margin.json"
@@ -460,25 +324,14 @@ class TestIntegration:
             state_file=state_file,
         )
 
-        intraday = IntradayTracker(
-            mode=TradingMode.MARGIN_T0,
-            margin_buying_power=100_000_000,
-        )
-
         # Open margin position
         success, msg = margin_mgr.open_position("VNM", 1000, 80_000, use_margin=True)
         assert success is True, f"Failed to open position: {msg}"
 
-        # Record in intraday tracker
-        intraday.record_buy("VNM", 1000, 80_000)
-
-        # Check both systems are in sync
+        # Check margin state
         margin_state = margin_mgr.get_account_state()
-        intraday_pos = intraday.get_position("VNM")
-
         assert len(margin_state.positions) == 1
-        assert intraday_pos is not None
-        assert intraday_pos.open_quantity == 1000
+        assert margin_state.total_borrowed > 0
 
         # Cleanup
         if os.path.exists(state_file):

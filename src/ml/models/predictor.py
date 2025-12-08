@@ -47,11 +47,7 @@ class MLPredictor:
         self.ensure_models_dir()
         # Đồng bộ số features mong đợi với features.get_feature_columns()
         try:
-            # Try enhanced features first
-            try:
-                from src.ml.features.enhanced import get_feature_columns
-            except ImportError:
-                from src.ml.features.technical import get_feature_columns
+            from src.ml.features.enhanced_v2 import get_feature_columns
 
             self.expected_features = len(get_feature_columns())
         except Exception:
@@ -114,10 +110,7 @@ class MLPredictor:
 
             # Save feature names if available
             try:
-                try:
-                    from src.ml.features.enhanced import get_feature_columns
-                except ImportError:
-                    from src.ml.features.technical import get_feature_columns
+                from src.ml.features.enhanced_v2 import get_feature_columns
 
                 metadata["feature_names"] = get_feature_columns()
             except Exception:
@@ -247,10 +240,7 @@ class MLPredictor:
             return
 
         try:
-            try:
-                from src.ml.features.enhanced import get_feature_columns
-            except ImportError:
-                from src.ml.features.technical import get_feature_columns
+            from src.ml.features.enhanced_v2 import get_feature_columns
 
             feature_names = get_feature_columns()
 
@@ -325,7 +315,7 @@ class MLPredictor:
             return None
 
         try:
-            from src.ml.features.technical import get_feature_columns
+            from src.ml.features.enhanced_v2 import get_feature_columns
 
             feature_names = get_feature_columns()
 
@@ -609,7 +599,7 @@ class MLPredictor:
 
                         # Check if saved model matches current feature definition
                         try:
-                            from src.ml.features.technical import get_feature_columns
+                            from src.ml.features.enhanced_v2 import get_feature_columns
 
                             current_features = len(get_feature_columns())
 

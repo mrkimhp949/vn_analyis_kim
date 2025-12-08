@@ -187,7 +187,7 @@ class StrategyRunner:
 
         try:
             # Generate features from dataframe
-            from src.ml.features.technical import add_ml_features, get_feature_columns
+            from src.ml.features.enhanced_v2 import add_ml_features, get_feature_columns
 
             # Add ML features to dataframe
             df_with_features = add_ml_features(df.copy())

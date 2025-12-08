@@ -80,7 +80,7 @@ class EnhancedMLPredictor:
 
         # Expected features
         try:
-            from src.ml.features.enhanced import get_feature_columns
+            from src.ml.features.enhanced_v2 import get_feature_columns
 
             self.expected_features = len(get_feature_columns())
             self.feature_names = get_feature_columns()

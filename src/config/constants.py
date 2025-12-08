@@ -395,6 +395,23 @@ FOREIGN_FLOW_MODERATE_BUY_BONUS = 5  # +5 confidence for moderate foreign buying
 FOREIGN_FLOW_MODERATE_SELL_PENALTY = -5  # -5 confidence for moderate foreign selling (score < 0)
 FOREIGN_FLOW_STRONG_SELL_PENALTY = -15  # -15 confidence for strong foreign selling (score < -0.5)
 
+# NEW v8.0: Symbol-specific Foreign Flow Integration
+FOREIGN_FLOW_SYMBOL_STRONG_ACCUMULATION = 15  # +15 for strong symbol accumulation
+FOREIGN_FLOW_SYMBOL_ACCUMULATION = 8  # +8 for symbol accumulation
+FOREIGN_FLOW_SYMBOL_DISTRIBUTION = -10  # -10 for symbol distribution
+FOREIGN_FLOW_SYMBOL_STRONG_DISTRIBUTION = -20  # -20 for strong symbol distribution
+
+# NEW v8.0: Dynamic Warning Thresholds by Regime
+MAX_WARNINGS_BULL = 6  # Allow more warnings in bull market
+MAX_WARNINGS_SIDEWAYS = 4  # Standard warnings in sideways
+MAX_WARNINGS_BEAR = 2  # Strict in bear market
+MAX_WARNINGS_HIGH_VOL = 2  # Very strict in high volatility
+
+# NEW v8.0: ATR-based Limit Order Threshold
+LIMIT_ORDER_ATR_MULTIPLIER = 0.3  # Use 30% of ATR as limit threshold
+LIMIT_ORDER_MIN_THRESHOLD = 0.5  # Minimum 0.5% threshold
+LIMIT_ORDER_MAX_THRESHOLD = 2.0  # Maximum 2.0% threshold
+
 # ============================================================================
 # NEW v5.0: Additional Vietnam Market Features
 # ============================================================================
@@ -405,13 +422,6 @@ VN_MAINTENANCE_MARGIN = 0.35  # 35% maintenance margin (broker dependent)
 VN_MARGIN_WARNING_LEVEL = 0.40  # 40% - warning level
 VN_MARGIN_CALL_LEVEL = 0.30  # 30% - margin call trigger
 VN_FORCE_LIQUIDATION_LEVEL = 0.25  # 25% - force liquidation
-
-# T+0 Intraday Trading Constants
-VN_T0_ENABLED = True  # T+0 enabled for margin accounts
-VN_T0_MIN_ACCOUNT_VALUE = 50_000_000  # 50M VND minimum for T+0
-VN_T0_MAX_TRADES_PER_DAY = 20  # Max intraday trades
-VN_T0_MAX_LOSS_PCT = 0.02  # Stop T+0 trading at -2% daily loss
-VN_T0_MIN_HOLDING_MINUTES = 5  # Min holding time (prevent wash trades)
 
 # Odd-Lot Trading Constants
 VN_ODD_LOT_ENABLED = True  # Odd-lot trading enabled since 2021
@@ -466,6 +476,20 @@ __all__ = [
     "get_ml_signal_weight",
     "get_dynamic_slippage",
     "get_adaptive_holding_days",
+    # NEW v8.0: Symbol-specific Foreign Flow
+    "FOREIGN_FLOW_SYMBOL_STRONG_ACCUMULATION",
+    "FOREIGN_FLOW_SYMBOL_ACCUMULATION",
+    "FOREIGN_FLOW_SYMBOL_DISTRIBUTION",
+    "FOREIGN_FLOW_SYMBOL_STRONG_DISTRIBUTION",
+    # NEW v8.0: Dynamic Warning Thresholds
+    "MAX_WARNINGS_BULL",
+    "MAX_WARNINGS_SIDEWAYS",
+    "MAX_WARNINGS_BEAR",
+    "MAX_WARNINGS_HIGH_VOL",
+    # NEW v8.0: ATR-based Limit Order
+    "LIMIT_ORDER_ATR_MULTIPLIER",
+    "LIMIT_ORDER_MIN_THRESHOLD",
+    "LIMIT_ORDER_MAX_THRESHOLD",
     # Adaptive Holding Days Constants
     "HOLDING_DAYS_BULL_STRONG_TREND",
     "HOLDING_DAYS_BULL_WEAK_TREND",
@@ -632,12 +656,6 @@ __all__ = [
     "VN_MARGIN_WARNING_LEVEL",
     "VN_MARGIN_CALL_LEVEL",
     "VN_FORCE_LIQUIDATION_LEVEL",
-    # NEW v5.0: T+0 Intraday Trading
-    "VN_T0_ENABLED",
-    "VN_T0_MIN_ACCOUNT_VALUE",
-    "VN_T0_MAX_TRADES_PER_DAY",
-    "VN_T0_MAX_LOSS_PCT",
-    "VN_T0_MIN_HOLDING_MINUTES",
     # NEW v5.0: Odd-Lot Trading
     "VN_ODD_LOT_ENABLED",
     "VN_ODD_LOT_MIN_QTY",

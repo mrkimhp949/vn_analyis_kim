@@ -22,19 +22,35 @@ Usage:
 """
 
 import logging
-from typing import Optional
+from types import ModuleType
+from typing import Any, Optional, Protocol, Union
 
 from src.config.trading_config import TradingConfig
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "create_orchestrator",
+    "create_test_orchestrator",
+    "create_data_loader",
+    "create_ml_signal_generator",
+    "create_strategy_manager",
+    "create_portfolio_manager",
+    "create_risk_service",
+    "create_entry_service",
+    "create_exit_service",
+    "create_notification_service",
+    "create_circuit_breaker",
+    "create_paper_trading_account",
+]
 
-def create_data_loader():
+
+def create_data_loader() -> ModuleType:
     """
-    Factory function to create data loader
+    Factory function to create data loader.
 
     Returns:
-        load_data function from loader module
+        ModuleType: load_data function from loader module
     """
     from src.data import loader
 
@@ -42,15 +58,15 @@ def create_data_loader():
     return loader
 
 
-def create_ml_signal_generator(config: TradingConfig):
+def create_ml_signal_generator(config: TradingConfig) -> Any:
     """
-    Factory function to create ML signal generator
+    Factory function to create ML signal generator.
 
     Args:
         config: Trading configuration
 
     Returns:
-        MLSignalGenerator or EnhancedMLSignalGenerator
+        Any: MLSignalGenerator or EnhancedMLSignalGenerator instance
     """
     try:
         from src.ml.signals.enhanced_v2 import (
@@ -60,38 +76,39 @@ def create_ml_signal_generator(config: TradingConfig):
         generator = EnhancedMLSignalGenerator(config)
         logger.debug("✅ Created EnhancedMLSignalGenerator")
         return generator
-    except Exception:
-        logger.warning("Could not create EnhancedMLSignalGenerator")
-        from src.ml.signals.generator import MLSignalGenerator
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.warning(f"Could not create EnhancedMLSignalGenerator: {e}")
+    except TypeError as e:
+        logger.warning(f"EnhancedMLSignalGenerator init failed: {e}")
 
-        generator = MLSignalGenerator()  # No config parameter
-        logger.debug("✅ Created MLSignalGenerator (fallback)")
-        return generator
+    # Fallback to basic generator
+    from src.ml.signals.generator_v2 import MLSignalGeneratorV2
+
+    generator = MLSignalGeneratorV2()
+    logger.debug("✅ Created MLSignalGeneratorV2 (fallback)")
+    return generator
 
 
-def create_strategy_manager(config: TradingConfig):
+def create_strategy_manager() -> Any:
     """
-    Factory function to create strategy manager
-
-    Args:
-        config: Trading configuration
+    Factory function to create strategy manager.
 
     Returns:
-        StrategyManager instance
+        Any: StrategyManager instance
     """
     from src.strategies.manager import StrategyManager
 
-    manager = StrategyManager()  # No config parameter
+    manager = StrategyManager()
     logger.debug("✅ Created StrategyManager")
     return manager
 
 
-def create_portfolio_manager():
+def create_portfolio_manager() -> Any:
     """
-    Factory function to create portfolio manager
+    Factory function to create portfolio manager.
 
     Returns:
-        PortfolioManager singleton instance
+        Any: PortfolioManager singleton instance
     """
     from src.portfolio.manager import get_portfolio_manager
 
@@ -100,12 +117,12 @@ def create_portfolio_manager():
     return manager
 
 
-def create_risk_service():
+def create_risk_service() -> Any:
     """
-    Factory function to create risk service
+    Factory function to create risk service.
 
     Returns:
-        RiskService instance
+        Any: RiskService instance
     """
     from src.services.risk_service import get_risk_service
 
@@ -114,29 +131,26 @@ def create_risk_service():
     return service
 
 
-def create_entry_service(config: TradingConfig):
+def create_entry_service() -> Any:
     """
-    Factory function to create entry service
-
-    Args:
-        config: Trading configuration
+    Factory function to create entry service.
 
     Returns:
-        EntrySignalService instance
+        Any: EntrySignalService instance
     """
     from src.services.entry_service import EntrySignalService
 
-    service = EntrySignalService()  # No config parameter
+    service = EntrySignalService()
     logger.debug("✅ Created EntrySignalService")
     return service
 
 
-def create_exit_service():
+def create_exit_service() -> Any:
     """
-    Factory function to create exit service
+    Factory function to create exit service.
 
     Returns:
-        ExitManagementService instance
+        Any: ExitManagementService instance
     """
     from src.services.exit_service import ExitManagementService
 
@@ -145,12 +159,12 @@ def create_exit_service():
     return service
 
 
-def create_notification_service():
+def create_notification_service() -> ModuleType:
     """
-    Factory function to create notification service
+    Factory function to create notification service.
 
     Returns:
-        Telegram notification module
+        ModuleType: Telegram notification module
     """
     from src.notifications import telegram
 
@@ -158,12 +172,12 @@ def create_notification_service():
     return telegram
 
 
-def create_circuit_breaker():
+def create_circuit_breaker() -> Any:
     """
-    Factory function to create circuit breaker
+    Factory function to create circuit breaker.
 
     Returns:
-        CircuitBreaker instance
+        Any: CircuitBreaker instance
     """
     from src.risk.circuit_breaker import CircuitBreaker
 
@@ -172,12 +186,12 @@ def create_circuit_breaker():
     return breaker
 
 
-def create_paper_trading_account():
+def create_paper_trading_account() -> Any:
     """
-    Factory function to create paper trading account
+    Factory function to create paper trading account.
 
     Returns:
-        PaperTradingAccount instance
+        Any: PaperTradingAccount instance
     """
     from src.portfolio.paper_trading import PaperTradingAccount
 
@@ -186,9 +200,9 @@ def create_paper_trading_account():
     return account
 
 
-def create_orchestrator(config: Optional[TradingConfig] = None):
+def create_orchestrator(config: Optional[TradingConfig] = None) -> Any:
     """
-    Main factory function to create fully configured orchestrator
+    Main factory function to create fully configured orchestrator.
 
     This demonstrates Dependency Injection pattern:
     - All dependencies are created here
@@ -205,24 +219,116 @@ def create_orchestrator(config: Optional[TradingConfig] = None):
         >>> orchestrator = create_orchestrator()
         >>> orchestrator.run_scan()
     """
+    return _create_orchestrator_internal(config=config)
+
+
+def create_test_orchestrator(
+    config: Optional[TradingConfig] = None,
+    data_loader: Optional[Any] = None,
+    ml_generator: Optional[Any] = None,
+    strategy_manager: Optional[Any] = None,
+    portfolio_manager: Optional[Any] = None,
+    risk_service: Optional[Any] = None,
+    entry_service: Optional[Any] = None,
+    exit_service: Optional[Any] = None,
+    notification_service: Optional[Any] = None,
+    circuit_breaker: Optional[Any] = None,
+    paper_account: Optional[Any] = None,
+) -> Any:
+    """
+    Factory for testing - allows injecting mocks.
+
+    Any parameter set to None will use the real implementation.
+    Pass mock objects to override specific dependencies.
+
+    Args:
+        config: Trading configuration (optional)
+        data_loader: Mock data loader (optional)
+        ml_generator: Mock ML signal generator (optional)
+        strategy_manager: Mock strategy manager (optional)
+        portfolio_manager: Mock portfolio manager (optional)
+        risk_service: Mock risk service (optional)
+        entry_service: Mock entry service (optional)
+        exit_service: Mock exit service (optional)
+        notification_service: Mock notification service (optional)
+        circuit_breaker: Mock circuit breaker (optional)
+        paper_account: Mock paper trading account (optional)
+
+    Returns:
+        Any: TradingOrchestrator instance with injected dependencies
+
+    Example:
+        >>> mock_ml = MagicMock()
+        >>> test_orch = create_test_orchestrator(ml_generator=mock_ml)
+        >>> # Now orchestrator uses mock ML generator
+    """
+    return _create_orchestrator_internal(
+        config=config,
+        data_loader=data_loader,
+        ml_generator=ml_generator,
+        strategy_manager=strategy_manager,
+        portfolio_manager=portfolio_manager,
+        risk_service=risk_service,
+        entry_service=entry_service,
+        exit_service=exit_service,
+        notification_service=notification_service,
+        circuit_breaker=circuit_breaker,
+        paper_account=paper_account,
+    )
+
+
+def _create_orchestrator_internal(
+    config: Optional[TradingConfig] = None,
+    data_loader: Optional[Any] = None,
+    ml_generator: Optional[Any] = None,
+    strategy_manager: Optional[Any] = None,
+    portfolio_manager: Optional[Any] = None,
+    risk_service: Optional[Any] = None,
+    entry_service: Optional[Any] = None,
+    exit_service: Optional[Any] = None,
+    notification_service: Optional[Any] = None,
+    circuit_breaker: Optional[Any] = None,
+    paper_account: Optional[Any] = None,
+) -> Any:
+    """
+    Internal factory function to create orchestrator with optional dependency overrides.
+
+    This is the shared implementation for both create_orchestrator and create_test_orchestrator.
+
+    Args:
+        config: Trading configuration (optional, will create default if not provided)
+        data_loader: Data loader instance or None to create default
+        ml_generator: ML signal generator instance or None to create default
+        strategy_manager: Strategy manager instance or None to create default
+        portfolio_manager: Portfolio manager instance or None to create default
+        risk_service: Risk service instance or None to create default
+        entry_service: Entry service instance or None to create default
+        exit_service: Exit service instance or None to create default
+        notification_service: Notification service instance or None to create default
+        circuit_breaker: Circuit breaker instance or None to create default
+        paper_account: Paper trading account instance or None to create default
+
+    Returns:
+        Any: TradingOrchestrator instance with all dependencies injected
+    """
     # Create config if not provided
     if config is None:
         config = TradingConfig()
         logger.info("Created default TradingConfig")
 
-    # Create all dependencies
+    # Create dependencies - use provided or create new
     logger.info("🏭 Creating orchestrator dependencies...")
 
-    data_loader = create_data_loader()
-    ml_generator = create_ml_signal_generator(config)
-    strategy_manager = create_strategy_manager(config)
-    portfolio_manager = create_portfolio_manager()
-    risk_service = create_risk_service()
-    entry_service = create_entry_service(config)
-    exit_service = create_exit_service()
-    notification_service = create_notification_service()
-    circuit_breaker = create_circuit_breaker()
-    paper_account = create_paper_trading_account()
+    data_loader = data_loader or create_data_loader()
+    ml_generator = ml_generator or create_ml_signal_generator(config)
+    strategy_manager = strategy_manager or create_strategy_manager()
+    portfolio_manager = portfolio_manager or create_portfolio_manager()
+    risk_service = risk_service or create_risk_service()
+    entry_service = entry_service or create_entry_service()
+    exit_service = exit_service or create_exit_service()
+    notification_service = notification_service or create_notification_service()
+    circuit_breaker = circuit_breaker or create_circuit_breaker()
+    paper_account = paper_account or create_paper_trading_account()
 
     # Import refactored orchestrator with dependency injection support
     from src.core.orchestrator import TradingOrchestrator
@@ -250,65 +356,3 @@ def create_orchestrator(config: Optional[TradingConfig] = None):
     logger.info("✅ Orchestrator created with dependency injection")
 
     return orchestrator
-
-
-# Example for testing - create orchestrator with mocked dependencies
-def create_test_orchestrator(
-    config=None,
-    data_loader=None,
-    ml_generator=None,
-    strategy_manager=None,
-    portfolio_manager=None,
-    risk_service=None,
-    entry_service=None,
-    exit_service=None,
-    notification_service=None,
-    circuit_breaker=None,
-    paper_account=None,
-):
-    """
-    Factory for testing - allows injecting mocks
-
-    Any parameter set to None will use the real implementation.
-    Pass mock objects to override specific dependencies.
-
-    Example:
-        >>> mock_ml = MagicMock()
-        >>> test_orch = create_test_orchestrator(ml_generator=mock_ml)
-        >>> # Now orchestrator uses mock ML generator
-    """
-    if config is None:
-        config = TradingConfig()
-
-    # Use provided mocks or create real instances
-    data_loader = data_loader or create_data_loader()
-    ml_generator = ml_generator or create_ml_signal_generator(config)
-    strategy_manager = strategy_manager or create_strategy_manager(config)
-    portfolio_manager = portfolio_manager or create_portfolio_manager()
-    risk_service = risk_service or create_risk_service()
-    entry_service = entry_service or create_entry_service(config)
-    exit_service = exit_service or create_exit_service()
-    notification_service = notification_service or create_notification_service()
-    circuit_breaker = circuit_breaker or create_circuit_breaker()
-    paper_account = paper_account or create_paper_trading_account()
-
-    from src.core.orchestrator import TradingOrchestrator
-
-    return TradingOrchestrator(
-        # Legacy params
-        bot_instance=None,
-        chat_id="",
-        vnindex_df=None,
-        # Modern dependency injection
-        config=config,
-        data_loader=data_loader,
-        ml_generator=ml_generator,
-        strategy_manager=strategy_manager,
-        portfolio_manager=portfolio_manager,
-        risk_service=risk_service,
-        entry_service=entry_service,
-        exit_service=exit_service,
-        notification_service=notification_service,
-        circuit_breaker=circuit_breaker,
-        paper_account=paper_account,
-    )

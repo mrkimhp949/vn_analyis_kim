@@ -9,7 +9,15 @@ This module provides comprehensive entry signal analysis with:
 - ML signal integration with technical analysis fallback
 - Transaction cost modeling (0.9% round trip)
 
-Version: 4.1.0
+IMPROVEMENTS v8.0 (2024-12):
+- Separated blocking logic from confidence adjustments (no more -999 hack)
+- Symbol-specific foreign flow integration (priority over market-wide)
+- Dynamic warning thresholds by market regime
+- ATR-based limit order threshold (adaptive to volatility)
+- Enhanced sentiment filter with price-based fallback
+- Better filter tracking and telemetry
+
+Version: 8.0.0
 Author: Trading Bot Team
 """
 
@@ -54,6 +62,7 @@ from src.config.constants import (
     VN_MIN_LIQUIDITY_VALUE,
     VIETNAM_PRICE_LIMIT_PERCENT,
 )
+from src.config.exceptions import DataQualityError
 
 # Import utilities
 from src.monitoring.performance import get_performance_monitor
@@ -427,7 +436,7 @@ class ImprovedEntryLogic:
         # Validate DataFrame
         try:
             DataValidator.validate_dataframe(df, min_rows=50)
-        except (ValueError, KeyError) as e:
+        except (ValueError, KeyError, DataQualityError) as e:
             return (False, f"Data validation failed: {e}", 0, 0)
 
         close_price = safe_get_latest(df, "close", 0)
@@ -523,6 +532,13 @@ class ImprovedEntryLogic:
 
         Returns:
             Tuple of (passed, reasons, warnings, adjustments, adjustment_breakdown)
+
+        IMPROVED v8.0: Separated blocking logic from confidence adjustments
+        =====================================================================
+        - Blocking conditions are checked in mandatory filters (return False)
+        - Core filters only apply confidence adjustments (no -999 hack)
+        - Dynamic warning threshold based on market regime
+        =====================================================================
         """
         reasons: List[str] = []
         warnings: List[str] = []
@@ -539,8 +555,8 @@ class ImprovedEntryLogic:
         if not passed:
             return (False, [], [], [], adjustment_breakdown)
 
-        # Run core filters
-        self._run_core_filters(
+        # Run core filters (with blocking conditions separated)
+        blocked, block_msg = self._run_core_filters(
             df,
             signal_type,
             current_price,
@@ -550,6 +566,15 @@ class ImprovedEntryLogic:
             adjustments,
             adjustment_breakdown,
         )
+        if blocked:
+            adjustment_breakdown.append(
+                {
+                    "filter": "core_filter_block",
+                    "delta": None,
+                    "note": block_msg,
+                }
+            )
+            return (False, [], [], [], adjustment_breakdown)
 
         # Run optional filters
         self._run_optional_filters(
@@ -561,7 +586,48 @@ class ImprovedEntryLogic:
             adjustments, adjustment_breakdown, adjustment_scale
         )
 
+        # IMPROVED v8.0: Dynamic warning threshold check
+        max_warnings = self._get_dynamic_max_warnings(market_regime)
+        if len(warnings) > max_warnings:
+            adjustment_breakdown.append(
+                {
+                    "filter": "warning_threshold",
+                    "delta": None,
+                    "note": f"Too many warnings ({len(warnings)} > {max_warnings})",
+                }
+            )
+            return (False, reasons, warnings, adjustments, adjustment_breakdown)
+
         return (True, reasons, warnings, adjustments, adjustment_breakdown)
+
+    def _get_dynamic_max_warnings(self, market_regime: Optional[Dict]) -> int:
+        """
+        Get dynamic max warnings threshold based on market regime.
+
+        IMPROVED v8.0: Stricter in bear/volatile markets
+        """
+        from src.config.constants import (
+            MAX_WARNINGS_BULL,
+            MAX_WARNINGS_SIDEWAYS,
+            MAX_WARNINGS_BEAR,
+            MAX_WARNINGS_HIGH_VOL,
+        )
+
+        if not market_regime:
+            return self.max_warnings_allowed
+
+        regime = market_regime.get("regime", "SIDEWAYS")
+
+        if regime == "BULL":
+            return MAX_WARNINGS_BULL
+        elif regime == "SIDEWAYS":
+            return MAX_WARNINGS_SIDEWAYS
+        elif regime == "BEAR":
+            return MAX_WARNINGS_BEAR
+        elif regime == "HIGH_VOLATILITY":
+            return MAX_WARNINGS_HIGH_VOL
+
+        return self.max_warnings_allowed
 
     def _get_adjustment_scale(self, market_regime: Optional[Dict]) -> float:
         """
@@ -597,6 +663,31 @@ class ImprovedEntryLogic:
         Returns:
             Tuple of (passed, block_reason)
         """
+        # FILTER 0: Per-Symbol Circuit Breaker (IMPROVED v8.1)
+        # Block trading if symbol has consecutive losses or poor win rate
+        if self._current_symbol:
+            try:
+                from src.risk.per_symbol_circuit_breaker import get_per_symbol_circuit_breaker
+
+                cb = get_per_symbol_circuit_breaker()
+                can_trade, reason = cb.can_trade(self._current_symbol)
+
+                if not can_trade:
+                    adjustment_breakdown.append(
+                        {
+                            "filter": "per_symbol_circuit_breaker",
+                            "delta": None,
+                            "note": reason,
+                        }
+                    )
+                    self._track_filter("per_symbol_circuit_breaker", False, self._current_symbol)
+                    return (False, f"Symbol blocked by circuit breaker: {reason}")
+
+            except ImportError:
+                logger.debug("Per-symbol circuit breaker not available")
+            except Exception as e:
+                logger.debug(f"Per-symbol circuit breaker check failed: {e}")
+
         # FILTER 1: Market Regime
         if market_regime and not market_regime.get("tradeable", True):
             adjustment_breakdown.append(
@@ -651,6 +742,41 @@ class ImprovedEntryLogic:
         except Exception as e:
             logger.debug(f"ATO/ATC check failed: {e}")
 
+        # FILTER 4: Lunch Break Protection (NEW v7.0)
+        # Avoid entry 15 minutes before lunch (11:15-11:30)
+        # Reason: Selling pressure typically increases before lunch
+        try:
+            from datetime import time as dt_time
+
+            now = datetime.now().time()
+            if dt_time(11, 15) <= now <= dt_time(11, 30):
+                adjustment_breakdown.append(
+                    {
+                        "filter": "lunch_break_protection",
+                        "delta": -20,
+                        "note": "⚠️ Avoid entry before lunch break (11:15-11:30) - selling pressure",
+                        "apply_penalty": True,
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Lunch break check failed: {e}")
+
+        # FILTER 5: Friday Afternoon Warning (NEW v7.0)
+        # Reduce confidence on Friday afternoon due to weekend risk + T+2 settlement
+        try:
+            now = datetime.now()
+            if now.weekday() == 4 and now.time() >= dt_time(13, 0):
+                adjustment_breakdown.append(
+                    {
+                        "filter": "friday_afternoon_warning",
+                        "delta": -15,
+                        "note": "⚠️ Friday afternoon - weekend risk + T+2 settlement",
+                        "apply_penalty": True,
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Friday check failed: {e}")
+
         return (True, None)
 
     def _run_core_filters(
@@ -663,18 +789,30 @@ class ImprovedEntryLogic:
         warnings: List[str],
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
-    ) -> None:
-        """Run core entry filters."""
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Run core entry filters.
+
+        IMPROVED v8.0: Returns blocking status instead of using -999 hack
+        =====================================================================
+        Returns:
+            Tuple of (is_blocked, block_reason)
+            - is_blocked: True if entry should be blocked
+            - block_reason: Reason for blocking (None if not blocked)
+        =====================================================================
+        """
         # Apply ATO/ATC penalty if flagged from mandatory filters
         for item in adjustment_breakdown:
             if item.get("apply_penalty") and item.get("delta") is not None:
                 adjustments.append(item["delta"])
                 warnings.append(item["note"])
 
-        # Vietnam price limits (floor warning)
-        self._apply_price_limit_filter(
+        # Vietnam price limits (can block on ceiling)
+        blocked, block_reason = self._apply_price_limit_filter(
             df, current_price, warnings, adjustments, adjustment_breakdown
         )
+        if blocked:
+            return (True, block_reason)
 
         # Trend alignment
         self._apply_trend_filter(
@@ -686,10 +824,12 @@ class ImprovedEntryLogic:
             df, current_price, reasons, warnings, adjustments, adjustment_breakdown
         )
 
-        # Volume confirmation
-        self._apply_volume_filter(
+        # Volume confirmation (can block on manipulation)
+        blocked, block_reason = self._apply_volume_filter(
             df, current_price, market_regime, reasons, warnings, adjustments, adjustment_breakdown
         )
+        if blocked:
+            return (True, block_reason)
 
         # Liquidity check
         self._apply_liquidity_filter(
@@ -699,11 +839,15 @@ class ImprovedEntryLogic:
         # Volatility check
         self._apply_volatility_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
 
-        # RSI check
-        self._apply_rsi_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
+        # RSI check (with market regime for trend confirmation)
+        self._apply_rsi_filter(
+            df, reasons, warnings, adjustments, adjustment_breakdown, market_regime
+        )
 
         # Portfolio correlation
         self._apply_correlation_filter(df, reasons, warnings, adjustments, adjustment_breakdown)
+
+        return (False, None)
 
     def _apply_price_limit_filter(
         self,
@@ -712,8 +856,19 @@ class ImprovedEntryLogic:
         warnings: List[str],
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
-    ) -> None:
-        """Apply Vietnam price limit filter (BLOCK ceiling, warn floor)."""
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Apply Vietnam price limit filter.
+
+        IMPROVED v8.0: Separated blocking logic
+        =====================================================================
+        - CEILING: Block entry (return True) - too risky, may get trapped
+        - FLOOR: Warn but allow (return False) - potential reversal opportunity
+        =====================================================================
+
+        Returns:
+            Tuple of (is_blocked, block_reason)
+        """
         price_limit_check = self._check_vietnam_price_limits(df, current_price)
 
         if price_limit_check["near_limit"]:
@@ -722,13 +877,9 @@ class ImprovedEntryLogic:
             if price_limit_check["limit_type"] == "CEILING":
                 # BLOCK entry near ceiling - too risky, may get trapped
                 warnings.append(f"🚫 BLOCKED: {warning_msg}")
-                self._add_adjustment(
-                    adjustments,
-                    adjustment_breakdown,
-                    "vietnam_price_limits",
-                    -999,  # Block entry
-                    f"BLOCKED: {warning_msg}",
-                )
+                self._track_filter("vietnam_price_limits", False, self._current_symbol or "")
+                return (True, f"Near ceiling price limit: {warning_msg}")
+
             elif price_limit_check["limit_type"] == "FLOOR":
                 # Warn but allow entry near floor (potential reversal)
                 warnings.append(f"⚠️ {warning_msg}")
@@ -739,6 +890,9 @@ class ImprovedEntryLogic:
                     VN_FLOOR_PENALTY,
                     warning_msg,
                 )
+                self._track_filter("vietnam_price_limits", True, self._current_symbol or "")
+
+        return (False, None)
 
     def _apply_trend_filter(
         self,
@@ -806,24 +960,28 @@ class ImprovedEntryLogic:
         warnings: List[str],
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
-    ) -> None:
-        """Apply volume confirmation filter with manipulation detection."""
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Apply volume confirmation filter with manipulation detection.
+
+        IMPROVED v8.0: Separated blocking logic for manipulation
+        =====================================================================
+        Returns:
+            Tuple of (is_blocked, block_reason)
+            - is_blocked: True if volume manipulation detected
+            - block_reason: Reason for blocking (None if not blocked)
+        =====================================================================
+        """
         volume_check = self._check_volume_confirmation(df, market_regime)
         is_small_cap = self._is_small_cap(df, current_price)
 
-        # Check for volume manipulation (abnormal spike)
+        # Check for volume manipulation (abnormal spike) - BLOCKING condition
         manipulation_check = self._check_volume_manipulation(df)
         if manipulation_check["is_manipulation"]:
             warning_msg = f"🚫 BLOCKED: {manipulation_check['reason']}"
             warnings.append(warning_msg)
-            self._add_adjustment(
-                adjustments,
-                adjustment_breakdown,
-                "volume_manipulation",
-                -999,
-                manipulation_check["reason"],
-            )
-            return  # Don't process further if manipulation detected
+            self._track_filter("volume_manipulation", False, self._current_symbol or "")
+            return (True, f"Volume manipulation detected: {manipulation_check['reason']}")
 
         if not volume_check["confirmed"]:
             volume_note = volume_check["reason"]
@@ -833,12 +991,16 @@ class ImprovedEntryLogic:
             warnings.append(warning_msg)
             penalty = -5 if is_small_cap else -10
             self._add_adjustment(adjustments, adjustment_breakdown, "volume", penalty, volume_note)
+            self._track_filter("volume", False, self._current_symbol or "")
         else:
             reasons.append(f"✅ Volume: {volume_check['reason']}")
             if volume_check["surge"]:
                 self._add_adjustment(
                     adjustments, adjustment_breakdown, "volume", +5, "Volume surge"
                 )
+            self._track_filter("volume", True, self._current_symbol or "")
+
+        return (False, None)
 
     def _is_small_cap(self, df: pd.DataFrame, current_price: float) -> bool:
         """Check if stock is small cap based on daily trading value."""
@@ -911,17 +1073,71 @@ class ImprovedEntryLogic:
         warnings: List[str],
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
+        market_regime: Optional[Dict] = None,
     ) -> None:
-        """Apply RSI check filter."""
+        """
+        Apply RSI check filter.
+
+        IMPROVED v8.1: Add trend confirmation before giving RSI oversold bonus.
+        In bear markets, oversold can become "more oversold" - need trend filter.
+        """
         rsi_check = self._check_rsi(df)
+
+        # Get current regime
+        regime = "SIDEWAYS"
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
 
         if rsi_check["overbought"]:
             warning_msg = f"⚠️ RSI overbought: {rsi_check['value']:.1f}"
             warnings.append(warning_msg)
             self._add_adjustment(adjustments, adjustment_breakdown, "rsi", -10, warning_msg)
         elif rsi_check["oversold"]:
-            reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (strong buy)")
-            self._add_adjustment(adjustments, adjustment_breakdown, "rsi", +15, "Oversold RSI")
+            # IMPROVED v8.1: Check trend before giving oversold bonus
+            # In bear market, require trend confirmation
+            trend_check = self._check_trend_alignment(df, "BUY")
+
+            if regime == "BEAR":
+                # Bear market: Only give bonus if trend is turning up
+                if trend_check.get("aligned", False):
+                    reasons.append(f"✅ RSI oversold + trend confirm: {rsi_check['value']:.1f}")
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "rsi",
+                        +10,
+                        "Oversold RSI (trend confirmed)",
+                    )
+                else:
+                    # Oversold in bear without trend confirmation - small bonus only
+                    reasons.append(f"⚠️ RSI oversold (no trend): {rsi_check['value']:.1f}")
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "rsi",
+                        +3,
+                        "Oversold RSI (bear market, no trend)",
+                    )
+            elif regime == "HIGH_VOLATILITY":
+                # High volatility: Be cautious with oversold
+                if trend_check.get("aligned", False):
+                    reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (high vol)")
+                    self._add_adjustment(
+                        adjustments, adjustment_breakdown, "rsi", +8, "Oversold RSI (high vol)"
+                    )
+                else:
+                    warnings.append(f"⚠️ RSI oversold in high vol: {rsi_check['value']:.1f}")
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "rsi",
+                        0,
+                        "Oversold RSI (high vol, no trend)",
+                    )
+            else:
+                # Bull/Sideways: Full bonus for oversold
+                reasons.append(f"✅ RSI oversold: {rsi_check['value']:.1f} (strong buy)")
+                self._add_adjustment(adjustments, adjustment_breakdown, "rsi", +15, "Oversold RSI")
         elif rsi_check["optimal"]:
             reasons.append(f"✅ RSI: {rsi_check['value']:.1f}")
             self._add_adjustment(adjustments, adjustment_breakdown, "rsi", +5, "Optimal RSI")
@@ -1004,6 +1220,8 @@ class ImprovedEntryLogic:
         """
         Apply NLP sentiment filter using PhoBERT/FinBERT analysis.
 
+        IMPROVED v8.0: Enhanced fallback logic
+        =====================================================================
         Phase 2/3 Implementation:
         - Scrapes Vietnamese financial news (CafeF, VnExpress, VietStock)
         - Analyzes sentiment using PhoBERT (Vietnamese) / FinBERT (English)
@@ -1013,56 +1231,232 @@ class ImprovedEntryLogic:
             NEUTRAL: 0
             NEGATIVE: -10
             VERY_NEGATIVE: -20
+
+        Fallback Logic (NEW v8.0):
+        - If NLP module unavailable: Use price-based sentiment proxy
+        - If no news found: Apply neutral score (0) with note
+        - If error occurs: Log and continue without blocking
+        =====================================================================
         """
         if not self._current_symbol:
             return
 
+        nlp_available = False
+        sentiment_data = None
+
+        # Try NLP-based sentiment first
         try:
             from src.nlp.multimodal_fusion import get_sentiment_adjustment
 
             sentiment_data = get_sentiment_adjustment(self._current_symbol, df)
+            nlp_available = True
 
-            adjustment = sentiment_data["adjustment"]
-            sentiment = sentiment_data["sentiment"]
-            score = sentiment_data["score"]
-            news_count = sentiment_data["news_count"]
+        except ImportError:
+            logger.debug("NLP module not available - using price-based sentiment fallback")
+        except Exception as e:
+            logger.warning(f"NLP sentiment error: {e} - using fallback")
 
-            if news_count == 0:
-                # No news available - skip filter
+        # IMPROVED v8.0: Fallback to price-based sentiment proxy
+        if not nlp_available or sentiment_data is None:
+            sentiment_data = self._calculate_price_based_sentiment(df)
+            if sentiment_data:
                 self._add_adjustment(
                     adjustments,
                     adjustment_breakdown,
-                    "sentiment_nlp",
-                    0,
-                    "No recent news found",
+                    "sentiment_price_proxy",
+                    sentiment_data["adjustment"],
+                    f"Price-based sentiment: {sentiment_data['sentiment']} ({sentiment_data['reason']})",
                 )
-                return
+                if sentiment_data["adjustment"] > 0:
+                    reasons.append(f"📊 Price sentiment: {sentiment_data['sentiment']}")
+                elif sentiment_data["adjustment"] < 0:
+                    warnings.append(f"📊 Price sentiment: {sentiment_data['sentiment']}")
+            return
 
-            # Apply sentiment adjustment
-            if adjustment > 0:
-                reason_msg = f"📰 {sentiment} sentiment ({news_count} articles, score={score:.2f})"
-                reasons.append(f"✅ {reason_msg}")
-            elif adjustment < 0:
-                warning_msg = f"📰 {sentiment} sentiment ({news_count} articles, score={score:.2f})"
-                warnings.append(f"⚠️ {warning_msg}")
-            else:
-                reason_msg = f"📰 Neutral sentiment ({news_count} articles)"
+        # Process NLP sentiment data
+        adjustment = sentiment_data["adjustment"]
+        sentiment = sentiment_data["sentiment"]
+        score = sentiment_data["score"]
+        news_count = sentiment_data["news_count"]
 
+        if news_count == 0:
+            # No news available - use neutral score with note
             self._add_adjustment(
                 adjustments,
                 adjustment_breakdown,
                 "sentiment_nlp",
-                adjustment,
-                f"{sentiment} ({score:.2f}, {news_count} articles)",
+                0,
+                "No recent news found - neutral sentiment assumed",
             )
+            return
 
-            # Track filter performance
-            self._track_filter("sentiment_nlp", adjustment >= 0, self._current_symbol)
+        # Apply sentiment adjustment
+        if adjustment > 0:
+            reason_msg = f"📰 {sentiment} sentiment ({news_count} articles, score={score:.2f})"
+            reasons.append(f"✅ {reason_msg}")
+        elif adjustment < 0:
+            warning_msg = f"📰 {sentiment} sentiment ({news_count} articles, score={score:.2f})"
+            warnings.append(f"⚠️ {warning_msg}")
+        else:
+            reason_msg = f"📰 Neutral sentiment ({news_count} articles)"
 
-        except ImportError:
-            logger.debug("NLP module not available - skipping sentiment filter")
+        self._add_adjustment(
+            adjustments,
+            adjustment_breakdown,
+            "sentiment_nlp",
+            adjustment,
+            f"{sentiment} ({score:.2f}, {news_count} articles)",
+        )
+
+        # Track filter performance
+        self._track_filter("sentiment_nlp", adjustment >= 0, self._current_symbol)
+
+    def _calculate_price_based_sentiment(self, df: pd.DataFrame) -> Optional[Dict]:
+        """
+        Calculate sentiment proxy from price action when NLP is unavailable.
+
+        IMPROVED v8.1: Enhanced with volume profile analysis
+        =====================================================================
+        Uses recent price momentum, volume patterns, and volume profile as sentiment proxy:
+
+        Scoring System:
+        - Price momentum (5d, 20d returns)
+        - Volume confirmation (current vs average)
+        - Volume profile: Accumulation/Distribution pattern
+        - OBV trend (if available)
+
+        Final sentiment:
+        - VERY_POSITIVE: score >= 4 (+8)
+        - POSITIVE: score >= 2 (+5)
+        - SLIGHTLY_POSITIVE: score >= 1 (+2)
+        - NEUTRAL: score around 0 (0)
+        - SLIGHTLY_NEGATIVE: score <= -1 (-3)
+        - NEGATIVE: score <= -2 (-5)
+        - VERY_NEGATIVE: score <= -4 (-10)
+        =====================================================================
+        """
+        if len(df) < 20:
+            return None
+
+        try:
+            close = df["close"]
+            volume = df["volume"] if "volume" in df.columns else None
+
+            score = 0
+            components = []
+
+            # 1. Price momentum (5-day and 20-day returns)
+            ret_5d = (close.iloc[-1] / close.iloc[-5] - 1) * 100 if len(df) >= 5 else 0
+            ret_20d = (close.iloc[-1] / close.iloc[-20] - 1) * 100 if len(df) >= 20 else 0
+
+            if ret_5d > 3:
+                score += 1
+                components.append(f"+{ret_5d:.1f}% 5d")
+            elif ret_5d > 1:
+                score += 0.5
+                components.append(f"+{ret_5d:.1f}% 5d")
+            elif ret_5d < -3:
+                score -= 1
+                components.append(f"{ret_5d:.1f}% 5d")
+            elif ret_5d < -1:
+                score -= 0.5
+                components.append(f"{ret_5d:.1f}% 5d")
+
+            if ret_20d > 5:
+                score += 1
+                components.append(f"+{ret_20d:.1f}% 20d")
+            elif ret_20d > 2:
+                score += 0.5
+            elif ret_20d < -5:
+                score -= 1
+                components.append(f"{ret_20d:.1f}% 20d")
+            elif ret_20d < -2:
+                score -= 0.5
+
+            # 2. Volume profile analysis (NEW v8.1)
+            if volume is not None and len(volume) >= 20:
+                avg_vol = volume.tail(20).mean()
+                current_vol = volume.iloc[-1]
+                vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
+
+                # Volume surge with price movement
+                if vol_ratio > 1.5:
+                    if ret_5d > 0:
+                        score += 1
+                        components.append("vol surge↑")
+                    elif ret_5d < 0:
+                        score -= 1
+                        components.append("vol surge↓")
+                elif vol_ratio > 1.2:
+                    if ret_5d > 0:
+                        score += 0.5
+                        components.append("vol confirm↑")
+                    elif ret_5d < 0:
+                        score -= 0.5
+                        components.append("vol confirm↓")
+
+                # Volume trend analysis (accumulation/distribution)
+                vol_5d_avg = volume.tail(5).mean()
+                vol_10d_avg = volume.tail(10).mean()
+
+                if vol_5d_avg > vol_10d_avg * 1.2:
+                    # Increasing volume
+                    if ret_5d > 0:
+                        score += 0.5  # Accumulation
+                        components.append("accumulation")
+                    elif ret_5d < 0:
+                        score -= 0.5  # Distribution
+                        components.append("distribution")
+
+                # Price-volume divergence check
+                price_up = close.iloc[-1] > close.iloc[-5]
+                vol_declining = vol_5d_avg < vol_10d_avg * 0.8
+
+                if price_up and vol_declining:
+                    score -= 0.5  # Weak rally
+                    components.append("weak rally")
+                elif not price_up and vol_declining:
+                    score += 0.5  # Selling exhaustion
+                    components.append("exhaustion")
+
+            # 3. OBV trend (if available)
+            if "obv" in df.columns:
+                obv = df["obv"]
+                obv_5d = obv.tail(5)
+                obv_trend = (
+                    (obv_5d.iloc[-1] - obv_5d.iloc[0]) / abs(obv_5d.iloc[0]) * 100
+                    if obv_5d.iloc[0] != 0
+                    else 0
+                )
+
+                if obv_trend > 5:
+                    score += 0.5
+                    components.append("OBV↑")
+                elif obv_trend < -5:
+                    score -= 0.5
+                    components.append("OBV↓")
+
+            # Determine sentiment from final score
+            reason = " | ".join(components) if components else f"Price: {ret_5d:+.1f}% 5d"
+
+            if score >= 4:
+                return {"sentiment": "VERY_POSITIVE", "adjustment": 8, "reason": reason}
+            elif score >= 2:
+                return {"sentiment": "POSITIVE", "adjustment": 5, "reason": reason}
+            elif score >= 1:
+                return {"sentiment": "SLIGHTLY_POSITIVE", "adjustment": 2, "reason": reason}
+            elif score <= -4:
+                return {"sentiment": "VERY_NEGATIVE", "adjustment": -10, "reason": reason}
+            elif score <= -2:
+                return {"sentiment": "NEGATIVE", "adjustment": -5, "reason": reason}
+            elif score <= -1:
+                return {"sentiment": "SLIGHTLY_NEGATIVE", "adjustment": -3, "reason": reason}
+            else:
+                return {"sentiment": "NEUTRAL", "adjustment": 0, "reason": reason}
+
         except Exception as e:
-            logger.warning(f"Sentiment filter error: {e}")
+            logger.debug(f"Price-based sentiment calculation failed: {e}")
+            return None
 
     def _apply_price_action_filter(
         self,
@@ -1219,16 +1613,64 @@ class ImprovedEntryLogic:
         """
         Apply foreign flow (smart money) filter.
 
+        IMPROVED v8.0: Symbol-specific + Market-wide foreign flow analysis
+        =====================================================================
         Foreign investors are considered "smart money" in Vietnam market.
-        Net buying/selling patterns can indicate market sentiment.
+
+        Two-level analysis:
+        1. Market-wide flow: Overall market sentiment
+        2. Symbol-specific flow: Individual stock accumulation/distribution
+
+        Symbol-specific flow takes priority when available, as it provides
+        more actionable insight for the specific stock being analyzed.
+        =====================================================================
         """
         from src.config.constants import (
             FOREIGN_FLOW_STRONG_BUY_BONUS,
             FOREIGN_FLOW_MODERATE_BUY_BONUS,
             FOREIGN_FLOW_MODERATE_SELL_PENALTY,
             FOREIGN_FLOW_STRONG_SELL_PENALTY,
+            FOREIGN_FLOW_SYMBOL_STRONG_ACCUMULATION,
+            FOREIGN_FLOW_SYMBOL_ACCUMULATION,
+            FOREIGN_FLOW_SYMBOL_DISTRIBUTION,
+            FOREIGN_FLOW_SYMBOL_STRONG_DISTRIBUTION,
         )
 
+        symbol = self._current_symbol
+        symbol_flow_applied = False
+
+        # PRIORITY 1: Symbol-specific foreign flow (more actionable)
+        if symbol:
+            try:
+                from src.market.foreign_flow import get_realtime_foreign_tracker
+
+                tracker = get_realtime_foreign_tracker()
+                symbol_adjustment, symbol_reason = tracker.get_entry_adjustment(symbol)
+
+                if symbol_adjustment != 0:
+                    symbol_flow_applied = True
+                    if symbol_adjustment > 0:
+                        reason_msg = f"✅ {symbol}: {symbol_reason}"
+                        reasons.append(reason_msg)
+                    else:
+                        warning_msg = f"⚠️ {symbol}: {symbol_reason}"
+                        warnings.append(warning_msg)
+
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "foreign_flow_symbol",
+                        symbol_adjustment,
+                        f"Symbol-specific: {symbol_reason}",
+                    )
+                    self._track_filter("foreign_flow_symbol", symbol_adjustment >= 0, symbol)
+
+            except ImportError:
+                logger.debug("Realtime foreign tracker not available")
+            except Exception as e:
+                logger.debug(f"Symbol foreign flow check failed for {symbol}: {e}")
+
+        # PRIORITY 2: Market-wide foreign flow (fallback or additional signal)
         try:
             from src.market.foreign_flow import get_foreign_flow_analyzer
 
@@ -1239,53 +1681,62 @@ class ImprovedEntryLogic:
             trend = flow.trend
             strength = flow.strength
 
+            # Reduce market-wide impact if symbol-specific already applied
+            market_weight = 0.5 if symbol_flow_applied else 1.0
+
             # Strong buying (score > 0.5)
             if score > 0.5:
-                reason_msg = f"✅ Strong foreign buying ({strength} | score: {score:.2f})"
+                adj = int(FOREIGN_FLOW_STRONG_BUY_BONUS * market_weight)
+                reason_msg = f"✅ Market foreign buying ({strength} | score: {score:.2f})"
                 reasons.append(reason_msg)
                 self._add_adjustment(
                     adjustments,
                     adjustment_breakdown,
-                    "foreign_flow",
-                    FOREIGN_FLOW_STRONG_BUY_BONUS,
+                    "foreign_flow_market",
+                    adj,
                     reason_msg,
                 )
             # Moderate buying (0 < score <= 0.5)
             elif 0 < score <= 0.5:
-                reason_msg = f"✅ Foreign buying ({strength} | score: {score:.2f})"
+                adj = int(FOREIGN_FLOW_MODERATE_BUY_BONUS * market_weight)
+                reason_msg = f"✅ Market foreign flow positive ({strength} | score: {score:.2f})"
                 reasons.append(reason_msg)
                 self._add_adjustment(
                     adjustments,
                     adjustment_breakdown,
-                    "foreign_flow",
-                    FOREIGN_FLOW_MODERATE_BUY_BONUS,
+                    "foreign_flow_market",
+                    adj,
                     reason_msg,
                 )
             # Moderate selling (-0.5 <= score < 0)
             elif -0.5 <= score < 0:
-                warning_msg = f"⚠️ Foreign selling ({strength} | score: {score:.2f})"
+                adj = int(FOREIGN_FLOW_MODERATE_SELL_PENALTY * market_weight)
+                warning_msg = f"⚠️ Market foreign selling ({strength} | score: {score:.2f})"
                 warnings.append(warning_msg)
                 self._add_adjustment(
                     adjustments,
                     adjustment_breakdown,
-                    "foreign_flow",
-                    FOREIGN_FLOW_MODERATE_SELL_PENALTY,
+                    "foreign_flow_market",
+                    adj,
                     warning_msg,
                 )
             # Strong selling (score < -0.5)
             elif score < -0.5:
-                warning_msg = f"⚠️ Strong foreign selling ({strength} | score: {score:.2f})"
+                adj = int(FOREIGN_FLOW_STRONG_SELL_PENALTY * market_weight)
+                warning_msg = f"⚠️ Strong market foreign selling ({strength} | score: {score:.2f})"
                 warnings.append(warning_msg)
                 self._add_adjustment(
                     adjustments,
                     adjustment_breakdown,
-                    "foreign_flow",
-                    FOREIGN_FLOW_STRONG_SELL_PENALTY,
+                    "foreign_flow_market",
+                    adj,
                     warning_msg,
                 )
 
+            self._track_filter("foreign_flow_market", score >= 0, symbol or "MARKET")
+
         except Exception as e:
-            logger.debug(f"Foreign flow analysis failed: {e}")
+            logger.debug(f"Market foreign flow analysis failed: {e}")
             # Not critical - just skip this filter if unavailable
 
     def _apply_adjustment_scaling(
@@ -1603,11 +2054,13 @@ class ImprovedEntryLogic:
             is_limit_order = optimized_entry.get("entry_type") in ["PULLBACK", "BREAKOUT"]
             limit_price = optimized_entry.get("entry_price") if is_limit_order else None
 
-            # Only use limit order if entry price is significantly different from current
+            # IMPROVED v8.0: ATR-based limit order threshold
+            # Dynamic threshold based on stock volatility instead of fixed 0.5%
+            limit_threshold = self._get_atr_based_limit_threshold(df, close_price)
             price_diff_pct = (
                 abs(entry_price - close_price) / close_price * 100 if close_price > 0 else 0
             )
-            if is_limit_order and price_diff_pct < 0.5:
+            if is_limit_order and price_diff_pct < limit_threshold:
                 # Entry price too close to current - use market order instead
                 is_limit_order = False
                 limit_price = None
@@ -2088,6 +2541,240 @@ class ImprovedEntryLogic:
             "tier": tier,
         }
 
+    def calculate_liquidity_score(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        current_price: Optional[float] = None,
+    ) -> Dict:
+        """
+        NEW v7.0: Calculate composite liquidity score (0-100).
+
+        Composite score based on multiple factors:
+        1. Average daily value (40% weight)
+        2. Bid-ask spread estimate (20% weight)
+        3. Volume consistency (20% weight)
+        4. Market depth proxy (20% weight)
+
+        Vietnam market tiers:
+        - VN30: Score 80-100 (highest liquidity)
+        - Large cap (>10B VND/day): Score 60-80
+        - Mid cap (3-10B VND/day): Score 40-60
+        - Small cap (1-3B VND/day): Score 20-40
+        - Penny (<1B VND/day): Score 0-20
+
+        Args:
+            symbol: Stock symbol
+            df: DataFrame with OHLCV data
+            current_price: Current price (optional, will use latest close)
+
+        Returns:
+            Dict with:
+            - score: Composite score 0-100
+            - tier: Liquidity tier name
+            - components: Individual component scores
+            - tradeable: Whether liquidity is sufficient for trading
+            - max_position_value: Recommended max position value
+            - warnings: List of liquidity warnings
+        """
+        try:
+            from src.config.constants import VN30_SYMBOLS
+        except ImportError:
+            VN30_SYMBOLS = []
+
+        # Default result for insufficient data
+        default_result = {
+            "score": 0,
+            "tier": "unknown",
+            "components": {},
+            "tradeable": False,
+            "max_position_value": 0,
+            "warnings": ["Insufficient data for liquidity analysis"],
+        }
+
+        if df is None or df.empty or "volume" not in df.columns:
+            return default_result
+
+        if len(df) < 20:
+            return default_result
+
+        # Get current price
+        if current_price is None:
+            current_price = safe_get_latest(df, "close", 0)
+
+        if current_price <= 0:
+            return default_result
+
+        warnings = []
+
+        # =================================================================
+        # Component 1: Average Daily Value (40% weight)
+        # =================================================================
+        avg_volume = df["volume"].tail(20).mean()
+        avg_value = avg_volume * current_price
+
+        # Score based on value tiers
+        if avg_value >= 20_000_000_000:  # > 20B VND
+            value_score = 100
+        elif avg_value >= 10_000_000_000:  # 10-20B VND
+            value_score = 80
+        elif avg_value >= 5_000_000_000:  # 5-10B VND
+            value_score = 65
+        elif avg_value >= 3_000_000_000:  # 3-5B VND
+            value_score = 50
+        elif avg_value >= 1_000_000_000:  # 1-3B VND
+            value_score = 35
+        elif avg_value >= 500_000_000:  # 500M-1B VND
+            value_score = 20
+        else:  # < 500M VND
+            value_score = 10
+            warnings.append(f"Very low liquidity: {avg_value/1e9:.2f}B VND/day")
+
+        # =================================================================
+        # Component 2: Bid-Ask Spread Estimate (20% weight)
+        # =================================================================
+        # Estimate spread from high-low range vs close
+        # Tighter spread = higher score
+        try:
+            avg_range = (df["high"].tail(20) - df["low"].tail(20)).mean()
+            avg_close = df["close"].tail(20).mean()
+            spread_pct = (avg_range / avg_close) * 100 if avg_close > 0 else 5
+
+            if spread_pct < 1.0:
+                spread_score = 100
+            elif spread_pct < 1.5:
+                spread_score = 80
+            elif spread_pct < 2.0:
+                spread_score = 60
+            elif spread_pct < 3.0:
+                spread_score = 40
+            elif spread_pct < 5.0:
+                spread_score = 20
+            else:
+                spread_score = 10
+                warnings.append(f"Wide spread: {spread_pct:.1f}%")
+        except Exception:
+            spread_score = 50  # Default if calculation fails
+
+        # =================================================================
+        # Component 3: Volume Consistency (20% weight)
+        # =================================================================
+        # Consistent volume = more reliable liquidity
+        try:
+            volume_std = df["volume"].tail(20).std()
+            volume_cv = volume_std / avg_volume if avg_volume > 0 else 1
+
+            if volume_cv < 0.3:
+                consistency_score = 100  # Very consistent
+            elif volume_cv < 0.5:
+                consistency_score = 80
+            elif volume_cv < 0.7:
+                consistency_score = 60
+            elif volume_cv < 1.0:
+                consistency_score = 40
+            else:
+                consistency_score = 20
+                warnings.append("Inconsistent volume - liquidity may vary")
+        except Exception:
+            consistency_score = 50
+
+        # =================================================================
+        # Component 4: Market Depth Proxy (20% weight)
+        # =================================================================
+        # Use volume relative to price movement as depth proxy
+        # High volume with low price change = deep market
+        try:
+            price_changes = df["close"].tail(20).pct_change().abs()
+            avg_price_change = price_changes.mean()
+
+            # Volume per 1% price move
+            if avg_price_change > 0:
+                depth_ratio = avg_volume / (avg_price_change * 100)
+
+                if depth_ratio > 1_000_000:
+                    depth_score = 100
+                elif depth_ratio > 500_000:
+                    depth_score = 80
+                elif depth_ratio > 200_000:
+                    depth_score = 60
+                elif depth_ratio > 100_000:
+                    depth_score = 40
+                else:
+                    depth_score = 20
+            else:
+                depth_score = 50
+        except Exception:
+            depth_score = 50
+
+        # =================================================================
+        # VN30 Bonus
+        # =================================================================
+        vn30_bonus = 0
+        if symbol.upper() in VN30_SYMBOLS:
+            vn30_bonus = 10  # Bonus for VN30 stocks
+
+        # =================================================================
+        # Calculate Composite Score
+        # =================================================================
+        composite_score = (
+            value_score * 0.40
+            + spread_score * 0.20
+            + consistency_score * 0.20
+            + depth_score * 0.20
+            + vn30_bonus
+        )
+        composite_score = min(100, max(0, composite_score))
+
+        # =================================================================
+        # Determine Tier
+        # =================================================================
+        if composite_score >= 80:
+            tier = "VN30/Blue Chip"
+        elif composite_score >= 60:
+            tier = "Large Cap"
+        elif composite_score >= 40:
+            tier = "Mid Cap"
+        elif composite_score >= 20:
+            tier = "Small Cap"
+        else:
+            tier = "Penny/Illiquid"
+
+        # =================================================================
+        # Calculate Max Position Value
+        # =================================================================
+        # Rule: Max position = 5% of average daily value
+        # This ensures position can be liquidated in 1 day without major impact
+        max_position_value = avg_value * 0.05
+
+        # Adjust by score
+        if composite_score < 40:
+            max_position_value *= 0.5  # Reduce for illiquid stocks
+
+        # =================================================================
+        # Determine Tradeable
+        # =================================================================
+        tradeable = composite_score >= 20 and avg_value >= 300_000_000  # Min 300M VND
+
+        if not tradeable:
+            warnings.append("Stock may be too illiquid for safe trading")
+
+        return {
+            "score": round(composite_score, 1),
+            "tier": tier,
+            "components": {
+                "value_score": round(value_score, 1),
+                "spread_score": round(spread_score, 1),
+                "consistency_score": round(consistency_score, 1),
+                "depth_score": round(depth_score, 1),
+                "vn30_bonus": vn30_bonus,
+            },
+            "tradeable": tradeable,
+            "max_position_value": int(max_position_value),
+            "avg_daily_value": avg_value,
+            "warnings": warnings,
+            "symbol": symbol,
+        }
+
     def _check_multi_timeframe_trend(self, df: pd.DataFrame) -> Dict:
         """
         NEW: Confirm xu hướng trên nhiều timeframe (daily/weekly/monthly)
@@ -2136,7 +2823,7 @@ class ImprovedEntryLogic:
             # Check for NaN values
             if df["close"].isna().any() or df["volume"].isna().any():
                 logger.warning("OBV calculation: NaN values detected, filling forward")
-                df = df.fillna(method="ffill")
+                df = df.ffill()
 
             # Check for sufficient data
             if len(df) < 2:
@@ -2547,24 +3234,39 @@ class ImprovedEntryLogic:
 
         # Try to use SectorRotationAnalyzer first
         try:
-            from src.market.sector_rotation import get_sector_analyzer
-
-            analyzer = get_sector_analyzer()
+            from src.market.sector_rotation import (
+                get_sector_rotation_analyzer,
+                get_symbol_sector_info,
+            )
 
             # Get sector for current symbol
             if self._current_symbol:
-                sector_info = analyzer.get_symbol_sector_info(self._current_symbol)
+                sector_info = get_symbol_sector_info(self._current_symbol)
                 result["sector_id"] = sector_info.get("sector_id", "unknown")
                 result["is_leading"] = sector_info.get("is_leading", False)
                 result["is_lagging"] = sector_info.get("is_lagging", False)
 
                 # Get rotation analysis
-                rotation = analyzer.analyze()
-                result["rotation_phase"] = rotation.phase
+                analyzer = get_sector_rotation_analyzer()
+                rotation = analyzer.get_rotation_signal()
+
+                # Determine rotation phase based on overweight sectors
+                if any(s in rotation.overweight for s in ["BANKING", "SECURITIES"]):
+                    result["rotation_phase"] = "EARLY"
+                elif any(s in rotation.overweight for s in ["TECHNOLOGY", "REAL_ESTATE"]):
+                    result["rotation_phase"] = "MID"
+                elif any(s in rotation.overweight for s in ["ENERGY", "INDUSTRIAL"]):
+                    result["rotation_phase"] = "LATE"
+                elif any(s in rotation.overweight for s in ["CONSUMER", "UTILITIES"]):
+                    result["rotation_phase"] = "RECESSION"
+                else:
+                    result["rotation_phase"] = "UNKNOWN"
 
                 # Get sector performance if available
-                if result["sector_id"] in rotation.sector_performances:
-                    perf = rotation.sector_performances[result["sector_id"]]
+                momentum_data = analyzer.get_sector_momentum()
+                sector_upper = result["sector_id"].upper()
+                if sector_upper in momentum_data:
+                    perf = momentum_data[sector_upper]
                     result["sector_perf"] = perf.return_1m * 100  # Convert to percentage
 
                 logger.debug(
@@ -2849,6 +3551,57 @@ class ImprovedEntryLogic:
 
     # NOTE: _adjust_thresholds_for_market is now defined at class level (line ~317)
     # with REGIME_THRESHOLDS for adaptive threshold adjustment
+
+    def _get_atr_based_limit_threshold(self, df: pd.DataFrame, current_price: float) -> float:
+        """
+        Calculate ATR-based limit order threshold.
+
+        IMPROVED v8.0: Dynamic threshold based on stock volatility
+        =====================================================================
+        Instead of fixed 0.5% threshold, use ATR to determine appropriate
+        limit order threshold for each stock's volatility profile.
+
+        Formula: threshold = ATR_pct * LIMIT_ORDER_ATR_MULTIPLIER
+        Clamped between MIN_THRESHOLD and MAX_THRESHOLD
+
+        Benefits:
+        - Volatile stocks: Higher threshold (avoid premature market orders)
+        - Stable stocks: Lower threshold (tighter limit orders)
+        =====================================================================
+
+        Args:
+            df: DataFrame with OHLCV data
+            current_price: Current stock price
+
+        Returns:
+            Limit order threshold as percentage (0.5 - 2.0%)
+        """
+        from src.config.constants import (
+            LIMIT_ORDER_ATR_MULTIPLIER,
+            LIMIT_ORDER_MIN_THRESHOLD,
+            LIMIT_ORDER_MAX_THRESHOLD,
+        )
+
+        # Get ATR
+        atr = safe_get_latest(df, "atr", 0)
+
+        if atr == 0 or current_price == 0:
+            # Fallback to default threshold
+            return LIMIT_ORDER_MIN_THRESHOLD
+
+        # Calculate ATR as percentage of price
+        atr_pct = (atr / current_price) * 100
+
+        # Apply multiplier and clamp
+        threshold = atr_pct * LIMIT_ORDER_ATR_MULTIPLIER
+        threshold = max(LIMIT_ORDER_MIN_THRESHOLD, min(threshold, LIMIT_ORDER_MAX_THRESHOLD))
+
+        logger.debug(
+            f"ATR-based limit threshold: ATR={atr:.2f}, "
+            f"ATR%={atr_pct:.2f}%, threshold={threshold:.2f}%"
+        )
+
+        return threshold
 
     def _optimize_entry_price(
         self,
@@ -3339,21 +4092,70 @@ class ImprovedEntryLogic:
 
     def _get_technical_signal(self, df: pd.DataFrame) -> str:
         """
-        Determine signal type from technical analysis
+        Determine signal type from technical analysis.
+        IMPROVED v8.1: Multi-indicator check instead of simple 2-candle comparison.
+
         Returns: "BUY", "SELL", or "HOLD"
+
+        Scoring System (need >= 3 points for BUY, <= -3 for SELL):
+        - EMA20 > EMA50: +2 (trend alignment)
+        - RSI < 40: +1 (not overbought)
+        - Price > EMA20: +1 (above short-term MA)
+        - Volume > 20-day avg: +1 (volume confirmation)
+        - MACD > 0 or MACD crossover: +1 (momentum)
         """
         if len(df) < 50:
             return "HOLD"
 
         from utils.dataframe_utils import safe_get_latest
 
-        current_price = safe_get_latest(df, "close", 0)
-        prev_price = df["close"].iloc[-2] if len(df) >= 2 else current_price
+        score = 0
 
-        # Simple trend following
-        if current_price > prev_price:
+        # Get indicators
+        current_price = safe_get_latest(df, "close", 0)
+        ema20 = safe_get_latest(df, "ema20", 0)
+        ema50 = safe_get_latest(df, "ema50", 0)
+        rsi = safe_get_latest(df, "rsi", 50)
+        current_volume = safe_get_latest(df, "volume", 0)
+        avg_volume = df["volume"].tail(20).mean() if "volume" in df.columns else 0
+
+        # 1. EMA alignment (most important - 2 points)
+        if ema20 > 0 and ema50 > 0:
+            if ema20 > ema50:
+                score += 2  # Bullish trend
+            elif ema20 < ema50 * 0.98:  # 2% below
+                score -= 2  # Bearish trend
+
+        # 2. RSI check (1 point)
+        if 30 <= rsi <= 65:
+            score += 1  # Healthy RSI zone for buying
+        elif rsi > 70:
+            score -= 1  # Overbought
+        elif rsi < 25:
+            score += 1  # Deep oversold - potential reversal
+
+        # 3. Price vs EMA20 (1 point)
+        if ema20 > 0 and current_price > ema20:
+            score += 1  # Price above short-term MA
+        elif ema20 > 0 and current_price < ema20 * 0.97:
+            score -= 1  # Price significantly below MA
+
+        # 4. Volume confirmation (1 point)
+        if avg_volume > 0 and current_volume > avg_volume * 1.1:
+            score += 1  # Above average volume
+
+        # 5. MACD momentum (1 point)
+        macd = safe_get_latest(df, "macd", 0)
+        macd_signal = safe_get_latest(df, "macd_signal", 0)
+        if macd > macd_signal and macd > 0:
+            score += 1  # Bullish MACD
+        elif macd < macd_signal and macd < 0:
+            score -= 1  # Bearish MACD
+
+        # Decision: need >= 3 points for BUY, <= -3 for SELL
+        if score >= 3:
             return "BUY"
-        elif current_price < prev_price:
+        elif score <= -3:
             return "SELL"
         else:
             return "HOLD"

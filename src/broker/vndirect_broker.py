@@ -15,28 +15,33 @@ Author: Trading Bot Team
 Version: 1.0.0
 """
 
-import hashlib
-import hmac
-import json
 import logging
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
-from enum import Enum
+from typing import Callable, Dict, List, Optional
 
 import requests
 
 from src.broker.base_broker import (
+    AccountInfo,
     BaseBroker,
     Order,
-    Position,
-    AccountInfo,
     OrderSide,
-    OrderType,
     OrderStatus,
+    OrderType,
+    Position,
 )
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Constants
+# ============================================================================
+DEFAULT_TIMEOUT = 15  # seconds (VNDirect is slower)
+MIN_REQUEST_INTERVAL = 0.3  # 300ms between requests
+MAX_RETRIES = 3
+RETRY_DELAY = 1.0  # seconds
+LOT_SIZE = 100  # Vietnam market lot size
 
 
 class VNDirectEndpoints:
@@ -82,7 +87,7 @@ class VNDirectBroker(BaseBroker):
         username: str,
         password: str,
         is_paper: bool = True,  # Default to paper trading for safety
-        otp_callback: Optional[callable] = None,  # Callback to get OTP
+        otp_callback: Optional[Callable[[], str]] = None,  # Callback to get OTP
     ):
         """
         Initialize VNDirect Broker
@@ -102,17 +107,16 @@ class VNDirectBroker(BaseBroker):
 
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
-        self._token_expiry: Optional[datetime] = None
         self._session = requests.Session()
         self._otp_token: Optional[str] = None
 
         # Rate limiting
-        self._last_request_time = 0
-        self._min_request_interval = 0.3  # 300ms between requests
+        self._last_request_time = 0.0
+        self._min_request_interval = MIN_REQUEST_INTERVAL
 
         # Retry settings
-        self._max_retries = 3
-        self._retry_delay = 1.0  # seconds
+        self._max_retries = MAX_RETRIES
+        self._retry_delay = RETRY_DELAY
 
     @property
     def broker_name(self) -> str:
@@ -142,7 +146,9 @@ class VNDirectBroker(BaseBroker):
                     "password": self.password,
                 }
 
-                response = self._session.post(VNDirectEndpoints.AUTH_URL, json=payload, timeout=15)
+                response = self._session.post(
+                    VNDirectEndpoints.AUTH_URL, json=payload, timeout=DEFAULT_TIMEOUT
+                )
 
                 if response.status_code == 200:
                     data = response.json()
@@ -206,9 +212,13 @@ class VNDirectBroker(BaseBroker):
         for attempt in range(self._max_retries if retry else 1):
             try:
                 if method.upper() == "GET":
-                    response = self._session.get(url, headers=headers, params=params, timeout=10)
+                    response = self._session.get(
+                        url, headers=headers, params=params, timeout=DEFAULT_TIMEOUT
+                    )
                 else:
-                    response = self._session.post(url, headers=headers, json=data, timeout=10)
+                    response = self._session.post(
+                        url, headers=headers, json=data, timeout=DEFAULT_TIMEOUT
+                    )
 
                 if response.status_code == 200:
                     return response.json()
@@ -356,8 +366,8 @@ class VNDirectBroker(BaseBroker):
             Order object or None if failed
         """
         # Validate lot size
-        if quantity % 100 != 0:
-            logger.warning(f"Invalid lot size: {quantity}. Must be multiple of 100.")
+        if quantity % LOT_SIZE != 0:
+            logger.warning(f"Invalid lot size: {quantity}. Must be multiple of {LOT_SIZE}.")
             return None
 
         # Safety check for live trading
@@ -548,9 +558,20 @@ def create_vndirect_broker(
     username: str,
     password: str,
     is_paper: bool = True,
-    otp_callback: Optional[callable] = None,
+    otp_callback: Optional[Callable[[], str]] = None,
 ) -> VNDirectBroker:
-    """Create and connect VNDirect broker"""
+    """Create and connect VNDirect broker.
+
+    Args:
+        account_id: VNDirect trading account ID
+        username: VNDirect username
+        password: VNDirect password
+        is_paper: Use paper trading mode (default True for safety)
+        otp_callback: Callback function to get OTP for live trading
+
+    Returns:
+        VNDirectBroker: Connected broker instance
+    """
     broker = VNDirectBroker(
         account_id=account_id,
         username=username,

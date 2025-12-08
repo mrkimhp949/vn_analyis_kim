@@ -158,5 +158,37 @@
     "precision": 0.0,
     "effectiveness_score": 0.0,
     "last_updated": "2025-12-01T18:20:11.781878"
+  },
+  "volume": {
+    "filter_name": "volume",
+    "total_checks": 106,
+    "blocked_count": 44,
+    "warning_count": 0,
+    "passed_count": 62,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 0.41509433962264153,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 0.0,
+    "last_updated": "2025-12-08T23:19:00.793559"
+  },
+  "foreign_flow_market": {
+    "filter_name": "foreign_flow_market",
+    "total_checks": 16,
+    "blocked_count": 0,
+    "warning_count": 0,
+    "passed_count": 16,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 0.0,
+    "last_updated": "2025-12-08T23:19:00.795229"
   }
 }

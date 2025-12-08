@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
-from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+from src.ml.features.enhanced_v2 import add_enhanced_features, get_feature_columns
 from src.ml.models.ensemble import EnhancedMLPredictor
 
 logger = logging.getLogger(__name__)
@@ -261,13 +261,13 @@ class EnhancedMLSignalGenerator:
 
         confidence = min(confidence, 100)
 
-        # Decision - VERY RELAXED for current market
-        # Allow BUY when combined >= 0.2 (was 0.3)
-        # Allow technical to generate BUY even with neutral/weak ML
-        if combined_signal >= 0.2:
+        # Decision - BALANCED thresholds (IMPROVED v8.1)
+        # Increased from 0.2 to 0.35 to reduce false positives
+        # Rationale: 0.2 was too aggressive, causing too many weak signals
+        if combined_signal >= 0.35:
             signal = "BUY"
             reasons.insert(0, f"ML({ml_score:.2f})")
-        elif combined_signal <= -0.2:
+        elif combined_signal <= -0.35:
             signal = "SELL"
             reasons.insert(0, f"ML({ml_score:.2f})")
         else:

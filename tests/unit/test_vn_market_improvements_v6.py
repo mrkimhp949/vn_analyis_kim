@@ -346,7 +346,8 @@ class TestFloorBounceConstants:
         """Immediate exit volume threshold should be defined"""
         from src.config.constants import VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME
 
-        assert VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME == 3.0  # 3x volume
+        # IMPROVED Priority 1: Increased sensitivity - 2.5x instead of 3.0x for faster panic detection
+        assert VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME == 2.5  # 2.5x volume
 
 
 class TestOddLotIntegration:
@@ -445,48 +446,6 @@ class TestMarginTradingIntegration:
         assert result["base_shares"] == result["margin_shares"]
 
 
-class TestT0TradingValidation:
-    """Test T+0 intraday trading validation"""
-
-    def test_t0_validation_enabled(self):
-        """Test T+0 validation when enabled"""
-        from src.strategies.position_sizing import EnhancedPositionSizer
-        from src.config.constants import VN_T0_ENABLED
-
-        sizer = EnhancedPositionSizer(total_capital=100_000_000)
-
-        result = sizer.validate_t0_trading(
-            symbol="VNM",
-            quantity=1000,
-            price=85000,
-            account_value=100_000_000,  # 100M VND
-        )
-
-        assert result["t0_enabled"] == VN_T0_ENABLED
-        assert "validations" in result
-
-    def test_t0_validation_account_too_small(self):
-        """Test T+0 validation fails for small accounts"""
-        from src.strategies.position_sizing import EnhancedPositionSizer
-        from src.config.constants import VN_T0_MIN_ACCOUNT_VALUE
-
-        sizer = EnhancedPositionSizer(total_capital=30_000_000)  # 30M VND
-
-        result = sizer.validate_t0_trading(
-            symbol="VNM",
-            quantity=100,
-            price=85000,
-            account_value=30_000_000,  # Below 50M minimum
-        )
-
-        # Should fail account value check
-        if result["t0_enabled"]:
-            assert result["can_trade_t0"] == False
-            assert any(
-                v["check"] == "account_value" and not v["passed"] for v in result["validations"]
-            )
-
-
 class TestSpecialInstrumentIntegration:
     """Test warrant/ETF special instrument handling"""
 
@@ -560,26 +519,6 @@ class TestMarginConstants:
         assert VN_MARGIN_WARNING_LEVEL == 0.40  # 40%
         assert VN_MARGIN_CALL_LEVEL == 0.30  # 30%
         assert VN_FORCE_LIQUIDATION_LEVEL == 0.25  # 25%
-
-
-class TestT0Constants:
-    """Test T+0 trading constants are properly defined"""
-
-    def test_t0_constants_defined(self):
-        """Test all T+0 constants are defined"""
-        from src.config.constants import (
-            VN_T0_ENABLED,
-            VN_T0_MIN_ACCOUNT_VALUE,
-            VN_T0_MAX_TRADES_PER_DAY,
-            VN_T0_MAX_LOSS_PCT,
-            VN_T0_MIN_HOLDING_MINUTES,
-        )
-
-        assert VN_T0_ENABLED == True
-        assert VN_T0_MIN_ACCOUNT_VALUE == 50_000_000  # 50M VND
-        assert VN_T0_MAX_TRADES_PER_DAY == 20
-        assert VN_T0_MAX_LOSS_PCT == 0.02  # 2%
-        assert VN_T0_MIN_HOLDING_MINUTES == 5
 
 
 class TestWarrantETFConstants:
