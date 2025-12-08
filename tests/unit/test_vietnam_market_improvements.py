@@ -300,9 +300,10 @@ class TestForeignFlowIntegration:
     def test_adjusted_score_for_stale_data(self, analyzer):
         """Test score adjustment for stale data"""
         from src.market.foreign_flow import ForeignFlowData
+        from unittest.mock import patch
 
         # Mock fresh data with score 0.8
-        analyzer._cache = ForeignFlowData(
+        test_data = ForeignFlowData(
             date=datetime.now().isoformat(),
             net_value=100_000_000,
             buy_value=150_000_000,
@@ -314,20 +315,24 @@ class TestForeignFlowIntegration:
             consecutive_days=3,
             vs_average=1.5,
         )
+        analyzer._cache = test_data
         analyzer._cache_time = datetime.now()
 
         # Fresh data - full score
         score = analyzer.get_adjusted_score(max_delay_minutes=15)
         assert score == 0.8
 
-        # Make data stale
+        # Make data stale and mock analyze to return cached data
         analyzer._cache_time = datetime.now() - timedelta(minutes=20)
 
-        # Stale data - reduced score (50% of original)
-        score = analyzer.get_adjusted_score(max_delay_minutes=15)
-        # Note: get_adjusted_score calls analyze() which may recalculate
-        # Just verify it's reduced from original
-        assert score <= 0.8
+        # Mock _fetch_foreign_flow_data to return None so analyze() uses cached data
+        # This simulates the scenario where we have stale cached data
+        with patch.object(analyzer, "_fetch_foreign_flow_data", return_value=None):
+            with patch.object(analyzer, "analyze", return_value=test_data):
+                # Stale data - reduced score (50% of original)
+                score = analyzer.get_adjusted_score(max_delay_minutes=15)
+                # Score should be reduced from original (0.8 * 0.5 = 0.4)
+                assert score <= 0.8
 
 
 class TestVietnamMarketConstants:

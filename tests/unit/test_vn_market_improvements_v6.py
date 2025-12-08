@@ -346,7 +346,8 @@ class TestFloorBounceConstants:
         """Immediate exit volume threshold should be defined"""
         from src.config.constants import VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME
 
-        assert VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME == 3.0  # 3x volume
+        # IMPROVED Priority 1: Increased sensitivity - 2.5x instead of 3.0x for faster panic detection
+        assert VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME == 2.5  # 2.5x volume
 
 
 class TestOddLotIntegration:
