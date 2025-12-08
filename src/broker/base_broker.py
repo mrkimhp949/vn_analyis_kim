@@ -19,16 +19,23 @@ Version: 1.0.0
 """
 
 import logging
+import random
+import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Callable
-import random
-import time
-import threading
+from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Constants
+# ============================================================================
+DEFAULT_INITIAL_CASH = 100_000_000  # 100M VND
+LOT_SIZE = 100  # Vietnam market lot size
+PRICE_TICK = 10  # Price tick for most stocks (VND)
 
 
 class OrderSide(Enum):
@@ -278,29 +285,40 @@ class BaseBroker(ABC):
         return account.total_equity if account else 0.0
 
 
+# Simulation defaults
+DEFAULT_SLIPPAGE_MIN = 0.001  # 0.1%
+DEFAULT_SLIPPAGE_MAX = 0.003  # 0.3%
+DEFAULT_LATENCY_MIN_MS = 1000  # 1 second
+DEFAULT_LATENCY_MAX_MS = 3000  # 3 seconds
+DEFAULT_FILL_BATCH_SIZE = 100  # Fill in batches of 100 shares
+DEFAULT_PARTIAL_FILL_PROB = 0.3  # 30% chance of partial fill
+DEFAULT_MARKET_IMPACT_THRESHOLD = 10000  # Orders > 10k shares
+DEFAULT_MARKET_IMPACT_FACTOR = 0.001  # 0.1% per 10k shares
+
+
 @dataclass
 class SimulationConfig:
     """Configuration for realistic order simulation"""
 
     # Slippage settings
     enable_slippage: bool = True
-    slippage_min_pct: float = 0.001  # 0.1%
-    slippage_max_pct: float = 0.003  # 0.3%
+    slippage_min_pct: float = DEFAULT_SLIPPAGE_MIN
+    slippage_max_pct: float = DEFAULT_SLIPPAGE_MAX
 
     # Partial fill settings
     enable_partial_fills: bool = True
-    fill_batch_size: int = 100  # Fill in batches of 100 shares
-    partial_fill_probability: float = 0.3  # 30% chance of partial fill
+    fill_batch_size: int = DEFAULT_FILL_BATCH_SIZE
+    partial_fill_probability: float = DEFAULT_PARTIAL_FILL_PROB
 
     # Latency settings
     enable_latency: bool = True
-    latency_min_ms: int = 1000  # 1 second
-    latency_max_ms: int = 3000  # 3 seconds
+    latency_min_ms: int = DEFAULT_LATENCY_MIN_MS
+    latency_max_ms: int = DEFAULT_LATENCY_MAX_MS
 
     # Market impact (for large orders)
     enable_market_impact: bool = True
-    market_impact_threshold: int = 10000  # Orders > 10k shares
-    market_impact_factor: float = 0.001  # 0.1% per 10k shares
+    market_impact_threshold: int = DEFAULT_MARKET_IMPACT_THRESHOLD
+    market_impact_factor: float = DEFAULT_MARKET_IMPACT_FACTOR
 
 
 class SimulatedBroker(BaseBroker):
@@ -317,7 +335,7 @@ class SimulatedBroker(BaseBroker):
     def __init__(
         self,
         account_id: str = "PAPER",
-        initial_cash: float = 100_000_000,  # 100M VND
+        initial_cash: float = DEFAULT_INITIAL_CASH,
         simulation_config: Optional[SimulationConfig] = None,
         realistic_mode: bool = False,  # Enable all realistic features
     ):
@@ -388,8 +406,8 @@ class SimulatedBroker(BaseBroker):
         order_type: OrderType = OrderType.LO,
     ) -> Optional[Order]:
         # Validate lot size
-        if quantity % 100 != 0:
-            logger.warning(f"Invalid lot size: {quantity}")
+        if quantity % LOT_SIZE != 0:
+            logger.warning(f"Invalid lot size: {quantity}. Must be multiple of {LOT_SIZE}")
             return None
 
         # Check buying power for buy orders
@@ -472,8 +490,8 @@ class SimulatedBroker(BaseBroker):
         total_adjustment = slippage + market_impact
         fill_price = base_price * (1 + total_adjustment)
 
-        # Round to valid price tick (Vietnam market: 10 VND for most stocks)
-        fill_price = round(fill_price / 10) * 10
+        # Round to valid price tick (Vietnam market)
+        fill_price = round(fill_price / PRICE_TICK) * PRICE_TICK
 
         if total_adjustment != 0:
             logger.debug(
@@ -689,13 +707,24 @@ class SimulatedBroker(BaseBroker):
         logger.info("Paper trading account reset")
 
 
-# Singleton for paper trading
+# Thread-safe singleton for paper trading
 _paper_broker: Optional[SimulatedBroker] = None
+_paper_broker_lock = threading.Lock()
 
 
-def get_paper_broker(initial_cash: float = 100_000_000) -> SimulatedBroker:
-    """Get singleton paper trading broker"""
+def get_paper_broker(initial_cash: float = DEFAULT_INITIAL_CASH) -> SimulatedBroker:
+    """Get thread-safe singleton paper trading broker.
+
+    Args:
+        initial_cash: Initial cash balance in VND (default: 100M VND)
+
+    Returns:
+        SimulatedBroker: Singleton instance of paper trading broker
+    """
     global _paper_broker
     if _paper_broker is None:
-        _paper_broker = SimulatedBroker(initial_cash=initial_cash)
+        with _paper_broker_lock:
+            # Double-check locking pattern
+            if _paper_broker is None:
+                _paper_broker = SimulatedBroker(initial_cash=initial_cash)
     return _paper_broker

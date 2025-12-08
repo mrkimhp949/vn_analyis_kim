@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import pandas as pd
 from src.data.loader import load_data
-from src.ml.features.technical import add_ml_features
+from src.ml.features.enhanced_v2 import add_ml_features
 
 logger = logging.getLogger(__name__)
 

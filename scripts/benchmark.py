@@ -116,7 +116,7 @@ def benchmark_data_loading():
 
 def benchmark_technical_indicators():
     """Benchmark technical indicators calculation"""
-    from src.ml.features.technical import add_ml_features
+    from src.ml.features.enhanced_v2 import add_ml_features
 
     # Create sample data
     dates = pd.date_range("2024-01-01", periods=100, freq="D")

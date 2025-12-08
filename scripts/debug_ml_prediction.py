@@ -11,7 +11,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 from src.data.loader import load_data
-from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+from src.ml.features.enhanced_v2 import add_enhanced_features, get_feature_columns
 from src.ml.models.ensemble import EnhancedMLPredictor
 
 # Load data for one ticker

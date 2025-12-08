@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 
 from src.data.loader import load_data
-from src.ml.features.technical import add_ml_features
+from src.ml.features.enhanced_v2 import add_ml_features
 from src.ml.signals.generator import MLSignalGenerator
 from src.strategies.entry_logic_simplified import SimplifiedEntryLogic
 from src.config.entry_config import get_entry_config

@@ -9,7 +9,7 @@ Modules:
 - protocols: Protocol definitions for dependency injection
 - models: Data classes for position sizing results
 - cache: Correlation cache implementation
-- position_sizing_main: Main EnhancedPositionSizer class
+- sizer: Main EnhancedPositionSizer class
 
 Usage:
     from src.strategies.position_sizing import EnhancedPositionSizer, EnhancedPositionSize
@@ -23,9 +23,7 @@ from .cache import CorrelationCache
 from .constants import PositionSizingConstants
 from .models import EnhancedPositionSize, MarketRegimeInfo, PositionSize
 from .protocols import CircuitBreakerProtocol, DataLoaderProtocol, RegimeDetectorProtocol
-
-# Import main class from renamed module
-from src.strategies.position_sizing_main import EnhancedPositionSizer
+from .sizer import EnhancedPositionSizer
 
 __all__ = [
     # Constants

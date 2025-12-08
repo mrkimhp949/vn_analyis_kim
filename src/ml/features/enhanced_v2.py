@@ -1,25 +1,47 @@
 # -*- coding: utf-8 -*-
 """
-Enhanced Features V2 - Improved for 65%+ accuracy target
-Key improvements:
+Enhanced Features - Unified Module (V1 + V2 merged)
+
+V2 improvements for 65%+ accuracy target:
 1. Better target definition (forward returns with threshold)
 2. Predictive features (not just lagging indicators)
 3. Market regime features
 4. Momentum quality indicators
 5. Mean reversion signals
-6. NEW: Price action patterns
-7. NEW: Liquidity features
-8. NEW: Sentiment proxy features
+6. Price action patterns
+7. Liquidity features
+8. Sentiment proxy features
+
+V3 improvements:
+- Merged V1 and V2 into single module
+- Backward compatibility with V1 API (add_enhanced_features, get_feature_columns)
+- Added __all__ export list
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import ta
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    # V2 API (recommended)
+    "add_enhanced_features_v2",
+    "get_feature_columns_v2",
+    "create_improved_target",
+    "create_multi_horizon_target",
+    "add_predictive_features",
+    "add_market_regime_features",
+    # V1 API (backward compatibility)
+    "add_enhanced_features",
+    "get_feature_columns",
+    "get_all_feature_columns",
+    # Technical.py compatibility (alias)
+    "add_ml_features",
+]
 
 # =============================================================================
 # TARGET DEFINITION - KEY IMPROVEMENT
@@ -561,6 +583,383 @@ def get_feature_columns_v2() -> list:
 
 
 # =============================================================================
+# V1 API - BACKWARD COMPATIBILITY
+# =============================================================================
+
+
+def get_feature_columns() -> List[str]:
+    """
+    V1 API: Danh sách features cho ML models (28 features)
+
+    DEPRECATED: Use get_feature_columns_v2() for new code.
+    Kept for backward compatibility with existing models.
+
+    Returns:
+        List of feature names (28 features)
+    """
+    base_features = [
+        # Base (18)
+        "sma20",
+        "ema20",
+        "ema50",
+        "rsi",
+        "rsi_signal",
+        "atr",
+        "macd",
+        "macd_signal",
+        "macd_dif",
+        "macd_signal_line",
+        "bb_width",
+        "bb_position",
+        "momentum_5",
+        "momentum_10",
+        "momentum_20",
+        "volume_ratio",
+        "volume_surge",
+        "volatility_20",
+    ]
+
+    new_features = [
+        # New (10)
+        "roc_10",  # Rate of change
+        "stoch_k",  # Stochastic
+        "obv_signal",  # On-Balance Volume signal
+        "price_vs_vwap",  # Price vs VWAP
+        "hv_ratio",  # Volatility regime
+        "close_position",  # Close position in range
+        "rs",  # Relative strength
+        "rs_momentum",  # RS momentum
+        "price_vs_sma20",  # Mean reversion
+        "adx",  # Trend strength
+    ]
+
+    return base_features + new_features
+
+
+def get_all_feature_columns() -> List[str]:
+    """
+    V1 API: Danh sách TẤT CẢ features (bao gồm cả lag features)
+
+    DEPRECATED: Use get_feature_columns_v2() for new code.
+    Dùng cho feature importance analysis
+    """
+    base = get_feature_columns()
+
+    # Add lag features
+    lag_features = []
+    for lag in [1, 2, 3, 5]:
+        lag_features.extend([f"close_lag_{lag}", f"volume_lag_{lag}", f"rsi_lag_{lag}"])
+
+    # Add pattern features
+    pattern_features = [
+        "is_doji",
+        "is_hammer",
+        "is_bullish_engulfing",
+        "distance_to_resistance",
+        "distance_to_support",
+        "ema_alignment",
+    ]
+
+    return base + lag_features + pattern_features
+
+
+def add_enhanced_features(
+    df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None
+) -> pd.DataFrame:
+    """
+    V1 API: Thêm enhanced features cho ML models
+
+    DEPRECATED: Use add_enhanced_features_v2() for new code.
+    Kept for backward compatibility with existing models.
+
+    Args:
+        df: DataFrame của cổ phiếu
+        index_df: DataFrame của chỉ số (VNINDEX)
+
+    Returns:
+        DataFrame với enhanced features
+    """
+    if df.empty or len(df) < 50:
+        logger.warning("Không đủ dữ liệu để tính features")
+        return df
+
+    df = df.copy()
+
+    # ========================================================================
+    # BASE FEATURES - WITH ROBUST ERROR HANDLING
+    # ========================================================================
+
+    try:
+        # 1. Moving Averages
+        df["sma20"] = df["close"].rolling(20).mean()
+        df["ema20"] = df["close"].ewm(span=20).mean()
+        df["ema50"] = df["close"].ewm(span=50).mean()
+    except Exception as e:
+        logger.warning(f"⚠️ Moving averages failed: {e}")
+        df["sma20"] = df["close"]
+        df["ema20"] = df["close"]
+        df["ema50"] = df["close"]
+
+    try:
+        # 2. RSI
+        df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+        df["rsi_signal"] = (df["rsi"] > 30) & (df["rsi"] < 70)
+    except Exception as e:
+        logger.warning(f"⚠️ RSI calculation failed: {e}")
+        df["rsi"] = 50.0
+        df["rsi_signal"] = True
+
+    try:
+        # 3. ATR
+        df["atr"] = ta.volatility.AverageTrueRange(
+            df["high"], df["low"], df["close"], window=14
+        ).average_true_range()
+    except Exception as e:
+        logger.warning(f"⚠️ ATR calculation failed: {e}")
+        df["atr"] = df["close"] * 0.02
+
+    try:
+        # 4. MACD
+        macd = ta.trend.MACD(df["close"])
+        df["macd"] = macd.macd()
+        df["macd_signal"] = macd.macd_signal()
+        df["macd_dif"] = macd.macd_diff()
+        df["macd_signal_line"] = (df["macd"] > df["macd_signal"]).astype(int)
+    except Exception as e:
+        logger.warning(f"⚠️ MACD calculation failed: {e}")
+        df["macd"] = 0.0
+        df["macd_signal"] = 0.0
+        df["macd_dif"] = 0.0
+        df["macd_signal_line"] = 0
+
+    try:
+        # 5. Bollinger Bands
+        bb = ta.volatility.BollingerBands(df["close"])
+        df["bb_high"] = bb.bollinger_hband()
+        df["bb_low"] = bb.bollinger_lband()
+        df["bb_mid"] = bb.bollinger_mavg()
+        df["bb_width"] = (df["bb_high"] - df["bb_low"]) / df["bb_mid"]
+        df["bb_position"] = (df["close"] - df["bb_low"]) / (df["bb_high"] - df["bb_low"])
+    except Exception as e:
+        logger.warning(f"⚠️ Bollinger Bands calculation failed: {e}")
+        df["bb_high"] = df["close"] * 1.02
+        df["bb_low"] = df["close"] * 0.98
+        df["bb_mid"] = df["close"]
+        df["bb_width"] = 0.04
+        df["bb_position"] = 0.5
+
+    try:
+        # 6. Momentum
+        df["momentum_5"] = df["close"].pct_change(5)
+        df["momentum_10"] = df["close"].pct_change(10)
+        df["momentum_20"] = df["close"].pct_change(20)
+    except Exception as e:
+        logger.warning(f"⚠️ Momentum calculation failed: {e}")
+        df["momentum_5"] = 0.0
+        df["momentum_10"] = 0.0
+        df["momentum_20"] = 0.0
+
+    try:
+        # 7. Volume
+        df["volume_sma20"] = df["volume"].rolling(20).mean()
+        df["volume_ratio"] = df["volume"] / df["volume_sma20"]
+        df["volume_surge"] = (df["volume_ratio"] > 1.5).astype(int)
+    except Exception as e:
+        logger.warning(f"⚠️ Volume features failed: {e}")
+        df["volume_sma20"] = df["volume"]
+        df["volume_ratio"] = 1.0
+        df["volume_surge"] = 0
+
+    try:
+        # 8. Volatility
+        df["volatility_20"] = df["close"].pct_change().rolling(20).std()
+    except Exception as e:
+        logger.warning(f"⚠️ Volatility calculation failed: {e}")
+        df["volatility_20"] = 0.02
+
+    # ========================================================================
+    # ADDITIONAL FEATURES
+    # ========================================================================
+
+    try:
+        # 9. PRICE MOMENTUM INDICATORS
+        df["roc_5"] = ta.momentum.ROCIndicator(df["close"], window=5).roc()
+        df["roc_10"] = ta.momentum.ROCIndicator(df["close"], window=10).roc()
+        df["stoch_k"] = ta.momentum.StochasticOscillator(df["high"], df["low"], df["close"]).stoch()
+        df["stoch_d"] = ta.momentum.StochasticOscillator(
+            df["high"], df["low"], df["close"]
+        ).stoch_signal()
+    except Exception as e:
+        logger.warning(f"⚠️ Price momentum indicators failed: {e}")
+        df["roc_5"] = 0.0
+        df["roc_10"] = 0.0
+        df["stoch_k"] = 50.0
+        df["stoch_d"] = 50.0
+
+    try:
+        # 10. VOLUME-PRICE RELATIONSHIP
+        df["obv"] = ta.volume.OnBalanceVolumeIndicator(
+            df["close"], df["volume"]
+        ).on_balance_volume()
+        df["obv_ema"] = df["obv"].ewm(span=20).mean()
+        df["obv_signal"] = (df["obv"] > df["obv_ema"]).astype(int)
+
+        # VWAP
+        df["vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+        df["price_vs_vwap"] = (df["close"] - df["vwap"]) / df["vwap"]
+    except Exception as e:
+        logger.warning(f"⚠️ Volume-price relationship failed: {e}")
+        df["obv"] = 0.0
+        df["obv_ema"] = 0.0
+        df["obv_signal"] = 0
+        df["vwap"] = df["close"]
+        df["price_vs_vwap"] = 0.0
+
+    try:
+        # 11. VOLATILITY REGIME
+        df["hv_10"] = df["close"].pct_change().rolling(10).std() * np.sqrt(252)
+        df["hv_20"] = df["close"].pct_change().rolling(20).std() * np.sqrt(252)
+        df["hv_ratio"] = df["hv_10"] / df["hv_20"]
+
+        df["atr_percentile"] = (
+            df["atr"].rolling(50).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Volatility regime failed: {e}")
+        df["hv_10"] = 0.02
+        df["hv_20"] = 0.02
+        df["hv_ratio"] = 1.0
+        df["atr_percentile"] = 0.5
+
+    # 12. MARKET MICROSTRUCTURE
+    df["hl_range"] = (df["high"] - df["low"]) / df["close"]
+    df["hl_range_ma"] = df["hl_range"].rolling(20).mean()
+    df["close_position"] = (df["close"] - df["low"]) / (df["high"] - df["low"])
+    df["gap"] = (df["open"] - df["close"].shift(1)) / df["close"].shift(1)
+    df["gap_filled"] = (
+        ((df["gap"] > 0) & (df["low"] <= df["close"].shift(1)))
+        | ((df["gap"] < 0) & (df["high"] >= df["close"].shift(1)))
+    ).astype(int)
+
+    # 13. RELATIVE STRENGTH
+    if index_df is not None and not index_df.empty:
+        try:
+            merged = pd.merge(
+                df[["time", "close"]],
+                index_df[["time", "close"]],
+                on="time",
+                suffixes=("_stock", "_index"),
+            )
+
+            if not merged.empty:
+                merged["return_stock"] = merged["close_stock"].pct_change()
+                merged["return_index"] = merged["close_index"].pct_change()
+                merged["cum_return_stock"] = (1 + merged["return_stock"]).cumprod()
+                merged["cum_return_index"] = (1 + merged["return_index"]).cumprod()
+                merged["rs"] = merged["cum_return_stock"] / merged["cum_return_index"]
+                merged["rs_momentum"] = merged["rs"].pct_change(10)
+                df = df.merge(merged[["time", "rs", "rs_momentum"]], on="time", how="left")
+                df["rs"] = df["rs"].fillna(1.0)
+                df["rs_momentum"] = df["rs_momentum"].fillna(0.0)
+            else:
+                df["rs"] = 1.0
+                df["rs_momentum"] = 0.0
+        except Exception:
+            logger.warning("Error calculating RS")
+            df["rs"] = 1.0
+            df["rs_momentum"] = 0.0
+    else:
+        df["rs"] = 1.0
+        df["rs_momentum"] = 0.0
+
+    # 14. LAG FEATURES
+    for lag in [1, 2, 3, 5]:
+        df[f"close_lag_{lag}"] = df["close"].shift(lag)
+        df[f"volume_lag_{lag}"] = df["volume"].shift(lag)
+        df[f"rsi_lag_{lag}"] = df["rsi"].shift(lag)
+
+    # 15. ROLLING STATISTICS
+    df["price_vs_sma20"] = (df["close"] - df["sma20"]) / df["sma20"]
+    df["price_vs_ema50"] = (df["close"] - df["ema50"]) / df["ema50"]
+    rolling_mean = df["close"].rolling(20).mean()
+    rolling_std = df["close"].rolling(20).std()
+    df["zscore"] = (df["close"] - rolling_mean) / rolling_std
+
+    # 16. CANDLESTICK PATTERNS
+    body = abs(df["close"] - df["open"])
+    range_hl = df["high"] - df["low"]
+    df["is_doji"] = (body / range_hl < 0.1).astype(int)
+    lower_shadow = df[["open", "close"]].min(axis=1) - df["low"]
+    upper_shadow = df["high"] - df[["open", "close"]].max(axis=1)
+    df["is_hammer"] = ((lower_shadow > body * 2) & (upper_shadow < body * 0.5)).astype(int)
+    prev_body = abs(df["close"].shift(1) - df["open"].shift(1))
+    df["is_bullish_engulfing"] = (
+        (df["close"] > df["open"])
+        & (df["close"].shift(1) < df["open"].shift(1))
+        & (body > prev_body * 1.5)
+    ).astype(int)
+
+    # 17. SUPPORT/RESISTANCE LEVELS
+    df["resistance_20"] = df["high"].rolling(20).max()
+    df["support_20"] = df["low"].rolling(20).min()
+    df["distance_to_resistance"] = (df["resistance_20"] - df["close"]) / df["close"]
+    df["distance_to_support"] = (df["close"] - df["support_20"]) / df["close"]
+
+    try:
+        # 18. TREND STRENGTH (ADX)
+        adx = ta.trend.ADXIndicator(df["high"], df["low"], df["close"])
+        df["adx"] = adx.adx()
+        df["adx_pos"] = adx.adx_pos()
+        df["adx_neg"] = adx.adx_neg()
+        df["ema_alignment"] = (df["ema20"] > df["ema50"]).astype(int)
+    except Exception as e:
+        logger.warning(f"⚠️ Trend strength (ADX) failed: {e}")
+        df["adx"] = 25.0
+        df["adx_pos"] = 20.0
+        df["adx_neg"] = 20.0
+        df["ema_alignment"] = 1
+
+    # ========================================================================
+    # TARGET
+    # ========================================================================
+    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+
+    # ========================================================================
+    # FILL NaN
+    # ========================================================================
+    required_features = get_feature_columns()
+
+    for feature in required_features:
+        if feature not in df.columns:
+            logger.warning(f"⚠️ Missing feature: {feature}, adding with default value 0")
+            df[feature] = 0.0
+
+    df[required_features] = df[required_features].ffill()
+    df[required_features] = df[required_features].bfill()
+
+    for feature in required_features:
+        if df[feature].isna().any():
+            if any(keyword in feature.lower() for keyword in ["ratio", "pct", "momentum", "roc"]):
+                default_value = 0.0
+            elif "rsi" in feature.lower():
+                default_value = 50.0
+            elif "stoch" in feature.lower():
+                default_value = 50.0
+            elif "signal" in feature.lower():
+                default_value = 0
+            else:
+                default_value = 0.0
+            df[feature] = df[feature].fillna(default_value)
+
+    nan_count = df[required_features].isna().sum().sum()
+    if nan_count > 0:
+        logger.warning(f"⚠️ {nan_count} NaN values remain after filling, using 0 as last resort")
+        df[required_features] = df[required_features].fillna(0)
+
+    return df
+
+
+# =============================================================================
 # TESTING
 # =============================================================================
 
@@ -596,3 +995,11 @@ if __name__ == "__main__":
         print(f"   Class 1: {target_dist.get(1, 0)*100:.1f}%")
 
     print("\n✅ Testing complete!")
+
+
+# =============================================================================
+# ALIASES FOR BACKWARD COMPATIBILITY WITH technical.py
+# =============================================================================
+
+# Alias for technical.py compatibility
+add_ml_features = add_enhanced_features

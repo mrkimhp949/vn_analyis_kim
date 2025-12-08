@@ -21,7 +21,7 @@ import pandas as pd
 
 from src.strategies.position_sizing import EnhancedPositionSizer
 from src.data.loader import load_data
-from src.ml.features.technical import add_ml_features
+from src.ml.features.enhanced_v2 import add_ml_features
 from src.ml.signals.generator import MLSignalGenerator
 
 matplotlib.use("Agg")  # Sử dụng backend không cần GUI

@@ -19,6 +19,7 @@ Usage:
 """
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -26,6 +27,64 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Constants
+# ============================================================================
+__all__ = [
+    "ForeignFlowData",
+    "ForeignFlowAnalyzer",
+    "IntradayForeignFlow",
+    "RealtimeForeignFlowTracker",
+    "get_foreign_flow_analyzer",
+    "get_realtime_foreign_tracker",
+]
+
+# Cache settings
+DEFAULT_CACHE_TTL_SECONDS = 300  # 5 minutes
+DEFAULT_LOOKBACK_DAYS = 20
+
+# Threshold multipliers for scoring
+STRONG_THRESHOLD_MULTIPLIER = 2.0
+MODERATE_THRESHOLD_MULTIPLIER = 1.0
+
+# Scoring values
+SCORE_STRONG_BUYING = 1.0
+SCORE_MODERATE_BUYING = 0.5
+SCORE_WEAK_BUYING = 0.2
+SCORE_WEAK_SELLING = -0.2
+SCORE_MODERATE_SELLING = -0.5
+SCORE_STRONG_SELLING = -1.0
+
+# Foreign participation estimate
+FOREIGN_PARTICIPATION_RATIO = 0.20  # ~20% of market
+
+# Realtime tracking settings
+UPDATE_INTERVAL_SECONDS = 60  # 1 minute
+SIGNIFICANT_FLOW_THRESHOLD_VND = 5_000_000_000  # 5B VND
+INTRADAY_HISTORY_LIMIT = 100  # Keep last 100 updates
+
+# Trend detection thresholds
+ACCUMULATION_RATIO = 1.2  # Buy > Sell * 1.2 = Accumulating
+STRONG_ACCUMULATION_RATIO = 1.5  # Strong accumulation threshold
+
+# Staleness settings
+DEFAULT_MAX_DELAY_MINUTES = 15
+STALE_DATA_WEIGHT_REDUCTION = 0.5  # Reduce by 50%
+
+# Default VN30 symbols (fallback)
+DEFAULT_VN30_SYMBOLS = [
+    "VNM",
+    "VCB",
+    "HPG",
+    "FPT",
+    "MWG",
+    "VHM",
+    "VIC",
+    "TCB",
+    "MBB",
+    "ACB",
+]
 
 
 @dataclass
@@ -63,10 +122,10 @@ class ForeignFlowAnalyzer:
 
     def __init__(
         self,
-        lookback_days: int = 20,
-        strong_threshold_multiplier: float = 2.0,
-        moderate_threshold_multiplier: float = 1.0,
-        cache_ttl_seconds: int = 300,  # 5 minutes
+        lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+        strong_threshold_multiplier: float = STRONG_THRESHOLD_MULTIPLIER,
+        moderate_threshold_multiplier: float = MODERATE_THRESHOLD_MULTIPLIER,
+        cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ):
         self.lookback_days = lookback_days
         self.strong_threshold = strong_threshold_multiplier
@@ -204,8 +263,12 @@ class ForeignFlowAnalyzer:
                 "price_change"
             ].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
 
-            # Convert to buy/sell values (rough estimate based on typical foreign participation ~20%)
-            avg_value = vnindex_df["volume"].mean() * vnindex_df["close"].mean() * 0.20
+            # Convert to buy/sell values (rough estimate based on typical foreign participation)
+            avg_value = (
+                vnindex_df["volume"].mean()
+                * vnindex_df["close"].mean()
+                * FOREIGN_PARTICIPATION_RATIO
+            )
 
             result = pd.DataFrame(
                 {
@@ -264,27 +327,27 @@ class ForeignFlowAnalyzer:
         )
 
     def _calculate_score(self, net_value: float, avg_net: float) -> float:
-        """Calculate score from -1 to +1"""
+        """Calculate score from -1 to +1."""
         if avg_net == 0:
             return 0.0
 
         ratio = net_value / avg_net
 
         if ratio >= self.strong_threshold:
-            return 1.0
+            return SCORE_STRONG_BUYING
         elif ratio >= self.moderate_threshold:
-            return 0.5
+            return SCORE_MODERATE_BUYING
         elif ratio > 0:
-            return 0.2
+            return SCORE_WEAK_BUYING
         elif ratio > -self.moderate_threshold:
-            return -0.2
+            return SCORE_WEAK_SELLING
         elif ratio > -self.strong_threshold:
-            return -0.5
+            return SCORE_MODERATE_SELLING
         else:
-            return -1.0
+            return SCORE_STRONG_SELLING
 
-    def _determine_trend_strength(self, net_value: float, avg_net: float) -> tuple:
-        """Determine trend direction and strength"""
+    def _determine_trend_strength(self, net_value: float, avg_net: float) -> Tuple[str, str]:
+        """Determine trend direction and strength."""
         if avg_net == 0:
             return "NEUTRAL", "WEAK"
 
@@ -332,7 +395,7 @@ class ForeignFlowAnalyzer:
         age = (datetime.now() - self._cache_time).total_seconds()
         return age < self.cache_ttl
 
-    def is_data_stale(self, max_delay_minutes: int = 15) -> bool:
+    def is_data_stale(self, max_delay_minutes: int = DEFAULT_MAX_DELAY_MINUTES) -> bool:
         """
         Check if foreign flow data is stale (delayed more than threshold).
 
@@ -373,7 +436,7 @@ class ForeignFlowAnalyzer:
             return float("inf")
         return (datetime.now() - self._cache_time).total_seconds() / 60
 
-    def get_adjusted_score(self, max_delay_minutes: int = 15) -> float:
+    def get_adjusted_score(self, max_delay_minutes: int = DEFAULT_MAX_DELAY_MINUTES) -> float:
         """
         Get foreign flow score with staleness adjustment.
 
@@ -396,7 +459,7 @@ class ForeignFlowAnalyzer:
             return 0.0
 
         if self.is_data_stale(max_delay_minutes):
-            adjusted = result.score * 0.5
+            adjusted = result.score * STALE_DATA_WEIGHT_REDUCTION
             logger.info(
                 f"📊 Foreign flow score adjusted for staleness: "
                 f"{result.score:.2f} → {adjusted:.2f}"
@@ -520,24 +583,13 @@ class RealtimeForeignFlowTracker:
         self._alerts: List[Dict] = []
 
     def _get_default_symbols(self) -> List[str]:
-        """Get default symbols (VN30)"""
+        """Get default symbols (VN30)."""
         try:
             from src.utils.vietnam_market import VN30_SYMBOLS
 
             return list(VN30_SYMBOLS)
         except ImportError:
-            return [
-                "VNM",
-                "VCB",
-                "HPG",
-                "FPT",
-                "MWG",
-                "VHM",
-                "VIC",
-                "TCB",
-                "MBB",
-                "ACB",
-            ]
+            return DEFAULT_VN30_SYMBOLS.copy()
 
     def update(self) -> Dict[str, IntradayForeignFlow]:
         """
@@ -559,9 +611,11 @@ class RealtimeForeignFlowTracker:
                         self._intraday_data[symbol] = []
                     self._intraday_data[symbol].append(flow_data)
 
-                    # Trim history (keep last 100 updates)
-                    if len(self._intraday_data[symbol]) > 100:
-                        self._intraday_data[symbol] = self._intraday_data[symbol][-100:]
+                    # Trim history (keep last N updates)
+                    if len(self._intraday_data[symbol]) > INTRADAY_HISTORY_LIMIT:
+                        self._intraday_data[symbol] = self._intraday_data[symbol][
+                            -INTRADAY_HISTORY_LIMIT:
+                        ]
 
                     # Check for alerts
                     self._check_alerts(symbol, flow_data)
@@ -600,20 +654,20 @@ class RealtimeForeignFlowTracker:
         return None
 
     def _determine_trend(self, data: Dict) -> str:
-        """Determine accumulation/distribution trend"""
+        """Determine accumulation/distribution trend."""
         net_value = data.get("buy_value", 0) - data.get("sell_value", 0)
         vs_avg = data.get("vs_avg", 1.0)
 
-        if net_value > 0 and vs_avg > 1.2:
+        if net_value > 0 and vs_avg > ACCUMULATION_RATIO:
             return "ACCUMULATING"
-        elif net_value < 0 and vs_avg > 1.2:
+        elif net_value < 0 and vs_avg > ACCUMULATION_RATIO:
             return "DISTRIBUTING"
         else:
             return "NEUTRAL"
 
-    def _check_alerts(self, symbol: str, flow: IntradayForeignFlow):
-        """Check for significant flow changes and generate alerts"""
-        if abs(flow.net_value) >= self.SIGNIFICANT_FLOW_THRESHOLD:
+    def _check_alerts(self, symbol: str, flow: IntradayForeignFlow) -> None:
+        """Check for significant flow changes and generate alerts."""
+        if abs(flow.net_value) >= SIGNIFICANT_FLOW_THRESHOLD_VND:
             alert = {
                 "timestamp": datetime.now().isoformat(),
                 "symbol": symbol,
@@ -662,8 +716,8 @@ class RealtimeForeignFlowTracker:
             "net_value": total_buy - total_sell,
             "market_trend": (
                 "ACCUMULATING"
-                if total_buy > total_sell * 1.2
-                else "DISTRIBUTING" if total_sell > total_buy * 1.2 else "NEUTRAL"
+                if total_buy > total_sell * ACCUMULATION_RATIO
+                else "DISTRIBUTING" if total_sell > total_buy * ACCUMULATION_RATIO else "NEUTRAL"
             ),
             "accumulating_symbols": accumulating,
             "distributing_symbols": distributing,
@@ -686,11 +740,11 @@ class RealtimeForeignFlowTracker:
         if not flow:
             return (0, "No foreign flow data available")
 
-        if flow.trend == "ACCUMULATING" and flow.vs_5day_avg > 1.5:
+        if flow.trend == "ACCUMULATING" and flow.vs_5day_avg > STRONG_ACCUMULATION_RATIO:
             return (+15, f"Strong foreign accumulation ({flow.net_value/1e9:+.1f}B)")
         elif flow.trend == "ACCUMULATING":
             return (+8, f"Foreign accumulation ({flow.net_value/1e9:+.1f}B)")
-        elif flow.trend == "DISTRIBUTING" and flow.vs_5day_avg > 1.5:
+        elif flow.trend == "DISTRIBUTING" and flow.vs_5day_avg > STRONG_ACCUMULATION_RATIO:
             return (-20, f"Strong foreign distribution ({flow.net_value/1e9:+.1f}B)")
         elif flow.trend == "DISTRIBUTING":
             return (-10, f"Foreign distribution ({flow.net_value/1e9:+.1f}B)")
@@ -705,24 +759,32 @@ class RealtimeForeignFlowTracker:
         return alerts
 
 
-# Singleton instances
+# Thread-safe singleton instances
 _analyzer_instance: Optional[ForeignFlowAnalyzer] = None
 _realtime_tracker: Optional[RealtimeForeignFlowTracker] = None
+_analyzer_lock = threading.Lock()
+_tracker_lock = threading.Lock()
 
 
 def get_foreign_flow_analyzer() -> ForeignFlowAnalyzer:
-    """Get singleton instance of foreign flow analyzer"""
+    """Get thread-safe singleton instance of foreign flow analyzer."""
     global _analyzer_instance
     if _analyzer_instance is None:
-        _analyzer_instance = ForeignFlowAnalyzer()
+        with _analyzer_lock:
+            # Double-check locking pattern
+            if _analyzer_instance is None:
+                _analyzer_instance = ForeignFlowAnalyzer()
     return _analyzer_instance
 
 
 def get_realtime_foreign_tracker(
     symbols: Optional[List[str]] = None,
 ) -> RealtimeForeignFlowTracker:
-    """Get singleton instance of realtime foreign flow tracker"""
+    """Get thread-safe singleton instance of realtime foreign flow tracker."""
     global _realtime_tracker
     if _realtime_tracker is None:
-        _realtime_tracker = RealtimeForeignFlowTracker(symbols)
+        with _tracker_lock:
+            # Double-check locking pattern
+            if _realtime_tracker is None:
+                _realtime_tracker = RealtimeForeignFlowTracker(symbols)
     return _realtime_tracker

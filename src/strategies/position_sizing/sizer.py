@@ -16,7 +16,7 @@ Module Structure (v5.0):
 - position_sizing/protocols.py: DI interfaces
 - position_sizing/models.py: Data classes
 - position_sizing/cache.py: Correlation cache
-- position_sizing.py: Main EnhancedPositionSizer (this file)
+- position_sizing/sizer.py: Main EnhancedPositionSizer (this file)
 """
 
 from __future__ import annotations
@@ -40,15 +40,15 @@ from src.config.constants import (
 )
 from src.config.exceptions import RiskManagementError
 
-# Import from subpackage for internal use and re-export for backward compatibility
-from src.strategies.position_sizing.cache import CorrelationCache
-from src.strategies.position_sizing.constants import PositionSizingConstants
-from src.strategies.position_sizing.models import (
+# Import from same package using relative imports
+from .cache import CorrelationCache
+from .constants import PositionSizingConstants
+from .models import (
     EnhancedPositionSize,
     MarketRegimeInfo,
     PositionSize,
 )
-from src.strategies.position_sizing.protocols import (
+from .protocols import (
     CircuitBreakerProtocol,
     DataLoaderProtocol,
     RegimeDetectorProtocol,

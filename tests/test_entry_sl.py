@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from src.ml.features.technical import add_ml_features
+from src.ml.features.enhanced_v2 import add_ml_features
 from src.strategies.entry_logic import ImprovedEntryLogic
 
 

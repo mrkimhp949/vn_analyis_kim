@@ -73,7 +73,7 @@ def test_entry_logic_with_v2():
 
     from src.strategies.entry_logic import ImprovedEntryLogic
     from src.ml.signals.enhanced_v2 import EnhancedMLSignalGeneratorV2
-    from src.ml.features.technical import add_ml_features
+    from src.ml.features.enhanced_v2 import add_ml_features
 
     # Initialize
     generator = EnhancedMLSignalGeneratorV2(use_v2=True)

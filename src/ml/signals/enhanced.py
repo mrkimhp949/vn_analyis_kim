@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
-from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+from src.ml.features.enhanced_v2 import add_enhanced_features, get_feature_columns
 from src.ml.models.ensemble import EnhancedMLPredictor
 
 logger = logging.getLogger(__name__)

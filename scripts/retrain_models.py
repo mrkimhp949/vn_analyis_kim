@@ -164,7 +164,7 @@ def main_legacy():
 
     def load_training_data(tickers, lookback=500):
         from src.data.loader import load_data
-        from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+        from src.ml.features.enhanced_v2 import add_enhanced_features, get_feature_columns
 
         all_data = []
         feature_cols = get_feature_columns()
@@ -202,7 +202,7 @@ def main_legacy():
         return pd.concat(all_data, ignore_index=True)
 
     def prepare_features(df):
-        from src.ml.features.enhanced import get_feature_columns
+        from src.ml.features.enhanced_v2 import get_feature_columns
 
         feature_cols = get_feature_columns()
         available_cols = [c for c in feature_cols if c in df.columns]

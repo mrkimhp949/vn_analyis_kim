@@ -10,6 +10,12 @@ IMPROVEMENTS V3:
 - Refactored for better maintainability (10/10)
 - Separated concerns: constants, scoring, notifications
 - Improved type hints and documentation
+
+IMPROVEMENTS V3.1:
+- Added __all__ export list
+- Thread-safe singleton pattern
+- Added missing constants (VOLUME_LOOKBACK, CASH_BUFFER_WARNING_RATIO)
+- Removed unused imports
 """
 
 from __future__ import annotations
@@ -17,9 +23,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import numbers
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
@@ -41,6 +48,27 @@ if TYPE_CHECKING:
     from src.strategies.position_sizing import PositionSize
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    # Configuration
+    "EntryServiceConfig",
+    "SERVICE_CONFIG",
+    # Data classes
+    "ScanResult",
+    "T2CashCheckResult",
+    "NoSignalSummary",
+    # Helper classes
+    "SignalScorer",
+    "NoSignalNotifier",
+    # Main service
+    "EntrySignalService",
+    # Singleton functions
+    "get_entry_service",
+    "reset_entry_service",
+    # Utility functions
+    "safe_to_float",
+    "safe_get_attr",
+]
 
 
 # =============================================================================
@@ -106,6 +134,12 @@ class EntryServiceConfig:
     # Reasons/warnings normalization
     MAX_REASONS_FOR_SCORING: int = 8
     MAX_WARNINGS_FOR_SCORING: int = 5
+
+    # Volume lookback for average calculation
+    VOLUME_LOOKBACK: int = 20
+
+    # Cash buffer warning ratio (warn if < 120% of required)
+    CASH_BUFFER_WARNING_RATIO: float = 1.2
 
 
 # Global config instance
@@ -760,7 +794,7 @@ class EntrySignalService:
             return position_size
 
         validator = get_vietnam_market_validator()
-        avg_volume = df["volume"].tail(20).mean()
+        avg_volume = df["volume"].tail(self.config.VOLUME_LOOKBACK).mean()
 
         is_safe, warning = validator.validate_position_size_vs_volume(
             position_size.shares, avg_volume, symbol
@@ -875,7 +909,10 @@ class EntrySignalService:
 
             # Warning if close to limit
             warning = None
-            if is_sufficient and gross_available < total_required * 1.2:
+            if (
+                is_sufficient
+                and gross_available < total_required * self.config.CASH_BUFFER_WARNING_RATIO
+            ):
                 warning = (
                     f"Cash utilization high: {gross_available:,.0f} available, "
                     f"{total_required:,.0f} required (including T+2 buffer)"
@@ -922,30 +959,36 @@ class EntrySignalService:
 
 
 # =============================================================================
-# SINGLETON PATTERN
+# SINGLETON PATTERN (Thread-safe)
 # =============================================================================
 
 _entry_service: Optional[EntrySignalService] = None
+_entry_service_lock = threading.Lock()
 
 
 def get_entry_service() -> EntrySignalService:
     """
-    Get entry service singleton.
+    Get entry service singleton (thread-safe).
+
+    Uses double-check locking pattern for thread safety.
 
     Returns:
         EntrySignalService instance
     """
     global _entry_service
     if _entry_service is None:
-        _entry_service = EntrySignalService()
+        with _entry_service_lock:
+            if _entry_service is None:
+                _entry_service = EntrySignalService()
     return _entry_service
 
 
 def reset_entry_service() -> None:
     """
-    Reset entry service singleton.
+    Reset entry service singleton (thread-safe).
 
     Useful for testing or reconfiguration.
     """
     global _entry_service
-    _entry_service = None
+    with _entry_service_lock:
+        _entry_service = None

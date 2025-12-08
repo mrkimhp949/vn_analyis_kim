@@ -15,28 +15,31 @@ Author: Trading Bot Team
 Version: 1.0.0
 """
 
-import hashlib
-import hmac
-import json
 import logging
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
-from enum import Enum
 
 import requests
 
 from src.broker.base_broker import (
+    AccountInfo,
     BaseBroker,
     Order,
-    Position,
-    AccountInfo,
     OrderSide,
-    OrderType,
     OrderStatus,
+    OrderType,
+    Position,
 )
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Constants
+# ============================================================================
+DEFAULT_TIMEOUT = 10  # seconds
+MIN_REQUEST_INTERVAL = 0.2  # 200ms between requests
+LOT_SIZE = 100  # Vietnam market lot size
 
 
 class SSIEndpoints:
@@ -97,12 +100,11 @@ class SSIBroker(BaseBroker):
         self.is_paper = is_paper
 
         self._access_token: Optional[str] = None
-        self._token_expiry: Optional[datetime] = None
         self._session = requests.Session()
 
         # Rate limiting
-        self._last_request_time = 0
-        self._min_request_interval = 0.2  # 200ms between requests
+        self._last_request_time = 0.0
+        self._min_request_interval = MIN_REQUEST_INTERVAL
 
     @property
     def broker_name(self) -> str:
@@ -129,7 +131,9 @@ class SSIBroker(BaseBroker):
                 "consumerSecret": self.consumer_secret,
             }
 
-            response = self._session.post(SSIEndpoints.AUTH_URL, json=payload, timeout=10)
+            response = self._session.post(
+                SSIEndpoints.AUTH_URL, json=payload, timeout=DEFAULT_TIMEOUT
+            )
 
             if response.status_code == 200:
                 data = response.json()
@@ -159,9 +163,25 @@ class SSIBroker(BaseBroker):
         self._last_request_time = time.time()
 
     def _make_request(
-        self, method: str, url: str, data: Optional[Dict] = None, params: Optional[Dict] = None
+        self,
+        method: str,
+        url: str,
+        data: Optional[Dict] = None,
+        params: Optional[Dict] = None,
+        max_retries: int = 3,
     ) -> Optional[Dict]:
-        """Make authenticated API request"""
+        """Make authenticated API request with retry logic.
+
+        Args:
+            method: HTTP method (GET or POST)
+            url: API endpoint URL
+            data: Request body for POST requests
+            params: Query parameters for GET requests
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            Dict: Response JSON or None if failed
+        """
         if not self._ensure_authenticated():
             return None
 
@@ -172,26 +192,47 @@ class SSIBroker(BaseBroker):
             "Content-Type": "application/json",
         }
 
-        try:
-            if method.upper() == "GET":
-                response = self._session.get(url, headers=headers, params=params, timeout=10)
-            else:
-                response = self._session.post(url, headers=headers, json=data, timeout=10)
+        for attempt in range(max_retries):
+            try:
+                if method.upper() == "GET":
+                    response = self._session.get(
+                        url, headers=headers, params=params, timeout=DEFAULT_TIMEOUT
+                    )
+                else:
+                    response = self._session.post(
+                        url, headers=headers, json=data, timeout=DEFAULT_TIMEOUT
+                    )
 
-            if response.status_code == 200:
-                return response.json()
-            elif response.status_code == 401:
-                # Token expired, re-authenticate
-                logger.info("Token expired, re-authenticating...")
-                self._access_token = self._authenticate()
-                return self._make_request(method, url, data, params)
-            else:
-                logger.warning(f"SSI API error: {response.status_code} - {response.text}")
-                return None
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 401:
+                    # Token expired, re-authenticate
+                    logger.info("Token expired, re-authenticating...")
+                    self._access_token = self._authenticate()
+                    if self._access_token:
+                        headers["Authorization"] = f"Bearer {self._access_token}"
+                        continue
+                elif response.status_code == 429:
+                    # Rate limited
+                    retry_after = int(response.headers.get("Retry-After", 5))
+                    logger.warning(f"Rate limited, waiting {retry_after}s")
+                    time.sleep(retry_after)
+                    continue
+                else:
+                    logger.warning(f"SSI API error: {response.status_code} - {response.text}")
 
-        except Exception as e:
-            logger.error(f"SSI request error: {e}")
-            return None
+            except requests.exceptions.Timeout:
+                logger.warning(f"SSI request timeout (attempt {attempt + 1}/{max_retries})")
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"SSI connection error (attempt {attempt + 1}/{max_retries}): {e}")
+            except Exception as e:
+                logger.error(f"SSI request error: {e}")
+                break
+
+            if attempt < max_retries - 1:
+                time.sleep(1.0 * (attempt + 1))  # Exponential backoff
+
+        return None
 
     def disconnect(self) -> None:
         """Disconnect from SSI API"""
@@ -284,8 +325,8 @@ class SSIBroker(BaseBroker):
             Order object or None if failed
         """
         # Validate lot size
-        if quantity % 100 != 0:
-            logger.warning(f"Invalid lot size: {quantity}. Must be multiple of 100.")
+        if quantity % LOT_SIZE != 0:
+            logger.warning(f"Invalid lot size: {quantity}. Must be multiple of {LOT_SIZE}.")
             return None
 
         # Safety check for live trading

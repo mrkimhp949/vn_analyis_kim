@@ -13,13 +13,36 @@ This is a key component for achieving A+ rating (92 → 95+)
 """
 
 import logging
-from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Constants
+# ============================================================================
+RUIN_THRESHOLD = 0.50  # Risk of ruin: losing >50% of capital
+LOSS_THRESHOLD_30 = 0.30  # 30% loss threshold
+LOSS_THRESHOLD_20 = 0.20  # 20% loss threshold
+
+# Drawdown thresholds
+DRAWDOWN_EXCELLENT = 0.10  # <10% is excellent
+DRAWDOWN_GOOD = 0.15  # <15% is good
+DRAWDOWN_WARNING = 0.20  # <20% is warning
+DRAWDOWN_DANGER = 0.25  # >25% is dangerous
+
+# Grading thresholds
+GRADE_A_PLUS = 85
+GRADE_A = 75
+GRADE_B_PLUS = 65
+GRADE_B = 55
+GRADE_C = 45
+
+# Position sizing limits
+MIN_POSITION_SIZE = 0.01  # 1% minimum
+MAX_POSITION_SIZE = 0.25  # 25% maximum
 
 
 @dataclass
@@ -147,8 +170,8 @@ class MonteCarloSimulator:
             R = abs(self.avg_win_pct / self.avg_loss_pct)
             kelly_full = self.win_rate - ((1 - self.win_rate) / R)
             self.kelly_pct = max(
-                0.01, min(kelly_full * self.kelly_fraction, 0.25)
-            )  # Clamp to 1-25%
+                MIN_POSITION_SIZE, min(kelly_full * self.kelly_fraction, MAX_POSITION_SIZE)
+            )  # Clamp to MIN-MAX position size
             logger.info(
                 f"📊 Using Kelly Criterion: {self.kelly_pct:.1%} "
                 f"(full Kelly: {kelly_full:.1%}, fraction: {self.kelly_fraction})"
@@ -164,8 +187,8 @@ class MonteCarloSimulator:
         Returns:
             MonteCarloResult with comprehensive statistics
         """
-        if seed is not None:
-            np.random.seed(seed)
+        # Use new RandomGenerator API (thread-safe)
+        rng = np.random.default_rng(seed)
 
         logger.info(
             f"🎲 Running Monte Carlo simulation: {self.num_simulations:,} simulations, "
@@ -179,8 +202,8 @@ class MonteCarloSimulator:
         sim_profit_factors = np.zeros(self.num_simulations)
 
         for sim_idx in range(self.num_simulations):
-            # Run one simulation
-            final_cap, max_dd, win_rate, pf = self._run_single_simulation()
+            # Run one simulation with thread-safe random generator
+            final_cap, max_dd, win_rate, pf = self._run_single_simulation(rng)
 
             final_capitals[sim_idx] = final_cap
             max_drawdowns[sim_idx] = max_dd
@@ -198,9 +221,12 @@ class MonteCarloSimulator:
 
         return result
 
-    def _run_single_simulation(self) -> Tuple[float, float, float, float]:
+    def _run_single_simulation(self, rng: np.random.Generator) -> Tuple[float, float, float, float]:
         """
         Run a single simulation of N trades
+
+        Args:
+            rng: NumPy random generator instance (thread-safe)
 
         Returns:
             (final_capital, max_drawdown, win_rate, profit_factor)
@@ -216,16 +242,16 @@ class MonteCarloSimulator:
 
         for _ in range(self.num_trades_per_sim):
             # Determine if trade wins or loses
-            is_win = np.random.random() < self.win_rate
+            is_win = rng.random() < self.win_rate
 
             if is_win:
                 # Sample from win distribution
-                return_pct = np.random.normal(self.avg_win_pct, self.win_stddev)
+                return_pct = rng.normal(self.avg_win_pct, self.win_stddev)
                 return_pct = max(0.1, return_pct)  # Ensure positive win
                 wins += 1
             else:
                 # Sample from loss distribution
-                return_pct = np.random.normal(self.avg_loss_pct, self.loss_stddev)
+                return_pct = rng.normal(self.avg_loss_pct, self.loss_stddev)
                 return_pct = min(-0.1, return_pct)  # Ensure negative loss
                 losses += 1
 
@@ -245,16 +271,19 @@ class MonteCarloSimulator:
             else:
                 total_loss_amount += abs(pnl)
 
+            # Prevent capital from going negative
+            capital = max(0.0, capital)
+
             # Track drawdown
             if capital > peak_capital:
                 peak_capital = capital
 
-            dd = (peak_capital - capital) / peak_capital if peak_capital > 0 else 0
-            if dd > max_dd:
-                max_dd = dd
+            # Safe division to prevent division by zero
+            dd = (peak_capital - capital) / peak_capital if peak_capital > 0 else 0.0
+            max_dd = max(max_dd, dd)
 
-            # Stop if ruined (< 50% of initial capital)
-            if capital <= self.initial_capital * 0.5:
+            # Stop if ruined (< RUIN_THRESHOLD of initial capital)
+            if capital <= self.initial_capital * (1 - RUIN_THRESHOLD):
                 break
 
         # Calculate metrics
@@ -271,16 +300,26 @@ class MonteCarloSimulator:
         win_rates: np.ndarray,
         profit_factors: np.ndarray,
     ) -> MonteCarloResult:
-        """Calculate aggregate statistics from all simulations"""
+        """Calculate aggregate statistics from all simulations.
 
-        # Risk metrics
-        ruin_threshold = self.initial_capital * 0.5
+        Args:
+            final_capitals: Array of final capital values from each simulation
+            max_drawdowns: Array of max drawdown values from each simulation
+            win_rates: Array of win rates from each simulation
+            profit_factors: Array of profit factors from each simulation
+
+        Returns:
+            MonteCarloResult: Comprehensive statistics object
+        """
+
+        # Risk metrics using defined constants
+        ruin_threshold = self.initial_capital * (1 - RUIN_THRESHOLD)
         risk_of_ruin = (final_capitals < ruin_threshold).sum() / self.num_simulations
 
-        loss_30_threshold = self.initial_capital * 0.7
+        loss_30_threshold = self.initial_capital * (1 - LOSS_THRESHOLD_30)
         risk_of_30pct_loss = (final_capitals < loss_30_threshold).sum() / self.num_simulations
 
-        loss_20_threshold = self.initial_capital * 0.8
+        loss_20_threshold = self.initial_capital * (1 - LOSS_THRESHOLD_20)
         risk_of_20pct_loss = (final_capitals < loss_20_threshold).sum() / self.num_simulations
 
         # Expected value
@@ -299,11 +338,11 @@ class MonteCarloSimulator:
         worst_return_pct = ((worst_case - self.initial_capital) / self.initial_capital) * 100
         best_return_pct = ((best_case - self.initial_capital) / self.initial_capital) * 100
 
-        # Drawdown statistics
+        # Drawdown statistics using defined constants
         avg_max_drawdown = np.mean(max_drawdowns)
         worst_drawdown = np.max(max_drawdowns)
-        pct_exceed_10 = (max_drawdowns > 0.10).sum() / self.num_simulations
-        pct_exceed_20 = (max_drawdowns > 0.20).sum() / self.num_simulations
+        pct_exceed_10 = (max_drawdowns > DRAWDOWN_EXCELLENT).sum() / self.num_simulations
+        pct_exceed_20 = (max_drawdowns > DRAWDOWN_WARNING).sum() / self.num_simulations
 
         # Win/loss distribution
         avg_win_rate = np.mean(win_rates)
@@ -338,7 +377,14 @@ class MonteCarloSimulator:
         )
 
     def generate_report(self, result: MonteCarloResult) -> str:
-        """Generate formatted report from Monte Carlo results"""
+        """Generate formatted report from Monte Carlo results.
+
+        Args:
+            result: MonteCarloResult object containing simulation results
+
+        Returns:
+            str: Formatted report string
+        """
 
         report = []
         report.append("=" * 80)
@@ -399,10 +445,14 @@ class MonteCarloSimulator:
         report.append("📉 DRAWDOWN STATISTICS:")
         report.append(f"   Average max drawdown: {result.avg_max_drawdown*100:.2f}%")
         report.append(f"   Worst drawdown: {result.worst_drawdown*100:.2f}%")
-        report.append(f"   Simulations with DD >10%: {result.pct_sims_exceed_10pct_dd*100:.1f}%")
-        report.append(f"   Simulations with DD >20%: {result.pct_sims_exceed_20pct_dd*100:.1f}%")
-        if result.avg_max_drawdown < 0.15:
-            report.append("   ✅ Average drawdown <15%")
+        report.append(
+            f"   Simulations with DD >{DRAWDOWN_EXCELLENT*100:.0f}%: {result.pct_sims_exceed_10pct_dd*100:.1f}%"
+        )
+        report.append(
+            f"   Simulations with DD >{DRAWDOWN_WARNING*100:.0f}%: {result.pct_sims_exceed_20pct_dd*100:.1f}%"
+        )
+        if result.avg_max_drawdown < DRAWDOWN_GOOD:
+            report.append(f"   ✅ Average drawdown <{DRAWDOWN_GOOD*100:.0f}%")
         else:
             report.append(f"   ⚠️ WARNING: High average drawdown {result.avg_max_drawdown*100:.1f}%")
         report.append("")
@@ -437,12 +487,32 @@ class MonteCarloSimulator:
         return "\n".join(report)
 
     def _format_return(self, capital: float) -> str:
-        """Format capital as return percentage"""
+        """Format capital as return percentage.
+
+        Args:
+            capital: Final capital value in VND
+
+        Returns:
+            str: Formatted string with return percentage and capital value
+        """
         return_pct = ((capital - self.initial_capital) / self.initial_capital) * 100
         return f"{return_pct:+.2f}% ({capital:,.0f} VND)"
 
     def _calculate_grade(self, result: MonteCarloResult) -> str:
-        """Calculate overall grade based on metrics"""
+        """Calculate overall grade based on metrics.
+
+        Args:
+            result: MonteCarloResult object containing simulation results
+
+        Returns:
+            str: Grade string (A+ to D) with description
+
+        Grading criteria:
+            - Risk of ruin: 40 points max
+            - Expected return: 30 points max
+            - Average drawdown: 20 points max
+            - Profit factor: 10 points max
+        """
         score = 0
 
         # Risk of ruin (40 points)
@@ -466,13 +536,13 @@ class MonteCarloSimulator:
             score += 10
 
         # Average drawdown (20 points)
-        if result.avg_max_drawdown < 0.10:
+        if result.avg_max_drawdown < DRAWDOWN_EXCELLENT:
             score += 20
-        elif result.avg_max_drawdown < 0.15:
+        elif result.avg_max_drawdown < DRAWDOWN_GOOD:
             score += 15
-        elif result.avg_max_drawdown < 0.20:
+        elif result.avg_max_drawdown < DRAWDOWN_WARNING:
             score += 10
-        elif result.avg_max_drawdown < 0.25:
+        elif result.avg_max_drawdown < DRAWDOWN_DANGER:
             score += 5
 
         # Profit factor (10 points)
@@ -483,16 +553,16 @@ class MonteCarloSimulator:
         elif result.avg_profit_factor > 1.0:
             score += 5
 
-        # Assign grade
-        if score >= 85:
+        # Assign grade using defined constants
+        if score >= GRADE_A_PLUS:
             return "A+ (Excellent)"
-        elif score >= 75:
+        elif score >= GRADE_A:
             return "A (Very Good)"
-        elif score >= 65:
+        elif score >= GRADE_B_PLUS:
             return "B+ (Good)"
-        elif score >= 55:
+        elif score >= GRADE_B:
             return "B (Acceptable)"
-        elif score >= 45:
+        elif score >= GRADE_C:
             return "C (Needs Improvement)"
         else:
             return "D (Not Recommended)"

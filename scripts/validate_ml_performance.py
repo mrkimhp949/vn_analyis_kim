@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore")
 def load_and_prepare_data():
     """Load data và prepare features"""
     from src.data.loader import load_data
-    from src.ml.features.enhanced import add_enhanced_features, get_feature_columns
+    from src.ml.features.enhanced_v2 import add_enhanced_features, get_feature_columns
 
     # Test với nhiều symbols
     symbols = ["VNM", "FPT", "VIC", "VHM", "HPG", "MWG", "MSN", "VCB", "TCB", "VPB"]

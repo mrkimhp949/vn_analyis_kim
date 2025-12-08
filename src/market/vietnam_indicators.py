@@ -9,16 +9,67 @@ IMPROVEMENTS v3.0:
 - Session boundary detection
 - VN30 correlation
 - Sector rotation analysis
+
+IMPROVEMENTS v3.1:
+- Added constants for magic numbers
+- Thread-safe singleton
+- Optimized pytz import
+- Added __all__ export list
 """
 
 import logging
+import threading
 from datetime import datetime, time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
+# Try to import pytz once at module level
+try:
+    import pytz
+
+    VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+    HAS_PYTZ = True
+except ImportError:
+    VN_TZ = None
+    HAS_PYTZ = False
+
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "VietnamMarketIndicators",
+    "get_vietnam_indicators",
+]
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Price limit thresholds
+NEAR_CEILING_THRESHOLD = 5.0  # % - threshold for near ceiling warning
+NEAR_FLOOR_THRESHOLD = -5.0  # % - threshold for near floor warning
+
+# Intraday volatility thresholds
+DEFAULT_MAX_INTRADAY_RANGE = 5.0  # %
+HIGH_CHANGE_FROM_OPEN_THRESHOLD = 4.0  # %
+HIGH_CHANGE_FROM_LOW_THRESHOLD = 5.0  # %
+
+# Foreign flow thresholds
+VOLUME_RATIO_THRESHOLD = 1.2
+PRICE_CHANGE_THRESHOLD = 0.01
+BULLISH_BEARISH_DAYS_THRESHOLD = 3
+MAX_CONFIDENCE = 80
+NEUTRAL_CONFIDENCE = 50
+DEFAULT_FOREIGN_FLOW_LOOKBACK = 5
+DEFAULT_VOLUME_AVG_PERIOD = 20
+
+# Correlation thresholds
+HIGH_CORRELATION_THRESHOLD = 0.8
+MODERATE_CORRELATION_THRESHOLD = 0.5
+LOW_CORRELATION_THRESHOLD = 0.2
+MIN_DATA_POINTS_CORRELATION = 10
+DEFAULT_CORRELATION_LOOKBACK = 20
 
 
 class VietnamMarketIndicators:
@@ -76,7 +127,7 @@ class VietnamMarketIndicators:
         change_pct = (current_price - prev_close) / prev_close * 100
 
         # Kiểm tra gần ceiling (>5%)
-        if change_pct >= 5.0:
+        if change_pct >= NEAR_CEILING_THRESHOLD:
             return {
                 "near_limit": True,
                 "limit_type": "CEILING",
@@ -88,7 +139,7 @@ class VietnamMarketIndicators:
             }
 
         # Kiểm tra gần floor (<-5%)
-        if change_pct <= -5.0:
+        if change_pct <= NEAR_FLOOR_THRESHOLD:
             return {
                 "near_limit": True,
                 "limit_type": "FLOOR",
@@ -155,12 +206,12 @@ class VietnamMarketIndicators:
             safe = False
 
         # Cảnh báo nếu đã tăng mạnh từ open
-        if change_from_open > 4.0:
+        if change_from_open > HIGH_CHANGE_FROM_OPEN_THRESHOLD:
             warnings.append(f"Đã tăng {change_from_open:.1f}% từ open")
             safe = False
 
         # Cảnh báo nếu đã tăng mạnh từ đáy ngày
-        if change_from_low > 5.0:
+        if change_from_low > HIGH_CHANGE_FROM_LOW_THRESHOLD:
             warnings.append(f"Đã tăng {change_from_low:.1f}% từ đáy ngày")
             safe = False
 
@@ -195,7 +246,11 @@ class VietnamMarketIndicators:
         recent = df.tail(lookback)
 
         # Tính volume trung bình
-        avg_volume = df["volume"].tail(20).mean() if len(df) >= 20 else df["volume"].mean()
+        avg_volume = (
+            df["volume"].tail(DEFAULT_VOLUME_AVG_PERIOD).mean()
+            if len(df) >= DEFAULT_VOLUME_AVG_PERIOD
+            else df["volume"].mean()
+        )
 
         # Đếm số ngày volume cao + giá tăng (bullish)
         bullish_days = 0
@@ -206,21 +261,21 @@ class VietnamMarketIndicators:
             vol_ratio = row["volume"] / avg_volume if avg_volume > 0 else 1
             price_change = (row["close"] - row["open"]) / row["open"] if row["open"] > 0 else 0
 
-            if vol_ratio > 1.2 and price_change > 0.01:
+            if vol_ratio > VOLUME_RATIO_THRESHOLD and price_change > PRICE_CHANGE_THRESHOLD:
                 bullish_days += 1
-            elif vol_ratio > 1.2 and price_change < -0.01:
+            elif vol_ratio > VOLUME_RATIO_THRESHOLD and price_change < -PRICE_CHANGE_THRESHOLD:
                 bearish_days += 1
 
         # Xác định xu hướng
-        if bullish_days >= 3:
+        if bullish_days >= BULLISH_BEARISH_DAYS_THRESHOLD:
             flow = "BUYING"
-            confidence = min(bullish_days / lookback * 100, 80)
-        elif bearish_days >= 3:
+            confidence = min(bullish_days / lookback * 100, MAX_CONFIDENCE)
+        elif bearish_days >= BULLISH_BEARISH_DAYS_THRESHOLD:
             flow = "SELLING"
-            confidence = min(bearish_days / lookback * 100, 80)
+            confidence = min(bearish_days / lookback * 100, MAX_CONFIDENCE)
         else:
             flow = "NEUTRAL"
-            confidence = 50
+            confidence = NEUTRAL_CONFIDENCE
 
         return {
             "estimated_flow": flow,
@@ -246,12 +301,9 @@ class VietnamMarketIndicators:
         Returns:
             Dict với thông tin session timing
         """
-        try:
-            import pytz
-
-            VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+        if HAS_PYTZ and VN_TZ is not None:
             now = datetime.now(VN_TZ)
-        except ImportError:
+        else:
             now = datetime.now()
 
         current_time = now.time()
@@ -328,7 +380,7 @@ class VietnamMarketIndicators:
             stock_returns = stock_returns.tail(min_len)
             vn30_returns = vn30_returns.tail(min_len)
 
-            if len(stock_returns) >= 10:
+            if len(stock_returns) >= MIN_DATA_POINTS_CORRELATION:
                 correlation = stock_returns.corr(vn30_returns)
 
                 # Tính beta
@@ -347,11 +399,11 @@ class VietnamMarketIndicators:
 
     def _interpret_correlation(self, correlation: float, beta: float) -> str:
         """Interpret correlation và beta"""
-        if correlation > 0.8:
+        if correlation > HIGH_CORRELATION_THRESHOLD:
             return "Highly correlated with market - follows VN30 closely"
-        elif correlation > 0.5:
+        elif correlation > MODERATE_CORRELATION_THRESHOLD:
             return "Moderately correlated - influenced by market"
-        elif correlation > 0.2:
+        elif correlation > LOW_CORRELATION_THRESHOLD:
             return "Low correlation - somewhat independent"
         else:
             return "Very low correlation - independent of market"
@@ -367,12 +419,9 @@ class VietnamMarketIndicators:
         Returns:
             Dict với khuyến nghị thời điểm
         """
-        try:
-            import pytz
-
-            VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+        if HAS_PYTZ and VN_TZ is not None:
             now = datetime.now(VN_TZ)
-        except ImportError:
+        else:
             now = datetime.now()
 
         current_time = now.time()
@@ -401,15 +450,18 @@ class VietnamMarketIndicators:
         return {"is_optimal": False, "period": "Neutral", "recommendation": "ACCEPTABLE"}
 
 
-# Singleton instance
+# Singleton instance with thread-safe initialization
 _vietnam_indicators = None
+_vietnam_indicators_lock = threading.Lock()
 
 
 def get_vietnam_indicators() -> VietnamMarketIndicators:
-    """Get singleton instance"""
+    """Get singleton instance (thread-safe)"""
     global _vietnam_indicators
     if _vietnam_indicators is None:
-        _vietnam_indicators = VietnamMarketIndicators()
+        with _vietnam_indicators_lock:
+            if _vietnam_indicators is None:
+                _vietnam_indicators = VietnamMarketIndicators()
     return _vietnam_indicators
 
 

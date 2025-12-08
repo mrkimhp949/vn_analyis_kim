@@ -520,7 +520,7 @@ if __name__ == "__main__":
 
     # Test with sample data
     from src.data.loader import load_data
-    from src.ml.features.technical import add_ml_features
+    from src.ml.features.enhanced_v2 import add_ml_features
 
     symbol = "VNM"
     print(f"📊 Analyzing {symbol}...")

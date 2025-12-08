@@ -22,13 +22,73 @@ Version: 1.0.0
 """
 
 import logging
+import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Exports
+# ============================================================================
+__all__ = [
+    # Data classes
+    "SectorMomentum",
+    "RotationSignal",
+    "SectorAnalysisResult",
+    "LeadingIndicatorSignal",
+    # Analyzers
+    "SectorRotationAnalyzer",
+    "SectorLeadingIndicatorAnalyzer",
+    # Factory functions
+    "get_sector_rotation_analyzer",
+    "get_sector_analyzer",
+    "get_leading_indicator_analyzer",
+    "get_symbol_sector_info",
+    # Constants
+    "SECTOR_REPRESENTATIVES",
+    "SECTOR_CHARACTERISTICS",
+    "SECTOR_LEADING_INDICATORS",
+]
+
+# ============================================================================
+# Constants
+# ============================================================================
+# Cache settings
+DEFAULT_CACHE_TTL_SECONDS = 3600  # 1 hour
+DEFAULT_LOOKBACK_DAYS = 60
+
+# Momentum weights
+DEFAULT_MOMENTUM_WEIGHT_1W = 0.3
+DEFAULT_MOMENTUM_WEIGHT_1M = 0.4
+DEFAULT_MOMENTUM_WEIGHT_3M = 0.3
+
+# Thresholds
+OVERWEIGHT_THRESHOLD = 0.5
+UNDERWEIGHT_THRESHOLD = -0.3
+BULLISH_THRESHOLD = 0.3
+BEARISH_THRESHOLD = -0.3
+
+# Volume trend thresholds
+VOLUME_INCREASING_THRESHOLD = 1.2
+VOLUME_DECREASING_THRESHOLD = 0.8
+
+# Sector weight adjustments
+OVERWEIGHT_ADJUSTMENT = 1.2
+UNDERWEIGHT_ADJUSTMENT = 0.7
+NEUTRAL_ADJUSTMENT = 1.0
+
+# Confidence thresholds
+LOW_CONFIDENCE = 30
+MIN_SIGNAL_CONFIDENCE = 60
+
+# Leading indicator thresholds
+BULLISH_INDICATOR_RATIO = 0.6
+BEARISH_INDICATOR_RATIO = 0.6
+WARNING_CONFIDENCE_REDUCTION = 0.8
 
 
 # Sector representative stocks (top 3-5 by market cap)
@@ -286,17 +346,17 @@ class SectorRotationAnalyzer:
 
     def __init__(
         self,
-        lookback_days: int = 60,
-        momentum_weights: Dict[str, float] = None,
-        overweight_threshold: float = 0.5,
-        underweight_threshold: float = -0.3,
-        cache_ttl_seconds: int = 3600,  # 1 hour
+        lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+        momentum_weights: Optional[Dict[str, float]] = None,
+        overweight_threshold: float = OVERWEIGHT_THRESHOLD,
+        underweight_threshold: float = UNDERWEIGHT_THRESHOLD,
+        cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ):
         self.lookback_days = lookback_days
         self.momentum_weights = momentum_weights or {
-            "1w": 0.3,
-            "1m": 0.4,
-            "3m": 0.3,
+            "1w": DEFAULT_MOMENTUM_WEIGHT_1W,
+            "1m": DEFAULT_MOMENTUM_WEIGHT_1M,
+            "3m": DEFAULT_MOMENTUM_WEIGHT_3M,
         }
         self.overweight_threshold = overweight_threshold
         self.underweight_threshold = underweight_threshold
@@ -396,17 +456,17 @@ class SectorRotationAnalyzer:
 
             # Volume trend
             avg_volume_change = sum(volume_changes) / len(volume_changes)
-            if avg_volume_change > 1.2:
+            if avg_volume_change > VOLUME_INCREASING_THRESHOLD:
                 volume_trend = "INCREASING"
-            elif avg_volume_change < 0.8:
+            elif avg_volume_change < VOLUME_DECREASING_THRESHOLD:
                 volume_trend = "DECREASING"
             else:
                 volume_trend = "STABLE"
 
             # Trend determination
-            if momentum_score > 0.3:
+            if momentum_score > BULLISH_THRESHOLD:
                 trend = "BULLISH"
-            elif momentum_score < -0.3:
+            elif momentum_score < BEARISH_THRESHOLD:
                 trend = "BEARISH"
             else:
                 trend = "NEUTRAL"
@@ -506,7 +566,7 @@ class SectorRotationAnalyzer:
             spread = avg_overweight - avg_underweight
             confidence = min(100, spread * 100)
         else:
-            confidence = 30  # Low confidence if no clear rotation
+            confidence = LOW_CONFIDENCE  # Low confidence if no clear rotation
 
         # Generate rationale
         rationale = self._generate_rationale(momentum_data, overweight, underweight)
@@ -672,22 +732,26 @@ class SectorRotationAnalyzer:
         signal = self.get_rotation_signal()
 
         if sector in signal.overweight:
-            return True, f"Sector {sector} is OVERWEIGHT - favorable", 1.2
+            return True, f"Sector {sector} is OVERWEIGHT - favorable", OVERWEIGHT_ADJUSTMENT
         elif sector in signal.underweight:
-            return False, f"Sector {sector} is UNDERWEIGHT - avoid", 0.7
+            return False, f"Sector {sector} is UNDERWEIGHT - avoid", UNDERWEIGHT_ADJUSTMENT
         else:
-            return True, f"Sector {sector} is NEUTRAL", 1.0
+            return True, f"Sector {sector} is NEUTRAL", NEUTRAL_ADJUSTMENT
 
 
-# Singleton instance
+# Thread-safe singleton instances
 _analyzer_instance: Optional[SectorRotationAnalyzer] = None
+_analyzer_lock = threading.Lock()
 
 
 def get_sector_rotation_analyzer() -> SectorRotationAnalyzer:
-    """Get singleton instance of sector rotation analyzer"""
+    """Get thread-safe singleton instance of sector rotation analyzer."""
     global _analyzer_instance
     if _analyzer_instance is None:
-        _analyzer_instance = SectorRotationAnalyzer()
+        with _analyzer_lock:
+            # Double-check locking pattern
+            if _analyzer_instance is None:
+                _analyzer_instance = SectorRotationAnalyzer()
     return _analyzer_instance
 
 
@@ -773,7 +837,7 @@ class SectorLeadingIndicatorAnalyzer:
             print(f"Banking sector bullish in {signal.lead_time_days} days")
     """
 
-    def __init__(self, cache_ttl_seconds: int = 3600):
+    def __init__(self, cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS):
         self.cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, LeadingIndicatorSignal] = {}
         self._cache_time: Optional[datetime] = None
@@ -822,10 +886,10 @@ class SectorLeadingIndicatorAnalyzer:
 
             # Determine overall signal
             total_indicators = len(config["indicators"])
-            if bullish_count > total_indicators * 0.6:
+            if bullish_count > total_indicators * BULLISH_INDICATOR_RATIO:
                 signal_type = "BULLISH"
                 confidence = min(100, (bullish_count / total_indicators) * 100)
-            elif bearish_count > total_indicators * 0.6:
+            elif bearish_count > total_indicators * BEARISH_INDICATOR_RATIO:
                 signal_type = "BEARISH"
                 confidence = min(100, (bearish_count / total_indicators) * 100)
             else:
@@ -834,7 +898,7 @@ class SectorLeadingIndicatorAnalyzer:
 
             # Reduce confidence if warning signals present
             if warning_signals:
-                confidence *= 0.8
+                confidence *= WARNING_CONFIDENCE_REDUCTION
 
             # Generate recommendation
             recommendation = self._generate_recommendation(
@@ -888,7 +952,7 @@ class SectorLeadingIndicatorAnalyzer:
         rotate_out = []
 
         for sector, signal in all_signals.items():
-            if signal.signal_type == "BULLISH" and signal.confidence >= 60:
+            if signal.signal_type == "BULLISH" and signal.confidence >= MIN_SIGNAL_CONFIDENCE:
                 rotate_into.append(
                     {
                         "sector": sector,
@@ -896,7 +960,7 @@ class SectorLeadingIndicatorAnalyzer:
                         "lead_time": signal.lead_time_days,
                     }
                 )
-            elif signal.signal_type == "BEARISH" and signal.confidence >= 60:
+            elif signal.signal_type == "BEARISH" and signal.confidence >= MIN_SIGNAL_CONFIDENCE:
                 rotate_out.append(
                     {
                         "sector": sector,
@@ -913,14 +977,14 @@ class SectorLeadingIndicatorAnalyzer:
         if rotate_into:
             avg_lead_time = sum(s["lead_time"] for s in rotate_into) / len(rotate_into)
         else:
-            avg_lead_time = 30
+            avg_lead_time = DEFAULT_LOOKBACK_DAYS // 2  # Default ~30 days
 
         # Overall confidence
         if rotate_into or rotate_out:
             all_conf = [s["confidence"] for s in rotate_into + rotate_out]
             overall_confidence = sum(all_conf) / len(all_conf)
         else:
-            overall_confidence = 30
+            overall_confidence = LOW_CONFIDENCE
 
         return {
             "rotate_into": [s["sector"] for s in rotate_into[:3]],
@@ -1036,13 +1100,17 @@ class SectorLeadingIndicatorAnalyzer:
         return age < self.cache_ttl
 
 
-# Singleton instance for leading indicator analyzer
+# Thread-safe singleton instance for leading indicator analyzer
 _leading_indicator_instance: Optional[SectorLeadingIndicatorAnalyzer] = None
+_leading_indicator_lock = threading.Lock()
 
 
 def get_leading_indicator_analyzer() -> SectorLeadingIndicatorAnalyzer:
-    """Get singleton instance of leading indicator analyzer."""
+    """Get thread-safe singleton instance of leading indicator analyzer."""
     global _leading_indicator_instance
     if _leading_indicator_instance is None:
-        _leading_indicator_instance = SectorLeadingIndicatorAnalyzer()
+        with _leading_indicator_lock:
+            # Double-check locking pattern
+            if _leading_indicator_instance is None:
+                _leading_indicator_instance = SectorLeadingIndicatorAnalyzer()
     return _leading_indicator_instance
