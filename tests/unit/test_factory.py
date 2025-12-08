@@ -121,10 +121,9 @@ class TestCreateStrategyManager:
         # Arrange
         mock_instance = Mock()
         mock_manager_class.return_value = mock_instance
-        config = TradingConfig()
 
         # Act
-        result = create_strategy_manager(config)
+        result = create_strategy_manager()
 
         # Assert
         mock_manager_class.assert_called_once_with()  # No config parameter
@@ -132,12 +131,9 @@ class TestCreateStrategyManager:
 
     @patch("src.strategies.manager.StrategyManager")
     def test_passes_config(self, mock_manager_class):
-        """Test that config is passed correctly"""
-        # Arrange
-        config = TradingConfig(min_risk_reward=3.0)
-
+        """Test that strategy manager is created without config"""
         # Act
-        create_strategy_manager(config)
+        create_strategy_manager()
 
         # Assert
         mock_manager_class.assert_called_once_with()  # No config parameter
@@ -203,10 +199,9 @@ class TestCreateEntryService:
         # Arrange
         mock_instance = Mock()
         mock_service_class.return_value = mock_instance
-        config = TradingConfig()
 
         # Act
-        result = create_entry_service(config)
+        result = create_entry_service()
 
         # Assert
         mock_service_class.assert_called_once_with()  # No config parameter

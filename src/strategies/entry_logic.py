@@ -62,6 +62,7 @@ from src.config.constants import (
     VN_MIN_LIQUIDITY_VALUE,
     VIETNAM_PRICE_LIMIT_PERCENT,
 )
+from src.config.exceptions import DataQualityError
 
 # Import utilities
 from src.monitoring.performance import get_performance_monitor
@@ -435,7 +436,7 @@ class ImprovedEntryLogic:
         # Validate DataFrame
         try:
             DataValidator.validate_dataframe(df, min_rows=50)
-        except (ValueError, KeyError) as e:
+        except (ValueError, KeyError, DataQualityError) as e:
             return (False, f"Data validation failed: {e}", 0, 0)
 
         close_price = safe_get_latest(df, "close", 0)
