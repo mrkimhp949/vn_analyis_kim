@@ -5,8 +5,8 @@
     "total_loss": 0.0,
     "total_profit": 0.0,
     "net_pnl": 0.0,
-    "last_updated": "2025-12-10T19:20:23.126922"
+    "last_updated": "2025-12-10T21:19:03.593681"
   },
   "consecutive_losses": 0,
-  "last_trade_date": "2025-12-04"
+  "last_trade_date": null
 }
