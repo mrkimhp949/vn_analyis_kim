@@ -102,17 +102,17 @@ def sell_ml_signal():
 
 
 def test_exit_strategy_init_default():
-    """Test default initialization (v4.2 - refactored with ExitConfig)"""
+    """Test default initialization (v10.0 - refactored with ExitConfig)"""
     strategy = ImprovedExitStrategy()
 
-    # v6.1: Uses ExitConfig with VN market optimized defaults
-    # IMPROVED: 6%, 10%, 15% for better R:R ratio (net ~4.5%, ~8.5%, ~13.5% after costs)
-    assert strategy.tp_levels == [0.06, 0.10, 0.15]  # 3 TP levels (6%, 10%, 15%)
-    assert strategy.trailing_activation == 0.025  # v4.1: Tightened to 2.5%
-    assert strategy.trailing_distance == 0.02  # v4.1: Tightened to 2%
+    # v10.0: Uses ExitConfig with VN market optimized defaults for R:R >= 1.5
+    # IMPROVED: 7%, 12%, 18% for better R:R ratio (net ~5.5%, ~10.5%, ~16.5% after costs)
+    assert strategy.tp_levels == [0.07, 0.12, 0.18]  # 3 TP levels (7%, 12%, 18%)
+    assert strategy.trailing_activation == 0.03  # v10.0: Activate at 3% profit
+    assert strategy.trailing_distance == 0.015  # v10.0: Trail 1.5% below peak
     assert strategy.max_holding_days == 20  # v4.1: 20 days max
     assert strategy.time_decay_threshold == 0.02  # v4.1: 2% threshold
-    assert strategy.default_stop_loss_pct == 0.055  # v4.1: 5.5% stop loss
+    assert strategy.default_stop_loss_pct == 0.04  # v10.0: 4% stop loss
 
 
 def test_exit_strategy_init_custom():
