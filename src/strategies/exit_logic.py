@@ -139,64 +139,92 @@ class ExitConfig:
     """
     Centralized exit configuration - loại bỏ magic numbers.
     Tất cả thresholds có thể config được.
+
+    IMPROVED v10.0: Optimized R:R ratio >= 1.5 for Vietnam market.
+
+    Key improvements:
+    - TP levels adjusted for better R:R
+    - Stop loss tightened to 4% (net ~2.5% after costs)
+    - Dynamic TP based on market regime
+    - Transaction cost aware calculations
     """
 
-    # Take Profit levels - IMPROVED v6.1 for VN market shorter cycles
+    # Take Profit levels - IMPROVED v10.0 for optimal R:R >= 1.5
     # Vietnam market characteristics:
     # - Shorter cycles (2-4 weeks typical)
     # - Higher volatility (±7% daily limit)
     # - T+2 settlement affects holding decisions
     # - Transaction costs ~1.5% round trip
-    # OPTIMIZED: 6%, 10%, 15% - improved R:R ratio >= 1.5
-    # Net profit after costs: ~4.5%, ~8.5%, ~13.5%
-    # With SL ~4%, R:R = 6/4 = 1.5 (minimum acceptable)
-    take_profit_levels: Tuple[float, float, float] = (0.06, 0.10, 0.15)
+    #
+    # R:R Calculation (v10.0):
+    # - Stop Loss: 4% gross = ~2.5% net loss after costs
+    # - TP1: 7% gross = ~5.5% net profit → R:R = 5.5/2.5 = 2.2 ✓
+    # - TP2: 12% gross = ~10.5% net profit → R:R = 10.5/2.5 = 4.2 ✓
+    # - TP3: 18% gross = ~16.5% net profit → R:R = 16.5/2.5 = 6.6 ✓
+    take_profit_levels: Tuple[float, float, float] = (0.07, 0.12, 0.18)
 
-    # IMPROVED v6.1: Dynamic TP levels by market regime
-    # BULL: Wider targets to capture momentum
-    # BEAR: Tighter targets to lock profits quickly
-    # SIDEWAYS: Standard targets
+    # IMPROVED v10.0: Dynamic TP levels by market regime with R:R >= 1.5
+    # BULL: Wider targets to capture momentum (R:R ~2.5-7.0)
+    # BEAR: Tighter targets to lock profits quickly (R:R ~1.5-3.0)
+    # SIDEWAYS: Standard targets (R:R ~2.0-5.0)
+    # HIGH_VOL: Quick exits (R:R ~1.5-3.5)
     use_dynamic_tp_levels: bool = True
-    tp_levels_bull: Tuple[float, float, float] = (0.08, 0.15, 0.25)
-    tp_levels_bear: Tuple[float, float, float] = (0.04, 0.07, 0.10)
-    tp_levels_sideways: Tuple[float, float, float] = (0.06, 0.10, 0.15)
-    tp_levels_high_volatility: Tuple[float, float, float] = (0.05, 0.08, 0.12)
+    tp_levels_bull: Tuple[float, float, float] = (0.10, 0.18, 0.28)  # SL 4% → R:R = 2.5, 4.5, 7.0
+    tp_levels_bear: Tuple[float, float, float] = (0.05, 0.08, 0.12)  # SL 3% → R:R = 1.5, 2.5, 3.5
+    tp_levels_sideways: Tuple[float, float, float] = (
+        0.07,
+        0.12,
+        0.18,
+    )  # SL 4% → R:R = 1.75, 3.0, 4.5
+    tp_levels_high_volatility: Tuple[float, float, float] = (
+        0.06,
+        0.10,
+        0.15,
+    )  # SL 4% → R:R = 1.5, 2.5, 3.75
 
-    # Stop Loss - IMPROVED v4.1 with transaction cost awareness
-    # Must account for ~1.5% round trip cost
-    stop_loss_atr_multiplier: float = 2.0
-    default_stop_loss_pct: float = 0.055  # IMPROVED: 5.5% below entry (net ~4% after costs)
-    min_stop_loss_pct: float = 0.035  # Min 3.5% risk (net ~2% after costs)
-    max_stop_loss_pct: float = 0.075  # Max 7.5% risk (approaching daily limit)
+    # Stop Loss - IMPROVED v10.0 with R:R optimization
+    # Tightened to improve R:R ratio while accounting for ~1.5% round trip cost
+    stop_loss_atr_multiplier: float = 1.8  # TIGHTENED from 2.0
+    default_stop_loss_pct: float = 0.04  # IMPROVED: 4% below entry (net ~2.5% after costs)
+    min_stop_loss_pct: float = 0.025  # Min 2.5% risk (net ~1% after costs) - for low beta
+    max_stop_loss_pct: float = 0.06  # Max 6% risk (net ~4.5% after costs) - for high beta
 
-    # Beta-adjusted stop loss - IMPROVED v4.0
-    use_beta_adjusted_stops: bool = True  # Enable beta-adjusted stops
-    high_beta_stop_loss_pct: float = 0.08  # 8% for beta > 1.2
-    low_beta_stop_loss_pct: float = 0.05  # 5% for beta < 0.8
-    high_beta_threshold: float = 1.2  # Beta threshold for wider stop
-    low_beta_threshold: float = 0.8  # Beta threshold for tighter stop
+    # Beta-adjusted stop loss - IMPROVED v10.0 for R:R consistency
+    use_beta_adjusted_stops: bool = True
+    high_beta_stop_loss_pct: float = 0.06  # 6% for beta > 1.2 (wider for volatile stocks)
+    low_beta_stop_loss_pct: float = 0.03  # 3% for beta < 0.8 (tighter for stable stocks)
+    high_beta_threshold: float = 1.2
+    low_beta_threshold: float = 0.8
 
-    # Trailing Stop - IMPROVED v4.1 for VN market
-    # VN market has ±7% daily limit, so trailing needs to be responsive
-    trailing_stop_activation: float = (
-        0.025  # TIGHTENED: Activate at 2.5% profit (net ~1% after costs)
-    )
-    trailing_stop_distance: float = 0.02  # TIGHTENED: Trail 2% below peak
-    trailing_stop_atr_multiplier: float = 1.8  # Slightly tighter ATR multiplier
+    # NEW v10.0: Minimum R:R enforcement
+    min_risk_reward_ratio: float = 1.5  # Minimum acceptable R:R
+    target_risk_reward_ratio: float = 2.0  # Target R:R for position sizing
+
+    # Trailing Stop - IMPROVED v10.0 for VN market
+    # More aggressive trailing to lock profits
+    trailing_stop_activation: float = 0.03  # Activate at 3% profit (net ~1.5% after costs)
+    trailing_stop_distance: float = 0.015  # TIGHTENED: Trail 1.5% below peak
+    trailing_stop_atr_multiplier: float = 1.5  # Tighter ATR multiplier
     use_dynamic_trailing: bool = True
 
-    # Time Decay - IMPROVED v4.1 with T+2 awareness
-    # VN market T+2 settlement means capital is tied up longer
+    # NEW v10.0: Accelerated trailing after TP1
+    trailing_after_tp1_distance: float = 0.01  # 1% trailing after TP1 hit
+    trailing_acceleration_factor: float = 0.8  # Tighten trailing by 20% after each TP
+
+    # Time Decay - IMPROVED v10.0 with T+2 awareness
     max_holding_days: int = MAX_HOLDING_DAYS
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
-    t2_settlement_days: int = 2  # T+2 settlement cycle
+    t2_settlement_days: int = 2
 
-    # Profit Protection - IMPROVED v4.1
-    # Protect profits early due to VN market volatility
-    profit_protection_activation: float = 0.025  # TIGHTENED: Activate at 2.5% profit
-    profit_protection_percent: float = 0.65  # IMPROVED: Protect 65% of max profit
+    # NEW v10.0: Time-based exit acceleration
+    time_decay_start_day: int = 10  # Start reducing targets after day 10
+    time_decay_tp_reduction: float = 0.10  # Reduce TP targets by 10% per day after start
 
-    # NEW v4.2: Session-based exit rules (Vietnam market specific)
+    # Profit Protection - IMPROVED v10.0
+    profit_protection_activation: float = 0.02  # Activate at 2% profit
+    profit_protection_percent: float = 0.70  # IMPROVED: Protect 70% of max profit
+
+    # NEW v10.0: Session-based exit rules (Vietnam market specific)
     exit_before_lunch_if_profitable: bool = True  # Exit profitable positions before lunch
     lunch_exit_min_profit_pct: float = (
         0.025  # Min 2.5% profit to exit before lunch (net ~1% after costs)

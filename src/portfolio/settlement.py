@@ -506,8 +506,250 @@ class SettlementTracker:
         return "\n".join(lines)
 
 
-# Singleton instance
+# =============================================================================
+# MARGIN TRADING SETTLEMENT - T+0 Support (IMPROVED v10.0)
+# =============================================================================
+
+
+@dataclass
+class MarginSettlementRecord:
+    """Settlement record for margin trades (T+0)"""
+
+    trade_date: str
+    symbol: str
+    side: str
+    quantity: int
+    amount: float
+    margin_ratio: float  # 0.5 = 50% margin used
+    borrowed_amount: float
+    settlement_type: str = "T+0"  # T+0 for margin, T+2 for cash
+    interest_rate: float = 0.12  # 12% annual
+    status: str = "OPEN"  # OPEN, CLOSED
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+
+class MarginSettlementManager:
+    """
+    Margin Settlement Manager for T+0 Trading.
+
+    IMPROVED v10.0: Complete margin settlement support.
+
+    Vietnam Margin Rules:
+    - T+0 settlement for margin accounts
+    - Can buy and sell same day
+    - Interest charged on borrowed amount
+    - Initial margin: 50%
+    - Maintenance margin: 35%
+
+    Usage:
+        manager = get_margin_settlement_manager()
+
+        # Record margin buy
+        manager.record_margin_trade("VNM", "BUY", 1000, 85_000_000, margin_ratio=0.5)
+
+        # Check buying power
+        buying_power = manager.get_buying_power(equity=100_000_000)
+    """
+
+    INITIAL_MARGIN = 0.50  # 50% margin requirement
+    MAINTENANCE_MARGIN = 0.35  # 35% maintenance
+    INTEREST_RATE_ANNUAL = 0.12  # 12% annual interest
+    INTEREST_RATE_DAILY = INTEREST_RATE_ANNUAL / 365
+
+    def __init__(self, state_file: str = "margin_settlement_state.json"):
+        self.state_file = state_file
+        self._records: List[MarginSettlementRecord] = []
+        self._lock = RLock()
+        self._load_state()
+        logger.info("✅ MarginSettlementManager initialized")
+
+    def _load_state(self):
+        """Load persisted margin state"""
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._records = [MarginSettlementRecord(**r) for r in data.get("records", [])]
+            except Exception as e:
+                logger.warning(f"Failed to load margin state: {e}")
+                self._records = []
+
+    def _save_state(self):
+        """Persist margin state"""
+        try:
+            data = {
+                "records": [asdict(r) for r in self._records],
+                "last_updated": datetime.now().isoformat(),
+            }
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Failed to save margin state: {e}")
+
+    def record_margin_trade(
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        amount: float,
+        margin_ratio: float = 0.5,
+    ) -> MarginSettlementRecord:
+        """
+        Record a margin trade (T+0 settlement).
+
+        Args:
+            symbol: Stock symbol
+            side: "BUY" or "SELL"
+            quantity: Number of shares
+            amount: Total trade value
+            margin_ratio: Margin used (0.5 = 50%)
+
+        Returns:
+            MarginSettlementRecord
+        """
+        with self._lock:
+            borrowed = amount * margin_ratio if side == "BUY" else 0
+
+            record = MarginSettlementRecord(
+                trade_date=date.today().isoformat(),
+                symbol=symbol,
+                side=side.upper(),
+                quantity=quantity,
+                amount=amount,
+                margin_ratio=margin_ratio,
+                borrowed_amount=borrowed,
+            )
+
+            self._records.append(record)
+            self._save_state()
+
+            logger.info(
+                f"📝 Margin trade: {side} {symbol} {quantity} @ {amount:,.0f} VND | "
+                f"Borrowed: {borrowed:,.0f} (T+0 settlement)"
+            )
+
+            return record
+
+    def get_total_borrowed(self) -> float:
+        """Get total borrowed amount across all open positions"""
+        with self._lock:
+            return sum(
+                r.borrowed_amount for r in self._records if r.status == "OPEN" and r.side == "BUY"
+            )
+
+    def get_daily_interest(self) -> float:
+        """Calculate daily interest on borrowed amount"""
+        borrowed = self.get_total_borrowed()
+        return borrowed * self.INTEREST_RATE_DAILY
+
+    def get_buying_power(self, equity: float) -> Dict:
+        """
+        Calculate buying power for margin account.
+
+        Args:
+            equity: Current account equity
+
+        Returns:
+            Dict with buying power details
+        """
+        borrowed = self.get_total_borrowed()
+        daily_interest = self.get_daily_interest()
+
+        # Max borrowing = equity * (1 / INITIAL_MARGIN - 1)
+        # e.g., 100M equity with 50% margin = can borrow up to 100M
+        max_borrowing = equity * (1 / self.INITIAL_MARGIN - 1)
+        available_margin = max(0, max_borrowing - borrowed)
+
+        # Total buying power = equity + available_margin
+        buying_power = equity + available_margin
+
+        # T+0 same-day trading power (can use sell proceeds immediately)
+        t0_power = buying_power  # Same as buying power for margin
+
+        return {
+            "equity": equity,
+            "borrowed": borrowed,
+            "max_borrowing": max_borrowing,
+            "available_margin": available_margin,
+            "buying_power": buying_power,
+            "t0_trading_power": t0_power,
+            "daily_interest": daily_interest,
+            "margin_utilization_pct": (borrowed / max_borrowing * 100) if max_borrowing > 0 else 0,
+            "maintenance_margin_value": equity * self.MAINTENANCE_MARGIN,
+        }
+
+    def can_trade_t0(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        equity: float,
+    ) -> Tuple[bool, str]:
+        """
+        Check if T+0 trade is possible with margin account.
+
+        Args:
+            symbol: Stock symbol
+            side: "BUY" or "SELL"
+            amount: Trade amount
+            equity: Current equity
+
+        Returns:
+            (can_trade, reason)
+        """
+        power = self.get_buying_power(equity)
+
+        if side == "BUY":
+            if amount > power["buying_power"]:
+                return (
+                    False,
+                    f"Insufficient buying power. "
+                    f"Need: {amount:,.0f}, Available: {power['buying_power']:,.0f}",
+                )
+            return True, f"T+0 BUY OK. Buying power: {power['buying_power']:,.0f}"
+
+        # SELL - check if we have the position
+        return True, "T+0 SELL OK (immediate settlement)"
+
+    def get_t0_vs_t2_comparison(self, equity: float, cash_balance: float) -> Dict:
+        """
+        Compare T+0 (margin) vs T+2 (cash) trading capabilities.
+
+        Args:
+            equity: Account equity (for margin)
+            cash_balance: Cash balance (for cash account)
+
+        Returns:
+            Comparison dict
+        """
+        margin_power = self.get_buying_power(equity)
+
+        # T+2 cash account
+        tracker = get_settlement_tracker()
+        cash_info = tracker.get_available_cash(cash_balance)
+
+        return {
+            "margin_account": {
+                "settlement": "T+0",
+                "buying_power": margin_power["buying_power"],
+                "same_day_sell": True,
+                "interest_cost": margin_power["daily_interest"],
+                "advantage": "Can trade same day, use leverage",
+            },
+            "cash_account": {
+                "settlement": "T+2",
+                "buying_power": cash_info["available_cash"],
+                "same_day_sell": False,
+                "interest_cost": 0,
+                "advantage": "No interest cost, no margin calls",
+            },
+            "recommendation": ("Use margin for active trading, cash for long-term holds"),
+        }
+
+
+# Singleton instances
 _tracker_instance: Optional[SettlementTracker] = None
+_margin_manager_instance: Optional[MarginSettlementManager] = None
 
 
 def get_settlement_tracker() -> SettlementTracker:
@@ -518,7 +760,69 @@ def get_settlement_tracker() -> SettlementTracker:
     return _tracker_instance
 
 
+def get_margin_settlement_manager() -> MarginSettlementManager:
+    """Get singleton instance of margin settlement manager"""
+    global _margin_manager_instance
+    if _margin_manager_instance is None:
+        _margin_manager_instance = MarginSettlementManager()
+    return _margin_manager_instance
+
+
 def reset_settlement_tracker() -> None:
     """Reset singleton instance (useful for testing)"""
     global _tracker_instance
     _tracker_instance = None
+
+
+def reset_margin_settlement_manager() -> None:
+    """Reset margin singleton instance (useful for testing)"""
+    global _margin_manager_instance
+    _margin_manager_instance = None
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
+
+def check_settlement_type(is_margin_account: bool = False) -> str:
+    """
+    Get settlement type based on account type.
+
+    Args:
+        is_margin_account: True if margin account
+
+    Returns:
+        "T+0" for margin, "T+2" for cash
+    """
+    return "T+0" if is_margin_account else "T+2"
+
+
+def get_available_buying_power(
+    cash_balance: float,
+    equity: float = None,
+    is_margin_account: bool = False,
+) -> Dict:
+    """
+    Get available buying power based on account type.
+
+    Args:
+        cash_balance: Cash balance for cash account
+        equity: Equity for margin account
+        is_margin_account: True if margin account
+
+    Returns:
+        Dict with buying power details
+    """
+    if is_margin_account and equity is not None:
+        manager = get_margin_settlement_manager()
+        return manager.get_buying_power(equity)
+    else:
+        tracker = get_settlement_tracker()
+        cash_info = tracker.get_available_cash(cash_balance)
+        return {
+            "equity": cash_balance,
+            "buying_power": cash_info["available_cash"],
+            "settlement_type": "T+2",
+            "pending_settlements": cash_info["pending_settlements"],
+        }

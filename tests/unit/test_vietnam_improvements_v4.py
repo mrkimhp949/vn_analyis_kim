@@ -602,16 +602,17 @@ class TestEntryLogicEnhanced:
         assert SESSION_TRADING_AVAILABLE == True
 
     def test_analyze_entry_enhanced_method_exists(self):
-        """Test that analyze_entry_enhanced method exists"""
+        """Test that analyze_entry method exists (v9.0 refactored - analyze_entry_enhanced merged into analyze_entry)"""
         from src.strategies.entry_logic import ImprovedEntryLogic
 
         entry_logic = ImprovedEntryLogic()
 
-        assert hasattr(entry_logic, "analyze_entry_enhanced")
-        assert callable(entry_logic.analyze_entry_enhanced)
+        # v9.0: analyze_entry_enhanced was merged into analyze_entry
+        assert hasattr(entry_logic, "analyze_entry")
+        assert callable(entry_logic.analyze_entry)
 
     def test_analyze_entry_enhanced_basic(self, sample_data, sample_ml_signal):
-        """Test basic enhanced entry analysis"""
+        """Test basic enhanced entry analysis (v9.0 refactored - uses analyze_entry)"""
         from src.strategies.entry_logic import ImprovedEntryLogic
 
         entry_logic = ImprovedEntryLogic(
@@ -620,16 +621,15 @@ class TestEntryLogicEnhanced:
             require_volume_confirmation=False,
         )
 
+        # v9.0: analyze_entry_enhanced was merged into analyze_entry
         # This should not raise an error
         try:
-            signal = entry_logic.analyze_entry_enhanced(
+            signal = entry_logic.analyze_entry(
                 df=sample_data,
-                ml_signal=sample_ml_signal,
+                ml_signal=sample_ml_signal.get("signal"),
+                ml_confidence=sample_ml_signal.get("confidence"),
                 symbol="TEST",
-                check_trading_hours=False,  # Skip for test
-                check_session_timing=False,  # Skip for test
-                check_fundamentals=False,  # Skip for test
-                check_earnings=False,  # Skip for test
+                market_regime=None,
             )
 
             assert signal is not None

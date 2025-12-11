@@ -1,12 +1,12 @@
 {
   "today": {
-    "date": "2025-12-08",
+    "date": "2025-12-10",
     "trades_count": 0,
     "total_loss": 0.0,
     "total_profit": 0.0,
     "net_pnl": 0.0,
-    "last_updated": "2025-12-08T19:17:13.016469"
+    "last_updated": "2025-12-10T21:58:47.116430"
   },
   "consecutive_losses": 0,
-  "last_trade_date": "2025-12-04"
+  "last_trade_date": null
 }
