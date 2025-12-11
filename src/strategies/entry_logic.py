@@ -56,6 +56,19 @@ from src.strategies.technical_scorers import TechnicalScorer
 from src.strategies.price_optimizer import PriceOptimizer, RiskRewardCalculator
 from src.strategies.sentiment_analyzer import SentimentAnalyzer, VolumeAnalyzer
 
+# Import special instruments handler for Warrant/ETF
+SPECIAL_INSTRUMENTS_AVAILABLE = False
+try:
+    from src.strategies.warrant_etf_strategy import (
+        get_special_instruments_handler,
+        detect_instrument_type,
+        InstrumentType,
+    )
+
+    SPECIAL_INSTRUMENTS_AVAILABLE = True
+except ImportError:
+    pass
+
 # Type checking imports
 if TYPE_CHECKING:
     from src.portfolio.manager import PortfolioManager
@@ -627,7 +640,90 @@ class ImprovedEntryLogic:
                     sentiment.get("reason", ""),
                 )
 
+        # 12. Special Instruments Check (Warrant/ETF) - NEW 10/10
+        if SPECIAL_INSTRUMENTS_AVAILABLE and symbol:
+            special_result = self._check_special_instruments(
+                symbol, df, adjustments, adjustment_breakdown
+            )
+            if special_result.get("blocked"):
+                return special_result.get("reason")
+            if special_result.get("warnings"):
+                warnings.extend(special_result["warnings"])
+            if special_result.get("reasons"):
+                reasons.extend(special_result["reasons"])
+
         return None  # No blocking reason
+
+    def _check_special_instruments(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        adjustments: List[int],
+        adjustment_breakdown: List[Dict],
+    ) -> Dict:
+        """
+        Check special instruments (Warrant/ETF) and apply adjustments.
+
+        NEW 10/10 Implementation:
+        - Detect instrument type (Stock/Warrant/ETF)
+        - Apply confidence adjustments
+        - Add warnings for high-risk instruments
+
+        Returns:
+            Dict with blocked, reason, warnings, reasons
+        """
+        result = {"blocked": False, "reason": None, "warnings": [], "reasons": []}
+
+        try:
+            handler = get_special_instruments_handler()
+            instrument_type = handler.get_instrument_type(symbol)
+
+            if instrument_type == InstrumentType.WARRANT:
+                # Warrants are high risk - add warnings
+                result["warnings"].append("⚠️ WARRANT: High leverage instrument")
+                result["warnings"].append("⚠️ WARRANT: Check expiry date before trading")
+
+                # Apply confidence penalty for warrants
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "warrant",
+                    -15,
+                    "Warrant high-risk penalty",
+                )
+
+                # Get additional confidence adjustment
+                conf_adj, warnings = handler.get_confidence_adjustment(symbol, df)
+                if conf_adj != 0:
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "warrant_analysis",
+                        conf_adj,
+                        f"Warrant analysis: {warnings[0] if warnings else 'N/A'}",
+                    )
+                result["warnings"].extend(warnings)
+
+            elif instrument_type == InstrumentType.ETF:
+                # ETFs are lower risk - add positive note
+                result["reasons"].append("✅ ETF: Diversified exposure, lower volatility")
+
+                # Get confidence adjustment
+                conf_adj, warnings = handler.get_confidence_adjustment(symbol, df)
+                if conf_adj != 0:
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "etf_analysis",
+                        conf_adj,
+                        f"ETF analysis: {warnings[0] if warnings else 'Good'}",
+                    )
+                result["warnings"].extend(warnings)
+
+        except Exception as e:
+            logger.debug(f"Special instruments check error: {e}")
+
+        return result
 
     def _check_liquidity(self, df: pd.DataFrame, current_price: float) -> Dict:
         """Check liquidity with tiered thresholds."""
@@ -720,6 +816,20 @@ class ImprovedEntryLogic:
         # Reduce for warnings
         if len(warnings) > 3:
             multiplier *= 0.8
+
+        # NEW 10/10: Apply special instrument multiplier (Warrant/ETF)
+        if SPECIAL_INSTRUMENTS_AVAILABLE and self._current_symbol:
+            try:
+                handler = get_special_instruments_handler()
+                instrument_mult = handler.get_position_size_multiplier(self._current_symbol)
+                multiplier *= instrument_mult
+
+                if instrument_mult != 1.0:
+                    logger.debug(
+                        f"[{self._current_symbol}] Special instrument multiplier: {instrument_mult:.2f}"
+                    )
+            except Exception as e:
+                logger.debug(f"Special instrument multiplier error: {e}")
 
         return max(0.3, min(1.5, multiplier))
 

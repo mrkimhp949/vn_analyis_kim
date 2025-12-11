@@ -8,9 +8,10 @@ Centralized utilities for Vietnam stock market specific rules:
 - Exchange detection (HOSE/HNX/UPCOM)
 - Price limit calculation
 - ATO/ATC session detection
+- Holiday calendar (via vietnam_holidays.py)
 
 Author: Trading Bot Team
-Version: 1.0.0
+Version: 2.0.0 - Complete 10/10 Implementation
 """
 
 import logging
@@ -20,6 +21,36 @@ from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# IMPORT COMPLETE HOLIDAY CALENDAR (10/10 Implementation)
+# =============================================================================
+
+# Import complete holiday calendar from vietnam_holidays.py
+try:
+    from src.utils.vietnam_holidays import (
+        VietnamHolidayCalendar,
+        get_holiday_calendar,
+        is_vietnam_holiday as _is_vietnam_holiday_complete,
+        is_trading_day as _is_trading_day_complete,
+        get_next_trading_day,
+        get_previous_trading_day,
+        get_upcoming_holidays,
+        is_pre_holiday_trading_day,
+        days_until_tet,
+        get_tet_period,
+        count_trading_days_between,
+        get_trading_days_in_month,
+        get_all_holidays_for_year,
+        VIETNAM_TET_HOLIDAYS as TET_HOLIDAYS_COMPLETE,
+        VIETNAM_HUNG_KINGS_DAY as HUNG_KINGS_DAY_COMPLETE,
+    )
+
+    COMPLETE_HOLIDAY_CALENDAR_AVAILABLE = True
+    logger.debug("✅ Complete holiday calendar loaded from vietnam_holidays.py")
+except ImportError as e:
+    COMPLETE_HOLIDAY_CALENDAR_AVAILABLE = False
+    logger.warning(f"⚠️ Complete holiday calendar not available: {e}")
 
 # =============================================================================
 # CONSTANTS
@@ -240,12 +271,19 @@ def is_vietnam_public_holiday(dt: Optional[datetime] = None) -> Tuple[bool, str]
     """
     Check if date is a Vietnam public holiday with holiday name.
 
+    IMPROVED 10/10: Uses complete holiday calendar with substitute holidays.
+
     Args:
         dt: Datetime to check (None = today)
 
     Returns:
         Tuple of (is_holiday, holiday_name)
     """
+    # Use complete calendar if available (includes substitute holidays)
+    if COMPLETE_HOLIDAY_CALENDAR_AVAILABLE:
+        return _is_vietnam_holiday_complete(dt)
+
+    # Fallback to basic implementation
     if dt is None:
         try:
             import pytz
@@ -273,6 +311,38 @@ def is_vietnam_public_holiday(dt: Optional[datetime] = None) -> Tuple[bool, str]
             return True, "Giỗ Tổ Hùng Vương"
 
     return False, ""
+
+
+def is_trading_day_vn(dt: Optional[datetime] = None) -> Tuple[bool, str]:
+    """
+    Check if date is a trading day in Vietnam market.
+
+    IMPROVED 10/10: Uses complete holiday calendar.
+
+    Args:
+        dt: Datetime to check (None = today)
+
+    Returns:
+        Tuple of (is_trading_day, reason_if_not)
+    """
+    if COMPLETE_HOLIDAY_CALENDAR_AVAILABLE:
+        return _is_trading_day_complete(dt)
+
+    # Fallback implementation
+    if dt is None:
+        dt = datetime.now()
+
+    # Check weekend
+    if dt.weekday() >= 5:
+        day_name = "Saturday" if dt.weekday() == 5 else "Sunday"
+        return False, f"Weekend ({day_name})"
+
+    # Check holiday
+    is_holiday, holiday_name = is_vietnam_public_holiday(dt)
+    if is_holiday:
+        return False, f"Holiday: {holiday_name}"
+
+    return True, "Trading day"
 
 
 # Foreign ownership limits by sector (approximate)
