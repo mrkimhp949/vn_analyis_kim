@@ -33,38 +33,38 @@ class LiquidityTiers:
 
     large_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 3_000_000_000,  # LOWERED: 3B VND minimum (was 5B)
-            "min_volume": 100_000,  # LOWERED: 100K shares (was 150K)
+            "min_value": 1_500_000_000,  # OPTIMIZED v4.2: 1.5B VND (was 3B) - capture more VN30
+            "min_volume": 80_000,  # OPTIMIZED: 80K shares (was 100K) - better VN30 coverage
             "position_multiplier": 1.0,  # Full position size
-            "max_position_pct": 0.12,  # TIGHTENED: Max 12% of portfolio (was 15%)
+            "max_position_pct": 0.12,  # Max 12% of portfolio
         }
     )
 
     mid_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 1_000_000_000,  # LOWERED: 1B VND minimum (was 1.5B)
-            "min_volume": 40_000,  # LOWERED: 40K shares (was 60K)
+            "min_value": 500_000_000,  # OPTIMIZED v4.2: 500M VND (was 1B) - expand universe
+            "min_volume": 30_000,  # OPTIMIZED: 30K shares (was 40K)
             "position_multiplier": 0.85,  # 85% position size
-            "max_position_pct": 0.10,  # TIGHTENED: Max 10% of portfolio (was 12%)
+            "max_position_pct": 0.10,  # Max 10% of portfolio
         }
     )
 
     small_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 500_000_000,  # LOWERED: 500M VND minimum (was 800M)
-            "min_volume": 25_000,  # LOWERED: 25K shares (was 40K)
+            "min_value": 200_000_000,  # OPTIMIZED v4.2: 200M VND (was 500M) - more small caps
+            "min_volume": 15_000,  # OPTIMIZED: 15K shares (was 25K)
             "position_multiplier": 0.70,  # 70% position size (higher risk)
-            "max_position_pct": 0.07,  # TIGHTENED: Max 7% of portfolio (was 8%)
+            "max_position_pct": 0.07,  # Max 7% of portfolio
         }
     )
 
     # NEW: Micro cap tier for speculative plays
     micro_cap: Dict[str, float] = field(
         default_factory=lambda: {
-            "min_value": 300_000_000,  # LOWERED: 300M VND minimum (was 500M)
-            "min_volume": 15_000,  # LOWERED: 15K shares (was 25K)
-            "position_multiplier": 0.50,  # 50% position size (high risk)
-            "max_position_pct": 0.05,  # Max 5% of portfolio
+            "min_value": 100_000_000,  # OPTIMIZED v4.2: 100M VND (was 300M) - penny stocks
+            "min_volume": 10_000,  # OPTIMIZED: 10K shares (was 15K)
+            "position_multiplier": 0.40,  # 40% position size (very high risk)
+            "max_position_pct": 0.04,  # Max 4% of portfolio (tighter for safety)
         }
     )
 
@@ -127,19 +127,26 @@ class ExitConfig:
     )  # LOWERED: 6%, 12%, 20% (was 8%, 15%, 25%) - VN market cycles are shorter
 
     # Stop loss - BETA-ADJUSTED for different stock volatilities
-    # VN market has ±7% daily limit
-    default_stop_loss_pct: float = -6.0  # Base: -6% stop loss
-    stop_loss_atr_multiplier: float = 2.0  # IMPROVED: 2.0x ATR (was 1.5 - too tight)
-    stop_loss_min_pct: float = -7.0  # Max 7% risk (matches VN price limit)
-    stop_loss_max_pct: float = -4.0  # Min 4% risk (was 3% - too tight)
+    # VN market has ±7% daily limit - OPTIMIZED v4.2 for wider stops
+    default_stop_loss_pct: float = -5.0  # OPTIMIZED: Base -5% stop loss (was -6%, too tight)
+    stop_loss_atr_multiplier: float = 2.5  # OPTIMIZED: 2.5x ATR (was 2.0) - gives room to breathe
+    stop_loss_min_pct: float = -8.0  # OPTIMIZED: Max 8% risk (was 7%) - account for VN volatility
+    stop_loss_max_pct: float = -3.5  # OPTIMIZED: Min 3.5% risk (was 4%) - tighter for low beta
 
-    # NEW: Beta-adjusted stop loss thresholds
-    # Higher beta stocks need wider stops to avoid premature exit
-    high_beta_stop_loss_pct: float = -8.0  # 8% for beta > 1.2
-    low_beta_stop_loss_pct: float = -5.0  # 5% for beta < 0.8
+    # OPTIMIZED v4.2: Beta-adjusted stop loss thresholds
+    # Higher beta stocks need wider stops to avoid premature exit in VN market
+    high_beta_stop_loss_pct: float = -10.0  # OPTIMIZED: 10% for beta > 1.2 (was 8% - too tight)
+    low_beta_stop_loss_pct: float = -4.0  # OPTIMIZED: 4% for beta < 0.8 (was 5%)
+    very_high_beta_stop_loss_pct: float = -12.0  # NEW: 12% for beta > 1.5 (highly volatile)
     high_beta_threshold: float = 1.2  # Beta threshold for wider stop
+    very_high_beta_threshold: float = 1.5  # NEW: Threshold for very wide stop
     low_beta_threshold: float = 0.8  # Beta threshold for tighter stop
     use_beta_adjusted_stops: bool = True  # Enable beta-adjusted stops
+
+    # NEW v4.2: ATR-based dynamic stop loss
+    use_atr_dynamic_stop: bool = True  # Enable ATR-based dynamic stops
+    atr_stop_min_periods: int = 14  # Minimum ATR periods for calculation
+    atr_stop_buffer_pct: float = 0.005  # 0.5% buffer added to ATR stop
 
     # NEW: Breakeven stop configuration
     enable_breakeven_stop: bool = True  # Move stop to breakeven after 1R

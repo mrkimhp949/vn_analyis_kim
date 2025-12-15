@@ -118,6 +118,18 @@ try:
 except ImportError:
     pass
 
+# NEW v9.1: Order Book Integration for Entry Timing
+ORDER_BOOK_AVAILABLE = False
+try:
+    from src.strategies.order_book_integration import (
+        get_order_book_integration,
+        OrderBookIntegration,
+    )
+
+    ORDER_BOOK_AVAILABLE = True
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 

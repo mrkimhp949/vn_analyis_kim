@@ -2,18 +2,19 @@
 """
 Backtesting Engine - Test Trading Strategies with Historical Data
 
-IMPROVEMENTS V2:
+IMPROVEMENTS V3:
 - Vietnam lot size (100 shares) and tick size enforcement
 - Synchronized transaction costs from constants.py
 - Partial exit support
 - Circuit breaker and risk guards
 - Position size multiplier support
+- DYNAMIC SLIPPAGE based on symbol liquidity and order size (NEW v3)
 """
 
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -24,9 +25,24 @@ from src.config.constants import (
     TOTAL_TRANSACTION_COST,
     VIETNAM_LOT_SIZE,
     VIETNAM_TICK_SIZE,
+    VN_SLIPPAGE_VN30,
+    VN_SLIPPAGE_LIQUID,
+    VN_SLIPPAGE_MEDIUM,
+    VN_SLIPPAGE_ILLIQUID,
+    get_dynamic_slippage,
+    get_order_impact_slippage,
 )
 
 logger = logging.getLogger(__name__)
+
+# Try to import VN30 fetcher for dynamic VN30 check
+VN30_DYNAMIC_AVAILABLE = False
+try:
+    from src.utils.vietnam_market import is_vn30_dynamic, get_vn30_symbols_dynamic
+
+    VN30_DYNAMIC_AVAILABLE = True
+except ImportError:
+    pass
 
 
 def round_to_lot_size(shares: int, lot_size: int = VIETNAM_LOT_SIZE) -> int:
@@ -46,7 +62,7 @@ class BacktestConfig:
     initial_capital: float = 100_000_000  # 100M VND
     # Use centralized transaction costs from constants.py
     commission_rate: float = DEFAULT_COMMISSION_RATE  # 0.35% (brokerage + tax + fees)
-    slippage: float = DEFAULT_SLIPPAGE  # 0.1% price slippage
+    slippage: float = DEFAULT_SLIPPAGE  # 0.1% price slippage (fallback)
     max_positions: int = 5  # Max concurrent positions
     position_size_pct: float = 0.20  # 20% per position (default, can be overridden by multiplier)
 
@@ -62,6 +78,76 @@ class BacktestConfig:
     # Circuit breaker settings
     max_consecutive_losses: int = 3  # Block trading after N consecutive losses
     daily_loss_circuit_breaker: bool = True  # Enable daily loss circuit breaker
+
+    # IMPROVED v3: Dynamic slippage settings
+    use_dynamic_slippage: bool = True  # Use dynamic slippage based on liquidity
+    slippage_vn30: float = VN_SLIPPAGE_VN30  # 0.3% for VN30 blue chips
+    slippage_liquid: float = VN_SLIPPAGE_LIQUID  # 0.4% for liquid stocks
+    slippage_medium: float = VN_SLIPPAGE_MEDIUM  # 0.6% for medium liquidity
+    slippage_illiquid: float = VN_SLIPPAGE_ILLIQUID  # 1.0% for illiquid stocks
+
+
+def calculate_dynamic_slippage(
+    symbol: str,
+    order_value: float,
+    avg_daily_volume: float = 0,
+    avg_price: float = 0,
+    config: Optional[BacktestConfig] = None,
+) -> float:
+    """
+    Calculate dynamic slippage based on symbol liquidity and order size.
+
+    IMPROVED v3: Matches production slippage calculation.
+
+    Args:
+        symbol: Stock symbol
+        order_value: Order value in VND
+        avg_daily_volume: Average daily volume in shares
+        avg_price: Average price per share
+        config: BacktestConfig (optional)
+
+    Returns:
+        Slippage rate (0.003 - 0.010)
+    """
+    if config is None:
+        config = BacktestConfig()
+
+    if not config.use_dynamic_slippage:
+        return config.slippage
+
+    # Check if VN30 using dynamic fetcher
+    is_vn30 = False
+    if VN30_DYNAMIC_AVAILABLE:
+        try:
+            is_vn30 = is_vn30_dynamic(symbol)
+        except Exception:
+            pass
+
+    # Calculate liquidity value if possible
+    liquidity_value = avg_daily_volume * avg_price if avg_daily_volume > 0 and avg_price > 0 else 0
+
+    # Use the centralized slippage calculation from constants.py
+    if liquidity_value > 0:
+        try:
+            return get_order_impact_slippage(
+                symbol=symbol,
+                order_value=order_value,
+                avg_daily_volume=avg_daily_volume,
+                avg_price=avg_price,
+                is_market_order=True,
+            )
+        except Exception:
+            pass
+
+    # Fallback: tiered slippage
+    if is_vn30:
+        return config.slippage_vn30  # 0.3%
+    elif liquidity_value > 3_000_000_000:  # > 3B VND
+        return config.slippage_liquid  # 0.4%
+    elif liquidity_value > 1_000_000_000:  # 1-3B VND
+        return config.slippage_medium  # 0.6%
+    else:
+        return config.slippage_illiquid  # 1.0%
 
 
 @dataclass
@@ -232,6 +318,7 @@ class BacktestEngine:
     Features:
     - Historical data simulation
     - Realistic transaction costs (commission + slippage)
+    - DYNAMIC SLIPPAGE based on symbol liquidity (IMPROVED v3)
     - Position sizing and risk management
     - Performance metrics calculation
     - Trade history tracking
@@ -264,11 +351,58 @@ class BacktestEngine:
         # Risk tracking
         self.total_portfolio_risk: float = 0.0
 
+        # IMPROVED v3: Liquidity data cache for dynamic slippage
+        self._liquidity_cache: Dict[str, Dict] = {}
+
+        slippage_mode = "DYNAMIC" if self.config.use_dynamic_slippage else "FIXED"
         logger.info(f"Backtesting engine initialized with {self.capital:,.0f} VND")
         logger.info(
-            f"  Transaction cost: {self.config.commission_rate*100:.2f}% + {self.config.slippage*100:.2f}% slippage"
+            f"  Transaction cost: {self.config.commission_rate*100:.2f}% + {slippage_mode} slippage"
         )
         logger.info(f"  Lot size: {self.config.lot_size}, Tick size: {self.config.tick_size} VND")
+
+    def set_liquidity_data(self, symbol: str, avg_daily_volume: float, avg_price: float):
+        """
+        Set liquidity data for a symbol to enable dynamic slippage calculation.
+
+        IMPROVED v3: Call this before trading to get accurate slippage.
+
+        Args:
+            symbol: Stock symbol
+            avg_daily_volume: Average daily trading volume in shares
+            avg_price: Average price per share in VND
+        """
+        self._liquidity_cache[symbol] = {
+            "avg_daily_volume": avg_daily_volume,
+            "avg_price": avg_price,
+            "liquidity_value": avg_daily_volume * avg_price,
+        }
+
+    def _get_dynamic_slippage(self, symbol: str, order_value: float) -> float:
+        """
+        Get dynamic slippage for a symbol based on liquidity.
+
+        Args:
+            symbol: Stock symbol
+            order_value: Order value in VND
+
+        Returns:
+            Slippage rate
+        """
+        if not self.config.use_dynamic_slippage:
+            return self.config.slippage
+
+        liquidity = self._liquidity_cache.get(symbol, {})
+        avg_daily_volume = liquidity.get("avg_daily_volume", 0)
+        avg_price = liquidity.get("avg_price", 0)
+
+        return calculate_dynamic_slippage(
+            symbol=symbol,
+            order_value=order_value,
+            avg_daily_volume=avg_daily_volume,
+            avg_price=avg_price,
+            config=self.config,
+        )
 
     def can_open_position(self, symbol: str, required_capital: float) -> bool:
         """
@@ -423,7 +557,7 @@ class BacktestEngine:
     def close_position(
         self, symbol: str, date: datetime, exit_price: float, reason: str = ""
     ) -> Optional[Trade]:
-        """Close an existing position (full exit)"""
+        """Close an existing position (full exit) with DYNAMIC SLIPPAGE"""
         if symbol not in self.positions:
             logger.warning(f"Cannot close {symbol}: No open position")
             return None
@@ -433,13 +567,17 @@ class BacktestEngine:
         # Round exit price to tick size
         exit_price = round_to_tick_size(exit_price, self.config.tick_size)
 
-        # Close the trade
+        # IMPROVED v3: Calculate dynamic slippage based on order size
+        order_value = trade.shares * exit_price
+        dynamic_slippage = self._get_dynamic_slippage(symbol, order_value)
+
+        # Close the trade with dynamic slippage
         trade.close_trade(
             exit_date=date,
             exit_price=exit_price,
             exit_reason=reason,
             commission_rate=self.config.commission_rate,
-            slippage=self.config.slippage,
+            slippage=dynamic_slippage,
         )
 
         # Update capital (for remaining shares after any partial exits)
@@ -515,20 +653,24 @@ class BacktestEngine:
             result = self.close_position(symbol, date, exit_price, reason)
             return result.pnl if result else None
 
-        # Execute partial close
+        # IMPROVED v3: Calculate dynamic slippage for partial exit
+        order_value = exit_shares * exit_price
+        dynamic_slippage = self._get_dynamic_slippage(symbol, order_value)
+
+        # Execute partial close with dynamic slippage
         partial_pnl = trade.partial_close(
             exit_date=date,
             exit_price=exit_price,
             exit_shares=exit_shares,
             exit_reason=reason,
             commission_rate=self.config.commission_rate,
-            slippage=self.config.slippage,
+            slippage=dynamic_slippage,
         )
 
         # Update capital with proceeds from partial exit
         exit_value = exit_shares * exit_price
         self.capital += exit_value - (
-            exit_shares * exit_price * (self.config.commission_rate + self.config.slippage)
+            exit_shares * exit_price * (self.config.commission_rate + dynamic_slippage)
         )
 
         # Update daily P&L
