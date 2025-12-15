@@ -661,6 +661,5 @@ def start_margin_monitoring(margin_manager=None):
 
 def stop_margin_monitoring():
     """Stop margin call monitoring."""
-    global _monitor_instance
     if _monitor_instance:
         _monitor_instance.stop()
