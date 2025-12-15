@@ -191,7 +191,7 @@ class ImprovedEntryLogic:
         use_tiered_liquidity: bool = True,
         use_price_action_filter: bool = False,
         use_sector_strength_filter: bool = True,
-        use_market_breadth_filter: bool = False,
+        use_market_breadth_filter: bool = True,  # ENABLED: Important for regime confirmation
         use_monthly_timeframe: bool = False,
         soft_filter_mode: bool = True,
         max_warnings_allowed: int = 5,
@@ -596,10 +596,37 @@ class ImprovedEntryLogic:
                 adjustments, adjustment_breakdown, "resistance", -10, "Near resistance"
             )
 
-        # 9. Sector Strength (Optional)
+        # 9. Sector Strength (Optional) - Enhanced with Rotation Signals
         if self.use_sector_strength_filter:
             sector = self._technical_checker.check_sector_strength(df, market_regime, symbol)
-            if sector["is_leading"]:
+
+            # Use rotation_bonus if available (from SectorRotationAnalyzer)
+            rotation_bonus = sector.get("rotation_bonus", 0)
+
+            if sector.get("in_overweight_sector"):
+                reasons.append(f"✅ Overweight sector: {sector['sector_id']} (rotation)")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector",
+                    max(10, rotation_bonus),
+                    f"Sector rotation overweight ({sector.get('rotation_phase', 'N/A')})",
+                )
+                # Note top picks if available
+                if sector.get("top_sector_picks"):
+                    logger.debug(f"Sector top picks: {sector['top_sector_picks']}")
+
+            elif sector.get("in_underweight_sector"):
+                warnings.append(f"⚠️ Underweight sector: {sector['sector_id']} (rotation)")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector",
+                    min(-10, rotation_bonus),
+                    f"Sector rotation underweight ({sector.get('rotation_phase', 'N/A')})",
+                )
+
+            elif sector["is_leading"]:
                 reasons.append(f"✅ Leading sector: {sector['sector_id']}")
                 self._add_adjustment(
                     adjustments, adjustment_breakdown, "sector", 10, "Sector leader"

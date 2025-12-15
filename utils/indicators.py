@@ -107,9 +107,13 @@ class StopLossCalculator:
         atr_multiplier: float = 2.0,
         min_stop_pct: float = 0.03,  # Minimum 3% stop
         max_stop_pct: float = 0.10,  # Maximum 10% stop
+        market_regime: Optional[str] = None,  # NEW: Market regime for adaptive stops
+        beta: Optional[float] = None,  # NEW: Stock beta for volatility adjustment
     ) -> Tuple[float, str]:
         """
-        Calculate stop loss with robust validation
+        Calculate stop loss with robust validation and adaptive adjustments.
+
+        IMPROVED v5.0: Adaptive stop loss based on market regime and beta.
 
         Args:
             entry_price: Entry price
@@ -118,6 +122,8 @@ class StopLossCalculator:
             atr_multiplier: ATR multiplier for stop
             min_stop_pct: Minimum stop loss percentage
             max_stop_pct: Maximum stop loss percentage
+            market_regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
+            beta: Stock beta relative to market (optional)
 
         Returns:
             (stop_loss, reason) tuple
@@ -129,8 +135,40 @@ class StopLossCalculator:
         if atr <= 0:
             raise ValueError(f"Invalid ATR: {atr}")
 
-        # Calculate ATR-based stop
-        atr_stop = entry_price - (atr * atr_multiplier)
+        # NEW v5.0: Adaptive ATR multiplier based on market regime
+        adaptive_multiplier = atr_multiplier
+        regime_reason = ""
+
+        if market_regime:
+            if market_regime == "BULL":
+                # Bull market: can use wider stops (let winners run)
+                adaptive_multiplier = atr_multiplier * 1.1  # 10% wider
+                regime_reason = " (Bull: wider stop)"
+            elif market_regime == "BEAR":
+                # Bear market: use tighter stops (quick exits)
+                adaptive_multiplier = atr_multiplier * 0.8  # 20% tighter
+                regime_reason = " (Bear: tighter stop)"
+            elif market_regime == "HIGH_VOLATILITY":
+                # High volatility: wider stops to avoid whipsaws
+                adaptive_multiplier = atr_multiplier * 1.25  # 25% wider
+                regime_reason = " (High vol: wider stop)"
+            elif market_regime == "SIDEWAYS":
+                # Sideways: standard stops
+                adaptive_multiplier = atr_multiplier
+                regime_reason = " (Sideways: standard)"
+
+        # NEW v5.0: Beta-adjusted stops
+        beta_reason = ""
+        if beta is not None and beta > 0:
+            if beta > 1.3:  # High beta - more volatile
+                adaptive_multiplier *= 1.15  # 15% wider
+                beta_reason = f" (Beta {beta:.1f}: wider)"
+            elif beta < 0.7:  # Low beta - less volatile
+                adaptive_multiplier *= 0.85  # 15% tighter
+                beta_reason = f" (Beta {beta:.1f}: tighter)"
+
+        # Calculate ATR-based stop with adaptive multiplier
+        atr_stop = entry_price - (atr * adaptive_multiplier)
 
         # Validate support level
         valid_support = None
@@ -150,25 +188,39 @@ class StopLossCalculator:
             stop_loss = atr_stop
             reason = "ATR-based"
 
+        # Append regime and beta info to reason
+        reason += regime_reason + beta_reason
+
+        # NEW v5.0: Adaptive min/max stops based on regime
+        effective_min_stop_pct = min_stop_pct
+        effective_max_stop_pct = max_stop_pct
+
+        if market_regime == "BEAR":
+            effective_min_stop_pct = min_stop_pct * 0.8  # Tighter min in bear
+            effective_max_stop_pct = max_stop_pct * 0.8  # Tighter max in bear
+        elif market_regime == "HIGH_VOLATILITY":
+            effective_min_stop_pct = min_stop_pct * 1.2  # Wider min in high vol
+            effective_max_stop_pct = max_stop_pct * 1.3  # Wider max in high vol
+
         # Enforce minimum stop distance
-        min_stop = entry_price * (1 - min_stop_pct)
+        min_stop = entry_price * (1 - effective_min_stop_pct)
         if stop_loss > min_stop:
             logger.warning(
                 f"Stop loss {stop_loss:.0f} too close to entry {entry_price:.0f}, "
-                f"using minimum {min_stop_pct*100}%"
+                f"using minimum {effective_min_stop_pct*100:.1f}%"
             )
             stop_loss = min_stop
-            reason = f"Minimum {min_stop_pct*100}% stop"
+            reason = f"Minimum {effective_min_stop_pct*100:.1f}% stop"
 
         # Enforce maximum stop distance
-        max_stop = entry_price * (1 - max_stop_pct)
+        max_stop = entry_price * (1 - effective_max_stop_pct)
         if stop_loss < max_stop:
             logger.warning(
                 f"Stop loss {stop_loss:.0f} too far from entry {entry_price:.0f}, "
-                f"using maximum {max_stop_pct*100}%"
+                f"using maximum {effective_max_stop_pct*100:.1f}%"
             )
             stop_loss = max_stop
-            reason = f"Maximum {max_stop_pct*100}% stop"
+            reason = f"Maximum {effective_max_stop_pct*100:.1f}% stop"
 
         # Final validation
         if stop_loss <= 0:
@@ -178,6 +230,90 @@ class StopLossCalculator:
             raise ValueError(f"Stop loss {stop_loss:.0f} >= entry_price {entry_price:.0f}")
 
         return float(stop_loss), reason
+
+    @staticmethod
+    def calculate_adaptive_trailing_stop(
+        entry_price: float,
+        current_price: float,
+        highest_price: float,
+        atr: float,
+        profit_pct: float,
+        market_regime: Optional[str] = None,
+    ) -> Tuple[float, str]:
+        """
+        Calculate adaptive trailing stop based on profit level and market regime.
+
+        Trailing stop logic:
+        - Base trailing: ATR-based distance
+        - Profit < 5%: No trailing (use initial stop)
+        - Profit 5-10%: Trail at 3x ATR
+        - Profit 10-20%: Trail at 2x ATR
+        - Profit > 20%: Trail at 1.5x ATR (tight)
+
+        Market regime adjustments:
+        - BULL: Looser trailing to capture more upside
+        - BEAR: Tighter trailing to protect gains
+        - HIGH_VOL: Wider trailing to avoid whipsaws
+
+        Args:
+            entry_price: Original entry price
+            current_price: Current price
+            highest_price: Highest price since entry
+            atr: Current ATR
+            profit_pct: Current profit percentage (0.10 = 10%)
+            market_regime: Market regime for adaptive adjustment
+
+        Returns:
+            (trailing_stop, reason) tuple
+        """
+        # Base trailing distance by profit level
+        if profit_pct < 0.05:
+            # Not enough profit for trailing
+            return entry_price * 0.95, "No trailing (profit < 5%)"
+
+        elif profit_pct < 0.10:
+            # Small profit: loose trailing
+            atr_mult = 3.0
+            reason = "Trailing 3x ATR (5-10% profit)"
+
+        elif profit_pct < 0.20:
+            # Moderate profit: medium trailing
+            atr_mult = 2.0
+            reason = "Trailing 2x ATR (10-20% profit)"
+
+        else:
+            # Large profit: tight trailing
+            atr_mult = 1.5
+            reason = "Trailing 1.5x ATR (>20% profit)"
+
+        # Regime adjustment
+        if market_regime:
+            if market_regime == "BULL":
+                atr_mult *= 1.2  # Looser in bull
+                reason += " [Bull: wider]"
+            elif market_regime == "BEAR":
+                atr_mult *= 0.8  # Tighter in bear
+                reason += " [Bear: tighter]"
+            elif market_regime == "HIGH_VOLATILITY":
+                atr_mult *= 1.3  # Wider in high vol
+                reason += " [High vol: wider]"
+
+        # Calculate trailing stop from highest price
+        trailing_stop = highest_price - (atr * atr_mult)
+
+        # Ensure stop is above entry (protect initial capital)
+        breakeven_stop = entry_price * 1.01  # Slightly above entry
+        if profit_pct >= 0.10:
+            trailing_stop = max(trailing_stop, breakeven_stop)
+            if trailing_stop == breakeven_stop:
+                reason += " [Min: breakeven]"
+
+        # Ensure stop is below current price
+        if trailing_stop >= current_price:
+            trailing_stop = current_price * 0.98  # 2% below current
+            reason = "Safety stop (trailing too close)"
+
+        return float(trailing_stop), reason
 
     @staticmethod
     def calculate_take_profit_targets(

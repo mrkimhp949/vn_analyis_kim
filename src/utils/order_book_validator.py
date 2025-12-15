@@ -557,3 +557,308 @@ def estimate_market_impact(
     impact = volatility * (participation_rate**0.5) * 100
 
     return min(7.0, impact)  # Cap at 7% (VN price limit)
+
+
+class AdvancedSlippageEstimator:
+    """
+    Advanced slippage estimator using order book depth analysis.
+
+    This class provides more accurate slippage estimation by combining:
+    - Order book depth analysis
+    - Market impact models
+    - Urgency adjustments
+    - Time of day factors (Vietnam trading sessions)
+
+    Usage:
+        estimator = AdvancedSlippageEstimator()
+
+        # With order book
+        slippage = estimator.estimate_slippage(
+            symbol="VNM",
+            shares=10000,
+            side="BUY",
+            order_book=order_book,
+        )
+
+        # Without order book (uses statistical model)
+        slippage = estimator.estimate_slippage(
+            symbol="VNM",
+            shares=10000,
+            side="BUY",
+            avg_daily_volume=500000,
+            avg_spread=0.15,
+        )
+    """
+
+    # Session-based slippage multipliers (Vietnam market)
+    SESSION_MULTIPLIERS = {
+        "ATO": 1.5,  # High volatility at open
+        "AM_SESSION": 1.0,  # Normal morning session
+        "LUNCH": 0.8,  # Lower activity during lunch
+        "PM_SESSION": 1.0,  # Normal afternoon session
+        "ATC": 1.3,  # Higher volatility at close
+    }
+
+    # Urgency-based slippage adjustments
+    URGENCY_MULTIPLIERS = {
+        "low": 0.7,  # Patient execution
+        "normal": 1.0,  # Standard execution
+        "high": 1.3,  # Need to execute quickly
+        "immediate": 1.6,  # Must execute now
+    }
+
+    def __init__(
+        self,
+        base_slippage_bps: float = 10.0,  # Base slippage in basis points
+        use_order_book: bool = True,
+    ):
+        """
+        Initialize Advanced Slippage Estimator.
+
+        Args:
+            base_slippage_bps: Base slippage in basis points (default 10 = 0.1%)
+            use_order_book: Whether to use order book depth when available
+        """
+        self.base_slippage_bps = base_slippage_bps
+        self.use_order_book = use_order_book
+        self._order_book_validator = OrderBookValidator()
+
+    def get_current_session(self) -> str:
+        """Determine current trading session based on Vietnam time."""
+        from datetime import datetime
+        import pytz
+
+        vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+        now = datetime.now(vn_tz).time()
+
+        # Vietnam trading hours
+        if time(9, 0) <= now < time(9, 15):
+            return "ATO"
+        elif time(9, 15) <= now < time(11, 30):
+            return "AM_SESSION"
+        elif time(11, 30) <= now < time(13, 0):
+            return "LUNCH"
+        elif time(13, 0) <= now < time(14, 30):
+            return "PM_SESSION"
+        elif time(14, 30) <= now < time(15, 0):
+            return "ATC"
+        else:
+            return "CLOSED"
+
+    def estimate_slippage(
+        self,
+        symbol: str,
+        shares: int,
+        side: str,
+        order_book: Optional[OrderBook] = None,
+        avg_daily_volume: Optional[float] = None,
+        avg_spread: Optional[float] = None,  # Spread as percentage
+        urgency: str = "normal",
+        volatility: Optional[float] = None,  # Current volatility if known
+    ) -> Dict:
+        """
+        Estimate slippage for an order.
+
+        Args:
+            symbol: Stock symbol
+            shares: Number of shares to trade
+            side: "BUY" or "SELL"
+            order_book: Order book snapshot (optional but recommended)
+            avg_daily_volume: Average daily volume (optional)
+            avg_spread: Average bid-ask spread as percentage (optional)
+            urgency: Execution urgency ("low", "normal", "high", "immediate")
+            volatility: Current volatility (optional)
+
+        Returns:
+            Dict with slippage estimates and breakdown
+        """
+        result = {
+            "symbol": symbol,
+            "shares": shares,
+            "side": side,
+            "estimated_slippage_pct": 0.0,
+            "estimated_slippage_bps": 0.0,
+            "breakdown": {},
+            "confidence": "low",
+            "recommendations": [],
+        }
+
+        # Get session multiplier
+        session = self.get_current_session()
+        session_mult = self.SESSION_MULTIPLIERS.get(session, 1.0)
+
+        # Get urgency multiplier
+        urgency_mult = self.URGENCY_MULTIPLIERS.get(urgency, 1.0)
+
+        # Start with base slippage
+        total_slippage_bps = self.base_slippage_bps
+        breakdown = {"base": self.base_slippage_bps}
+
+        # Method 1: Order book based estimation (most accurate)
+        if order_book is not None and self.use_order_book:
+            validation = self._order_book_validator.validate_order(order_book, shares, side)
+
+            # Add order book slippage
+            ob_slippage_bps = validation.estimated_slippage_pct * 100  # Convert to bps
+            breakdown["order_book"] = ob_slippage_bps
+            total_slippage_bps += ob_slippage_bps
+
+            # Add market impact
+            breakdown["market_impact"] = validation.market_impact_pct * 100
+            total_slippage_bps += validation.market_impact_pct * 100
+
+            result["confidence"] = "high"
+            result["order_book_analysis"] = {
+                "impact_level": validation.impact_level.value,
+                "can_execute": validation.can_execute,
+                "warnings": validation.warnings,
+            }
+
+            if validation.split_orders:
+                result["recommendations"].append(
+                    f"Consider splitting into {len(validation.split_orders)} orders"
+                )
+
+        # Method 2: Statistical model (when no order book)
+        elif avg_daily_volume is not None:
+            # Participation rate based slippage
+            participation_rate = shares / avg_daily_volume if avg_daily_volume > 0 else 0
+
+            # Square-root impact model
+            impact_bps = 50 * (participation_rate**0.5)  # 50 bps for 1% participation
+            breakdown["participation_impact"] = impact_bps
+            total_slippage_bps += impact_bps
+
+            result["confidence"] = "medium"
+
+            if participation_rate > 0.01:
+                result["recommendations"].append(
+                    f"High participation rate ({participation_rate:.1%}) - consider splitting"
+                )
+
+        # Add spread component
+        if avg_spread is not None:
+            # Half the spread is typically paid
+            spread_bps = avg_spread * 50  # Convert % to bps and take half
+            breakdown["spread"] = spread_bps
+            total_slippage_bps += spread_bps
+
+        # Add volatility component
+        if volatility is not None:
+            vol_bps = volatility * 100 * 0.3  # 30% of daily volatility as slippage risk
+            breakdown["volatility"] = vol_bps
+            total_slippage_bps += vol_bps
+
+        # Apply multipliers
+        breakdown["session_adjustment"] = total_slippage_bps * (session_mult - 1)
+        breakdown["urgency_adjustment"] = total_slippage_bps * (urgency_mult - 1)
+
+        total_slippage_bps *= session_mult * urgency_mult
+
+        # Cap at reasonable level (500 bps = 5%)
+        total_slippage_bps = min(500, total_slippage_bps)
+
+        result["estimated_slippage_bps"] = round(total_slippage_bps, 2)
+        result["estimated_slippage_pct"] = round(total_slippage_bps / 100, 4)
+        result["breakdown"] = breakdown
+        result["session"] = session
+        result["multipliers"] = {
+            "session": session_mult,
+            "urgency": urgency_mult,
+        }
+
+        # Add recommendations based on slippage level
+        if total_slippage_bps > 100:  # > 1%
+            result["recommendations"].append("⚠️ High slippage expected - use limit orders")
+        if total_slippage_bps > 200:  # > 2%
+            result["recommendations"].append("🔴 Very high slippage - consider reducing order size")
+
+        return result
+
+    def get_optimal_execution_strategy(
+        self,
+        symbol: str,
+        shares: int,
+        side: str,
+        order_book: Optional[OrderBook] = None,
+        avg_daily_volume: Optional[float] = None,
+        max_slippage_pct: float = 0.5,
+    ) -> Dict:
+        """
+        Get optimal execution strategy to minimize slippage.
+
+        Returns:
+            Dict with execution strategy recommendations
+        """
+        # Estimate slippage with different approaches
+        estimates = {}
+
+        # Single order
+        single = self.estimate_slippage(symbol, shares, side, order_book, avg_daily_volume)
+        estimates["single_order"] = single["estimated_slippage_pct"]
+
+        # Calculate participation rate
+        participation_rate = 0.0
+        if avg_daily_volume and avg_daily_volume > 0:
+            participation_rate = shares / avg_daily_volume
+
+        # Determine optimal strategy
+        if participation_rate > 0.05:  # > 5% of daily volume
+            strategy = "VWAP"
+            reason = "Order size > 5% of ADV - use VWAP over full session"
+            num_splits = max(5, int(participation_rate * 20))
+        elif participation_rate > 0.02:  # 2-5%
+            strategy = "TWAP"
+            reason = "Order size 2-5% of ADV - use TWAP with 3-5 splits"
+            num_splits = 4
+        elif participation_rate > 0.01:  # 1-2%
+            strategy = "SPLIT"
+            reason = "Order size 1-2% of ADV - split into 2-3 orders"
+            num_splits = 2
+        else:
+            strategy = "SINGLE"
+            reason = "Order size < 1% of ADV - single market order OK"
+            num_splits = 1
+
+        # Calculate split orders
+        split_size = shares // num_splits
+        split_size = max(100, (split_size // 100) * 100)  # Round to lot size
+
+        splits = []
+        remaining = shares
+        for i in range(num_splits):
+            size = min(remaining, split_size)
+            if i == num_splits - 1:
+                size = remaining  # Last split gets remainder
+
+            size = (size // 100) * 100  # Round to lot
+            if size > 0:
+                splits.append(
+                    {
+                        "order_num": i + 1,
+                        "shares": size,
+                        "delay_minutes": i * 5 if strategy == "TWAP" else i * 15,
+                    }
+                )
+                remaining -= size
+
+        # Estimate slippage reduction
+        split_slippage = single["estimated_slippage_pct"] * (0.7 ** (num_splits - 1))
+
+        return {
+            "strategy": strategy,
+            "reason": reason,
+            "original_slippage_pct": single["estimated_slippage_pct"],
+            "estimated_reduced_slippage_pct": round(split_slippage, 4),
+            "slippage_reduction_pct": round(
+                (
+                    (1 - split_slippage / single["estimated_slippage_pct"]) * 100
+                    if single["estimated_slippage_pct"] > 0
+                    else 0
+                ),
+                1,
+            ),
+            "num_splits": num_splits,
+            "splits": splits,
+            "participation_rate": round(participation_rate * 100, 2),
+        }

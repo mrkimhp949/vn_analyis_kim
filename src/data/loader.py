@@ -109,24 +109,40 @@ def load_data(
 
     df = df.sort_values("time").reset_index(drop=True)
 
-    # Quality check - disabled (module not available)
-    # try:
-    #     from src.data.quality import get_quality_checker
-    #     quality_checker = get_quality_checker()
-    #     quality_results = quality_checker.validate(df, symbol)
-    #
-    #     if not quality_results["valid"]:
-    #         if quality_results["issues"]:
-    #             logger.warning(
-    #                 f"Data quality issues for {symbol}: {quality_results['issues']}"
-    #             )
-    #             df = quality_checker.clean_data(df, method="forward_fill")
-    #         if quality_results["warnings"]:
-    #             logger.info(
-    #                 f"Data quality warnings for {symbol}: {quality_results['warnings']}"
-    #             )
-    # except Exception:
-    #     logger.warning("Data quality check failed for {symbol}")
+    # Quality check - validate and clean data
+    try:
+        from src.data.quality import get_quality_checker
+
+        quality_checker = get_quality_checker()
+        quality_report = quality_checker.validate(df, symbol)
+
+        if not quality_report.valid:
+            # Log critical issues
+            critical_issues = [i for i in quality_report.issues if i.severity == "critical"]
+            if critical_issues:
+                for issue in critical_issues:
+                    logger.warning(f"⚠️ Data quality issue for {symbol}: {issue.description}")
+                # Return empty for critical issues
+                return pd.DataFrame()
+
+            # Clean data for non-critical issues
+            error_issues = [i for i in quality_report.issues if i.severity == "error"]
+            if error_issues:
+                logger.info(f"🔧 Cleaning {len(error_issues)} data issues for {symbol}")
+                df = quality_checker.clean_data(df, method="forward_fill")
+
+        # Log warnings (non-blocking)
+        if quality_report.warnings:
+            logger.debug(f"Data quality warnings for {symbol}: {quality_report.warnings[:3]}")
+
+        # Log quality score for monitoring
+        if quality_report.score < 70:
+            logger.info(f"📊 {symbol} data quality score: {quality_report.score:.0f}/100")
+
+    except ImportError:
+        logger.debug("Quality module not available, skipping validation")
+    except Exception as e:
+        logger.debug(f"Data quality check skipped for {symbol}: {e}")
 
     if len(df) < required_bars:
         logger.warning(

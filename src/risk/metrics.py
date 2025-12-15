@@ -505,6 +505,414 @@ def summarize_exposure(exposure: Dict[str, float], top_n: int = 5) -> List[str]:
     return [f"{sector}: {pct:.1f}%" for sector, pct in sorted_items[:top_n]]
 
 
+class DynamicCorrelationMonitor:
+    """
+    Monitor portfolio correlation dynamically with regime detection and correlation breakdown alerts.
+
+    Features:
+    - Rolling correlation to detect correlation shifts
+    - Regime-based correlation (crisis periods have higher correlation)
+    - Correlation breakdown alerts when relationships change
+    - Real-time risk scoring with Vietnam market adjustments
+    """
+
+    # Vietnam-specific: banking sector dominates VNINDEX, often shows high correlation
+    SECTOR_CORRELATION_ADJUSTMENTS = {
+        "BANKING": 0.85,  # Banks are highly correlated in VN market
+        "SECURITIES": 0.80,  # Securities firms follow market closely
+        "REAL_ESTATE": 0.75,  # RE sector shows sector-wide movements
+        "TECHNOLOGY": 0.60,  # Tech shows lower correlation
+        "FOOD_BEVERAGE": 0.55,  # Defensive, lower correlation
+        "RETAIL": 0.65,
+        "UTILITIES": 0.50,  # Most defensive
+    }
+
+    def __init__(
+        self,
+        lookback_short: int = 20,
+        lookback_long: int = 60,
+        correlation_threshold: float = 0.7,
+        breakdown_threshold: float = 0.3,
+    ):
+        """
+        Initialize dynamic correlation monitor.
+
+        Args:
+            lookback_short: Short-term lookback for recent correlation (default 20 days)
+            lookback_long: Long-term lookback for baseline correlation (default 60 days)
+            correlation_threshold: Threshold for high correlation warning
+            breakdown_threshold: Threshold for correlation breakdown alert (change in correlation)
+        """
+        self.lookback_short = lookback_short
+        self.lookback_long = lookback_long
+        self.correlation_threshold = correlation_threshold
+        self.breakdown_threshold = breakdown_threshold
+        self._cache = {}
+        self._cache_time = None
+        self._cache_ttl = 300  # 5 minutes
+
+    def calculate_rolling_correlation(
+        self,
+        returns_df: pd.DataFrame,
+        window: int = 20,
+    ) -> Dict[str, pd.Series]:
+        """
+        Calculate rolling correlation between all pairs.
+
+        Returns:
+            Dict mapping "SYMBOL1_SYMBOL2" to Series of rolling correlations
+        """
+        if returns_df.empty or returns_df.shape[1] < 2:
+            return {}
+
+        rolling_corr = {}
+        symbols = returns_df.columns.tolist()
+
+        for i, sym_i in enumerate(symbols):
+            for sym_j in symbols[i + 1 :]:
+                key = f"{sym_i}_{sym_j}"
+                # Calculate rolling correlation
+                rolling = returns_df[sym_i].rolling(window=window).corr(returns_df[sym_j])
+                rolling_corr[key] = rolling.dropna()
+
+        return rolling_corr
+
+    def detect_correlation_breakdown(
+        self,
+        symbols: List[str],
+    ) -> Dict:
+        """
+        Detect correlation breakdown (when correlation relationships change significantly).
+
+        This is critical for Vietnam market where correlation can spike during foreign outflows.
+
+        Returns:
+            Dict with breakdown alerts and analysis
+        """
+        from src.data.loader import load_data
+
+        # Load data for longer period
+        returns_data = {}
+        max_lookback = max(self.lookback_long, 90)
+
+        for symbol in symbols:
+            try:
+                df = load_data(symbol, lookback=max_lookback, use_cache=True)
+                if not df.empty and "close" in df.columns:
+                    returns = df["close"].pct_change().dropna()
+                    if len(returns) >= self.lookback_long:
+                        returns_data[symbol] = returns
+            except Exception as e:
+                logger.warning(f"Could not load data for {symbol}: {e}")
+                continue
+
+        if len(returns_data) < 2:
+            return {
+                "alerts": [],
+                "analysis": "Insufficient data for correlation breakdown detection",
+            }
+
+        returns_df = pd.DataFrame(returns_data)
+
+        # Calculate short-term and long-term correlation
+        short_term_df = returns_df.tail(self.lookback_short)
+        long_term_df = returns_df.tail(self.lookback_long)
+
+        short_corr = short_term_df.corr()
+        long_corr = long_term_df.corr()
+
+        # Find correlation changes
+        alerts = []
+        pair_analysis = {}
+
+        symbols_list = returns_df.columns.tolist()
+        for i, sym_i in enumerate(symbols_list):
+            for sym_j in symbols_list[i + 1 :]:
+                short_val = short_corr.loc[sym_i, sym_j]
+                long_val = long_corr.loc[sym_i, sym_j]
+
+                if pd.isna(short_val) or pd.isna(long_val):
+                    continue
+
+                change = short_val - long_val
+                pair_key = f"{sym_i}_{sym_j}"
+
+                pair_analysis[pair_key] = {
+                    "short_term": float(short_val),
+                    "long_term": float(long_val),
+                    "change": float(change),
+                }
+
+                # Check for significant breakdown
+                if abs(change) >= self.breakdown_threshold:
+                    direction = "increased" if change > 0 else "decreased"
+                    severity = "high" if abs(change) >= 0.5 else "medium"
+
+                    alerts.append(
+                        {
+                            "pair": (sym_i, sym_j),
+                            "direction": direction,
+                            "change": float(change),
+                            "short_term_corr": float(short_val),
+                            "long_term_corr": float(long_val),
+                            "severity": severity,
+                            "message": f"⚠️ {sym_i}-{sym_j} correlation {direction} by {abs(change):.2f} "
+                            f"({long_val:.2f} → {short_val:.2f})",
+                        }
+                    )
+
+        # Sort alerts by severity
+        alerts.sort(key=lambda x: abs(x["change"]), reverse=True)
+
+        return {
+            "alerts": alerts,
+            "pair_analysis": pair_analysis,
+            "has_breakdown": len(alerts) > 0,
+            "num_breakdowns": len(alerts),
+        }
+
+    def calculate_regime_adjusted_correlation(
+        self,
+        returns_df: pd.DataFrame,
+        market_regime: str = "normal",
+    ) -> pd.DataFrame:
+        """
+        Calculate correlation adjusted for market regime.
+
+        In crisis/high-volatility regimes, correlations tend to increase.
+        In normal/low-volatility regimes, correlations show true diversification.
+
+        Args:
+            returns_df: DataFrame of returns
+            market_regime: One of "normal", "high_volatility", "crisis"
+
+        Returns:
+            Adjusted correlation matrix
+        """
+        if returns_df.empty:
+            return pd.DataFrame()
+
+        base_corr = returns_df.corr()
+
+        # Regime adjustment factors (correlations increase in crisis)
+        regime_factors = {
+            "normal": 1.0,
+            "high_volatility": 1.15,  # Correlation tends to be 15% higher
+            "crisis": 1.30,  # Correlation spikes 30% in crisis
+            "low_volatility": 0.90,  # Correlation lower in calm markets
+        }
+
+        factor = regime_factors.get(market_regime, 1.0)
+
+        if factor == 1.0:
+            return base_corr
+
+        # Adjust correlation (but cap at 1.0 and floor at -1.0)
+        adjusted = base_corr * factor
+        adjusted = adjusted.clip(lower=-1.0, upper=1.0)
+
+        # Keep diagonal as 1.0
+        np.fill_diagonal(adjusted.values, 1.0)
+
+        return adjusted
+
+    def get_dynamic_portfolio_risk(
+        self,
+        symbols: List[str],
+        weights: Optional[Dict[str, float]] = None,
+        market_regime: str = "normal",
+    ) -> Dict:
+        """
+        Calculate dynamic portfolio risk considering regime and correlation shifts.
+
+        Args:
+            symbols: List of portfolio symbols
+            weights: Optional weight per symbol (default: equal weight)
+            market_regime: Current market regime
+
+        Returns:
+            Dict with comprehensive risk metrics
+        """
+        import time
+
+        # Check cache
+        cache_key = f"{','.join(sorted(symbols))}_{market_regime}"
+        current_time = time.time()
+
+        if (
+            self._cache_time is not None
+            and current_time - self._cache_time < self._cache_ttl
+            and cache_key in self._cache
+        ):
+            return self._cache[cache_key]
+
+        if len(symbols) < 2:
+            return {
+                "portfolio_variance": 0.0,
+                "portfolio_volatility": 0.0,
+                "diversification_ratio": 1.0,
+                "effective_positions": len(symbols),
+                "risk_score": 0,
+                "alerts": [],
+                "recommendation": "Need at least 2 positions for correlation analysis",
+            }
+
+        # Load returns
+        returns_df = load_returns_dataframe(symbols, self.lookback_long)
+        if returns_df.empty or returns_df.shape[1] < 2:
+            return {
+                "portfolio_variance": 0.0,
+                "portfolio_volatility": 0.0,
+                "diversification_ratio": 1.0,
+                "effective_positions": len(symbols),
+                "risk_score": 50,
+                "alerts": ["Insufficient data for correlation analysis"],
+                "recommendation": "Cannot calculate portfolio risk without historical data",
+            }
+
+        # Use only symbols with available data
+        available_symbols = returns_df.columns.tolist()
+
+        # Set equal weights if not provided
+        if weights is None:
+            weights = {s: 1.0 / len(available_symbols) for s in available_symbols}
+
+        # Normalize weights for available symbols
+        total_weight = sum(weights.get(s, 0) for s in available_symbols)
+        if total_weight == 0:
+            total_weight = 1.0
+        w = np.array(
+            [weights.get(s, 1.0 / len(available_symbols)) / total_weight for s in available_symbols]
+        )
+
+        # Calculate regime-adjusted correlation
+        corr_matrix = self.calculate_regime_adjusted_correlation(returns_df, market_regime)
+
+        # Calculate individual volatilities
+        individual_vols = returns_df.std().values
+
+        # Calculate portfolio variance using correlation matrix
+        # σ²_p = Σᵢ Σⱼ wᵢ wⱼ σᵢ σⱼ ρᵢⱼ
+        cov_matrix = np.outer(individual_vols, individual_vols) * corr_matrix.values
+        portfolio_variance = float(w @ cov_matrix @ w)
+        portfolio_volatility = float(np.sqrt(portfolio_variance))
+
+        # Weighted average volatility (for diversification ratio)
+        weighted_avg_vol = float(np.sum(w * individual_vols))
+
+        # Diversification ratio = weighted avg vol / portfolio vol
+        # Higher is better (more diversification benefit)
+        diversification_ratio = (
+            weighted_avg_vol / portfolio_volatility if portfolio_volatility > 0 else 1.0
+        )
+
+        # Effective number of positions (1 / Σwᵢ²) - Herfindahl adjustment
+        effective_positions = 1.0 / np.sum(w**2) if np.sum(w**2) > 0 else len(symbols)
+
+        # Detect correlation breakdowns
+        breakdown_info = self.detect_correlation_breakdown(available_symbols)
+
+        # Calculate risk score (0-100, higher = more risky)
+        # Based on: low diversification + high correlation + breakdowns
+        base_corr = returns_df.corr()
+        mask = np.triu(np.ones_like(base_corr, dtype=bool), k=1)
+        avg_corr = base_corr.where(mask).stack().abs().mean()
+
+        risk_factors = [
+            min(40, int(avg_corr * 40)),  # Correlation contribution (max 40)
+            min(30, int((2.0 - diversification_ratio) * 20)),  # Diversification (max 30)
+            min(30, breakdown_info["num_breakdowns"] * 10),  # Breakdown alerts (max 30)
+        ]
+        risk_score = min(100, sum(risk_factors))
+
+        # Collect alerts
+        alerts = []
+        if avg_corr > 0.6:
+            alerts.append(f"⚠️ High average correlation: {avg_corr:.2f}")
+        if diversification_ratio < 1.2:
+            alerts.append(f"⚠️ Low diversification benefit: {diversification_ratio:.2f}")
+        alerts.extend(
+            [a["message"] for a in breakdown_info["alerts"][:3]]
+        )  # Top 3 breakdown alerts
+
+        # Recommendation
+        if risk_score >= 70:
+            recommendation = "🔴 High portfolio risk - consider reducing correlated positions"
+        elif risk_score >= 40:
+            recommendation = "🟡 Moderate portfolio risk - monitor correlation changes"
+        else:
+            recommendation = "🟢 Portfolio well-diversified"
+
+        result = {
+            "portfolio_variance": float(portfolio_variance),
+            "portfolio_volatility": float(portfolio_volatility),
+            "annualized_volatility": float(portfolio_volatility * np.sqrt(252)),
+            "diversification_ratio": float(diversification_ratio),
+            "effective_positions": float(effective_positions),
+            "average_correlation": float(avg_corr),
+            "risk_score": risk_score,
+            "alerts": alerts,
+            "breakdown_analysis": breakdown_info,
+            "regime": market_regime,
+            "recommendation": recommendation,
+        }
+
+        # Cache result
+        self._cache[cache_key] = result
+        self._cache_time = current_time
+
+        return result
+
+    def get_correlation_heatmap_data(
+        self,
+        symbols: List[str],
+        include_rolling: bool = True,
+    ) -> Dict:
+        """
+        Get data for correlation heatmap visualization.
+
+        Returns:
+            Dict with correlation matrices and metadata for visualization
+        """
+        returns_df = load_returns_dataframe(symbols, self.lookback_long)
+        if returns_df.empty:
+            return {"error": "No data available"}
+
+        available = returns_df.columns.tolist()
+
+        result = {
+            "symbols": available,
+            "pearson_correlation": returns_df.corr().to_dict(),
+            "distance_correlation": calculate_distance_correlation_matrix(returns_df).to_dict(),
+            "copula_correlation": calculate_copula_correlation_matrix(returns_df).to_dict(),
+        }
+
+        if include_rolling:
+            rolling_corr = self.calculate_rolling_correlation(
+                returns_df, window=self.lookback_short
+            )
+            # Get latest values
+            latest_rolling = {
+                k: float(v.iloc[-1]) if len(v) > 0 else None for k, v in rolling_corr.items()
+            }
+            result["rolling_correlation"] = latest_rolling
+
+            # Get trend (increasing/decreasing)
+            trends = {}
+            for k, v in rolling_corr.items():
+                if len(v) >= 10:
+                    recent = v.tail(10).mean()
+                    earlier = v.head(10).mean()
+                    trends[k] = (
+                        "increasing"
+                        if recent > earlier + 0.05
+                        else ("decreasing" if recent < earlier - 0.05 else "stable")
+                    )
+            result["correlation_trends"] = trends
+
+        return result
+
+
 def get_diversification_recommendation(
     current_holdings: Dict[str, Dict],
     max_sector_pct: float = 40.0,

@@ -567,6 +567,147 @@ class SessionTradingManager:
         # Default: prefer continuous session
         return False, "Use limit order in continuous session for better price"
 
+    def get_adaptive_entry_timing(
+        self,
+        signal_confidence: float,
+        market_regime: Optional[Dict] = None,
+        is_volatile_day: bool = False,
+        symbol: Optional[str] = None,
+    ) -> Dict:
+        """
+        Get adaptive entry timing recommendation based on market conditions.
+
+        This enhanced method considers:
+        - Current session timing
+        - Market regime (BULL/BEAR/SIDEWAYS)
+        - Intraday volatility
+        - Signal confidence level
+
+        Args:
+            signal_confidence: Signal confidence (0-100)
+            market_regime: Market regime from regime_detector
+            is_volatile_day: True if high intraday volatility
+            symbol: Stock symbol for logging
+
+        Returns:
+            Dict with timing recommendation and adjustments
+        """
+        session_info = self.get_current_session()
+        timing_result = self.analyze_entry_timing()
+
+        result = {
+            "session": session_info.session_type.value,
+            "base_quality": timing_result.quality_score,
+            "adjusted_quality": timing_result.quality_score,
+            "position_multiplier": timing_result.position_size_multiplier,
+            "order_type": timing_result.recommended_order_type.value,
+            "is_tradeable": True,
+            "adjustments": [],
+            "recommendations": [],
+        }
+
+        # 1. Market Regime Adjustments
+        if market_regime:
+            regime = market_regime.get("regime", "SIDEWAYS")
+            regime_confidence = market_regime.get("confidence", 50)
+
+            if regime == "BEAR":
+                # In bear market, prefer morning entries (before afternoon selling)
+                if session_info.session_type == SessionType.AFTERNOON_CONTINUOUS:
+                    result["adjusted_quality"] -= 15
+                    result["position_multiplier"] *= 0.8
+                    result["adjustments"].append("Bear market: prefer morning entry")
+
+                # Avoid pre-lunch in bear market (strong selling pressure)
+                current_time = datetime.now(VN_TZ).time()
+                if time(10, 30) <= current_time <= time(11, 30):
+                    result["adjusted_quality"] -= 20
+                    result["adjustments"].append("Bear market: avoid pre-lunch selling")
+
+            elif regime == "BULL":
+                # In bull market, afternoon entries can catch momentum
+                if session_info.session_type == SessionType.AFTERNOON_CONTINUOUS:
+                    result["adjusted_quality"] += 5
+                    result["adjustments"].append("Bull market: afternoon momentum OK")
+
+            elif regime == "HIGH_VOLATILITY":
+                # High volatility: prefer optimal windows only
+                if not timing_result.is_optimal:
+                    result["adjusted_quality"] -= 25
+                    result["position_multiplier"] *= 0.6
+                    result["adjustments"].append("High volatility: wait for optimal window")
+
+            # Low regime confidence: be more cautious
+            if regime_confidence < 60:
+                result["position_multiplier"] *= 0.9
+                result["adjustments"].append("Low regime confidence: reduced size")
+
+        # 2. Volatility Adjustments
+        if is_volatile_day:
+            result["adjusted_quality"] -= 15
+            result["position_multiplier"] *= 0.7
+
+            # On volatile days, prefer mid-session entries
+            current_time = datetime.now(VN_TZ).time()
+            if time(9, 45) <= current_time <= time(10, 30):
+                result["adjusted_quality"] += 10
+                result["recommendations"].append("Volatile day: 9:45-10:30 sweet spot")
+            elif time(13, 30) <= current_time <= time(14, 0):
+                result["adjusted_quality"] += 10
+                result["recommendations"].append("Volatile day: 13:30-14:00 sweet spot")
+            else:
+                result["recommendations"].append("Volatile day: wait for mid-session")
+
+            result["adjustments"].append("Volatile day: reduced exposure")
+
+        # 3. Signal Confidence Integration
+        if signal_confidence < 50:
+            # Low confidence: require optimal timing
+            if not timing_result.is_optimal:
+                result["adjusted_quality"] -= 20
+                result["recommendations"].append("Low confidence: wait for optimal timing")
+        elif signal_confidence >= 80:
+            # High confidence: more flexible timing
+            result["adjusted_quality"] += 10
+            result["recommendations"].append("High confidence: timing less critical")
+
+        # 4. Order Type Recommendations
+        if session_info.is_auction:
+            if signal_confidence < 70:
+                result["order_type"] = "LO"  # Use limit order instead
+                result["recommendations"].append("Auction: use limit order for safety")
+        elif is_volatile_day:
+            result["order_type"] = "LO"
+            result["recommendations"].append("Volatile: limit order recommended")
+
+        # 5. Tradeable Decision
+        result["adjusted_quality"] = max(0, min(100, result["adjusted_quality"]))
+
+        if result["adjusted_quality"] < 30:
+            result["is_tradeable"] = False
+            result["recommendations"].append("Timing quality too low - wait")
+        elif session_info.session_type in [
+            SessionType.CLOSED,
+            SessionType.LUNCH_BREAK,
+            SessionType.POST_CLOSE,
+        ]:
+            result["is_tradeable"] = False
+            result["recommendations"].append("Market not open for trading")
+
+        # 6. Final position multiplier
+        result["position_multiplier"] = max(0.3, min(1.2, result["position_multiplier"]))
+
+        # Add timing to next optimal window
+        next_window = self.get_next_optimal_window()
+        if next_window and not timing_result.is_optimal:
+            if "minutes_until" in next_window:
+                result["next_optimal"] = next_window
+                result["recommendations"].append(
+                    f"Next optimal: {next_window['start']} ({next_window['minutes_until']} mins)"
+                )
+
+        return result
+
 
 # Singleton instance with thread-safe initialization
 _session_manager = None

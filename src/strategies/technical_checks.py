@@ -540,38 +540,111 @@ class TechnicalChecker:
         """
         Kiểm tra breadth của thị trường (số mã tăng/giảm).
 
+        Enhanced version that fetches real-time data if not available in regime.
+
         Args:
             market_regime: Market regime data
 
         Returns:
-            Dict with strong, weak, advance_ratio
+            Dict with strong, weak, advance_ratio, and details
         """
-        if not market_regime:
-            return {"strong": False, "weak": False}
+        advancers = 0
+        decliners = 0
+        unchanged = 0
+        source = "none"
 
-        details = market_regime.get("details", {})
-        breadth = market_regime.get("breadth") or details.get("breadth") or {}
+        # Try to get from regime data first
+        if market_regime:
+            details = market_regime.get("details", {})
+            breadth = market_regime.get("breadth") or details.get("breadth") or {}
 
-        advancers = breadth.get("advancers") or breadth.get("advancing") or 0
-        decliners = breadth.get("decliners") or breadth.get("declining") or 0
-        unchanged = breadth.get("unchanged", 0)
+            advancers = breadth.get("advancers") or breadth.get("advancing") or 0
+            decliners = breadth.get("decliners") or breadth.get("declining") or 0
+            unchanged = breadth.get("unchanged", 0)
+            source = "regime"
 
+        # If not available, try to fetch from TCBS API
+        if advancers == 0 and decliners == 0:
+            try:
+                import requests
+                from src.utils.rate_limiter import tcbs_limiter
+
+                tcbs_limiter.wait()
+                url = "https://apipubaws.tcbs.com.vn/stock-insight/v1/stock/top-price-change"
+                response = requests.get(url, timeout=5)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        # Count advancing/declining from top movers
+                        top_gainers = data.get("topGainers", [])
+                        top_losers = data.get("topLosers", [])
+                        advancers = len(top_gainers) if top_gainers else 0
+                        decliners = len(top_losers) if top_losers else 0
+                        source = "tcbs_api"
+            except Exception:
+                pass
+
+        # If still no data, try SSI API
+        if advancers == 0 and decliners == 0:
+            try:
+                import requests
+
+                url = "https://iboard.ssi.com.vn/dchart/api/1.1/defaultAllStocks"
+                response = requests.get(url, timeout=5)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict) and "data" in data:
+                        stocks = data["data"]
+                        for stock in stocks:
+                            change = stock.get("priceChange", 0)
+                            if change > 0:
+                                advancers += 1
+                            elif change < 0:
+                                decliners += 1
+                            else:
+                                unchanged += 1
+                        source = "ssi_api"
+            except Exception:
+                pass
+
+        # Calculate metrics
         total = advancers + decliners
         if total == 0:
-            return {"strong": False, "weak": False}
+            return {
+                "strong": False,
+                "weak": False,
+                "advance_ratio": 0.5,
+                "advancers": 0,
+                "decliners": 0,
+                "unchanged": 0,
+                "source": source,
+                "available": False,
+            }
 
         advance_ratio = advancers / total
 
-        strong = advance_ratio >= 0.6
-        weak = advance_ratio <= 0.4
+        # Breadth interpretation:
+        # > 60% advancing = Strong (bullish breadth)
+        # < 40% advancing = Weak (bearish breadth)
+        # 40-60% = Neutral
+        strong = advance_ratio >= 0.60
+        weak = advance_ratio <= 0.40
+
+        # Additional insights
+        breadth_score = (advance_ratio - 0.5) * 2  # -1 to +1 scale
 
         return {
             "strong": strong,
             "weak": weak,
             "advance_ratio": advance_ratio,
+            "breadth_score": breadth_score,
             "advancers": advancers,
             "decliners": decliners,
             "unchanged": unchanged,
+            "source": source,
+            "available": True,
         }
 
     def check_sector_strength(
@@ -584,6 +657,8 @@ class TechnicalChecker:
         - Ngành đang dẫn dắt (leading) hay tụt hậu (lagging)
         - Giai đoạn thị trường (EARLY, MID, LATE, RECESSION)
         - Điều chỉnh confidence dựa trên sector rotation
+        - Rotation bonus khi symbol thuộc overweight sector
+        - Rotation penalty khi symbol thuộc underweight sector
 
         Args:
             df: DataFrame with OHLCV data
@@ -591,7 +666,8 @@ class TechnicalChecker:
             current_symbol: Current stock symbol
 
         Returns:
-            Dict with is_leading, is_lagging, sector_perf, sector_id, rotation_phase
+            Dict with is_leading, is_lagging, sector_perf, sector_id, rotation_phase,
+            rotation_bonus, in_overweight_sector, in_underweight_sector, confidence
         """
         result = {
             "is_leading": False,
@@ -599,6 +675,11 @@ class TechnicalChecker:
             "sector_perf": 0.0,
             "sector_id": "unknown",
             "rotation_phase": "UNKNOWN",
+            "rotation_bonus": 0,  # Bonus/penalty from rotation (-10 to +15)
+            "in_overweight_sector": False,
+            "in_underweight_sector": False,
+            "confidence": 0,  # Rotation signal confidence
+            "top_sector_picks": [],  # Best stocks in leading sector
         }
 
         # Try to use SectorRotationAnalyzer first
@@ -617,6 +698,28 @@ class TechnicalChecker:
                 analyzer = get_sector_rotation_analyzer()
                 rotation = analyzer.get_rotation_signal()
 
+                # Get rotation signal confidence
+                result["confidence"] = rotation.confidence
+
+                # Check if current symbol's sector is in overweight/underweight
+                sector_upper = result["sector_id"].upper()
+
+                if sector_upper in rotation.overweight:
+                    result["in_overweight_sector"] = True
+                    result["is_leading"] = True
+                    # Bonus scales with confidence (5-15 points)
+                    result["rotation_bonus"] = int(5 + (rotation.confidence / 100) * 10)
+                    # Get top picks for this sector
+                    if sector_upper in rotation.top_picks:
+                        result["top_sector_picks"] = rotation.top_picks[sector_upper]
+
+                elif sector_upper in rotation.underweight:
+                    result["in_underweight_sector"] = True
+                    result["is_lagging"] = True
+                    # Penalty scales with confidence (-5 to -15 points)
+                    result["rotation_bonus"] = -int(5 + (rotation.confidence / 100) * 10)
+
+                # Determine rotation phase
                 if any(s in rotation.overweight for s in ["BANKING", "SECURITIES"]):
                     result["rotation_phase"] = "EARLY"
                 elif any(s in rotation.overweight for s in ["TECHNOLOGY", "REAL_ESTATE"]):
@@ -627,15 +730,21 @@ class TechnicalChecker:
                     result["rotation_phase"] = "RECESSION"
 
                 momentum_data = analyzer.get_sector_momentum()
-                sector_upper = result["sector_id"].upper()
                 if sector_upper in momentum_data:
                     perf = momentum_data[sector_upper]
                     result["sector_perf"] = perf.return_1m * 100
 
+                    # Additional bonus for strong momentum within overweight sector
+                    if result["in_overweight_sector"] and perf.momentum_score > 0.7:
+                        result["rotation_bonus"] += 5  # Extra bonus for high momentum
+                    elif result["in_underweight_sector"] and perf.momentum_score < -0.5:
+                        result["rotation_bonus"] -= 5  # Extra penalty for weak momentum
+
                 logger.debug(
                     f"📊 Sector check for {current_symbol}: "
                     f"sector={result['sector_id']}, leading={result['is_leading']}, "
-                    f"lagging={result['is_lagging']}, phase={result['rotation_phase']}"
+                    f"lagging={result['is_lagging']}, phase={result['rotation_phase']}, "
+                    f"rotation_bonus={result['rotation_bonus']}"
                 )
                 return result
 

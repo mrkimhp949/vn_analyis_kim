@@ -155,6 +155,176 @@ def get_enhanced_signal_generator(use_v2: bool = True) -> EnhancedMLSignalGenera
     return EnhancedMLSignalGeneratorV2(use_v2=use_v2)
 
 
+def validate_ml_prediction(
+    signal_result: dict,
+    symbol: str,
+    min_confidence: float = 50.0,
+    require_technical_confirmation: bool = True,
+) -> dict:
+    """
+    Validate ML prediction before using for trading decisions.
+
+    This function adds an extra layer of validation to ensure ML signals
+    meet minimum quality standards and are properly calibrated.
+
+    Args:
+        signal_result: Result from signal generator
+        symbol: Stock symbol
+        min_confidence: Minimum confidence threshold
+        require_technical_confirmation: Require technical indicator alignment
+
+    Returns:
+        Validated signal with additional metadata
+    """
+    validated = signal_result.copy()
+    validated["validation"] = {
+        "passed": True,
+        "warnings": [],
+        "adjustments": [],
+    }
+
+    # 1. Confidence calibration using historical accuracy
+    try:
+        from src.ml.monitor import get_ml_model_monitor
+
+        monitor = get_ml_model_monitor()
+        original_confidence = validated.get("confidence", 0)
+
+        # Calibrate confidence based on recent model performance
+        calibrated_confidence = monitor.calibrate_confidence(
+            confidence=original_confidence,
+            model_version=validated.get("model", "unknown"),
+        )
+
+        if calibrated_confidence != original_confidence:
+            validated["confidence"] = calibrated_confidence
+            validated["raw_confidence"] = original_confidence
+            validated["validation"]["adjustments"].append(
+                f"Confidence calibrated: {original_confidence:.0f}% -> {calibrated_confidence:.0f}%"
+            )
+
+        # Log prediction for future validation
+        if validated.get("signal") in ["BUY", "SELL"]:
+            monitor.log_prediction(
+                symbol=symbol,
+                prediction=validated.get("ml_score", 0.5),
+                predicted_class=1 if validated.get("signal") == "BUY" else 0,
+                confidence=calibrated_confidence,
+                model_version=validated.get("model", "unknown"),
+            )
+
+    except ImportError:
+        validated["validation"]["warnings"].append("ML monitor not available for calibration")
+    except Exception as e:
+        validated["validation"]["warnings"].append(f"Calibration error: {str(e)}")
+
+    # 2. Minimum confidence check
+    if validated.get("confidence", 0) < min_confidence:
+        validated["validation"]["passed"] = False
+        validated["validation"]["warnings"].append(
+            f"Confidence {validated.get('confidence', 0):.0f}% below minimum {min_confidence:.0f}%"
+        )
+        # Downgrade signal to HOLD if confidence too low
+        if validated.get("signal") in ["BUY", "SELL"]:
+            validated["original_signal"] = validated["signal"]
+            validated["signal"] = "HOLD"
+            validated["validation"]["adjustments"].append(
+                "Signal downgraded to HOLD due to low confidence"
+            )
+
+    # 3. Technical confirmation check
+    if require_technical_confirmation:
+        signal = validated.get("signal", "HOLD")
+        ema_trend = validated.get("ema_trend", "NEUTRAL")
+        rsi = validated.get("rsi", 50)
+
+        if signal == "BUY":
+            # BUY signal should have bullish technicals
+            if ema_trend == "DOWN":
+                validated["validation"]["warnings"].append(
+                    "BUY signal conflicts with EMA downtrend"
+                )
+                validated["confidence"] = max(0, validated.get("confidence", 0) - 10)
+                validated["validation"]["adjustments"].append(
+                    "Confidence reduced 10% due to EMA conflict"
+                )
+
+            if rsi > 70:
+                validated["validation"]["warnings"].append(
+                    f"BUY signal with overbought RSI ({rsi:.0f})"
+                )
+                validated["confidence"] = max(0, validated.get("confidence", 0) - 5)
+                validated["validation"]["adjustments"].append(
+                    "Confidence reduced 5% due to overbought RSI"
+                )
+
+        elif signal == "SELL":
+            # SELL signal should have bearish technicals
+            if ema_trend == "UP":
+                validated["validation"]["warnings"].append("SELL signal conflicts with EMA uptrend")
+                validated["confidence"] = max(0, validated.get("confidence", 0) - 10)
+                validated["validation"]["adjustments"].append(
+                    "Confidence reduced 10% due to EMA conflict"
+                )
+
+            if rsi < 30:
+                validated["validation"]["warnings"].append(
+                    f"SELL signal with oversold RSI ({rsi:.0f})"
+                )
+                validated["confidence"] = max(0, validated.get("confidence", 0) - 5)
+                validated["validation"]["adjustments"].append(
+                    "Confidence reduced 5% due to oversold RSI"
+                )
+
+    # 4. ML probability sanity check
+    ml_score = validated.get("ml_score", 0.5)
+    probabilities = validated.get("probabilities", {})
+
+    if probabilities:
+        buy_prob = probabilities.get("buy", 0.5)
+        sell_prob = probabilities.get("sell", 0.5)
+
+        # Check for extreme probabilities (model might be overfit)
+        if buy_prob > 0.95 or sell_prob > 0.95:
+            validated["validation"]["warnings"].append(
+                "Extreme ML probability detected - possible overfit"
+            )
+            validated["confidence"] = max(0, validated.get("confidence", 0) - 15)
+            validated["validation"]["adjustments"].append(
+                "Confidence reduced 15% due to extreme probability"
+            )
+
+        # Check for probability mismatch with signal
+        if validated.get("signal") == "BUY" and buy_prob < 0.5:
+            validated["validation"]["warnings"].append("BUY signal with low buy probability")
+            validated["validation"]["passed"] = False
+
+    # 5. Model drift check
+    try:
+        from src.ml.monitor import get_ml_model_monitor
+
+        monitor = get_ml_model_monitor()
+        drift_status = monitor.check_drift()
+
+        if drift_status.get("drift_detected"):
+            validated["validation"]["warnings"].append(
+                "Model drift detected - predictions may be unreliable"
+            )
+            validated["confidence"] = max(0, validated.get("confidence", 0) - 20)
+            validated["validation"]["adjustments"].append(
+                "Confidence reduced 20% due to model drift"
+            )
+
+    except Exception:
+        pass
+
+    # Update passed status based on warnings
+    if len(validated["validation"]["warnings"]) >= 3:
+        validated["validation"]["passed"] = False
+
+    return validated
+
+
 # =============================================================================
 # TESTING
 # =============================================================================

@@ -196,6 +196,174 @@ def get_dynamic_slippage(symbol: str, liquidity_value: float) -> float:
         return VN_SLIPPAGE_ILLIQUID  # 1.0%
 
 
+def get_order_impact_slippage(
+    symbol: str,
+    order_value: float,
+    avg_daily_volume: float,
+    avg_price: float,
+    is_market_order: bool = True,
+) -> float:
+    """
+    Calculate dynamic slippage based on order size vs Average Daily Volume (ADV).
+
+    Market Impact Model:
+    - Small orders (< 1% ADV): minimal impact
+    - Medium orders (1-5% ADV): linear impact increase
+    - Large orders (> 5% ADV): significant impact
+    - Very large orders (> 10% ADV): severe impact (may need TWAP/VWAP)
+
+    Args:
+        symbol: Stock symbol (e.g., "VNM", "HPG")
+        order_value: Order value in VND
+        avg_daily_volume: Average daily volume in shares
+        avg_price: Average price per share in VND
+        is_market_order: True for market orders, False for limit orders
+
+    Returns:
+        Total slippage rate including market impact (0.002-0.030)
+    """
+    # Calculate order size as % of ADV
+    avg_daily_value = avg_daily_volume * avg_price
+    if avg_daily_value <= 0:
+        return VN_SLIPPAGE_ILLIQUID  # Fallback for no liquidity data
+
+    order_pct_of_adv = order_value / avg_daily_value
+
+    # Base slippage from liquidity tier
+    base_slippage = get_dynamic_slippage(symbol, avg_daily_value)
+
+    # If limit order, base slippage is lower
+    if not is_market_order:
+        base_slippage = base_slippage * 0.4  # 40% of market order slippage
+
+    # Market impact calculation (square-root model commonly used in finance)
+    # Impact = k * sqrt(order_pct_of_adv)
+    # k = impact coefficient based on stock liquidity
+    if symbol.upper() in VN30_SYMBOLS:
+        impact_coefficient = 0.15  # VN30 - most liquid
+    elif avg_daily_value > 5_000_000_000:  # > 5B VND
+        impact_coefficient = 0.20
+    elif avg_daily_value > 2_000_000_000:  # 2-5B VND
+        impact_coefficient = 0.30
+    elif avg_daily_value > 500_000_000:  # 0.5-2B VND
+        impact_coefficient = 0.50
+    else:  # < 500M VND - illiquid
+        impact_coefficient = 0.80
+
+    # Calculate market impact
+    import math
+
+    market_impact = impact_coefficient * math.sqrt(order_pct_of_adv)
+
+    # Apply caps based on order size
+    if order_pct_of_adv > 0.10:  # > 10% ADV - very large order
+        # Add extra penalty for very large orders
+        market_impact = market_impact * 1.5
+        # Cap at 3% total impact for very large orders
+        market_impact = min(market_impact, 0.03)
+    elif order_pct_of_adv > 0.05:  # 5-10% ADV - large order
+        # Cap at 2% for large orders
+        market_impact = min(market_impact, 0.02)
+    elif order_pct_of_adv > 0.01:  # 1-5% ADV - medium order
+        # Cap at 1% for medium orders
+        market_impact = min(market_impact, 0.01)
+    else:  # < 1% ADV - small order
+        # Minimal impact, cap at 0.5%
+        market_impact = min(market_impact, 0.005)
+
+    # Total slippage = base + market impact
+    total_slippage = base_slippage + market_impact
+
+    # Absolute caps
+    total_slippage = min(total_slippage, 0.03)  # Max 3% total slippage
+    total_slippage = max(total_slippage, 0.002)  # Min 0.2% slippage
+
+    return total_slippage
+
+
+def estimate_execution_cost(
+    symbol: str,
+    order_value: float,
+    avg_daily_volume: float,
+    avg_price: float,
+    side: str = "BUY",
+    is_market_order: bool = True,
+) -> dict:
+    """
+    Estimate total execution cost for an order including all fees and slippage.
+
+    Args:
+        symbol: Stock symbol
+        order_value: Order value in VND
+        avg_daily_volume: Average daily volume in shares
+        avg_price: Average price per share
+        side: 'BUY' or 'SELL'
+        is_market_order: True for market orders, False for limit orders
+
+    Returns:
+        Dict with cost breakdown:
+        {
+            'slippage': float,
+            'commission': float,
+            'tax': float (sell only),
+            'exchange_fee': float,
+            'total_cost_pct': float,
+            'total_cost_vnd': float,
+            'effective_price': float,
+            'recommendation': str,
+        }
+    """
+    # Get dynamic slippage with market impact
+    slippage = get_order_impact_slippage(
+        symbol=symbol,
+        order_value=order_value,
+        avg_daily_volume=avg_daily_volume,
+        avg_price=avg_price,
+        is_market_order=is_market_order,
+    )
+
+    # Commission and fees
+    commission = VN_BROKERAGE_FEE  # 0.25%
+    exchange_fee = VN_EXCHANGE_FEE + VN_TRANSFER_FEE  # 0.05%
+    tax = VN_STOCK_TAX if side.upper() == "SELL" else 0  # 0.1% sell only
+
+    # Total cost percentage
+    total_cost_pct = slippage + commission + exchange_fee + tax
+
+    # Total cost in VND
+    total_cost_vnd = order_value * total_cost_pct
+
+    # Effective price after costs
+    if side.upper() == "BUY":
+        effective_price = avg_price * (1 + total_cost_pct)
+    else:
+        effective_price = avg_price * (1 - total_cost_pct)
+
+    # Order size recommendation
+    order_pct_of_adv = order_value / (avg_daily_volume * avg_price) if avg_daily_volume > 0 else 0
+
+    if order_pct_of_adv > 0.10:
+        recommendation = "SPLIT_ORDER: Consider using TWAP/VWAP over 2-3 days"
+    elif order_pct_of_adv > 0.05:
+        recommendation = "REDUCE_IMPACT: Use limit orders and split into 2-3 tranches"
+    elif order_pct_of_adv > 0.02:
+        recommendation = "USE_LIMIT: Prefer limit orders to reduce slippage"
+    else:
+        recommendation = "MARKET_OK: Order size is small enough for market order"
+
+    return {
+        "slippage": slippage,
+        "commission": commission,
+        "tax": tax,
+        "exchange_fee": exchange_fee,
+        "total_cost_pct": total_cost_pct,
+        "total_cost_vnd": total_cost_vnd,
+        "effective_price": effective_price,
+        "order_pct_of_adv": order_pct_of_adv,
+        "recommendation": recommendation,
+    }
+
+
 # Alternative costs for different scenarios (backward compatible)
 OPTIMISTIC_ROUND_TRIP_COST = VN_OPTIMISTIC_ROUND_TRIP  # 1.0% with best execution
 REALISTIC_ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% with market orders (default)
