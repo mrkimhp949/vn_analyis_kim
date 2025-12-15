@@ -59,17 +59,17 @@ class TestStrategyConfigV3:
             config.circuit_breaker.max_portfolio_heat <= 0.70
         ), "Max portfolio heat should be <= 70%"
 
-    def test_liquidity_tiers_tightened(self):
-        """Test liquidity tiers have been tightened"""
+    def test_liquidity_tiers_optimized(self):
+        """Test liquidity tiers have been optimized for broader coverage"""
         from src.config.strategy_config import get_strategy_config
 
         config = get_strategy_config()
         tiers = config.entry.liquidity_tiers
 
-        # Verify tightened liquidity requirements
-        assert tiers.large_cap["min_value"] >= 3_000_000_000, "Large cap min value should be >= 3B"
-        assert tiers.mid_cap["min_value"] >= 1_000_000_000, "Mid cap min value should be >= 1B"
-        assert tiers.small_cap["min_value"] >= 500_000_000, "Small cap min value should be >= 500M"
+        # Verify optimized liquidity requirements (v4.2 - relaxed for more opportunities)
+        assert tiers.large_cap["min_value"] >= 1_000_000_000, "Large cap min value should be >= 1B"
+        assert tiers.mid_cap["min_value"] >= 400_000_000, "Mid cap min value should be >= 400M"
+        assert tiers.small_cap["min_value"] >= 150_000_000, "Small cap min value should be >= 150M"
 
 
 class TestEntryConfigV3:

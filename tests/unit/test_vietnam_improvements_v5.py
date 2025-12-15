@@ -232,7 +232,7 @@ class TestTieredLiquidity:
 
         assert hasattr(tiers, "micro_cap")
         assert tiers.micro_cap["min_value"] < tiers.small_cap["min_value"]
-        assert tiers.micro_cap["position_multiplier"] == 0.5  # 50% for high risk
+        assert tiers.micro_cap["position_multiplier"] == 0.4  # 40% for very high risk (tightened)
 
 
 class TestEnhancedEntryFilters:

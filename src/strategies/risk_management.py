@@ -182,6 +182,8 @@ class EnhancedRiskManager(RiskManager):
             # Add recommendation to position info
             base_position["order_recommendation"] = slippage_result.get("recommendation", "")
 
+        return base_position
+
     def _calculate_dynamic_execution_cost(
         self,
         symbol: str,
