@@ -227,17 +227,6 @@ class EnhancedRiskManager(RiskManager):
                 "recommendation": "UNKNOWN",
             }
 
-        # IMPROVED v4.2: Vietnam lot size validation
-        if base_position["shares"] > 0:
-            base_position["shares"] = self._round_to_vn_lot(base_position["shares"])
-            base_position["value"] = base_position["shares"] * price
-
-        # IMPROVED v4.2: Add transaction cost estimate
-        base_position["estimated_cost"] = base_position["value"] * self.vn_transaction_cost
-        base_position["net_value"] = base_position["value"] - base_position["estimated_cost"]
-
-        return base_position
-
     def _round_to_vn_lot(self, shares: int) -> int:
         """Round shares to Vietnam lot size (100 shares minimum)."""
         if shares <= 0:
