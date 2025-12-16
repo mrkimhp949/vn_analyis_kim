@@ -253,9 +253,7 @@ class TestEnhancedRiskManager:
         # Should be rounded to nearest 100 (or 0)
         assert result["shares"] % 100 == 0
 
-    def test_calculate_enhanced_position_size_respects_max_capital(
-        self, risk_manager
-    ):
+    def test_calculate_enhanced_position_size_respects_max_capital(self, risk_manager):
         """Test that position size respects maximum capital limit"""
         result = risk_manager.calculate_enhanced_position_size(
             symbol="VCB",
