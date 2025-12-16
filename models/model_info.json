@@ -1,0 +1,40 @@
+{
+  "expected_features": 28,
+  "saved_at": "2025-12-16T18:57:01.614094",
+  "has_xgboost": false,
+  "has_rf": true,
+  "ensemble_weights": {
+    "rf": 0.5,
+    "xgb": 0.5
+  },
+  "feature_names": [
+    "sma20",
+    "ema20",
+    "ema50",
+    "rsi",
+    "rsi_signal",
+    "atr",
+    "macd",
+    "macd_signal",
+    "macd_dif",
+    "macd_signal_line",
+    "bb_width",
+    "bb_position",
+    "momentum_5",
+    "momentum_10",
+    "momentum_20",
+    "volume_ratio",
+    "volume_surge",
+    "volatility_20",
+    "roc_10",
+    "stoch_k",
+    "obv_signal",
+    "price_vs_vwap",
+    "hv_ratio",
+    "close_position",
+    "rs",
+    "rs_momentum",
+    "price_vs_sma20",
+    "adx"
+  ]
+}
