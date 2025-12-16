@@ -380,9 +380,8 @@ class TestFullTradingCycleIntegration:
         exit_strategy = ImprovedExitStrategy()
 
         # Step 1: Generate entry signal
-        entry_result = entry_logic.check_entry_conditions(
+        entry_result = entry_logic.analyze_entry(
             df=sample_stock_data,
-            index_df=sample_index_data,
             symbol=symbol,
         )
 
@@ -425,15 +424,14 @@ class TestFullTradingCycleIntegration:
             test_df = sample_stock_data.copy()
             test_df.loc[test_df.index[-1], "close"] = price
 
-            exit_decision = exit_strategy.check_exit_conditions(
+            exit_decision = exit_strategy.check_exit(
                 symbol=symbol,
                 entry_price=position.entry_price,
                 current_price=price,
-                highest_price=position.highest_price,
-                pnl_percent=(price / position.entry_price - 1) * 100,
-                pnl_amount=position.unrealized_pnl,
+                stop_loss=position.stop_loss,
+                take_profit_targets=position.take_profit_levels,
+                entry_date=position.entry_date,
                 df=test_df,
-                entry_timestamp=position.entry_date,
             )
 
             # No exit yet at reasonable profit
@@ -483,19 +481,18 @@ class TestFullTradingCycleIntegration:
             test_df = sample_stock_data.copy()
             test_df.loc[test_df.index[-1], "close"] = price
 
-            exit_decision = exit_strategy.check_exit_conditions(
+            exit_decision = exit_strategy.check_exit(
                 symbol=symbol,
                 entry_price=position.entry_price,
                 current_price=price,
-                highest_price=position.highest_price,
-                pnl_percent=(price / position.entry_price - 1) * 100,
-                pnl_amount=position.unrealized_pnl,
+                stop_loss=position.stop_loss,
+                take_profit_targets=position.take_profit_levels,
+                entry_date=position.entry_date,
                 df=test_df,
-                entry_timestamp=position.entry_date,
             )
 
             if exit_decision and exit_decision.should_exit:
-                position.close_position(price, str(exit_decision.reason))
+                position.close_position(price, str(exit_decision.exit_reason))
                 exit_triggered = True
                 break
 
@@ -617,7 +614,18 @@ class TestFullTradingCycleIntegration:
 
         # Calculate position size based on risk
         risk_per_share = entry_price - stop_loss
-        shares = int(max_risk_amount / risk_per_share)
+        shares_from_risk = int(max_risk_amount / risk_per_share) if risk_per_share > 0 else 0
+
+        # Cap position size to max 20% of account (important for proper risk management)
+        max_position_pct = 0.20
+        max_shares_from_position = int((account_value * max_position_pct) / entry_price)
+
+        # Use the smaller of the two to respect both limits
+        shares = min(shares_from_risk, max_shares_from_position)
+
+        # Round to lot size (Vietnam market standard)
+        lot_size = 100
+        shares = int(shares / lot_size) * lot_size
 
         # Position value
         position_value = shares * entry_price
@@ -648,9 +656,8 @@ class TestFullTradingCycleIntegration:
 
         # Generate signals for multiple symbols
         for symbol in symbols:
-            result = entry_logic.check_entry_conditions(
+            result = entry_logic.analyze_entry(
                 df=sample_stock_data,
-                index_df=sample_index_data,
                 symbol=symbol,
             )
 
@@ -853,11 +860,11 @@ class TestVietnamMarketRules:
         # HNX: 100 shares
         # UPCoM: 100 shares (odd lots allowed in some cases)
 
-        account_value = 50_000_000
-        entry_price = 95_000
+        account_value = 100_000_000  # 100M VND
+        entry_price = 50_000  # Lower price to ensure enough shares
 
-        # Calculate raw position
-        raw_shares = account_value * 0.10 / entry_price
+        # Calculate raw position (10% of account)
+        raw_shares = account_value * 0.10 / entry_price  # = 200 shares
 
         # Round to lot size
         lot_size = 100

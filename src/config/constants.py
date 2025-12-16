@@ -32,56 +32,80 @@ BULL_MARKET_THRESHOLD = 0.02  # 2% threshold for bull market
 BEAR_MARKET_THRESHOLD = -0.02  # -2% threshold for bear market
 TREND_THRESHOLD = 0.02  # 2% trend threshold
 
-# Time-based Constants
-MAX_HOLDING_DAYS = 20  # Maximum holding period in days
+# Time-based Constants - IMPROVED v5.0 for VN Market
+# Reduced from 20 to 15 days max to match VN market shorter cycles
+MAX_HOLDING_DAYS = 15  # TIGHTENED: Maximum holding period (was 20)
 EARLY_STOPPING_ROUNDS = 20  # ML early stopping rounds
 CORRELATION_LOOKBACK_DAYS = 60  # Correlation calculation lookback
 
-# Adaptive Holding Days by Market Regime
-HOLDING_DAYS_BULL_STRONG_TREND = 20  # Bull + ADX > 25
-HOLDING_DAYS_BULL_WEAK_TREND = 15  # Bull + ADX <= 25
-HOLDING_DAYS_SIDEWAYS_TREND = 12  # Sideways + ADX > 20
-HOLDING_DAYS_SIDEWAYS_NO_TREND = 10  # Sideways + ADX <= 20
-HOLDING_DAYS_BEAR_STRONG_TREND = 8  # Bear + ADX > 25
-HOLDING_DAYS_BEAR_WEAK_TREND = 6  # Bear + ADX <= 25
-HOLDING_DAYS_HIGH_VOLATILITY = 5  # High volatility - exit fast
-HOLDING_DAYS_DEFAULT = 15  # Default fallback
+# Adaptive Holding Days by Market Regime - TIGHTENED v5.0
+# VN market has shorter cycles due to:
+# - ±7% daily price limit creates faster mean reversion
+# - T+2.5 settlement affects capital efficiency
+# - Higher retail participation = faster sentiment swings
+HOLDING_DAYS_BULL_STRONG_TREND = 15  # TIGHTENED: Bull + ADX > 25 (was 20)
+HOLDING_DAYS_BULL_WEAK_TREND = 12  # TIGHTENED: Bull + ADX <= 25 (was 15)
+HOLDING_DAYS_SIDEWAYS_TREND = 10  # TIGHTENED: Sideways + ADX > 20 (was 12)
+HOLDING_DAYS_SIDEWAYS_NO_TREND = 8  # TIGHTENED: Sideways + ADX <= 20 (was 10)
+HOLDING_DAYS_BEAR_STRONG_TREND = 6  # TIGHTENED: Bear + ADX > 25 (was 8)
+HOLDING_DAYS_BEAR_WEAK_TREND = 5  # TIGHTENED: Bear + ADX <= 25 (was 6)
+HOLDING_DAYS_HIGH_VOLATILITY = 4  # TIGHTENED: High volatility - exit faster (was 5)
+HOLDING_DAYS_DEFAULT = 10  # TIGHTENED: Default fallback (was 15)
 ADX_STRONG_TREND_THRESHOLD = 25  # ADX threshold for strong trend
 ADX_WEAK_TREND_THRESHOLD = 20  # ADX threshold for weak trend
 
 
-def get_adaptive_holding_days(regime: str, adx: float = 20) -> int:
+def get_adaptive_holding_days(regime: str, adx: float = 20, volatility: float = 0.02) -> int:
     """
     Get adaptive max holding days based on market regime and trend strength.
+
+    IMPROVED v5.0: Added volatility parameter for more dynamic adjustment.
 
     Vietnam market characteristics:
     - T+2.5 settlement → minimum 3 days practical holding
     - High volatility → shorter holding to lock profits
     - Strong trends (ADX > 25) → can hold longer
+    - ±7% daily limit → faster mean reversion
 
     Args:
         regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
         adx: Average Directional Index (trend strength, default 20)
+        volatility: Market volatility as decimal (e.g., 0.02 = 2%)
 
     Returns:
-        Maximum holding days (5-20)
+        Maximum holding days (4-15)
     """
+    # Base days by regime
     if regime == "BULL":
         if adx > ADX_STRONG_TREND_THRESHOLD:
-            return HOLDING_DAYS_BULL_STRONG_TREND  # 20 days - strong trend
-        return HOLDING_DAYS_BULL_WEAK_TREND  # 15 days - weak trend
+            base_days = HOLDING_DAYS_BULL_STRONG_TREND  # 15 days - strong trend
+        else:
+            base_days = HOLDING_DAYS_BULL_WEAK_TREND  # 12 days - weak trend
     elif regime == "SIDEWAYS":
         if adx > ADX_WEAK_TREND_THRESHOLD:
-            return HOLDING_DAYS_SIDEWAYS_TREND  # 12 days - some trend
-        return HOLDING_DAYS_SIDEWAYS_NO_TREND  # 10 days - no trend
+            base_days = HOLDING_DAYS_SIDEWAYS_TREND  # 10 days - some trend
+        else:
+            base_days = HOLDING_DAYS_SIDEWAYS_NO_TREND  # 8 days - no trend
     elif regime == "BEAR":
         if adx > ADX_STRONG_TREND_THRESHOLD:
-            return HOLDING_DAYS_BEAR_STRONG_TREND  # 8 days - strong downtrend
-        return HOLDING_DAYS_BEAR_WEAK_TREND  # 6 days - exit faster
+            base_days = HOLDING_DAYS_BEAR_STRONG_TREND  # 6 days - strong downtrend
+        else:
+            base_days = HOLDING_DAYS_BEAR_WEAK_TREND  # 5 days - exit faster
     elif regime == "HIGH_VOLATILITY":
-        return HOLDING_DAYS_HIGH_VOLATILITY  # 5 days - very short
+        base_days = HOLDING_DAYS_HIGH_VOLATILITY  # 4 days - very short
     else:
-        return HOLDING_DAYS_DEFAULT  # 15 days default
+        base_days = HOLDING_DAYS_DEFAULT  # 10 days default
+
+    # NEW v5.0: Further reduce based on volatility
+    # High volatility = shorter holding period
+    if volatility > 0.04:  # > 4% daily volatility
+        base_days = max(4, int(base_days * 0.6))  # Reduce by 40%
+    elif volatility > 0.03:  # > 3% daily volatility
+        base_days = max(4, int(base_days * 0.75))  # Reduce by 25%
+    elif volatility > 0.02:  # > 2% daily volatility
+        base_days = max(5, int(base_days * 0.9))  # Reduce by 10%
+
+    return base_days
 
 
 # Commission and Slippage (Vietnam Market) - IMPROVED v4.0
