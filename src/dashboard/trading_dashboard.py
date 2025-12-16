@@ -1131,7 +1131,7 @@ def start_dashboard(
         port: Port to run on
         debug: Enable debug mode
     """
-    global update_thread, stop_updates
+    global update_thread
 
     stop_updates.clear()
 
@@ -1146,7 +1146,6 @@ def start_dashboard(
 
 def stop_dashboard():
     """Stop the dashboard."""
-    global stop_updates
     stop_updates.set()
     logger.info("Dashboard stopped")
 
