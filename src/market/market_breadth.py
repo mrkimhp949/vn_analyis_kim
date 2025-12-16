@@ -8,20 +8,28 @@ Real-time market breadth analysis for Vietnam stock market:
 - Sector breadth
 - Volume breadth
 - Breadth thrust signals
+- Data staleness handling with weight adjustment
 
 Author: Trading Bot Team
-Version: 1.0.0
+Version: 1.1.0
 """
 
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from threading import RLock
 from enum import Enum
 
 import numpy as np
 import pandas as pd
+
+from src.utils.data_staleness import (
+    DataStalenessMixin,
+    DataFreshness,
+    StalenessConfig,
+    STALENESS_CONFIGS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -209,12 +217,16 @@ class BreadthAnalysis:
 # =============================================================================
 
 
-class MarketBreadthAnalyzer:
+class MarketBreadthAnalyzer(DataStalenessMixin):
     """
     Vietnam Market Breadth Analyzer.
 
     Analyzes market breadth data from multiple sources to generate
     trading signals and adjustments.
+
+    Features data staleness handling:
+    - Stale data (>5 min) reduces weight by 15%
+    - Very stale data (>15 min) reduces weight by 50%
 
     Usage:
         analyzer = MarketBreadthAnalyzer()
@@ -224,6 +236,9 @@ class MarketBreadthAnalyzer:
 
         # Check breadth for entry
         entry_check = analyzer.check_breadth_for_entry()
+
+        # Get staleness-adjusted score
+        adjusted = analyzer.get_adjusted_score()
     """
 
     def __init__(
@@ -236,9 +251,12 @@ class MarketBreadthAnalyzer:
 
         self._lock = RLock()
 
+        # Initialize staleness tracking with market_breadth config
+        self._init_staleness("market_breadth")
+
         # Cache
         self._cache: Optional[BreadthAnalysis] = None
-        self._cache_time: Optional[datetime] = None
+        # _cache_time is now managed by DataStalenessMixin
 
         # History for trend calculation
         self._history: List[MarketBreadthData] = []
@@ -248,7 +266,7 @@ class MarketBreadthAnalyzer:
         self._ssi_provider = None
         self._init_providers()
 
-        logger.info("📊 Market Breadth Analyzer initialized")
+        logger.info("📊 Market Breadth Analyzer initialized (with staleness handling)")
 
     def _init_providers(self):
         """Initialize data providers."""
@@ -376,9 +394,9 @@ class MarketBreadthAnalyzer:
             # Analyze
             analysis = self._analyze_breadth(current_data)
 
-            # Cache
+            # Cache - use staleness mixin method
             self._cache = analysis
-            self._cache_time = datetime.now()
+            self._update_cache_timestamp()
 
             return analysis
 
@@ -616,6 +634,52 @@ class MarketBreadthAnalyzer:
             "signal": analysis.signal.value,
             "score": analysis.overall_score,
             "reasons": analysis.reasons,
+        }
+
+    def get_adjusted_score(self, use_cache: bool = True) -> float:
+        """
+        Get staleness-adjusted breadth score.
+
+        Automatically reduces score weight when data is stale:
+        - Fresh (<5 min): 100% weight
+        - Slightly stale (5-15 min): 85% weight
+        - Stale (15-30 min): 50% weight
+        - Very stale (30-60 min): 20% weight
+        - Expired (>60 min): 0% weight
+
+        Args:
+            use_cache: Use cached analysis
+
+        Returns:
+            Staleness-adjusted overall score
+        """
+        if use_cache and self._cache is not None:
+            raw_score = self._cache.overall_score
+        else:
+            analysis = self.get_analysis(force_refresh=not use_cache)
+            raw_score = analysis.overall_score
+
+        return self._apply_staleness_weight(raw_score)
+
+    def get_data_quality(self) -> Dict[str, Any]:
+        """
+        Get data quality status including staleness info.
+
+        Returns:
+            Dict with freshness, age, weight, and recommendations
+        """
+        staleness = self.get_staleness_status()
+
+        recommendations = []
+        if staleness["is_stale"]:
+            recommendations.append("Consider force_refresh=True for fresh data")
+        if staleness["is_expired"]:
+            recommendations.append("Data too old - signals may be unreliable")
+
+        return {
+            **staleness,
+            "recommendations": recommendations,
+            "cache_available": self._cache is not None,
         }
 
 

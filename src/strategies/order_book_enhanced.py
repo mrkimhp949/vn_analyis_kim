@@ -11,6 +11,7 @@ Features:
 - Intraday pattern detection
 - Smart order routing suggestions
 - Market impact estimation
+- Data staleness handling with confidence adjustment
 
 Vietnam Market Order Book Characteristics:
 - 3 best bid/ask levels visible publicly
@@ -20,7 +21,7 @@ Vietnam Market Order Book Characteristics:
 - Price step: 10/50/100 VND depending on price range
 
 Author: Trading Bot Team
-Version: 2.0.0
+Version: 2.1.0 - Added Data Staleness Handling
 """
 
 import logging
@@ -36,6 +37,13 @@ import os
 
 import numpy as np
 import pandas as pd
+
+from src.utils.data_staleness import (
+    DataStalenessMixin,
+    DataFreshness,
+    StalenessConfig,
+    STALENESS_CONFIGS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -529,7 +537,7 @@ class VNDirectOrderBookProvider(BrokerOrderBookProvider):
 # =============================================================================
 
 
-class EnhancedOrderBookAnalyzer:
+class EnhancedOrderBookAnalyzer(DataStalenessMixin):
     """
     Enhanced order book analysis with pattern detection.
 
@@ -541,6 +549,14 @@ class EnhancedOrderBookAnalyzer:
     - Spoofing detection
     - Entry timing optimization
     - Smart order routing suggestions
+    - Data staleness handling (confidence reduction for stale data)
+
+    Staleness handling:
+    - Fresh (<1 min): 100% confidence
+    - Slightly stale (1-2 min): 85% confidence
+    - Stale (2-5 min): 50% confidence
+    - Very stale (5-10 min): 20% confidence
+    - Expired (>10 min): Do not use for trading decisions
     """
 
     # Thresholds
@@ -551,9 +567,15 @@ class EnhancedOrderBookAnalyzer:
     INSTITUTIONAL_ORDER_PCT = 0.10  # 10% of ADV
 
     def __init__(self):
+        # Initialize staleness tracking with orderbook config (strict)
+        self._init_staleness("orderbook")
+
         # Historical data for pattern detection
         self._imbalance_history: Dict[str, List[Tuple[datetime, float]]] = {}
         self._spread_history: Dict[str, List[Tuple[datetime, float]]] = {}
+
+        # Per-symbol cache timestamps
+        self._orderbook_timestamps: Dict[str, datetime] = {}
 
         # ADV cache
         self._adv_cache: Dict[str, float] = {}
@@ -831,6 +853,9 @@ class EnhancedOrderBookAnalyzer:
         """Update historical data"""
         timestamp = order_book.timestamp
 
+        # Update per-symbol timestamp for staleness tracking
+        self._orderbook_timestamps[symbol] = timestamp
+
         # Imbalance history
         if symbol not in self._imbalance_history:
             self._imbalance_history[symbol] = []
@@ -846,6 +871,134 @@ class EnhancedOrderBookAnalyzer:
 
         if len(self._spread_history[symbol]) > 100:
             self._spread_history[symbol] = self._spread_history[symbol][-100:]
+
+    # =========================================================================
+    # STALENESS-ADJUSTED METHODS
+    # =========================================================================
+
+    def is_orderbook_stale(self, symbol: str, max_delay_seconds: int = 60) -> bool:
+        """
+        Check if order book data for a symbol is stale.
+
+        Args:
+            symbol: Stock symbol
+            max_delay_seconds: Threshold in seconds (default 60)
+
+        Returns:
+            True if data is older than threshold
+        """
+        if symbol not in self._orderbook_timestamps:
+            return True
+
+        age = (datetime.now() - self._orderbook_timestamps[symbol]).total_seconds()
+        return age > max_delay_seconds
+
+    def get_orderbook_age_seconds(self, symbol: str) -> float:
+        """Get age of order book data in seconds."""
+        if symbol not in self._orderbook_timestamps:
+            return float("inf")
+
+        return (datetime.now() - self._orderbook_timestamps[symbol]).total_seconds()
+
+    def get_orderbook_freshness(self, symbol: str) -> DataFreshness:
+        """
+        Get freshness level of order book data.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            DataFreshness level
+        """
+        age_seconds = self.get_orderbook_age_seconds(symbol)
+        age_minutes = age_seconds / 60
+
+        config = self._staleness_config
+        if age_minutes < config.fresh_threshold_minutes:
+            return DataFreshness.FRESH
+        elif age_minutes < config.slightly_stale_minutes:
+            return DataFreshness.SLIGHTLY_STALE
+        elif age_minutes < config.stale_threshold_minutes:
+            return DataFreshness.STALE
+        elif age_minutes < config.very_stale_threshold_minutes:
+            return DataFreshness.VERY_STALE
+        else:
+            return DataFreshness.EXPIRED
+
+    def get_adjusted_confidence(
+        self,
+        raw_confidence: float,
+        symbol: str,
+    ) -> float:
+        """
+        Get staleness-adjusted confidence score.
+
+        Automatically reduces confidence when order book data is stale:
+        - Fresh (<1 min): 100% of raw confidence
+        - Slightly stale (1-2 min): 85% of raw confidence
+        - Stale (2-5 min): 50% of raw confidence
+        - Very stale (5-10 min): 20% of raw confidence
+        - Expired (>10 min): 0% confidence
+
+        Args:
+            raw_confidence: Original confidence score (0-100)
+            symbol: Stock symbol
+
+        Returns:
+            Adjusted confidence score
+        """
+        freshness = self.get_orderbook_freshness(symbol)
+        weight = self._staleness_config.get_weight_for_freshness(freshness)
+
+        adjusted = raw_confidence * weight
+
+        # Log warning if stale
+        if freshness in (DataFreshness.STALE, DataFreshness.VERY_STALE):
+            logger.warning(
+                f"⚠️ Order book data stale for {symbol}: "
+                f"age={self.get_orderbook_age_seconds(symbol):.1f}s, "
+                f"confidence reduced {raw_confidence:.1f}→{adjusted:.1f}"
+            )
+
+        return adjusted
+
+    def get_data_quality_status(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get data quality status for order book analysis.
+
+        Args:
+            symbol: Specific symbol or None for overall status
+
+        Returns:
+            Dict with freshness, age, and trading readiness
+        """
+        if symbol:
+            freshness = self.get_orderbook_freshness(symbol)
+            weight = self._staleness_config.get_weight_for_freshness(freshness)
+
+            return {
+                "symbol": symbol,
+                "freshness": freshness.value,
+                "age_seconds": self.get_orderbook_age_seconds(symbol),
+                "confidence_factor": weight,
+                "is_stale": self.is_orderbook_stale(symbol),
+                "ready_for_trading": freshness
+                in (DataFreshness.FRESH, DataFreshness.SLIGHTLY_STALE),
+            }
+        else:
+            # Overall status
+            total = len(self._orderbook_timestamps)
+            stale_count = sum(1 for s in self._orderbook_timestamps if self.is_orderbook_stale(s))
+
+            return {
+                "tracked_symbols": total,
+                "fresh_orderbooks": total - stale_count,
+                "stale_orderbooks": stale_count,
+                "staleness_config": {
+                    "fresh_threshold_min": self._staleness_config.fresh_threshold_minutes,
+                    "stale_threshold_min": self._staleness_config.stale_threshold_minutes,
+                },
+            }
 
 
 # =============================================================================

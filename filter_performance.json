@@ -12,7 +12,7 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "price_limits": {
@@ -28,7 +28,7 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "trend_alignment": {
@@ -44,7 +44,7 @@
     "block_rate": 0.3333333333333333,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": "2025-12-01T18:20:11.781878"
   },
   "support_resistance": {
@@ -60,7 +60,7 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "volume_confirmation": {
@@ -76,15 +76,15 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "liquidity": {
     "filter_name": "liquidity",
-    "total_checks": 1,
+    "total_checks": 19,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 1,
+    "passed_count": 19,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -92,8 +92,8 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
-    "last_updated": "2025-12-01T18:20:11.781878"
+    "effectiveness_score": 64.99999999999999,
+    "last_updated": "2025-12-16T22:03:43.883791"
   },
   "volatility": {
     "filter_name": "volatility",
@@ -108,7 +108,7 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "rsi_check": {
@@ -124,7 +124,7 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "portfolio_correlation": {
@@ -140,7 +140,7 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": ""
   },
   "rsi": {
@@ -156,7 +156,7 @@
     "block_rate": 1.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 50.0,
     "last_updated": "2025-12-01T18:20:11.781878"
   },
   "volume": {
@@ -167,12 +167,12 @@
     "passed_count": 62,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
-    "passed_that_won": 0,
+    "passed_that_won": 1,
     "passed_that_lost": 0,
     "block_rate": 0.41509433962264153,
     "false_negative_rate": 0.0,
-    "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "precision": 1.0,
+    "effectiveness_score": 100.0,
     "last_updated": "2025-12-08T23:19:00.793559"
   },
   "foreign_flow_market": {
@@ -188,7 +188,71 @@
     "block_rate": 0.0,
     "false_negative_rate": 0.0,
     "precision": 0.0,
-    "effectiveness_score": 0.0,
+    "effectiveness_score": 64.99999999999999,
     "last_updated": "2025-12-08T23:19:00.795229"
+  },
+  "price_limit": {
+    "filter_name": "price_limit",
+    "total_checks": 18,
+    "blocked_count": 0,
+    "warning_count": 0,
+    "passed_count": 18,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 64.99999999999999,
+    "last_updated": "2025-12-16T22:03:43.869308"
+  },
+  "trend": {
+    "filter_name": "trend",
+    "total_checks": 18,
+    "blocked_count": 0,
+    "warning_count": 0,
+    "passed_count": 18,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 1,
+    "passed_that_lost": 0,
+    "block_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "precision": 1.0,
+    "effectiveness_score": 100.0,
+    "last_updated": "2025-12-16T22:03:43.880772"
+  },
+  "intraday_momentum": {
+    "filter_name": "intraday_momentum",
+    "total_checks": 18,
+    "blocked_count": 0,
+    "warning_count": 0,
+    "passed_count": 18,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 64.99999999999999,
+    "last_updated": "2025-12-16T22:03:44.977803"
+  },
+  "session_timing": {
+    "filter_name": "session_timing",
+    "total_checks": 18,
+    "blocked_count": 18,
+    "warning_count": 0,
+    "passed_count": 0,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 1.0,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 64.99999999999999,
+    "last_updated": "2025-12-16T22:03:44.979254"
   }
 }

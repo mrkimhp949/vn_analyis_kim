@@ -662,6 +662,64 @@ VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME = (
 # Circuit Breaker Improvements
 VN_MAX_CONSECUTIVE_WINS = 7  # Pause after 7 consecutive wins (was 5)
 
+# ============================================================================
+# NEW v9.7: Entry Logic Magic Numbers (Centralized)
+# ============================================================================
+# These constants were previously hardcoded in entry_logic.py
+# Centralizing them here for easier tuning and consistency
+
+# Gap Analysis Thresholds
+ENTRY_GAP_BLOCK_THRESHOLD = 0.05  # Block entry if gap > 5%
+ENTRY_GAP_WARN_THRESHOLD = 0.03  # Warn if gap > 3%
+ENTRY_GAP_FILL_MIN = -0.02  # Min gap for gap-fill opportunity
+ENTRY_GAP_FILL_MAX = -0.005  # Max gap for gap-fill opportunity
+
+# Accumulation/Distribution Thresholds
+AD_STRONG_ACCUMULATION_CMF = 0.10  # CMF > 0.10 = strong accumulation
+AD_MODERATE_ACCUMULATION_CMF = 0.05  # CMF > 0.05 = moderate accumulation
+AD_STRONG_DISTRIBUTION_CMF = -0.10  # CMF < -0.10 = strong distribution
+AD_MODERATE_DISTRIBUTION_CMF = -0.05  # CMF < -0.05 = moderate distribution
+AD_OBV_RISING_THRESHOLD = 1.05  # OBV short > long * 1.05 = rising
+AD_OBV_FALLING_THRESHOLD = 0.95  # OBV short < long * 0.95 = falling
+AD_PRICE_DIVERGENCE_THRESHOLD = 0.03  # 3% price rise with distribution = bearish divergence
+
+# Foreign Flow Thresholds
+FOREIGN_HEAVY_SELLING_PCT = -0.30  # Net selling > 30% = block
+FOREIGN_MODERATE_SELLING_PCT = -0.15  # Net selling > 15% = warning
+FOREIGN_LIGHT_SELLING_PCT = -0.05  # Net selling > 5% = light warning
+FOREIGN_HEAVY_BUYING_PCT = 0.25  # Net buying > 25% = strong positive
+FOREIGN_MODERATE_BUYING_PCT = 0.10  # Net buying > 10% = positive
+
+# Margin Availability Thresholds
+MARGIN_CRITICAL_THRESHOLD = 0.05  # < 5% available = block
+MARGIN_LOW_THRESHOLD = 0.15  # < 15% available = warning
+MARGIN_MODERATE_THRESHOLD = 0.30  # < 30% available = reduce position
+MARGIN_HIGH_PENDING_THRESHOLD = 0.30  # > 30% pending settlement = warning
+
+# Consecutive Loss Protection
+CONSECUTIVE_LOSS_DEFAULT_LIMIT = 3  # Block after 3 consecutive losses
+CONSECUTIVE_LOSS_DEFAULT_COOLDOWN = 5  # 5 days cool-down period
+
+# Intraday Momentum Thresholds
+INTRADAY_MOMENTUM_THRESHOLD = 0.03  # 3% intraday move threshold
+VN30_DIVERGENCE_THRESHOLD = 0.04  # 4% divergence from VN30 threshold
+
+# Pre-Holiday Risk
+PRE_HOLIDAY_DEFAULT_DAYS = 3  # Days before major holiday to reduce exposure
+
+# Sector Exposure Defaults (when circuit_breaker not available)
+SECTOR_EXPOSURE_BANKING = 0.25
+SECTOR_EXPOSURE_REAL_ESTATE = 0.20
+SECTOR_EXPOSURE_SECURITIES = 0.15
+SECTOR_EXPOSURE_TECHNOLOGY = 0.30
+SECTOR_EXPOSURE_CONSUMER = 0.30
+SECTOR_EXPOSURE_DEFAULT = 0.25
+SECTOR_EXPOSURE_BEAR_MULTIPLIER = 0.6  # Reduce by 40% in BEAR/HIGH_VOL
+
+# Support/Resistance Additional
+SR_HIGH_DISTANCE_THRESHOLD = 0.005  # 0.5% from high
+SR_AVG_PRICE_MULTIPLIER = 1.01  # 1% above 3-bar avg for sustained move
+
 # Export all constants
 __all__ = [
     # Dynamic Functions
@@ -875,4 +933,39 @@ __all__ = [
     "VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME",
     # NEW v5.0: Circuit Breaker
     "VN_MAX_CONSECUTIVE_WINS",
+    # NEW v9.7: Entry Logic Magic Numbers
+    "ENTRY_GAP_BLOCK_THRESHOLD",
+    "ENTRY_GAP_WARN_THRESHOLD",
+    "ENTRY_GAP_FILL_MIN",
+    "ENTRY_GAP_FILL_MAX",
+    "AD_STRONG_ACCUMULATION_CMF",
+    "AD_MODERATE_ACCUMULATION_CMF",
+    "AD_STRONG_DISTRIBUTION_CMF",
+    "AD_MODERATE_DISTRIBUTION_CMF",
+    "AD_OBV_RISING_THRESHOLD",
+    "AD_OBV_FALLING_THRESHOLD",
+    "AD_PRICE_DIVERGENCE_THRESHOLD",
+    "FOREIGN_HEAVY_SELLING_PCT",
+    "FOREIGN_MODERATE_SELLING_PCT",
+    "FOREIGN_LIGHT_SELLING_PCT",
+    "FOREIGN_HEAVY_BUYING_PCT",
+    "FOREIGN_MODERATE_BUYING_PCT",
+    "MARGIN_CRITICAL_THRESHOLD",
+    "MARGIN_LOW_THRESHOLD",
+    "MARGIN_MODERATE_THRESHOLD",
+    "MARGIN_HIGH_PENDING_THRESHOLD",
+    "CONSECUTIVE_LOSS_DEFAULT_LIMIT",
+    "CONSECUTIVE_LOSS_DEFAULT_COOLDOWN",
+    "INTRADAY_MOMENTUM_THRESHOLD",
+    "VN30_DIVERGENCE_THRESHOLD",
+    "PRE_HOLIDAY_DEFAULT_DAYS",
+    "SECTOR_EXPOSURE_BANKING",
+    "SECTOR_EXPOSURE_REAL_ESTATE",
+    "SECTOR_EXPOSURE_SECURITIES",
+    "SECTOR_EXPOSURE_TECHNOLOGY",
+    "SECTOR_EXPOSURE_CONSUMER",
+    "SECTOR_EXPOSURE_DEFAULT",
+    "SECTOR_EXPOSURE_BEAR_MULTIPLIER",
+    "SR_HIGH_DISTANCE_THRESHOLD",
+    "SR_AVG_PRICE_MULTIPLIER",
 ]

@@ -7,6 +7,7 @@ Sentiment analysis for Vietnam stock market using:
 - Social media sentiment
 - Forum/community analysis
 - Market sentiment indicators
+- Data staleness handling with weight adjustment
 
 Usage:
     from src.sentiment.vn_sentiment_analyzer import (
@@ -21,6 +22,9 @@ Usage:
     
     # Get market-wide sentiment
     market_sentiment = analyzer.get_market_sentiment()
+    
+    # Get staleness-adjusted score
+    adjusted = analyzer.get_adjusted_score("VNM")
 """
 
 import json
@@ -37,6 +41,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import requests
+
+from src.utils.data_staleness import (
+    DataStalenessMixin,
+    DataFreshness,
+    StalenessConfig,
+    STALENESS_CONFIGS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -770,7 +781,7 @@ class MarketDataSentiment:
 # =============================================================================
 
 
-class VNSentimentAnalyzer:
+class VNSentimentAnalyzer(DataStalenessMixin):
     """
     Vietnam Market Sentiment Analyzer
 
@@ -780,6 +791,10 @@ class VNSentimentAnalyzer:
     - Forum discussions
     - Market data
 
+    Features data staleness handling:
+    - Stale data (>15 min) reduces weight by 15%
+    - Very stale data (>30 min) reduces weight by 50%
+
     Usage:
         analyzer = VNSentimentAnalyzer()
 
@@ -788,6 +803,9 @@ class VNSentimentAnalyzer:
 
         # Get market sentiment
         market = analyzer.get_market_sentiment()
+
+        # Get staleness-adjusted score
+        adjusted = analyzer.get_adjusted_score("VNM")
     """
 
     # Source weights
@@ -802,19 +820,23 @@ class VNSentimentAnalyzer:
     def __init__(self):
         self._lock = RLock()
 
+        # Initialize staleness tracking with sentiment config
+        self._init_staleness("sentiment")
+
         # Initialize components
         self._text_processor = VietnameseTextProcessor()
         self._news_scraper = VNNewsScraper()
         self._market_sentiment = MarketDataSentiment()
 
-        # Cache
+        # Cache with per-symbol timestamps
         self._symbol_cache: Dict[str, SymbolSentiment] = {}
+        self._symbol_cache_times: Dict[str, datetime] = {}  # Track per-symbol staleness
         self._cache_ttl = timedelta(minutes=15)
 
         # History for trend calculation
         self._sentiment_history: Dict[str, List[Tuple[datetime, float]]] = {}
 
-        logger.info("🎭 VN Sentiment Analyzer initialized")
+        logger.info("🎭 VN Sentiment Analyzer initialized (with staleness handling)")
 
     def analyze_symbol(
         self,
@@ -886,8 +908,10 @@ class VNSentimentAnalyzer:
             # 4. Calculate trend
             result = self._calculate_trend(symbol, result)
 
-            # Cache result
+            # Cache result with timestamp
             self._symbol_cache[symbol] = result
+            self._symbol_cache_times[symbol] = datetime.now()
+            self._update_cache_timestamp()  # Update global cache time
 
             return result
 
@@ -1177,6 +1201,123 @@ class VNSentimentAnalyzer:
             "cached_symbols": list(self._symbol_cache.keys()),
             "history_symbols": list(self._sentiment_history.keys()),
         }
+
+    # =============================================================================
+    # STALENESS-ADJUSTED METHODS
+    # =============================================================================
+
+    def get_adjusted_score(
+        self,
+        symbol: str,
+        df: Optional[pd.DataFrame] = None,
+    ) -> float:
+        """
+        Get staleness-adjusted sentiment score for a symbol.
+
+        Automatically reduces score weight when data is stale:
+        - Fresh (<15 min): 100% weight
+        - Slightly stale (15-30 min): 85% weight
+        - Stale (30-60 min): 50% weight
+        - Very stale (60-120 min): 20% weight
+        - Expired (>120 min): 0% weight
+
+        Args:
+            symbol: Stock symbol
+            df: Optional price DataFrame
+
+        Returns:
+            Staleness-adjusted sentiment score
+        """
+        sentiment = self.analyze_symbol(symbol, df)
+        raw_score = sentiment.overall_score
+
+        # Check per-symbol staleness
+        cache_time = self._symbol_cache_times.get(symbol)
+        if cache_time is None:
+            return raw_score
+
+        age_minutes = (datetime.now() - cache_time).total_seconds() / 60
+
+        # Apply staleness weight based on config
+        config = self._staleness_config
+        if age_minutes < config.fresh_threshold_minutes:
+            weight = config.fresh_weight
+        elif age_minutes < config.slightly_stale_minutes:
+            weight = config.slightly_stale_weight
+        elif age_minutes < config.stale_threshold_minutes:
+            weight = config.stale_weight
+        elif age_minutes < config.very_stale_threshold_minutes:
+            weight = config.very_stale_weight
+        else:
+            weight = config.expired_weight
+
+        return raw_score * weight
+
+    def is_symbol_data_stale(
+        self,
+        symbol: str,
+        max_delay_minutes: int = 30,
+    ) -> bool:
+        """
+        Check if sentiment data for a symbol is stale.
+
+        Args:
+            symbol: Stock symbol
+            max_delay_minutes: Threshold in minutes
+
+        Returns:
+            True if data is older than threshold
+        """
+        cache_time = self._symbol_cache_times.get(symbol)
+        if cache_time is None:
+            return True
+
+        age = (datetime.now() - cache_time).total_seconds() / 60
+        return age > max_delay_minutes
+
+    def get_data_quality(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get data quality status for sentiment analysis.
+
+        Args:
+            symbol: Specific symbol or None for overall status
+
+        Returns:
+            Dict with freshness, age, weight, and recommendations
+        """
+        if symbol:
+            cache_time = self._symbol_cache_times.get(symbol)
+            if cache_time is None:
+                return {
+                    "freshness": "expired",
+                    "age_minutes": float("inf"),
+                    "weight_factor": 0.0,
+                    "is_stale": True,
+                    "symbol": symbol,
+                    "recommendation": "No data - run analyze_symbol()",
+                }
+
+            age = (datetime.now() - cache_time).total_seconds() / 60
+            freshness = self.get_data_freshness()
+            weight = self.get_staleness_weight()
+
+            return {
+                "freshness": freshness.value,
+                "age_minutes": age,
+                "weight_factor": weight,
+                "is_stale": self.is_symbol_data_stale(symbol),
+                "symbol": symbol,
+                "cache_time": cache_time.isoformat(),
+            }
+        else:
+            # Overall status
+            return {
+                **self.get_staleness_status(),
+                "cached_symbols": len(self._symbol_cache),
+                "stale_symbols": sum(
+                    1 for s in self._symbol_cache_times if self.is_symbol_data_stale(s)
+                ),
+            }
 
 
 # =============================================================================
