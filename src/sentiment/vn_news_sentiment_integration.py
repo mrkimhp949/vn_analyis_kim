@@ -715,6 +715,19 @@ class VNNewsEventDetector:
 
 
 # =============================================================================
+# NEWS CRAWLER INTEGRATION
+# =============================================================================
+
+NEWS_CRAWLER_AVAILABLE = False
+try:
+    from src.data.vn_news_crawler import get_news_crawler, VNNewsCrawler
+
+    NEWS_CRAWLER_AVAILABLE = True
+except ImportError:
+    pass
+
+
+# =============================================================================
 # NEWS SENTIMENT INTEGRATION
 # =============================================================================
 
@@ -726,10 +739,19 @@ class VNNewsSentimentIntegration:
     Maintains a rolling window of news events and generates
     real-time sentiment adjustments for trading decisions.
 
+    Features:
+    - Automatic news fetching via VN News Crawler
+    - Real-time event detection
+    - Sentiment score calculation with decay
+    - Entry/Exit signal adjustments
+
     Usage:
         integration = VNNewsSentimentIntegration()
 
-        # Add news events
+        # Auto-fetch and analyze news for symbol
+        integration.refresh_news("VNM")
+
+        # Or add news events manually
         integration.add_news("VNM", "Vinamilk lợi nhuận tăng 20%")
 
         # Get signal adjustment
@@ -743,10 +765,21 @@ class VNNewsSentimentIntegration:
         self,
         event_window_hours: int = 168,  # 7 days
         max_events_per_symbol: int = 50,
+        auto_fetch_news: bool = True,  # NEW: Auto-fetch from crawler
     ):
         self._lock = RLock()
         self._event_window = timedelta(hours=event_window_hours)
         self._max_events = max_events_per_symbol
+        self._auto_fetch = auto_fetch_news
+
+        # News crawler (if available)
+        self._news_crawler = None
+        if NEWS_CRAWLER_AVAILABLE and auto_fetch_news:
+            try:
+                self._news_crawler = get_news_crawler()
+                logger.info("📰 News Crawler integrated for auto-fetching")
+            except Exception as e:
+                logger.debug(f"News crawler init failed: {e}")
 
         # Event storage
         self._events: Dict[str, deque] = {}  # symbol -> deque of NewsEvent
@@ -758,7 +791,71 @@ class VNNewsSentimentIntegration:
         self._signal_cache: Dict[str, Tuple[datetime, SentimentSignal]] = {}
         self._cache_ttl = timedelta(minutes=5)
 
+        # Track last fetch time per symbol
+        self._last_fetch: Dict[str, datetime] = {}
+        self._fetch_cooldown = timedelta(minutes=10)
+
         logger.info("🔗 VN News Sentiment Integration initialized")
+
+    def refresh_news(
+        self,
+        symbol: str,
+        force: bool = False,
+    ) -> int:
+        """
+        Fetch and process latest news for a symbol.
+
+        Args:
+            symbol: Stock symbol
+            force: Force refresh even if recently fetched
+
+        Returns:
+            Number of new events detected
+        """
+        symbol = symbol.upper()
+
+        # Check cooldown
+        if not force and symbol in self._last_fetch:
+            if datetime.now() - self._last_fetch[symbol] < self._fetch_cooldown:
+                return 0
+
+        if self._news_crawler is None:
+            logger.debug("News crawler not available")
+            return 0
+
+        try:
+            # Fetch news from crawler
+            articles = self._news_crawler.get_news_for_symbol(
+                symbol,
+                max_articles=20,
+                max_age_hours=int(self._event_window.total_seconds() / 3600),
+            )
+
+            if not articles:
+                return 0
+
+            # Convert to events
+            new_events = 0
+            for article in articles:
+                events = self.add_news(
+                    symbol=symbol,
+                    headline=article.title,
+                    content=article.summary,
+                    source=article.source,
+                    published_at=article.published_at,
+                )
+                new_events += len(events)
+
+            self._last_fetch[symbol] = datetime.now()
+
+            if new_events > 0:
+                logger.info(f"📰 Refreshed news for {symbol}: {new_events} events detected")
+
+            return new_events
+
+        except Exception as e:
+            logger.warning(f"News refresh failed for {symbol}: {e}")
+            return 0
 
     def add_news(
         self,
@@ -831,6 +928,7 @@ class VNNewsSentimentIntegration:
         self,
         symbol: str,
         use_cache: bool = True,
+        auto_refresh: bool = True,  # NEW: Auto-fetch news if needed
     ) -> SentimentSignal:
         """
         Get sentiment-based signal adjustment.
@@ -838,6 +936,7 @@ class VNNewsSentimentIntegration:
         Args:
             symbol: Stock symbol
             use_cache: Use cached result if available
+            auto_refresh: Auto-fetch latest news if crawler available
 
         Returns:
             SentimentSignal with adjustments
@@ -849,6 +948,10 @@ class VNNewsSentimentIntegration:
             cache_time, signal = self._signal_cache[symbol]
             if datetime.now() - cache_time < self._cache_ttl:
                 return signal
+
+        # Auto-refresh news if available and enabled
+        if auto_refresh and self._auto_fetch and self._news_crawler is not None:
+            self.refresh_news(symbol)
 
         with self._lock:
             signal = self._calculate_signal(symbol)

@@ -143,6 +143,32 @@ try:
 except ImportError:
     pass
 
+# NEW v9.3: Market Breadth Integration
+MARKET_BREADTH_AVAILABLE = False
+try:
+    from src.market.market_breadth import (
+        get_breadth_analyzer,
+        MarketBreadthAnalyzer,
+        BreadthSignal,
+    )
+
+    MARKET_BREADTH_AVAILABLE = True
+except ImportError:
+    pass
+
+# NEW v9.4: Event Calendar Integration
+EVENT_CALENDAR_AVAILABLE = False
+try:
+    from src.market.event_calendar import (
+        get_event_calendar,
+        VietnamEventCalendar,
+        EventImpact,
+    )
+
+    EVENT_CALENDAR_AVAILABLE = True
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -286,6 +312,24 @@ class ImprovedEntryLogic:
         self._price_optimizer = PriceOptimizer(min_risk_reward=min_risk_reward)
         self._sentiment_analyzer = SentimentAnalyzer()
         self._volume_analyzer = VolumeAnalyzer()
+
+        # NEW v9.3: Market Breadth Analyzer
+        self._breadth_analyzer = None
+        if MARKET_BREADTH_AVAILABLE and self.use_market_breadth_filter:
+            try:
+                self._breadth_analyzer = get_breadth_analyzer()
+                logger.info("📊 Market Breadth Analyzer integrated into entry logic")
+            except Exception as e:
+                logger.warning(f"Failed to initialize breadth analyzer: {e}")
+
+        # NEW v9.4: Event Calendar
+        self._event_calendar = None
+        if EVENT_CALENDAR_AVAILABLE:
+            try:
+                self._event_calendar = get_event_calendar()
+                logger.info("📅 Event Calendar integrated into entry logic")
+            except Exception as e:
+                logger.warning(f"Failed to initialize event calendar: {e}")
 
     def _adjust_thresholds_for_market(self, market_regime: Optional[Dict]) -> None:
         """Dynamically adjust entry thresholds based on market regime."""
@@ -816,6 +860,55 @@ class ImprovedEntryLogic:
                 self._regime_position_multiplier *= news_result.get("position_multiplier", 1.0)
             self._track_filter("vn_news_sentiment", True, symbol or "")
 
+        # 17. Advanced Market Breadth (NEW v9.3) - Real-time breadth analyzer
+        if MARKET_BREADTH_AVAILABLE and self._breadth_analyzer and symbol:
+            breadth_result = self._check_advanced_breadth()
+            if breadth_result.get("blocked"):
+                self._track_filter("advanced_breadth", False, symbol or "")
+                return breadth_result.get("reason")
+            if breadth_result.get("warning"):
+                warnings.append(breadth_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "advanced_breadth",
+                    breadth_result.get("adjustment", -10),
+                    breadth_result.get("note", "Weak market breadth"),
+                )
+            elif breadth_result.get("positive"):
+                reasons.append(breadth_result["positive"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "advanced_breadth",
+                    breadth_result.get("adjustment", 5),
+                    breadth_result.get("note", "Strong market breadth"),
+                )
+            # Apply position multiplier from breadth
+            if breadth_result.get("position_multiplier", 1.0) != 1.0:
+                self._regime_position_multiplier *= breadth_result.get("position_multiplier", 1.0)
+            self._track_filter("advanced_breadth", True, symbol or "")
+
+        # 18. Event Calendar Check (NEW v9.4) - Check for high-impact events
+        if EVENT_CALENDAR_AVAILABLE and self._event_calendar and symbol:
+            event_result = self._check_event_calendar()
+            if event_result.get("blocked"):
+                self._track_filter("event_calendar", False, symbol or "")
+                return event_result.get("reason")
+            if event_result.get("warning"):
+                warnings.append(event_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "event_calendar",
+                    event_result.get("adjustment", -5),
+                    event_result.get("note", "High-impact event approaching"),
+                )
+            # Apply position multiplier for events
+            if event_result.get("position_multiplier", 1.0) != 1.0:
+                self._regime_position_multiplier *= event_result.get("position_multiplier", 1.0)
+            self._track_filter("event_calendar", True, symbol or "")
+
         return None  # No blocking reason
 
     def _check_special_instruments(
@@ -1217,6 +1310,134 @@ class ImprovedEntryLogic:
 
         except Exception as e:
             logger.debug(f"VN news sentiment check error: {e}")
+
+        return result
+
+    def _check_advanced_breadth(self) -> Dict:
+        """
+        Check advanced market breadth for entry decision.
+
+        NEW v9.3: Uses MarketBreadthAnalyzer for real-time breadth analysis.
+
+        Features:
+        - Block entry on breadth thrust down
+        - Boost confidence on breadth thrust up
+        - Adjust position size based on breadth
+
+        Returns:
+            Dict with blocked, warning, positive, adjustment, note, position_multiplier
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "positive": None,
+            "adjustment": 0,
+            "note": None,
+            "position_multiplier": 1.0,
+        }
+
+        try:
+            if self._breadth_analyzer is None:
+                return result
+
+            breadth_check = self._breadth_analyzer.check_breadth_for_entry()
+
+            if breadth_check is None:
+                return result
+
+            # Check if entry is favorable
+            if not breadth_check.get("is_favorable", True):
+                # Block on strong bearish breadth
+                signal = breadth_check.get("signal", "")
+                if signal in ("breadth_thrust_down", "strong_bearish"):
+                    result["blocked"] = True
+                    result["reason"] = f"🚫 Market breadth unfavorable: {signal}"
+                    return result
+
+            # Get adjustment values
+            conf_adj = breadth_check.get("confidence_adjustment", 0)
+            pos_mult = breadth_check.get("position_multiplier", 1.0)
+            signal = breadth_check.get("signal", "neutral")
+            score = breadth_check.get("score", 0)
+
+            # Convert to our scale
+            adjustment = int(conf_adj * 100)  # -15% to +10% -> -15 to +10
+            result["position_multiplier"] = pos_mult
+
+            # Determine warning or positive
+            if signal in ("strong_bearish", "bearish"):
+                result["warning"] = f"⚠️ Weak market breadth ({signal})"
+                result["adjustment"] = min(adjustment, -5)
+                result["note"] = f"A/D ratio unfavorable (score: {score:.2f})"
+            elif signal in ("bullish", "strong_bullish", "breadth_thrust_up"):
+                result["positive"] = f"✅ Strong market breadth ({signal})"
+                result["adjustment"] = max(adjustment, 5)
+                result["note"] = f"A/D ratio favorable (score: {score:.2f})"
+
+                if breadth_check.get("should_boost", False):
+                    result["adjustment"] += 5  # Extra boost for thrust
+                    result["note"] = "🚀 Breadth thrust detected!"
+
+        except Exception as e:
+            logger.debug(f"Advanced breadth check error: {e}")
+
+        return result
+
+    def _check_event_calendar(self) -> Dict:
+        """
+        Check event calendar for trading conditions.
+
+        NEW v9.4: Uses VietnamEventCalendar for event awareness.
+
+        Features:
+        - Block entry on market holidays
+        - Reduce position size before high-impact events
+        - Warn on derivative expiration days
+
+        Returns:
+            Dict with blocked, warning, adjustment, note, position_multiplier
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "adjustment": 0,
+            "note": None,
+            "position_multiplier": 1.0,
+        }
+
+        try:
+            if self._event_calendar is None:
+                return result
+
+            conditions = self._event_calendar.check_trading_conditions()
+
+            if conditions is None:
+                return result
+
+            # Check if trading day
+            if not conditions.get("is_trading_day", True):
+                result["blocked"] = True
+                result["reason"] = "🚫 Market is closed today (holiday)"
+                return result
+
+            # Get risk level
+            risk_level = conditions.get("risk_level", "normal")
+            pos_adj = conditions.get("position_adjustment", 1.0)
+            notes = conditions.get("notes", [])
+
+            result["position_multiplier"] = pos_adj
+
+            if risk_level == "high":
+                result["warning"] = "⚠️ High-impact events approaching"
+                result["adjustment"] = -10
+                result["note"] = "; ".join(notes[:2]) if notes else "Multiple events soon"
+            elif risk_level == "elevated":
+                result["warning"] = "⚠️ Market event risk elevated"
+                result["adjustment"] = -5
+                result["note"] = "; ".join(notes[:2]) if notes else "Event approaching"
+
+        except Exception as e:
+            logger.debug(f"Event calendar check error: {e}")
 
         return result
 

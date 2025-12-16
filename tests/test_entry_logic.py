@@ -143,12 +143,12 @@ def sideways_market_regime():
 
 
 def test_entry_logic_init_default():
-    """Test default initialization (v3.0 - optimized defaults for better win rate)"""
+    """Test default initialization (v9.4 - optimized defaults for VN market volatility)"""
     logic = ImprovedEntryLogic()
 
-    # v3.0: Optimized thresholds - values from constructor defaults
+    # v9.4: Raised thresholds for VN market volatility
     # Note: These are the constructor defaults, not config values
-    assert logic.min_confidence == 45  # Constructor default
+    assert logic.min_confidence == 55  # Constructor default (raised from 45)
     assert logic.min_risk_reward == 1.0  # Constructor default (config may override)
     assert logic.support_distance_percent == 7.0  # Constructor default
     assert logic.require_trend_alignment is False  # Constructor default

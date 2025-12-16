@@ -110,7 +110,7 @@ def test_exit_strategy_init_default():
     assert strategy.tp_levels == [0.07, 0.12, 0.18]  # 3 TP levels (7%, 12%, 18%)
     assert strategy.trailing_activation == 0.03  # v10.0: Activate at 3% profit
     assert strategy.trailing_distance == 0.015  # v10.0: Trail 1.5% below peak
-    assert strategy.max_holding_days == 20  # v4.1: 20 days max
+    assert strategy.max_holding_days == 15  # v10.1: 15 days max (reduced for faster exits)
     assert strategy.time_decay_threshold == 0.02  # v4.1: 2% threshold
     assert strategy.default_stop_loss_pct == 0.04  # v10.0: 4% stop loss
 

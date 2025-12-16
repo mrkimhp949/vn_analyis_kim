@@ -434,14 +434,38 @@ class VietnameseTextProcessor:
 
 
 # =============================================================================
+# NEWS CRAWLER INTEGRATION
+# =============================================================================
+
+# Try to import advanced news crawler
+NEWS_CRAWLER_AVAILABLE = False
+try:
+    from src.data.vn_news_crawler import get_news_crawler, VNNewsCrawler
+
+    NEWS_CRAWLER_AVAILABLE = True
+except ImportError:
+    pass
+
+
+# =============================================================================
 # NEWS SCRAPER
 # =============================================================================
 
 
 class VNNewsScraper:
-    """Scrape Vietnamese financial news."""
+    """Scrape Vietnamese financial news with advanced crawler integration."""
 
     def __init__(self):
+        # Use advanced crawler if available
+        self._advanced_crawler = None
+        if NEWS_CRAWLER_AVAILABLE:
+            try:
+                self._advanced_crawler = get_news_crawler()
+                logger.info("📰 Using advanced VN News Crawler")
+            except Exception as e:
+                logger.debug(f"Advanced crawler init failed: {e}")
+
+        # Fallback to basic session
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -478,7 +502,37 @@ class VNNewsScraper:
 
         articles = []
 
-        # Try CafeF
+        # Try advanced crawler first (preferred)
+        if self._advanced_crawler is not None:
+            try:
+                crawled_articles = self._advanced_crawler.get_news_for_symbol(
+                    symbol,
+                    max_articles=20,
+                    max_age_hours=days * 24,
+                )
+                for article in crawled_articles:
+                    articles.append(
+                        {
+                            "source": article.source,
+                            "title": article.title,
+                            "content": article.summary or article.title,
+                            "date": article.published_at,
+                            "url": article.url,
+                            "symbols": article.symbols,
+                        }
+                    )
+
+                if articles:
+                    logger.info(
+                        f"📰 Got {len(articles)} articles for {symbol} via advanced crawler"
+                    )
+                    self._cache[cache_key] = (datetime.now(), articles)
+                    return articles
+
+            except Exception as e:
+                logger.debug(f"Advanced crawler failed: {e}")
+
+        # Fallback: Try CafeF
         try:
             cafef_articles = self._scrape_cafef(symbol)
             articles.extend(cafef_articles)
@@ -569,6 +623,28 @@ class VNNewsScraper:
         """Get general market headlines."""
         headlines = []
 
+        # Try advanced crawler first
+        if self._advanced_crawler is not None:
+            try:
+                latest_news = self._advanced_crawler.get_latest_news(max_articles=limit)
+                for article in latest_news:
+                    headlines.append(
+                        {
+                            "source": article.source,
+                            "title": article.title,
+                            "date": article.published_at,
+                            "url": article.url,
+                        }
+                    )
+
+                if headlines:
+                    logger.info(f"📰 Got {len(headlines)} market headlines via advanced crawler")
+                    return headlines
+
+            except Exception as e:
+                logger.debug(f"Advanced crawler headlines failed: {e}")
+
+        # Fallback to basic scraping
         try:
             url = "https://cafef.vn/thi-truong-chung-khoan.chn"
             response = self._session.get(url, timeout=10)
@@ -593,6 +669,15 @@ class VNNewsScraper:
             logger.debug(f"Headlines fetch error: {e}")
 
         return headlines
+
+    def get_trending_symbols(self, top_n: int = 10) -> List[tuple]:
+        """Get trending stock symbols from news."""
+        if self._advanced_crawler is not None:
+            try:
+                return self._advanced_crawler.get_trending_symbols(top_n)
+            except Exception as e:
+                logger.debug(f"Trending symbols failed: {e}")
+        return []
 
 
 # =============================================================================
