@@ -1,25 +1,25 @@
 {
   "VNM": {
     "symbol": "VNM",
-    "consecutive_losses": 4,
+    "consecutive_losses": 0,
     "total_trades": 4,
     "total_wins": 0,
     "total_losses": 4,
     "win_rate": 0.0,
     "last_trade_date": "2025-11-22",
-    "blocked": true,
-    "blocked_reason": "🚫 Blocked: 4 consecutive losses"
+    "blocked": false,
+    "blocked_reason": ""
   },
   "HPG": {
     "symbol": "HPG",
-    "consecutive_losses": 4,
+    "consecutive_losses": 0,
     "total_trades": 5,
     "total_wins": 1,
     "total_losses": 4,
     "win_rate": 0.2,
     "last_trade_date": "2025-11-22",
-    "blocked": true,
-    "blocked_reason": "🚫 Blocked: Win rate 20.0% < 30.0% (1/5 trades)"
+    "blocked": false,
+    "blocked_reason": ""
   },
   "LOSER": {
     "symbol": "LOSER",
@@ -45,12 +45,12 @@
   },
   "VCB": {
     "symbol": "VCB",
-    "consecutive_losses": 1,
-    "total_trades": 3,
-    "total_wins": 2,
+    "consecutive_losses": 0,
+    "total_trades": 4,
+    "total_wins": 3,
     "total_losses": 1,
-    "win_rate": 0.6666666666666666,
-    "last_trade_date": "2025-11-26",
+    "win_rate": 0.75,
+    "last_trade_date": "2025-12-16",
     "blocked": false,
     "blocked_reason": ""
   },

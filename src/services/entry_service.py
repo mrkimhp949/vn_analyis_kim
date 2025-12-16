@@ -100,6 +100,31 @@ try:
 except ImportError:
     T2_SETTLEMENT_AVAILABLE = False
 
+# Import Vietnam ML Integration (NEW - 10/10 ML Integration)
+try:
+    from src.ml.vietnam_ml_integration import (
+        VietnamMLIntegration,
+        get_vietnam_ml_integration,
+        SignalQuality,
+    )
+    from src.ml.integration_bridge import (
+        MLIntegrationBridge,
+        get_ml_integration_bridge,
+        enhance_entry_signal_with_ml,
+    )
+
+    VIETNAM_ML_INTEGRATION_AVAILABLE = True
+except ImportError:
+    VIETNAM_ML_INTEGRATION_AVAILABLE = False
+
+# Legacy import for backward compatibility
+try:
+    from src.portfolio.settlement import T2SettlementManager
+
+    T2_SETTLEMENT_AVAILABLE = True
+except ImportError:
+    T2_SETTLEMENT_AVAILABLE = False
+
 
 # =============================================================================
 # CONSTANTS & CONFIGURATION
@@ -470,9 +495,12 @@ class EntrySignalService:
     - Validate entry conditions
     - Calculate position sizes
     - Filter and rank signals
+    - Integrate with Vietnam ML system (10/10)
 
     Attributes:
         ml_generator: ML signal generator
+        ml_integration: Vietnam ML integration (NEW)
+        ml_bridge: ML integration bridge (NEW)
         entry_logic: Entry logic analyzer
         position_sizer: Position size calculator
         portfolio_lock: Portfolio lock manager
@@ -490,6 +518,17 @@ class EntrySignalService:
         self.config = config
         self.ml_generator = EnhancedMLSignalGenerator()
         self.scorer = SignalScorer(config)
+
+        # NEW: Vietnam ML Integration (10/10)
+        self.ml_bridge = None
+        self.use_vietnam_ml = False
+        if VIETNAM_ML_INTEGRATION_AVAILABLE:
+            try:
+                self.ml_bridge = get_ml_integration_bridge(min_confidence=55.0)
+                self.use_vietnam_ml = True
+                logger.info("✅ Vietnam ML Integration (10/10) enabled")
+            except Exception as e:
+                logger.warning(f"⚠️ Vietnam ML Integration failed: {e}")
 
         # Load trading config
         cfg = get_config(validate=False)
@@ -627,6 +666,10 @@ class EntrySignalService:
                     logger.debug(f"[{symbol}] No entry: {', '.join(entry_signal.warnings)}")
                 return None
 
+            # NEW: Enhance entry signal with Vietnam ML insights (10/10)
+            if ml_signal is not None:
+                entry_signal = self._enhance_signal_with_ml(entry_signal, ml_signal, symbol)
+
             # Vietnam market validations
             if not self._validate_vietnam_market(symbol, df, entry_signal):
                 return None
@@ -715,6 +758,28 @@ class EntrySignalService:
     ) -> Optional[Dict[str, Any]]:
         """Run ML analysis with error handling."""
         ml_signal = None  # Default to None for error handling
+
+        # NEW: Use Vietnam ML Integration if available (10/10)
+        if self.use_vietnam_ml and self.ml_bridge is not None:
+            try:
+                ml_signal = self.ml_bridge.get_ml_signal_for_entry(
+                    df=df,
+                    symbol=symbol,
+                    index_df=vnindex_df,
+                )
+
+                if ml_signal and ml_signal.get("is_valid"):
+                    logger.debug(
+                        f"[{symbol}] Vietnam ML: {ml_signal.get('signal')} "
+                        f"({ml_signal.get('confidence', 0):.1f}% confidence, "
+                        f"quality={ml_signal.get('signal_quality', 'N/A')})"
+                    )
+                return ml_signal
+            except Exception as e:
+                logger.warning(f"⚠️ Vietnam ML error for {symbol}: {e}")
+                # Fall through to legacy ML
+
+        # Legacy ML analysis
         try:
             ml_signal = self.ml_generator.analyze(df, vnindex_df)
             if ml_signal is None:
@@ -724,6 +789,66 @@ class EntrySignalService:
             logger.warning(f"⚠️ ML analysis error for {symbol}: {type(e).__name__}: {e}")
             ml_signal = None  # Explicitly set to None on error
             return ml_signal
+
+    def _enhance_signal_with_ml(
+        self, entry_signal: Any, ml_signal: Dict[str, Any], symbol: str
+    ) -> Any:
+        """
+        Enhance entry signal with Vietnam ML insights.
+
+        NEW: Integrates calibrated ML confidence and quality metrics.
+        """
+        if not self.use_vietnam_ml or ml_signal is None:
+            return entry_signal
+
+        try:
+            if VIETNAM_ML_INTEGRATION_AVAILABLE:
+                entry_signal = enhance_entry_signal_with_ml(entry_signal, ml_signal)
+
+                # Adjust position multiplier based on ML quality
+                position_adj = self.ml_bridge.get_position_size_adjustment(ml_signal)
+                if hasattr(entry_signal, "metadata"):
+                    if entry_signal.metadata is None:
+                        entry_signal.metadata = {}
+                    entry_signal.metadata["ml_position_adjustment"] = position_adj
+
+                logger.debug(
+                    f"[{symbol}] Enhanced with ML: confidence={entry_signal.confidence}, "
+                    f"position_adj={position_adj:.2f}"
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ ML enhancement error for {symbol}: {e}")
+
+        return entry_signal
+
+    def update_trade_outcome(self, prediction_id: str, pnl_percent: float, outcome: str = "CLOSED"):
+        """
+        Update ML prediction with trade outcome for calibration.
+
+        CRITICAL: Call this when closing a trade to improve ML calibration!
+
+        Args:
+            prediction_id: ID from ML signal metadata
+            pnl_percent: Actual P&L percentage
+            outcome: Trade outcome (CLOSED, STOPPED, etc.)
+        """
+        if self.use_vietnam_ml and self.ml_bridge is not None:
+            try:
+                self.ml_bridge.update_trade_outcome(prediction_id, pnl_percent, outcome)
+                logger.debug(f"Updated ML outcome: {prediction_id} -> {pnl_percent:+.2f}%")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to update ML outcome: {e}")
+
+    def get_ml_performance_report(self, days: int = 30) -> Dict[str, Any]:
+        """
+        Get ML model performance report.
+
+        Returns:
+            Dict with accuracy metrics and quality breakdown
+        """
+        if self.use_vietnam_ml and self.ml_bridge is not None:
+            return self.ml_bridge.get_performance_report(days=days)
+        return {"error": "Vietnam ML Integration not available"}
 
     def _validate_vietnam_market(self, symbol: str, df: pd.DataFrame, entry_signal: Any) -> bool:
         """Validate Vietnam market specific rules."""

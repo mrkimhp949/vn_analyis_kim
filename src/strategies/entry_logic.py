@@ -118,6 +118,31 @@ try:
 except ImportError:
     pass
 
+# NEW v9.1: Order Book Integration for Entry Timing
+ORDER_BOOK_AVAILABLE = False
+try:
+    from src.strategies.order_book_integration import (
+        get_order_book_integration,
+        OrderBookIntegration,
+    )
+
+    ORDER_BOOK_AVAILABLE = True
+except ImportError:
+    pass
+
+# NEW v9.2: Vietnamese News Sentiment Integration
+VN_NEWS_SENTIMENT_AVAILABLE = False
+try:
+    from src.sentiment.vn_news_sentiment_integration import (
+        get_news_sentiment_integration,
+        VNNewsSentimentIntegration,
+        SentimentDirection,
+    )
+
+    VN_NEWS_SENTIMENT_AVAILABLE = True
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -178,7 +203,7 @@ class ImprovedEntryLogic:
 
     def __init__(
         self,
-        min_confidence: int = 45,
+        min_confidence: int = 55,  # IMPROVED: Raised from 45 for VN market volatility
         min_risk_reward: float = 1.0,
         support_distance_percent: float = 7.0,
         require_trend_alignment: bool = False,
@@ -191,10 +216,16 @@ class ImprovedEntryLogic:
         use_tiered_liquidity: bool = True,
         use_price_action_filter: bool = False,
         use_sector_strength_filter: bool = True,
-        use_market_breadth_filter: bool = False,
+        use_market_breadth_filter: bool = True,  # ENABLED: Important for regime confirmation
         use_monthly_timeframe: bool = False,
         soft_filter_mode: bool = True,
         max_warnings_allowed: int = 5,
+        use_order_book_timing: bool = True,  # NEW: Enable order book integration
+        use_intraday_momentum_filter: bool = True,  # NEW: Block entries when price moved >3% intraday
+        use_vn30_correlation_filter: bool = True,  # NEW: Check correlation with VN30
+        use_vn_news_sentiment_filter: bool = True,  # NEW v9.2: Vietnamese news sentiment integration
+        intraday_momentum_threshold: float = 0.03,  # NEW: 3% intraday move threshold
+        vn30_divergence_threshold: float = 0.04,  # NEW: 4% divergence from VN30 threshold
     ) -> None:
         """Initialize entry logic with configurable parameters."""
         # Core settings
@@ -223,6 +254,14 @@ class ImprovedEntryLogic:
         self.use_market_breadth_filter = use_market_breadth_filter
         self.use_monthly_timeframe = use_monthly_timeframe
         self.use_sentiment_filter = True
+
+        # NEW: Order Book and Intraday Momentum filters
+        self.use_order_book_timing = use_order_book_timing
+        self.use_intraday_momentum_filter = use_intraday_momentum_filter
+        self.use_vn30_correlation_filter = use_vn30_correlation_filter
+        self.use_vn_news_sentiment_filter = use_vn_news_sentiment_filter  # NEW v9.2
+        self.intraday_momentum_threshold = intraday_momentum_threshold
+        self.vn30_divergence_threshold = vn30_divergence_threshold
 
         # Soft filter mode
         self.soft_filter_mode = soft_filter_mode
@@ -596,10 +635,37 @@ class ImprovedEntryLogic:
                 adjustments, adjustment_breakdown, "resistance", -10, "Near resistance"
             )
 
-        # 9. Sector Strength (Optional)
+        # 9. Sector Strength (Optional) - Enhanced with Rotation Signals
         if self.use_sector_strength_filter:
             sector = self._technical_checker.check_sector_strength(df, market_regime, symbol)
-            if sector["is_leading"]:
+
+            # Use rotation_bonus if available (from SectorRotationAnalyzer)
+            rotation_bonus = sector.get("rotation_bonus", 0)
+
+            if sector.get("in_overweight_sector"):
+                reasons.append(f"✅ Overweight sector: {sector['sector_id']} (rotation)")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector",
+                    max(10, rotation_bonus),
+                    f"Sector rotation overweight ({sector.get('rotation_phase', 'N/A')})",
+                )
+                # Note top picks if available
+                if sector.get("top_sector_picks"):
+                    logger.debug(f"Sector top picks: {sector['top_sector_picks']}")
+
+            elif sector.get("in_underweight_sector"):
+                warnings.append(f"⚠️ Underweight sector: {sector['sector_id']} (rotation)")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector",
+                    min(-10, rotation_bonus),
+                    f"Sector rotation underweight ({sector.get('rotation_phase', 'N/A')})",
+                )
+
+            elif sector["is_leading"]:
                 reasons.append(f"✅ Leading sector: {sector['sector_id']}")
                 self._add_adjustment(
                     adjustments, adjustment_breakdown, "sector", 10, "Sector leader"
@@ -651,6 +717,104 @@ class ImprovedEntryLogic:
                 warnings.extend(special_result["warnings"])
             if special_result.get("reasons"):
                 reasons.extend(special_result["reasons"])
+
+        # 13. Intraday Momentum Filter (NEW) - Block entries when price moved >3% intraday
+        if self.use_intraday_momentum_filter:
+            intraday_result = self._check_intraday_momentum(df, current_price)
+            if intraday_result.get("blocked"):
+                self._track_filter("intraday_momentum", False, symbol or "")
+                return intraday_result.get("reason")
+            if intraday_result.get("warning"):
+                warnings.append(intraday_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "intraday_momentum",
+                    intraday_result.get("adjustment", -10),
+                    intraday_result.get("note", "High intraday move"),
+                )
+            self._track_filter("intraday_momentum", True, symbol or "")
+
+        # 14. VN30 Correlation Filter (NEW) - Check if stock diverges from VN30
+        if self.use_vn30_correlation_filter and symbol:
+            vn30_result = self._check_vn30_divergence(df, symbol, market_regime)
+            if vn30_result.get("blocked"):
+                self._track_filter("vn30_correlation", False, symbol or "")
+                return vn30_result.get("reason")
+            if vn30_result.get("warning"):
+                warnings.append(vn30_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vn30_correlation",
+                    vn30_result.get("adjustment", -10),
+                    vn30_result.get("note", "VN30 divergence"),
+                )
+            elif vn30_result.get("positive"):
+                reasons.append(vn30_result["positive"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vn30_correlation",
+                    5,
+                    "Aligned with VN30",
+                )
+            self._track_filter("vn30_correlation", True, symbol or "")
+
+        # 15. Order Book Timing (NEW) - Analyze order book for optimal entry
+        if self.use_order_book_timing and ORDER_BOOK_AVAILABLE and symbol:
+            order_book_result = self._check_order_book_timing(symbol, current_price)
+            if order_book_result.get("blocked"):
+                self._track_filter("order_book", False, symbol or "")
+                return order_book_result.get("reason")
+            if order_book_result.get("warning"):
+                warnings.append(order_book_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "order_book",
+                    order_book_result.get("adjustment", -5),
+                    order_book_result.get("note", "Order book pressure"),
+                )
+            elif order_book_result.get("positive"):
+                reasons.append(order_book_result["positive"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "order_book",
+                    order_book_result.get("adjustment", 10),
+                    order_book_result.get("note", "Strong bid support"),
+                )
+            self._track_filter("order_book", True, symbol or "")
+
+        # 16. Vietnamese News Sentiment (NEW v9.2) - Check news for blocking/adjustment
+        if self.use_vn_news_sentiment_filter and VN_NEWS_SENTIMENT_AVAILABLE and symbol:
+            news_result = self._check_vn_news_sentiment(symbol)
+            if news_result.get("blocked"):
+                self._track_filter("vn_news_sentiment", False, symbol or "")
+                return news_result.get("reason")
+            if news_result.get("warning"):
+                warnings.append(news_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vn_news_sentiment",
+                    news_result.get("adjustment", -10),
+                    news_result.get("note", "Negative news sentiment"),
+                )
+            elif news_result.get("positive"):
+                reasons.append(news_result["positive"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "vn_news_sentiment",
+                    news_result.get("adjustment", 5),
+                    news_result.get("note", "Positive news sentiment"),
+                )
+            # Apply position size multiplier from news sentiment
+            if news_result.get("position_multiplier", 1.0) != 1.0:
+                self._regime_position_multiplier *= news_result.get("position_multiplier", 1.0)
+            self._track_filter("vn_news_sentiment", True, symbol or "")
 
         return None  # No blocking reason
 
@@ -759,6 +923,302 @@ class ImprovedEntryLogic:
             "avg_volume": avg_volume,
             "tier": tier,
         }
+
+    def _check_intraday_momentum(self, df: pd.DataFrame, current_price: float) -> Dict:
+        """
+        Check intraday momentum to avoid chasing extended moves.
+
+        NEW IMPROVEMENT: Block entries when price has moved >3% intraday
+        to avoid buying at extended levels.
+
+        Args:
+            df: DataFrame with OHLCV data
+            current_price: Current price
+
+        Returns:
+            Dict with blocked, warning, adjustment, note
+        """
+        result = {"blocked": False, "warning": None, "adjustment": 0, "note": None}
+
+        try:
+            # Get today's open price (first bar or use 'open' of latest bar)
+            if "open" not in df.columns:
+                return result
+
+            # Use latest bar's open as proxy for session open
+            today_open = safe_get_latest(df, "open", 0)
+            if today_open <= 0:
+                return result
+
+            # Calculate intraday change
+            intraday_change = (current_price - today_open) / today_open
+
+            # Check if already moved significantly
+            if abs(intraday_change) >= self.intraday_momentum_threshold:
+                if intraday_change > 0:
+                    # Price already up >3% - risky to chase
+                    if intraday_change >= self.intraday_momentum_threshold * 1.5:  # >4.5%
+                        result["blocked"] = True
+                        result["reason"] = (
+                            f"Price already up {intraday_change*100:.1f}% today - too extended"
+                        )
+                    else:
+                        result["warning"] = f"⚠️ Intraday up {intraday_change*100:.1f}% - extended"
+                        result["adjustment"] = -10
+                        result["note"] = f"Chasing momentum ({intraday_change*100:.1f}%)"
+                else:
+                    # Price down >3% - might be catching falling knife
+                    if intraday_change <= -self.intraday_momentum_threshold * 1.5:  # <-4.5%
+                        result["blocked"] = True
+                        result["reason"] = (
+                            f"Price down {intraday_change*100:.1f}% today - potential falling knife"
+                        )
+                    else:
+                        result["warning"] = f"⚠️ Intraday down {intraday_change*100:.1f}% - cautious"
+                        result["adjustment"] = -5
+                        result["note"] = f"Catching dip ({intraday_change*100:.1f}%)"
+
+            # Also check if near daily high (could be distribution)
+            if "high" in df.columns:
+                today_high = safe_get_latest(df, "high", 0)
+                if today_high > 0:
+                    distance_from_high = (today_high - current_price) / today_high
+                    if distance_from_high < 0.005:  # Within 0.5% of high
+                        result["warning"] = result.get("warning", "") + " | Near daily high"
+                        result["adjustment"] = result.get("adjustment", 0) - 5
+
+        except Exception as e:
+            logger.debug(f"Intraday momentum check error: {e}")
+
+        return result
+
+    def _check_vn30_divergence(
+        self, df: pd.DataFrame, symbol: str, market_regime: Optional[Dict]
+    ) -> Dict:
+        """
+        Check if stock is diverging from VN30 index.
+
+        NEW IMPROVEMENT: Avoid entries when stock diverges significantly
+        from VN30 direction.
+
+        Args:
+            df: Stock DataFrame
+            symbol: Stock symbol
+            market_regime: Market regime info
+
+        Returns:
+            Dict with blocked, warning, positive, adjustment, note
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "positive": None,
+            "adjustment": 0,
+            "note": None,
+        }
+
+        try:
+            # Try to get VN30 data from regime info
+            if market_regime is None:
+                return result
+
+            # Get VN30/VNINDEX change from regime components
+            components = market_regime.get("components", {})
+            vnindex_change = components.get("vnindex_change", 0)
+
+            # Calculate stock's recent change (5-day)
+            if len(df) < 5:
+                return result
+
+            stock_change = (df["close"].iloc[-1] - df["close"].iloc[-5]) / df["close"].iloc[-5]
+
+            # Check divergence
+            divergence = stock_change - vnindex_change
+
+            if abs(divergence) >= self.vn30_divergence_threshold:
+                if divergence > 0 and vnindex_change < -0.01:
+                    # Stock up while market down - could be unsustainable
+                    result["warning"] = (
+                        f"⚠️ Stock up {stock_change*100:.1f}% vs VN30 down {vnindex_change*100:.1f}%"
+                    )
+                    result["adjustment"] = -10
+                    result["note"] = "Diverging from market - risky"
+                elif divergence < 0 and vnindex_change > 0.01:
+                    # Stock down while market up - could be weak stock
+                    if (
+                        divergence <= -self.vn30_divergence_threshold * 1.5
+                    ):  # Heavy underperformance
+                        result["blocked"] = True
+                        result["reason"] = (
+                            f"Stock lagging VN30 by {abs(divergence)*100:.1f}% - weak stock"
+                        )
+                    else:
+                        result["warning"] = (
+                            f"⚠️ Stock down {stock_change*100:.1f}% vs VN30 up {vnindex_change*100:.1f}%"
+                        )
+                        result["adjustment"] = -15
+                        result["note"] = "Underperforming market"
+            elif abs(divergence) < 0.01 and vnindex_change > 0.01:
+                # Stock moving with market in uptrend - good
+                result["positive"] = f"✅ Aligned with VN30 ({vnindex_change*100:.1f}%)"
+
+        except Exception as e:
+            logger.debug(f"VN30 divergence check error: {e}")
+
+        return result
+
+    def _check_order_book_timing(self, symbol: str, current_price: float) -> Dict:
+        """
+        Check order book for optimal entry timing.
+
+        NEW IMPROVEMENT: Analyze order book depth and imbalance
+        to optimize entry timing.
+
+        Args:
+            symbol: Stock symbol
+            current_price: Current price
+
+        Returns:
+            Dict with blocked, warning, positive, adjustment, note
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "positive": None,
+            "adjustment": 0,
+            "note": None,
+        }
+
+        try:
+            if not ORDER_BOOK_AVAILABLE:
+                return result
+
+            integration = get_order_book_integration()
+            analysis = integration.analyze_entry_timing(symbol, current_price)
+
+            if analysis is None:
+                return result
+
+            # Check order book signal
+            signal = analysis.get("signal")
+            imbalance = analysis.get("imbalance", 0)
+            spread_pct = analysis.get("spread_pct", 0)
+
+            # Strong sell pressure - block entry
+            if signal == "STRONG_SELL_PRESSURE":
+                result["blocked"] = True
+                result["reason"] = f"Heavy sell pressure in order book (imbalance: {imbalance:.2f})"
+                return result
+
+            # Moderate sell pressure - warning
+            if signal == "SELL_PRESSURE":
+                result["warning"] = f"⚠️ Sell pressure (imbalance: {imbalance:.2f})"
+                result["adjustment"] = -8
+                result["note"] = "Order book sell pressure"
+
+            # Strong buy pressure - positive
+            elif signal == "STRONG_BUY_PRESSURE":
+                result["positive"] = f"✅ Strong bid support (imbalance: {imbalance:.2f})"
+                result["adjustment"] = 12
+                result["note"] = "Strong bid support"
+
+            # Moderate buy pressure - slight positive
+            elif signal == "BUY_PRESSURE":
+                result["positive"] = f"✅ Bid support (imbalance: {imbalance:.2f})"
+                result["adjustment"] = 5
+                result["note"] = "Bid support"
+
+            # Wide spread warning
+            if spread_pct > 0.01:  # Spread > 1%
+                result["warning"] = f"⚠️ Wide spread ({spread_pct*100:.2f}%)"
+                result["adjustment"] = result.get("adjustment", 0) - 5
+                result["note"] = (result.get("note", "") + " | Wide spread").strip(" | ")
+
+            # Get recommended entry price
+            if analysis.get("recommended_limit_price"):
+                result["recommended_price"] = analysis["recommended_limit_price"]
+
+        except Exception as e:
+            logger.debug(f"Order book timing check error: {e}")
+
+        return result
+
+    def _check_vn_news_sentiment(self, symbol: str) -> Dict:
+        """
+        Check Vietnamese news sentiment for entry decision.
+
+        NEW v9.2: Analyze recent Vietnamese news for the symbol
+        and adjust entry confidence accordingly.
+
+        Features:
+        - Block entry on severe negative news
+        - Boost confidence on positive news
+        - Adjust position size based on sentiment
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Dict with blocked, warning, positive, adjustment, note, position_multiplier
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "positive": None,
+            "adjustment": 0,
+            "note": None,
+            "position_multiplier": 1.0,
+        }
+
+        try:
+            if not VN_NEWS_SENTIMENT_AVAILABLE:
+                return result
+
+            integration = get_news_sentiment_integration()
+            entry_check = integration.check_entry_sentiment(symbol, side="buy")
+
+            if entry_check is None:
+                return result
+
+            # Check if entry should be blocked
+            if not entry_check.get("should_proceed", True):
+                result["blocked"] = True
+                reasons = entry_check.get("reasons", [])
+                result["reason"] = reasons[0] if reasons else "Blocked by negative news"
+                return result
+
+            # Get sentiment direction and adjustments
+            sentiment_direction = entry_check.get("sentiment_direction", "neutral")
+            confidence_adj = entry_check.get("confidence_adjustment", 0)
+            position_mult = entry_check.get("position_multiplier", 1.0)
+
+            # Convert confidence adjustment to our scale (0-100)
+            adjustment = int(confidence_adj * 100)  # -15% to +10% -> -15 to +10
+
+            result["position_multiplier"] = position_mult
+
+            # Determine warning or positive based on sentiment
+            if sentiment_direction in ("bearish", "very_bearish"):
+                result["warning"] = f"⚠️ Bearish news sentiment ({sentiment_direction})"
+                result["adjustment"] = min(adjustment, -5)  # At least -5
+                result["note"] = "Negative news detected"
+            elif sentiment_direction in ("bullish", "very_bullish"):
+                result["positive"] = f"✅ Bullish news sentiment ({sentiment_direction})"
+                result["adjustment"] = max(adjustment, 5)  # At least +5
+                result["note"] = "Positive news detected"
+            else:
+                # Neutral - no adjustment
+                pass
+
+            # Add reasons to notes if available
+            reasons = entry_check.get("reasons", [])
+            if reasons and result["note"]:
+                result["note"] += f": {reasons[0][:50]}"
+
+        except Exception as e:
+            logger.debug(f"VN news sentiment check error: {e}")
+
+        return result
 
     def _get_dynamic_max_warnings(self, market_regime: Optional[Dict]) -> int:
         """Get dynamic max warnings based on market regime."""

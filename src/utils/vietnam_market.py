@@ -9,18 +9,76 @@ Centralized utilities for Vietnam stock market specific rules:
 - Price limit calculation
 - ATO/ATC session detection
 - Holiday calendar (via vietnam_holidays.py)
+- Dynamic VN30 fetching (via vn30_fetcher.py)
 
 Author: Trading Bot Team
-Version: 2.0.0 - Complete 10/10 Implementation
+Version: 2.1.0 - Dynamic VN30 Update
 """
 
 import logging
 from datetime import datetime, time, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# IMPORT DYNAMIC VN30 FETCHER (IMPROVED v2.1)
+# =============================================================================
+
+# Import VN30 fetcher for dynamic updates
+VN30_FETCHER_AVAILABLE = False
+_vn30_fetcher = None
+
+try:
+    from src.utils.vn30_fetcher import VN30Fetcher, get_vn30_fetcher
+
+    VN30_FETCHER_AVAILABLE = True
+    logger.debug("✅ VN30 fetcher loaded from vn30_fetcher.py")
+except ImportError as e:
+    logger.warning(f"⚠️ VN30 fetcher not available, using fallback: {e}")
+
+
+def get_vn30_symbols_dynamic(force_refresh: bool = False) -> Set[str]:
+    """
+    Get VN30 symbols dynamically from API with caching.
+
+    IMPROVED v2.1: Uses VN30Fetcher for automatic updates.
+    VN30 is rebalanced quarterly (January, April, July, October).
+
+    Args:
+        force_refresh: Force API refresh ignoring cache
+
+    Returns:
+        Set of VN30 symbol strings
+    """
+    global _vn30_fetcher
+
+    if VN30_FETCHER_AVAILABLE:
+        try:
+            if _vn30_fetcher is None:
+                _vn30_fetcher = get_vn30_fetcher()
+            return _vn30_fetcher.get_vn30_symbols(force_refresh=force_refresh)
+        except Exception as e:
+            logger.warning(f"VN30 fetcher error: {e}, using fallback")
+
+    # Fallback to hardcoded list
+    return VN30_SYMBOLS
+
+
+def is_vn30_dynamic(symbol: str) -> bool:
+    """
+    Check if symbol is in VN30 using dynamic data.
+
+    Args:
+        symbol: Stock symbol to check
+
+    Returns:
+        True if symbol is in VN30
+    """
+    return symbol.upper() in get_vn30_symbols_dynamic()
+
 
 # =============================================================================
 # IMPORT COMPLETE HOLIDAY CALENDAR (10/10 Implementation)

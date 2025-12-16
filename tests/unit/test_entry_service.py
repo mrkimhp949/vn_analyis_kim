@@ -541,6 +541,10 @@ class TestScanSingleTicker:
         entry_service.entry_logic.analyze_entry.return_value = mock_entry_signal
         entry_service.position_sizer.calculate_position_size.return_value = mock_position_size
 
+        # Ensure Vietnam ML is disabled so legacy ML is used
+        entry_service.use_vietnam_ml = False
+        entry_service.ml_bridge = None
+
         with (
             patch.object(entry_service_module, "load_data", return_value=sample_df),
             patch.object(entry_service_module, "DataValidator") as mock_validator,

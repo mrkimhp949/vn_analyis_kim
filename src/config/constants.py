@@ -32,56 +32,80 @@ BULL_MARKET_THRESHOLD = 0.02  # 2% threshold for bull market
 BEAR_MARKET_THRESHOLD = -0.02  # -2% threshold for bear market
 TREND_THRESHOLD = 0.02  # 2% trend threshold
 
-# Time-based Constants
-MAX_HOLDING_DAYS = 20  # Maximum holding period in days
+# Time-based Constants - IMPROVED v5.0 for VN Market
+# Reduced from 20 to 15 days max to match VN market shorter cycles
+MAX_HOLDING_DAYS = 15  # TIGHTENED: Maximum holding period (was 20)
 EARLY_STOPPING_ROUNDS = 20  # ML early stopping rounds
 CORRELATION_LOOKBACK_DAYS = 60  # Correlation calculation lookback
 
-# Adaptive Holding Days by Market Regime
-HOLDING_DAYS_BULL_STRONG_TREND = 20  # Bull + ADX > 25
-HOLDING_DAYS_BULL_WEAK_TREND = 15  # Bull + ADX <= 25
-HOLDING_DAYS_SIDEWAYS_TREND = 12  # Sideways + ADX > 20
-HOLDING_DAYS_SIDEWAYS_NO_TREND = 10  # Sideways + ADX <= 20
-HOLDING_DAYS_BEAR_STRONG_TREND = 8  # Bear + ADX > 25
-HOLDING_DAYS_BEAR_WEAK_TREND = 6  # Bear + ADX <= 25
-HOLDING_DAYS_HIGH_VOLATILITY = 5  # High volatility - exit fast
-HOLDING_DAYS_DEFAULT = 15  # Default fallback
+# Adaptive Holding Days by Market Regime - TIGHTENED v5.0
+# VN market has shorter cycles due to:
+# - ±7% daily price limit creates faster mean reversion
+# - T+2.5 settlement affects capital efficiency
+# - Higher retail participation = faster sentiment swings
+HOLDING_DAYS_BULL_STRONG_TREND = 15  # TIGHTENED: Bull + ADX > 25 (was 20)
+HOLDING_DAYS_BULL_WEAK_TREND = 12  # TIGHTENED: Bull + ADX <= 25 (was 15)
+HOLDING_DAYS_SIDEWAYS_TREND = 10  # TIGHTENED: Sideways + ADX > 20 (was 12)
+HOLDING_DAYS_SIDEWAYS_NO_TREND = 8  # TIGHTENED: Sideways + ADX <= 20 (was 10)
+HOLDING_DAYS_BEAR_STRONG_TREND = 6  # TIGHTENED: Bear + ADX > 25 (was 8)
+HOLDING_DAYS_BEAR_WEAK_TREND = 5  # TIGHTENED: Bear + ADX <= 25 (was 6)
+HOLDING_DAYS_HIGH_VOLATILITY = 4  # TIGHTENED: High volatility - exit faster (was 5)
+HOLDING_DAYS_DEFAULT = 10  # TIGHTENED: Default fallback (was 15)
 ADX_STRONG_TREND_THRESHOLD = 25  # ADX threshold for strong trend
 ADX_WEAK_TREND_THRESHOLD = 20  # ADX threshold for weak trend
 
 
-def get_adaptive_holding_days(regime: str, adx: float = 20) -> int:
+def get_adaptive_holding_days(regime: str, adx: float = 20, volatility: float = 0.02) -> int:
     """
     Get adaptive max holding days based on market regime and trend strength.
+
+    IMPROVED v5.0: Added volatility parameter for more dynamic adjustment.
 
     Vietnam market characteristics:
     - T+2.5 settlement → minimum 3 days practical holding
     - High volatility → shorter holding to lock profits
     - Strong trends (ADX > 25) → can hold longer
+    - ±7% daily limit → faster mean reversion
 
     Args:
         regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
         adx: Average Directional Index (trend strength, default 20)
+        volatility: Market volatility as decimal (e.g., 0.02 = 2%)
 
     Returns:
-        Maximum holding days (5-20)
+        Maximum holding days (4-15)
     """
+    # Base days by regime
     if regime == "BULL":
         if adx > ADX_STRONG_TREND_THRESHOLD:
-            return HOLDING_DAYS_BULL_STRONG_TREND  # 20 days - strong trend
-        return HOLDING_DAYS_BULL_WEAK_TREND  # 15 days - weak trend
+            base_days = HOLDING_DAYS_BULL_STRONG_TREND  # 15 days - strong trend
+        else:
+            base_days = HOLDING_DAYS_BULL_WEAK_TREND  # 12 days - weak trend
     elif regime == "SIDEWAYS":
         if adx > ADX_WEAK_TREND_THRESHOLD:
-            return HOLDING_DAYS_SIDEWAYS_TREND  # 12 days - some trend
-        return HOLDING_DAYS_SIDEWAYS_NO_TREND  # 10 days - no trend
+            base_days = HOLDING_DAYS_SIDEWAYS_TREND  # 10 days - some trend
+        else:
+            base_days = HOLDING_DAYS_SIDEWAYS_NO_TREND  # 8 days - no trend
     elif regime == "BEAR":
         if adx > ADX_STRONG_TREND_THRESHOLD:
-            return HOLDING_DAYS_BEAR_STRONG_TREND  # 8 days - strong downtrend
-        return HOLDING_DAYS_BEAR_WEAK_TREND  # 6 days - exit faster
+            base_days = HOLDING_DAYS_BEAR_STRONG_TREND  # 6 days - strong downtrend
+        else:
+            base_days = HOLDING_DAYS_BEAR_WEAK_TREND  # 5 days - exit faster
     elif regime == "HIGH_VOLATILITY":
-        return HOLDING_DAYS_HIGH_VOLATILITY  # 5 days - very short
+        base_days = HOLDING_DAYS_HIGH_VOLATILITY  # 4 days - very short
     else:
-        return HOLDING_DAYS_DEFAULT  # 15 days default
+        base_days = HOLDING_DAYS_DEFAULT  # 10 days default
+
+    # NEW v5.0: Further reduce based on volatility
+    # High volatility = shorter holding period
+    if volatility > 0.04:  # > 4% daily volatility
+        base_days = max(4, int(base_days * 0.6))  # Reduce by 40%
+    elif volatility > 0.03:  # > 3% daily volatility
+        base_days = max(4, int(base_days * 0.75))  # Reduce by 25%
+    elif volatility > 0.02:  # > 2% daily volatility
+        base_days = max(5, int(base_days * 0.9))  # Reduce by 10%
+
+    return base_days
 
 
 # Commission and Slippage (Vietnam Market) - IMPROVED v4.0
@@ -194,6 +218,174 @@ def get_dynamic_slippage(symbol: str, liquidity_value: float) -> float:
         return VN_SLIPPAGE_MEDIUM  # 0.6%
     else:  # < 1B VND
         return VN_SLIPPAGE_ILLIQUID  # 1.0%
+
+
+def get_order_impact_slippage(
+    symbol: str,
+    order_value: float,
+    avg_daily_volume: float,
+    avg_price: float,
+    is_market_order: bool = True,
+) -> float:
+    """
+    Calculate dynamic slippage based on order size vs Average Daily Volume (ADV).
+
+    Market Impact Model:
+    - Small orders (< 1% ADV): minimal impact
+    - Medium orders (1-5% ADV): linear impact increase
+    - Large orders (> 5% ADV): significant impact
+    - Very large orders (> 10% ADV): severe impact (may need TWAP/VWAP)
+
+    Args:
+        symbol: Stock symbol (e.g., "VNM", "HPG")
+        order_value: Order value in VND
+        avg_daily_volume: Average daily volume in shares
+        avg_price: Average price per share in VND
+        is_market_order: True for market orders, False for limit orders
+
+    Returns:
+        Total slippage rate including market impact (0.002-0.030)
+    """
+    # Calculate order size as % of ADV
+    avg_daily_value = avg_daily_volume * avg_price
+    if avg_daily_value <= 0:
+        return VN_SLIPPAGE_ILLIQUID  # Fallback for no liquidity data
+
+    order_pct_of_adv = order_value / avg_daily_value
+
+    # Base slippage from liquidity tier
+    base_slippage = get_dynamic_slippage(symbol, avg_daily_value)
+
+    # If limit order, base slippage is lower
+    if not is_market_order:
+        base_slippage = base_slippage * 0.4  # 40% of market order slippage
+
+    # Market impact calculation (square-root model commonly used in finance)
+    # Impact = k * sqrt(order_pct_of_adv)
+    # k = impact coefficient based on stock liquidity
+    if symbol.upper() in VN30_SYMBOLS:
+        impact_coefficient = 0.15  # VN30 - most liquid
+    elif avg_daily_value > 5_000_000_000:  # > 5B VND
+        impact_coefficient = 0.20
+    elif avg_daily_value > 2_000_000_000:  # 2-5B VND
+        impact_coefficient = 0.30
+    elif avg_daily_value > 500_000_000:  # 0.5-2B VND
+        impact_coefficient = 0.50
+    else:  # < 500M VND - illiquid
+        impact_coefficient = 0.80
+
+    # Calculate market impact
+    import math
+
+    market_impact = impact_coefficient * math.sqrt(order_pct_of_adv)
+
+    # Apply caps based on order size
+    if order_pct_of_adv > 0.10:  # > 10% ADV - very large order
+        # Add extra penalty for very large orders
+        market_impact = market_impact * 1.5
+        # Cap at 3% total impact for very large orders
+        market_impact = min(market_impact, 0.03)
+    elif order_pct_of_adv > 0.05:  # 5-10% ADV - large order
+        # Cap at 2% for large orders
+        market_impact = min(market_impact, 0.02)
+    elif order_pct_of_adv > 0.01:  # 1-5% ADV - medium order
+        # Cap at 1% for medium orders
+        market_impact = min(market_impact, 0.01)
+    else:  # < 1% ADV - small order
+        # Minimal impact, cap at 0.5%
+        market_impact = min(market_impact, 0.005)
+
+    # Total slippage = base + market impact
+    total_slippage = base_slippage + market_impact
+
+    # Absolute caps
+    total_slippage = min(total_slippage, 0.03)  # Max 3% total slippage
+    total_slippage = max(total_slippage, 0.002)  # Min 0.2% slippage
+
+    return total_slippage
+
+
+def estimate_execution_cost(
+    symbol: str,
+    order_value: float,
+    avg_daily_volume: float,
+    avg_price: float,
+    side: str = "BUY",
+    is_market_order: bool = True,
+) -> dict:
+    """
+    Estimate total execution cost for an order including all fees and slippage.
+
+    Args:
+        symbol: Stock symbol
+        order_value: Order value in VND
+        avg_daily_volume: Average daily volume in shares
+        avg_price: Average price per share
+        side: 'BUY' or 'SELL'
+        is_market_order: True for market orders, False for limit orders
+
+    Returns:
+        Dict with cost breakdown:
+        {
+            'slippage': float,
+            'commission': float,
+            'tax': float (sell only),
+            'exchange_fee': float,
+            'total_cost_pct': float,
+            'total_cost_vnd': float,
+            'effective_price': float,
+            'recommendation': str,
+        }
+    """
+    # Get dynamic slippage with market impact
+    slippage = get_order_impact_slippage(
+        symbol=symbol,
+        order_value=order_value,
+        avg_daily_volume=avg_daily_volume,
+        avg_price=avg_price,
+        is_market_order=is_market_order,
+    )
+
+    # Commission and fees
+    commission = VN_BROKERAGE_FEE  # 0.25%
+    exchange_fee = VN_EXCHANGE_FEE + VN_TRANSFER_FEE  # 0.05%
+    tax = VN_STOCK_TAX if side.upper() == "SELL" else 0  # 0.1% sell only
+
+    # Total cost percentage
+    total_cost_pct = slippage + commission + exchange_fee + tax
+
+    # Total cost in VND
+    total_cost_vnd = order_value * total_cost_pct
+
+    # Effective price after costs
+    if side.upper() == "BUY":
+        effective_price = avg_price * (1 + total_cost_pct)
+    else:
+        effective_price = avg_price * (1 - total_cost_pct)
+
+    # Order size recommendation
+    order_pct_of_adv = order_value / (avg_daily_volume * avg_price) if avg_daily_volume > 0 else 0
+
+    if order_pct_of_adv > 0.10:
+        recommendation = "SPLIT_ORDER: Consider using TWAP/VWAP over 2-3 days"
+    elif order_pct_of_adv > 0.05:
+        recommendation = "REDUCE_IMPACT: Use limit orders and split into 2-3 tranches"
+    elif order_pct_of_adv > 0.02:
+        recommendation = "USE_LIMIT: Prefer limit orders to reduce slippage"
+    else:
+        recommendation = "MARKET_OK: Order size is small enough for market order"
+
+    return {
+        "slippage": slippage,
+        "commission": commission,
+        "tax": tax,
+        "exchange_fee": exchange_fee,
+        "total_cost_pct": total_cost_pct,
+        "total_cost_vnd": total_cost_vnd,
+        "effective_price": effective_price,
+        "order_pct_of_adv": order_pct_of_adv,
+        "recommendation": recommendation,
+    }
 
 
 # Alternative costs for different scenarios (backward compatible)

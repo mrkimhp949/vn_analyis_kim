@@ -661,6 +661,457 @@ def start_margin_monitoring(margin_manager=None):
 
 def stop_margin_monitoring():
     """Stop margin call monitoring."""
-    global _monitor_instance
     if _monitor_instance:
         _monitor_instance.stop()
+
+
+# =============================================================================
+# T+2 CASH FLOW MANAGEMENT (IMPROVED v2.0)
+# =============================================================================
+
+
+@dataclass
+class T2CashFlowConfig:
+    """Configuration for T+2 cash flow management"""
+
+    # Settlement settings
+    settlement_days: int = 2  # T+2 for Vietnam
+
+    # Cash buffer settings
+    minimum_cash_buffer_pct: float = 0.10  # Keep 10% cash buffer
+    margin_call_buffer_pct: float = 0.05  # Extra 5% buffer for margin safety
+
+    # Warning thresholds
+    low_cash_warning_pct: float = 0.15  # Warn when available cash < 15% of portfolio
+    critical_cash_pct: float = 0.05  # Critical when < 5%
+
+
+@dataclass
+class PendingSettlement:
+    """Pending settlement record"""
+
+    trade_date: datetime
+    settlement_date: datetime
+    symbol: str
+    side: str  # BUY or SELL
+    quantity: int
+    amount: float
+    status: str = "PENDING"  # PENDING, SETTLED
+
+
+@dataclass
+class T2CashFlowStatus:
+    """T+2 cash flow status"""
+
+    available_cash: float
+    locked_cash: float  # Cash locked in pending buy settlements
+    pending_proceeds: float  # Cash coming from pending sell settlements
+    total_pending_buys: int
+    total_pending_sells: int
+    days_until_next_settlement: int
+    can_trade: bool
+    max_buy_amount: float  # Maximum amount available for new buys
+    warnings: List[str]
+
+
+class T2CashFlowManager:
+    """
+    T+2 Cash Flow Management for Vietnam Market Margin Accounts.
+
+    IMPROVED v2.0: Comprehensive cash flow tracking for margin accounts.
+
+    Vietnam market settlement rules:
+    - T+2: Stocks available for trading after 2 business days
+    - T+2.5: Cash available for withdrawal after 2.5 business days
+    - Buy on T0 → Cash locked until T+2
+    - Sell on T0 → Cash available on T+2
+
+    Features:
+    - Track pending buy/sell settlements
+    - Calculate available cash for trading
+    - Prevent over-buying
+    - Integrate with margin monitoring
+    - Cash flow forecasting
+
+    Usage:
+        cash_manager = T2CashFlowManager()
+
+        # Record a buy
+        cash_manager.record_buy("VNM", 100, 85_000)
+
+        # Check if can make new trade
+        status = cash_manager.get_cash_flow_status(total_cash=100_000_000)
+        if status.can_trade:
+            print(f"Max buy amount: {status.max_buy_amount:,.0f}")
+    """
+
+    def __init__(
+        self,
+        config: Optional[T2CashFlowConfig] = None,
+        margin_monitor: Optional[MarginCallMonitor] = None,
+        state_file: str = "t2_cash_flow.json",
+    ):
+        self.config = config or T2CashFlowConfig()
+        self.margin_monitor = margin_monitor
+        self.state_file = state_file
+
+        self._pending_settlements: List[PendingSettlement] = []
+        self._lock = threading.RLock()
+
+        # Load state
+        self._load_state()
+
+        logger.info("✅ T2CashFlowManager initialized")
+
+    def _load_state(self):
+        """Load persisted state."""
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for record in data.get("settlements", []):
+                        settlement = PendingSettlement(
+                            trade_date=datetime.fromisoformat(record["trade_date"]),
+                            settlement_date=datetime.fromisoformat(record["settlement_date"]),
+                            symbol=record["symbol"],
+                            side=record["side"],
+                            quantity=record["quantity"],
+                            amount=record["amount"],
+                            status=record.get("status", "PENDING"),
+                        )
+                        if settlement.status == "PENDING":
+                            self._pending_settlements.append(settlement)
+                logger.info(f"📂 Loaded {len(self._pending_settlements)} pending settlements")
+            except Exception as e:
+                logger.warning(f"Failed to load T+2 state: {e}")
+
+    def _save_state(self):
+        """Persist state."""
+        try:
+            data = {
+                "settlements": [
+                    {
+                        "trade_date": s.trade_date.isoformat(),
+                        "settlement_date": s.settlement_date.isoformat(),
+                        "symbol": s.symbol,
+                        "side": s.side,
+                        "quantity": s.quantity,
+                        "amount": s.amount,
+                        "status": s.status,
+                    }
+                    for s in self._pending_settlements
+                ],
+                "last_updated": datetime.now().isoformat(),
+            }
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Failed to save T+2 state: {e}")
+
+    def _get_settlement_date(self, trade_date: datetime) -> datetime:
+        """Calculate T+2 settlement date (skipping weekends)."""
+        try:
+            from src.utils.vietnam_market import get_next_trading_day
+
+            return get_next_trading_day(trade_date.date(), days_ahead=self.config.settlement_days)
+        except ImportError:
+            # Fallback: simple T+2 without holiday check
+            settlement = trade_date + timedelta(days=self.config.settlement_days)
+            while settlement.weekday() >= 5:  # Skip weekends
+                settlement += timedelta(days=1)
+            return settlement
+
+    def _cleanup_settled(self):
+        """Mark and remove settled transactions."""
+        with self._lock:
+            now = datetime.now()
+            for settlement in self._pending_settlements:
+                if settlement.settlement_date <= now and settlement.status == "PENDING":
+                    settlement.status = "SETTLED"
+                    logger.info(
+                        f"✅ Settlement completed: {settlement.symbol} {settlement.side} "
+                        f"{settlement.quantity} shares @ {settlement.amount:,.0f}"
+                    )
+
+            # Keep only pending
+            self._pending_settlements = [
+                s for s in self._pending_settlements if s.status == "PENDING"
+            ]
+            self._save_state()
+
+    def record_buy(
+        self,
+        symbol: str,
+        quantity: int,
+        price: float,
+        trade_date: Optional[datetime] = None,
+    ) -> PendingSettlement:
+        """
+        Record a buy order for T+2 tracking.
+
+        Args:
+            symbol: Stock symbol
+            quantity: Number of shares
+            price: Price per share
+            trade_date: Trade date (default: now)
+
+        Returns:
+            PendingSettlement record
+        """
+        trade_date = trade_date or datetime.now()
+        settlement_date = self._get_settlement_date(trade_date)
+        amount = quantity * price
+
+        settlement = PendingSettlement(
+            trade_date=trade_date,
+            settlement_date=settlement_date,
+            symbol=symbol,
+            side="BUY",
+            quantity=quantity,
+            amount=amount,
+        )
+
+        with self._lock:
+            self._pending_settlements.append(settlement)
+            self._save_state()
+
+        logger.info(
+            f"📥 Recorded BUY: {symbol} {quantity} @ {price:,.0f} = {amount:,.0f} "
+            f"(Settlement: {settlement_date.date()})"
+        )
+
+        return settlement
+
+    def record_sell(
+        self,
+        symbol: str,
+        quantity: int,
+        price: float,
+        trade_date: Optional[datetime] = None,
+    ) -> PendingSettlement:
+        """
+        Record a sell order for T+2 tracking.
+
+        Args:
+            symbol: Stock symbol
+            quantity: Number of shares
+            price: Price per share
+            trade_date: Trade date (default: now)
+
+        Returns:
+            PendingSettlement record
+        """
+        trade_date = trade_date or datetime.now()
+        settlement_date = self._get_settlement_date(trade_date)
+        amount = quantity * price
+
+        settlement = PendingSettlement(
+            trade_date=trade_date,
+            settlement_date=settlement_date,
+            symbol=symbol,
+            side="SELL",
+            quantity=quantity,
+            amount=amount,
+        )
+
+        with self._lock:
+            self._pending_settlements.append(settlement)
+            self._save_state()
+
+        logger.info(
+            f"📤 Recorded SELL: {symbol} {quantity} @ {price:,.0f} = {amount:,.0f} "
+            f"(Settlement: {settlement_date.date()})"
+        )
+
+        return settlement
+
+    def get_cash_flow_status(
+        self,
+        total_cash: float,
+        portfolio_value: float = 0,
+    ) -> T2CashFlowStatus:
+        """
+        Get current T+2 cash flow status.
+
+        Args:
+            total_cash: Total cash in account (broker balance)
+            portfolio_value: Total portfolio value (for percentage calculations)
+
+        Returns:
+            T2CashFlowStatus with detailed breakdown
+        """
+        self._cleanup_settled()
+
+        with self._lock:
+            # Calculate pending amounts
+            pending_buys = [s for s in self._pending_settlements if s.side == "BUY"]
+            pending_sells = [s for s in self._pending_settlements if s.side == "SELL"]
+
+            locked_cash = sum(s.amount for s in pending_buys)
+            pending_proceeds = sum(s.amount for s in pending_sells)
+
+            # Available cash = Total - Locked + Pending proceeds
+            # Note: Pending proceeds not yet available but can be counted for margin
+            available_cash = total_cash - locked_cash
+
+            # Days until next settlement
+            now = datetime.now()
+            upcoming = [s for s in self._pending_settlements if s.settlement_date > now]
+            if upcoming:
+                next_settlement = min(s.settlement_date for s in upcoming)
+                days_until = (next_settlement - now).days
+            else:
+                days_until = 0
+
+            # Calculate max buy amount
+            buffer = total_cash * self.config.minimum_cash_buffer_pct
+            max_buy = max(0, available_cash - buffer)
+
+            # Generate warnings
+            warnings = []
+
+            if portfolio_value > 0:
+                cash_pct = available_cash / portfolio_value
+
+                if cash_pct < self.config.critical_cash_pct:
+                    warnings.append(f"CRITICAL: Available cash only {cash_pct:.1%} of portfolio")
+                elif cash_pct < self.config.low_cash_warning_pct:
+                    warnings.append(f"WARNING: Low cash ({cash_pct:.1%} of portfolio)")
+
+            if available_cash < 0:
+                warnings.append("DANGER: Negative available cash - pending buys exceed balance")
+
+            if locked_cash > total_cash * 0.5:
+                warnings.append(
+                    f"CAUTION: {locked_cash:,.0f} VND ({locked_cash/total_cash:.1%}) locked in pending settlements"
+                )
+
+            can_trade = available_cash > buffer and available_cash > 0
+
+            return T2CashFlowStatus(
+                available_cash=available_cash,
+                locked_cash=locked_cash,
+                pending_proceeds=pending_proceeds,
+                total_pending_buys=len(pending_buys),
+                total_pending_sells=len(pending_sells),
+                days_until_next_settlement=days_until,
+                can_trade=can_trade,
+                max_buy_amount=max_buy,
+                warnings=warnings,
+            )
+
+    def can_execute_buy(
+        self,
+        order_value: float,
+        total_cash: float,
+    ) -> Tuple[bool, str]:
+        """
+        Check if a buy order can be executed given T+2 constraints.
+
+        Args:
+            order_value: Value of proposed buy order
+            total_cash: Total cash balance
+
+        Returns:
+            (can_execute, reason)
+        """
+        status = self.get_cash_flow_status(total_cash)
+
+        if not status.can_trade:
+            return False, "Insufficient available cash after T+2 settlement"
+
+        if order_value > status.max_buy_amount:
+            return False, (
+                f"Order {order_value:,.0f} exceeds max buy {status.max_buy_amount:,.0f} "
+                f"(Locked: {status.locked_cash:,.0f})"
+            )
+
+        return True, "OK"
+
+    def get_settlement_forecast(self, days_ahead: int = 5) -> List[Dict]:
+        """
+        Forecast cash flow for next N days.
+
+        Args:
+            days_ahead: Number of days to forecast
+
+        Returns:
+            List of daily forecasts
+        """
+        self._cleanup_settled()
+
+        forecasts = []
+        now = datetime.now()
+
+        for day_offset in range(days_ahead + 1):
+            forecast_date = now + timedelta(days=day_offset)
+
+            # Skip weekends
+            if forecast_date.weekday() >= 5:
+                continue
+
+            with self._lock:
+                # Settlements on this day
+                settling_buys = [
+                    s
+                    for s in self._pending_settlements
+                    if s.side == "BUY" and s.settlement_date.date() == forecast_date.date()
+                ]
+                settling_sells = [
+                    s
+                    for s in self._pending_settlements
+                    if s.side == "SELL" and s.settlement_date.date() == forecast_date.date()
+                ]
+
+            cash_released = sum(
+                s.amount for s in settling_buys
+            )  # Buy settlement releases locked cash
+            cash_received = sum(s.amount for s in settling_sells)  # Sell proceeds received
+
+            forecasts.append(
+                {
+                    "date": forecast_date.date().isoformat(),
+                    "day_offset": day_offset,
+                    "settling_buys": len(settling_buys),
+                    "settling_sells": len(settling_sells),
+                    "cash_released": cash_released,
+                    "cash_received": cash_received,
+                    "net_cash_change": cash_received,  # Only sell proceeds add cash
+                }
+            )
+
+        return forecasts
+
+    def integrate_with_margin_monitor(self, margin_monitor: MarginCallMonitor):
+        """
+        Integrate T+2 tracking with margin monitoring.
+
+        This ensures margin calculations account for pending settlements.
+        """
+        self.margin_monitor = margin_monitor
+
+        # Register callback to track margin-related actions
+        def on_margin_alert(alert: MarginAlert):
+            if alert.alert_type == MarginAlertType.MARGIN_CALL_TRIGGERED:
+                logger.warning("⚠️ Margin call detected - checking T+2 impact")
+                status = self.get_cash_flow_status(alert.amount_required)
+                if status.pending_proceeds > 0:
+                    logger.info(
+                        f"💡 Pending sell proceeds of {status.pending_proceeds:,.0f} "
+                        f"will settle in {status.days_until_next_settlement} days"
+                    )
+
+        margin_monitor.register_alert_callback(on_margin_alert)
+        logger.info("✅ T+2 manager integrated with margin monitor")
+
+
+# Singleton instance
+_t2_manager_instance: Optional[T2CashFlowManager] = None
+
+
+def get_t2_cash_flow_manager() -> T2CashFlowManager:
+    """Get singleton T+2 cash flow manager instance."""
+    global _t2_manager_instance
+    if _t2_manager_instance is None:
+        _t2_manager_instance = T2CashFlowManager()
+    return _t2_manager_instance

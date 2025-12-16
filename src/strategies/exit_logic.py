@@ -53,28 +53,28 @@ except ImportError:
     DEFAULT_TRAILING_STOP_ACTIVATION = 0.05
     DEFAULT_TRAILING_STOP_DISTANCE = 0.03
     DEFAULT_TIME_DECAY_THRESHOLD = 0.02
-    MAX_HOLDING_DAYS = 20
+    MAX_HOLDING_DAYS = 15  # TIGHTENED: was 20
     MIN_TRADES_FOR_POOR_PERFORMER = 5
     POOR_PERFORMER_CONSECUTIVE_LOSSES = 2
     POOR_PERFORMER_WIN_RATE_THRESHOLD = 0.35
     ROUND_TRIP_COST = 0.016
     VOLUME_SURGE_THRESHOLD = 1.5
-    HOLDING_DAYS_DEFAULT = 15
+    HOLDING_DAYS_DEFAULT = 10  # TIGHTENED: was 15
     ADX_STRONG_TREND_THRESHOLD = 25
     ADX_WEAK_TREND_THRESHOLD = 20
     ADAPTIVE_HOLDING_AVAILABLE = False
 
     def get_adaptive_holding_days(regime: str, adx: float = 20) -> int:
-        """Fallback adaptive holding days function."""
+        """Fallback adaptive holding days function - TIGHTENED for VN market."""
         if regime == "BULL":
-            return 20 if adx > 25 else 15
+            return 15 if adx > 25 else 12  # was 20/15
         elif regime == "SIDEWAYS":
-            return 12 if adx > 20 else 10
+            return 10 if adx > 20 else 8  # was 12/10
         elif regime == "BEAR":
-            return 8 if adx > 25 else 6
+            return 6 if adx > 25 else 5  # was 8/6
         elif regime == "HIGH_VOLATILITY":
-            return 5
-        return 15
+            return 4  # was 5
+        return 10  # was 15
 
 
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
@@ -89,6 +89,18 @@ except ImportError:
     is_trading_hour = lambda: True
     is_trading_day = lambda: True
     is_near_session_boundary = lambda minutes=5: (False, None)
+
+# NEW v9.2: Vietnamese News Sentiment Integration for Exit
+VN_NEWS_SENTIMENT_AVAILABLE = False
+try:
+    from src.sentiment.vn_news_sentiment_integration import (
+        get_news_sentiment_integration,
+        VNNewsSentimentIntegration,
+    )
+
+    VN_NEWS_SENTIMENT_AVAILABLE = True
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +129,7 @@ class ExitReason(Enum):
     FLOOR_BOUNCE_TIMEOUT = "Floor Bounce Timeout (No recovery)"  # NEW v6.0
     PANIC_SELLING = "Panic Selling (High volume at floor)"  # NEW v6.0
     GAP_DOWN_EMERGENCY = "Gap Down Emergency Exit"  # NEW v6.0
+    NEWS_SENTIMENT_FORCE_EXIT = "Negative News Sentiment (Force Exit)"  # NEW v9.2
 
 
 @dataclass
@@ -212,13 +225,13 @@ class ExitConfig:
     trailing_acceleration_factor: float = 0.8  # Tighten trailing by 20% after each TP
 
     # Time Decay - IMPROVED v10.0 with T+2 awareness
-    max_holding_days: int = MAX_HOLDING_DAYS
+    max_holding_days: int = MAX_HOLDING_DAYS  # Now 15 days (was 20)
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
     t2_settlement_days: int = 2
 
-    # NEW v10.0: Time-based exit acceleration
-    time_decay_start_day: int = 10  # Start reducing targets after day 10
-    time_decay_tp_reduction: float = 0.10  # Reduce TP targets by 10% per day after start
+    # NEW v10.0: Time-based exit acceleration - TIGHTENED for VN market
+    time_decay_start_day: int = 7  # TIGHTENED: Start reducing targets after day 7 (was 10)
+    time_decay_tp_reduction: float = 0.12  # TIGHTENED: Reduce TP by 12% per day (was 10%)
 
     # Profit Protection - IMPROVED v10.0
     profit_protection_activation: float = 0.02  # Activate at 2% profit
@@ -627,6 +640,7 @@ class ImprovedExitStrategy:
         checks = [
             self._check_stop_loss,
             self._check_gap_down,  # NEW: Check gap down protection
+            self._check_news_sentiment,  # NEW v9.2: Check news sentiment force exit
             self._check_friday_weekend,  # NEW v4.2: Friday/weekend risk management
             self._check_breakeven_stop,  # Check breakeven stop after 1R profit
             self._check_session_boundary,
@@ -2154,6 +2168,64 @@ class ImprovedExitStrategy:
         )
 
         return adaptive_max_days
+
+    # =========================================================================
+    # EXIT CHECK #11: NEWS SENTIMENT (NEW v9.2)
+    # =========================================================================
+
+    def _check_news_sentiment(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check Vietnamese news sentiment for force exit.
+
+        NEW v9.2: Forces exit when severe negative news is detected
+        or adjusts exit urgency based on sentiment.
+
+        Returns:
+            ExitDecision if force exit, None otherwise
+        """
+        if not VN_NEWS_SENTIMENT_AVAILABLE:
+            return None
+
+        symbol = ctx["symbol"]
+        current_price = ctx["current_price"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+
+        try:
+            integration = get_news_sentiment_integration()
+            exit_check = integration.check_exit_sentiment(
+                symbol=symbol,
+                current_pnl_pct=pnl_percent / 100,  # Convert to decimal
+            )
+
+            if exit_check is None:
+                return None
+
+            # Force exit on severe negative news
+            if exit_check.get("should_exit", False):
+                urgency = exit_check.get("urgency", 0.5)
+                reasons = exit_check.get("reasons", [])
+                reason_text = reasons[0] if reasons else "Negative news detected"
+
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.NEWS_SENTIMENT_FORCE_EXIT,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=f"📰 NEWS FORCE EXIT: {reason_text} ({pnl_percent:+.2f}%)",
+                    urgency=int(urgency * 5) + 1,  # Scale to 1-6
+                    metadata={
+                        "news_urgency": urgency,
+                        "news_reasons": reasons[:3],
+                    },
+                )
+
+        except Exception as e:
+            logger.debug(f"News sentiment exit check error: {e}")
+
+        return None
 
     # =========================================================================
     # STOP LOSS HELPERS

@@ -89,6 +89,23 @@ class EnhancedRiskManager(RiskManager):
         self.vn_transaction_cost = 0.015  # ~1.5% round trip
         self.t2_capital_buffer = 0.10  # 10% buffer for T+2 settlements
 
+        # NEW v5.0: Dynamic slippage integration
+        self.use_dynamic_slippage = True
+
+        # NEW v5.1: Liquidity-based position sizing
+        self.use_liquidity_based_sizing = True
+        self.max_volume_participation = 0.10  # Max 10% of daily volume
+        self.liquidity_tiers = {
+            "mega": {"min_value": 50_000_000_000, "max_participation": 0.05},  # 5% for mega caps
+            "large": {"min_value": 10_000_000_000, "max_participation": 0.08},  # 8% for large caps
+            "mid": {"min_value": 2_000_000_000, "max_participation": 0.10},  # 10% for mid caps
+            "small": {"min_value": 500_000_000, "max_participation": 0.15},  # 15% for small caps
+            "micro": {
+                "min_value": 0,
+                "max_participation": 0.20,
+            },  # 20% for micro caps (but higher slippage)
+        }
+
     def calculate_enhanced_position_size(
         self,
         symbol,
@@ -99,6 +116,7 @@ class EnhancedRiskManager(RiskManager):
         market_volatility=0.02,
         market_regime=None,
         force_regime_refresh: bool = False,
+        avg_daily_volume: int = 0,  # NEW: For dynamic slippage calculation
     ):
         """
         Position sizing nâng cao với nhiều yếu tố điều chỉnh
@@ -113,6 +131,7 @@ class EnhancedRiskManager(RiskManager):
             market_regime: Dict từ regime_detector (IMPROVEMENT #4)
             force_regime_refresh: Force refresh VNINDEX cache trước khi detect regime
                                   (nên dùng = True cho lệnh đầu tiên của trading session)
+            avg_daily_volume: Average daily volume for slippage calculation (NEW v5.0)
         """
         # Base position size từ class cha
         base_position = super().calculate_position_size(price, atr, confidence, signal)
@@ -148,16 +167,188 @@ class EnhancedRiskManager(RiskManager):
         max_shares_by_capital = int((self.total_capital * self.max_position_pct) / price)
         base_position["shares"] = min(base_position["shares"], max_shares_by_capital)
 
-        # IMPROVED v4.2: Vietnam lot size validation
-        if base_position["shares"] > 0:
-            base_position["shares"] = self._round_to_vn_lot(base_position["shares"])
-            base_position["value"] = base_position["shares"] * price
+        # NEW v5.1: Liquidity-based position sizing - limit to % of daily volume
+        if self.use_liquidity_based_sizing and avg_daily_volume > 0:
+            liquidity_result = self._apply_liquidity_based_sizing(
+                shares=base_position["shares"],
+                price=price,
+                avg_daily_volume=avg_daily_volume,
+                symbol=symbol,
+            )
+            if liquidity_result["adjusted"]:
+                base_position["shares"] = liquidity_result["shares"]
+                base_position["value"] = base_position["shares"] * price
+                base_position["max_loss"] = (
+                    base_position["risk_per_share"] * base_position["shares"]
+                )
+                base_position["liquidity_cap"] = liquidity_result
+                print(
+                    f"  📊 Liquidity cap: {liquidity_result['participation_pct']*100:.1f}% of daily volume "
+                    f"(tier: {liquidity_result['tier']})"
+                )
 
-        # IMPROVED v4.2: Add transaction cost estimate
-        base_position["estimated_cost"] = base_position["value"] * self.vn_transaction_cost
-        base_position["net_value"] = base_position["value"] - base_position["estimated_cost"]
+        # NEW v5.0: Dynamic slippage and execution cost calculation
+        if self.use_dynamic_slippage and avg_daily_volume > 0:
+            slippage_result = self._calculate_dynamic_execution_cost(
+                symbol=symbol,
+                order_value=base_position["value"],
+                avg_daily_volume=avg_daily_volume,
+                avg_price=price,
+                signal=signal,
+            )
+            base_position["execution_cost"] = slippage_result
+            base_position["effective_value"] = (
+                slippage_result.get("effective_price", price) * base_position["shares"]
+            )
+
+            # Adjust position if slippage is too high
+            if slippage_result.get("total_cost_pct", 0) > 0.025:  # > 2.5% total cost
+                # Reduce position to lower market impact
+                reduction_factor = 0.025 / slippage_result["total_cost_pct"]
+                reduction_factor = max(0.5, min(1.0, reduction_factor))  # Cap at 50% reduction
+                base_position["shares"] = int(base_position["shares"] * reduction_factor)
+                base_position["shares"] = self._round_to_vn_lot(base_position["shares"])
+                base_position["value"] = base_position["shares"] * price
+                print(
+                    f"  💰 Slippage adjustment: {reduction_factor:.2f}x (cost was {slippage_result['total_cost_pct']*100:.1f}%)"
+                )
+
+            # Add recommendation to position info
+            base_position["order_recommendation"] = slippage_result.get("recommendation", "")
 
         return base_position
+
+    def _apply_liquidity_based_sizing(
+        self,
+        shares: int,
+        price: float,
+        avg_daily_volume: int,
+        symbol: str,
+    ) -> dict:
+        """
+        Apply liquidity-based position sizing.
+
+        NEW v5.1 IMPROVEMENT: Scale position size based on % of daily volume
+        to minimize market impact and slippage.
+
+        Liquidity tiers:
+        - Mega cap (>50B VND/day): Max 5% of daily volume
+        - Large cap (10-50B VND/day): Max 8% of daily volume
+        - Mid cap (2-10B VND/day): Max 10% of daily volume
+        - Small cap (0.5-2B VND/day): Max 15% of daily volume
+        - Micro cap (<0.5B VND/day): Max 20% of daily volume
+
+        Args:
+            shares: Calculated number of shares
+            price: Current price
+            avg_daily_volume: Average daily trading volume
+            symbol: Stock symbol for logging
+
+        Returns:
+            Dict with adjusted shares, tier, participation_pct, adjusted flag
+        """
+        result = {
+            "shares": shares,
+            "original_shares": shares,
+            "tier": "unknown",
+            "participation_pct": 0.0,
+            "max_participation": self.max_volume_participation,
+            "adjusted": False,
+            "reason": None,
+        }
+
+        if avg_daily_volume <= 0:
+            return result
+
+        # Calculate daily trading value
+        avg_daily_value = avg_daily_volume * price
+
+        # Determine liquidity tier
+        tier = "micro"
+        max_participation = self.liquidity_tiers["micro"]["max_participation"]
+
+        for tier_name, tier_config in self.liquidity_tiers.items():
+            if avg_daily_value >= tier_config["min_value"]:
+                tier = tier_name
+                max_participation = tier_config["max_participation"]
+                break
+
+        result["tier"] = tier
+        result["max_participation"] = max_participation
+
+        # Calculate current participation
+        current_participation = shares / avg_daily_volume
+        result["participation_pct"] = current_participation
+
+        # Apply cap if exceeds max participation
+        if current_participation > max_participation:
+            max_shares = int(avg_daily_volume * max_participation)
+            max_shares = self._round_to_vn_lot(max_shares)
+
+            # Ensure minimum position
+            if max_shares < self.vn_lot_size:
+                max_shares = self.vn_lot_size
+
+            result["shares"] = min(shares, max_shares)
+            result["adjusted"] = True
+            result["reason"] = (
+                f"Capped to {max_participation*100:.0f}% of daily volume ({tier} cap)"
+            )
+
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"[{symbol}] Liquidity cap applied: {shares} -> {result['shares']} shares "
+                f"({current_participation*100:.1f}% -> {max_participation*100:.0f}% of volume)"
+            )
+
+        return result
+
+    def _calculate_dynamic_execution_cost(
+        self,
+        symbol: str,
+        order_value: float,
+        avg_daily_volume: int,
+        avg_price: float,
+        signal: str = "BUY",
+    ) -> dict:
+        """
+        Calculate dynamic execution cost using the new slippage model.
+
+        Args:
+            symbol: Stock symbol
+            order_value: Order value in VND
+            avg_daily_volume: Average daily volume in shares
+            avg_price: Average price per share
+            signal: 'BUY' or 'SELL'
+
+        Returns:
+            Dict with execution cost breakdown
+        """
+        try:
+            from src.config.constants import estimate_execution_cost
+
+            return estimate_execution_cost(
+                symbol=symbol,
+                order_value=order_value,
+                avg_daily_volume=avg_daily_volume,
+                avg_price=avg_price,
+                side=signal,
+                is_market_order=True,  # Assume market order for conservative estimate
+            )
+        except ImportError:
+            # Fallback to simple estimate
+            return {
+                "total_cost_pct": self.vn_transaction_cost,
+                "total_cost_vnd": order_value * self.vn_transaction_cost,
+                "effective_price": (
+                    avg_price * (1 + self.vn_transaction_cost)
+                    if signal == "BUY"
+                    else avg_price * (1 - self.vn_transaction_cost)
+                ),
+                "recommendation": "UNKNOWN",
+            }
 
     def _round_to_vn_lot(self, shares: int) -> int:
         """Round shares to Vietnam lot size (100 shares minimum)."""
