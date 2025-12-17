@@ -50,13 +50,15 @@ class EnhancedMLSignalGeneratorV2:
         # Try V3 first (best accuracy with ensemble + microstructure)
         if self.prefer_v3:
             try:
-                from src.ml.signals.generator_v3 import EnhancedMLSignalGeneratorV3
+                from src.ml.signals.generator_v3 import EnhancedMLSignalGeneratorV3, MLModelConfig
 
-                self.generator = EnhancedMLSignalGeneratorV3(
-                    confidence_threshold=0.55,
-                    use_walk_forward=True,
-                    calibrate_confidence=True,
+                # V3 uses config object with correct field names
+                config = MLModelConfig(
+                    min_confidence_for_signal=55.0,
+                    enable_walk_forward=True,
+                    enable_confidence_calibration=True,
                 )
+                self.generator = EnhancedMLSignalGeneratorV3(config=config)
                 self.model_loaded = True
                 self.use_v3 = True
                 logger.info(
@@ -125,8 +127,8 @@ class EnhancedMLSignalGeneratorV2:
 
         try:
             if self.use_v3:
-                # V3 generator (best - ensemble + microstructure)
-                result = self.generator.generate_signal(df, index_df, symbol)
+                # V3 generator uses analyze() method (best - ensemble + microstructure)
+                result = self.generator.analyze(df, index_df, symbol=symbol)
 
                 # Add compatibility fields for V1 interface
                 result["raw_confidence"] = result.get("confidence", 0)

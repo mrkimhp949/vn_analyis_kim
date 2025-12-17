@@ -1,12 +1,12 @@
 {
   "today": {
-    "date": "2025-12-16",
-    "trades_count": 1,
-    "total_loss": 500000.0,
+    "date": "2025-12-17",
+    "trades_count": 6,
+    "total_loss": 57907790.074999996,
     "total_profit": 0.0,
-    "net_pnl": -500000.0,
-    "last_updated": "2025-12-16T19:00:58.457716"
+    "net_pnl": -57907790.074999996,
+    "last_updated": "2025-12-17T18:32:14.969589"
   },
-  "consecutive_losses": 1,
-  "last_trade_date": "2025-12-16"
+  "consecutive_losses": 7,
+  "last_trade_date": "2025-12-17"
 }

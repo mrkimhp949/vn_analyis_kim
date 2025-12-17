@@ -1,13 +1,7 @@
 {
-  "expected_features": 28,
-  "saved_at": "2025-11-27T21:51:07.095773",
-  "has_xgboost": false,
-  "has_rf": true,
-  "ensemble_weights": {
-    "rf": 0.5,
-    "xgb": 0.5
-  },
-  "feature_names": [
+  "version": "v3",
+  "created_at": "2025-12-17T18:55:48.992108",
+  "feature_columns": [
     "sma20",
     "ema20",
     "ema50",
@@ -36,5 +30,22 @@
     "rs_momentum",
     "price_vs_sma20",
     "adx"
-  ]
+  ],
+  "n_features": 28,
+  "training_samples": 5208,
+  "test_samples": 1302,
+  "models": {
+    "random_forest": {
+      "accuracy": 0.5422427035330261,
+      "f1": 0.4491682070240296
+    },
+    "gradient_boosting": {
+      "accuracy": 0.5476190476190477,
+      "f1": 0.38065194532071506
+    },
+    "xgboost": {
+      "accuracy": 0.5637480798771122,
+      "f1": 0.47309833024118736
+    }
+  }
 }

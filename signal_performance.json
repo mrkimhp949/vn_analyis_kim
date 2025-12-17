@@ -13,15 +13,15 @@
   },
   "technical": {
     "total_signals": 33,
-    "total_trades": 6,
+    "total_trades": 9,
     "winning_trades": 1,
-    "losing_trades": 5,
-    "total_pnl": -4991510.000000001,
+    "losing_trades": 8,
+    "total_pnl": -33945420.075,
     "avg_profit": 134550.0000000011,
-    "avg_loss": 1025212.0000000003,
-    "win_rate": 0.16666666666666666,
-    "avg_pnl": -831918.3333333335,
-    "sharpe_ratio": -0.8687588518277185
+    "avg_loss": 4259996.259375,
+    "win_rate": 0.1111111111111111,
+    "avg_pnl": -3771713.341666667,
+    "sharpe_ratio": -0.9684154652239668
   },
-  "last_updated": "2025-12-03T20:00:59.802485"
+  "last_updated": "2025-12-17T18:32:14.941340"
 }
