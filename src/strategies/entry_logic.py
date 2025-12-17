@@ -68,6 +68,60 @@ from src.config.constants import (
     SECTOR_EXPOSURE_CONSUMER,
     SECTOR_EXPOSURE_DEFAULT,
     SECTOR_EXPOSURE_BEAR_MULTIPLIER,
+    # NEW v9.8: Entry Logic Improvements
+    FILTER_PRIORITY_CRITICAL,
+    FILTER_PRIORITY_IMPORTANT,
+    FILTER_PRIORITY_OPTIONAL,
+    FILTER_WEIGHT_CRITICAL,
+    FILTER_WEIGHT_IMPORTANT,
+    FILTER_WEIGHT_OPTIONAL,
+    ENTRY_QUALITY_EXCELLENT,
+    ENTRY_QUALITY_GOOD,
+    ENTRY_QUALITY_ACCEPTABLE,
+    ENTRY_QUALITY_REJECT,
+    INTRADAY_MOMENTUM_ATR_MULTIPLIER,
+    INTRADAY_MOMENTUM_MIN_THRESHOLD,
+    INTRADAY_MOMENTUM_MAX_THRESHOLD,
+    INTRADAY_MOMENTUM_BLOCK_MULTIPLIER,
+    GAP_ATR_MULTIPLIER,
+    GAP_MIN_BLOCK_THRESHOLD,
+    GAP_MAX_BLOCK_THRESHOLD,
+    GAP_BREAKOUT_VOLUME_CONFIRM,
+    CONSECUTIVE_LOSS_SMALL_THRESHOLD,
+    CONSECUTIVE_LOSS_MEDIUM_THRESHOLD,
+    CONSECUTIVE_LOSS_LARGE_THRESHOLD,
+    CONSECUTIVE_LOSS_SMALL_WEIGHT,
+    CONSECUTIVE_LOSS_MEDIUM_WEIGHT,
+    CONSECUTIVE_LOSS_LARGE_WEIGHT,
+    CONSECUTIVE_LOSS_WEIGHTED_LIMIT,
+    FAST_PATH_MIN_CONFIDENCE,
+    FAST_PATH_MIN_RR,
+    FAST_PATH_SKIP_FILTERS,
+    ENTRY_OPTIMAL_MORNING_START,
+    ENTRY_OPTIMAL_MORNING_END,
+    ENTRY_OPTIMAL_AFTERNOON_START,
+    ENTRY_OPTIMAL_AFTERNOON_END,
+    ENTRY_AVOID_LUNCH_START,
+    ENTRY_AVOID_LUNCH_END,
+    ENTRY_TIME_OPTIMAL_BONUS,
+    ENTRY_TIME_AVOID_PENALTY,
+    # NEW v9.9: Sector Breadth & Earnings Event Constants
+    SECTOR_BREADTH_STRONG,
+    SECTOR_BREADTH_NEUTRAL,
+    SECTOR_BREADTH_WEAK,
+    SECTOR_BREADTH_VERY_WEAK,
+    SECTOR_BREADTH_BLOCK,
+    SECTOR_BREADTH_STRONG_BONUS,
+    SECTOR_BREADTH_NEUTRAL_BONUS,
+    SECTOR_BREADTH_WEAK_PENALTY,
+    SECTOR_BREADTH_VERY_WEAK_PENALTY,
+    EARNINGS_BLOCK_DAYS,
+    EARNINGS_WARNING_DAYS,
+    EARNINGS_CAUTION_DAYS,
+    EARNINGS_WARNING_POSITION_MULT,
+    EARNINGS_CAUTION_POSITION_MULT,
+    EARNINGS_SEASON_POSITION_MULT,
+    VN_EARNINGS_MONTHS,
 )
 from src.config.exceptions import DataQualityError
 
@@ -366,6 +420,11 @@ class ImprovedEntryLogic:
         # NEW v9.7: Integrated filter performance tracker
         self._filter_tracker: FilterPerformanceTracker = get_filter_performance_tracker()
 
+        # NEW v9.8: Entry Quality Score tracking
+        self._filter_scores: Dict[str, float] = {}  # Track individual filter scores
+        self._last_entry_quality: float = 0.0  # Last calculated entry quality
+        self._weighted_losses: Dict[str, float] = {}  # Weighted loss tracking per symbol
+
         # Initialize modular components
         self._technical_checker = TechnicalChecker(
             support_distance_percent=support_distance_percent,
@@ -554,6 +613,8 @@ class ImprovedEntryLogic:
         """
         Main entry analysis method.
 
+        IMPROVED v9.8: Added Entry Quality Score and Fast Path for high-confidence signals.
+
         Args:
             df: DataFrame with OHLCV and indicators
             ml_signal: Optional ML model signal ("BUY", "SELL", "HOLD")
@@ -596,7 +657,13 @@ class ImprovedEntryLogic:
         adjustments: List[int] = []
         adjustment_breakdown: List[Dict] = []
 
-        # Run all filters
+        # NEW v9.8: Check for Fast Path (high confidence signals skip optional filters)
+        use_fast_path = self._should_use_fast_path(confidence, df, current_price)
+        if use_fast_path:
+            telemetry["fast_path"] = True
+            logger.debug(f"[{symbol}] Using fast path (confidence: {confidence})")
+
+        # Run all filters (with fast path consideration)
         block_reason = self._run_all_filters(
             df=df,
             current_price=current_price,
@@ -606,6 +673,7 @@ class ImprovedEntryLogic:
             warnings=warnings,
             adjustments=adjustments,
             adjustment_breakdown=adjustment_breakdown,
+            use_fast_path=use_fast_path,  # NEW v9.8
         )
 
         if block_reason:
@@ -621,6 +689,19 @@ class ImprovedEntryLogic:
         # Calculate final confidence
         final_confidence = confidence + sum(adjustments)
         final_confidence = max(0, min(100, final_confidence))
+
+        # NEW v9.8: Calculate Entry Quality Score
+        entry_quality = self._calculate_entry_quality_score(
+            reasons, warnings, adjustments, market_regime
+        )
+        self._last_entry_quality = entry_quality
+        telemetry["entry_quality"] = entry_quality
+
+        # NEW v9.8: Reject if entry quality too low
+        if entry_quality < ENTRY_QUALITY_REJECT:
+            return create_no_signal(
+                f"Entry quality too low: {entry_quality:.2f} < {ENTRY_QUALITY_REJECT}", telemetry
+            )
 
         # Technical-only mode needs higher confidence
         if self._is_technical_only and final_confidence < TECH_ONLY_MIN_CONFIDENCE:
@@ -679,9 +760,21 @@ class ImprovedEntryLogic:
         warnings: List[str],
         adjustments: List[int],
         adjustment_breakdown: List[Dict],
+        use_fast_path: bool = False,  # NEW v9.8
     ) -> Optional[str]:
-        """Run all filters and return block reason if any."""
+        """
+        Run all filters and return block reason if any.
+
+        IMPROVED v9.8: Added fast_path support to skip optional filters
+        for high-confidence signals.
+
+        Args:
+            use_fast_path: If True, skip optional filters (session_timing, gap_analysis, etc.)
+        """
         symbol = self._current_symbol
+
+        # NEW v9.8: Reset filter scores for this analysis
+        self._filter_scores = {}
 
         # 1. Vietnam Price Limit Check (Blocking)
         price_limit = self._technical_checker.check_vietnam_price_limits(df, current_price)
@@ -1069,79 +1162,109 @@ class ImprovedEntryLogic:
             self._track_filter("event_calendar", True, symbol or "")
 
         # 19. Session Timing Filter (NEW v9.5) - ATO/ATC session optimization
+        # NEW v9.8: Skip in fast path (optional filter)
         if self.use_session_timing_filter and SESSION_TRADING_AVAILABLE:
-            session_result = self._check_session_timing()
-            if session_result.get("blocked"):
-                self._track_filter("session_timing", False, symbol or "")
-                return session_result.get("reason")
-            if session_result.get("warning"):
-                warnings.append(session_result["warning"])
-                self._add_adjustment(
-                    adjustments,
-                    adjustment_breakdown,
-                    "session_timing",
-                    session_result.get("adjustment", -10),
-                    session_result.get("note", "Non-optimal entry timing"),
-                )
-            elif session_result.get("positive"):
-                reasons.append(session_result["positive"])
-                self._add_adjustment(
-                    adjustments,
-                    adjustment_breakdown,
-                    "session_timing",
-                    session_result.get("adjustment", 5),
-                    session_result.get("note", "Optimal entry timing"),
-                )
-            # Apply position multiplier from session timing
-            if session_result.get("position_multiplier", 1.0) != 1.0:
-                self._regime_position_multiplier *= session_result.get("position_multiplier", 1.0)
-            self._track_filter("session_timing", True, symbol or "")
+            if use_fast_path and "session_timing" in FAST_PATH_SKIP_FILTERS:
+                self._filter_scores["session_timing"] = 0.5  # Neutral score
+                logger.debug(f"[{symbol}] Fast path: skipping session_timing filter")
+            else:
+                session_result = self._check_session_timing()
+                if session_result.get("blocked"):
+                    self._track_filter("session_timing", False, symbol or "")
+                    return session_result.get("reason")
+                if session_result.get("warning"):
+                    warnings.append(session_result["warning"])
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "session_timing",
+                        session_result.get("adjustment", -10),
+                        session_result.get("note", "Non-optimal entry timing"),
+                    )
+                    self._filter_scores["session_timing"] = 0.3
+                elif session_result.get("positive"):
+                    reasons.append(session_result["positive"])
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "session_timing",
+                        session_result.get("adjustment", 5),
+                        session_result.get("note", "Optimal entry timing"),
+                    )
+                    self._filter_scores["session_timing"] = 1.0
+                else:
+                    self._filter_scores["session_timing"] = 0.5
+                # Apply position multiplier from session timing
+                if session_result.get("position_multiplier", 1.0) != 1.0:
+                    self._regime_position_multiplier *= session_result.get(
+                        "position_multiplier", 1.0
+                    )
+                self._track_filter("session_timing", True, symbol or "")
 
         # 20. Pre-Holiday Risk Reduction (NEW v9.5) - Reduce exposure before major holidays
+        # NEW v9.8: Skip in fast path (optional filter)
         if self.use_pre_holiday_filter:
-            holiday_result = self._check_pre_holiday_risk()
-            if holiday_result.get("blocked"):
-                self._track_filter("pre_holiday", False, symbol or "")
-                return holiday_result.get("reason")
-            if holiday_result.get("warning"):
-                warnings.append(holiday_result["warning"])
-                self._add_adjustment(
-                    adjustments,
-                    adjustment_breakdown,
-                    "pre_holiday",
-                    holiday_result.get("adjustment", -15),
-                    holiday_result.get("note", "Pre-holiday risk reduction"),
-                )
-            # Apply position multiplier for pre-holiday
-            if holiday_result.get("position_multiplier", 1.0) != 1.0:
-                self._regime_position_multiplier *= holiday_result.get("position_multiplier", 1.0)
-            self._track_filter("pre_holiday", True, symbol or "")
+            if use_fast_path and "pre_holiday" in FAST_PATH_SKIP_FILTERS:
+                self._filter_scores["pre_holiday"] = 0.5
+                logger.debug(f"[{symbol}] Fast path: skipping pre_holiday filter")
+            else:
+                holiday_result = self._check_pre_holiday_risk()
+                if holiday_result.get("blocked"):
+                    self._track_filter("pre_holiday", False, symbol or "")
+                    return holiday_result.get("reason")
+                if holiday_result.get("warning"):
+                    warnings.append(holiday_result["warning"])
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "pre_holiday",
+                        holiday_result.get("adjustment", -15),
+                        holiday_result.get("note", "Pre-holiday risk reduction"),
+                    )
+                    self._filter_scores["pre_holiday"] = 0.3
+                else:
+                    self._filter_scores["pre_holiday"] = 1.0
+                # Apply position multiplier for pre-holiday
+                if holiday_result.get("position_multiplier", 1.0) != 1.0:
+                    self._regime_position_multiplier *= holiday_result.get(
+                        "position_multiplier", 1.0
+                    )
+                self._track_filter("pre_holiday", True, symbol or "")
 
         # 21. Gap Analysis Filter (NEW v9.6) - Avoid buying into large gap up
+        # NEW v9.8: Skip in fast path (optional filter)
         if self.use_gap_analysis_filter:
-            gap_result = self._check_gap_risk(df, current_price)
-            if gap_result.get("blocked"):
-                self._track_filter("gap_analysis", False, symbol or "")
-                return gap_result.get("reason")
-            if gap_result.get("warning"):
-                warnings.append(gap_result["warning"])
-                self._add_adjustment(
-                    adjustments,
-                    adjustment_breakdown,
-                    "gap_analysis",
-                    gap_result.get("adjustment", -10),
-                    gap_result.get("note", "Gap risk"),
-                )
-            elif gap_result.get("positive"):
-                reasons.append(gap_result["positive"])
-                self._add_adjustment(
-                    adjustments,
-                    adjustment_breakdown,
-                    "gap_analysis",
-                    gap_result.get("adjustment", 5),
-                    gap_result.get("note", "Gap fill opportunity"),
-                )
-            self._track_filter("gap_analysis", True, symbol or "")
+            if use_fast_path and "gap_analysis" in FAST_PATH_SKIP_FILTERS:
+                self._filter_scores["gap_analysis"] = 0.5
+                logger.debug(f"[{symbol}] Fast path: skipping gap_analysis filter")
+            else:
+                gap_result = self._check_gap_risk(df, current_price)
+                if gap_result.get("blocked"):
+                    self._track_filter("gap_analysis", False, symbol or "")
+                    return gap_result.get("reason")
+                if gap_result.get("warning"):
+                    warnings.append(gap_result["warning"])
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "gap_analysis",
+                        gap_result.get("adjustment", -10),
+                        gap_result.get("note", "Gap risk"),
+                    )
+                    self._filter_scores["gap_analysis"] = 0.3
+                elif gap_result.get("positive"):
+                    reasons.append(gap_result["positive"])
+                    self._add_adjustment(
+                        adjustments,
+                        adjustment_breakdown,
+                        "gap_analysis",
+                        gap_result.get("adjustment", 5),
+                        gap_result.get("note", "Gap fill opportunity"),
+                    )
+                    self._filter_scores["gap_analysis"] = 1.0
+                else:
+                    self._filter_scores["gap_analysis"] = 0.5
+                self._track_filter("gap_analysis", True, symbol or "")
 
         # 22. Accumulation/Distribution Filter (NEW v9.6) - Smart money flow
         if self.use_accumulation_filter:
@@ -1234,6 +1357,52 @@ class ImprovedEntryLogic:
                     loss_result.get("note", "Recent losses on symbol"),
                 )
             self._track_filter("consecutive_loss", True, symbol or "")
+
+        # 26. Sector Breadth Indicator (NEW v9.9) - % stocks bullish in sector
+        if self.use_sector_strength_filter and symbol:
+            sector_breadth_result = self._check_sector_breadth(symbol)
+            if sector_breadth_result.get("blocked"):
+                self._track_filter("sector_breadth", False, symbol or "")
+                return sector_breadth_result.get("reason")
+            if sector_breadth_result.get("warning"):
+                warnings.append(sector_breadth_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector_breadth",
+                    sector_breadth_result.get("adjustment", -10),
+                    sector_breadth_result.get("note", "Weak sector breadth"),
+                )
+            elif sector_breadth_result.get("positive"):
+                reasons.append(sector_breadth_result["positive"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "sector_breadth",
+                    sector_breadth_result.get("adjustment", 10),
+                    sector_breadth_result.get("note", "Strong sector breadth"),
+                )
+            self._track_filter("sector_breadth", True, symbol or "")
+
+        # 27. Earnings/Event Block (NEW v9.9) - Block entry before earnings
+        if FUNDAMENTAL_AVAILABLE and symbol:
+            earnings_result = self._check_earnings_event_block(symbol)
+            if earnings_result.get("blocked"):
+                self._track_filter("earnings_block", False, symbol or "")
+                return earnings_result.get("reason")
+            if earnings_result.get("warning"):
+                warnings.append(earnings_result["warning"])
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "earnings_block",
+                    earnings_result.get("adjustment", -15),
+                    earnings_result.get("note", "Earnings approaching"),
+                )
+            # Apply position multiplier for earnings
+            if earnings_result.get("position_multiplier", 1.0) != 1.0:
+                self._regime_position_multiplier *= earnings_result.get("position_multiplier", 1.0)
+            self._track_filter("earnings_block", True, symbol or "")
 
         return None  # No blocking reason
 
@@ -1347,8 +1516,8 @@ class ImprovedEntryLogic:
         """
         Check intraday momentum to avoid chasing extended moves.
 
-        NEW IMPROVEMENT: Block entries when price has moved >3% intraday
-        to avoid buying at extended levels.
+        IMPROVED v9.8: Dynamic ATR-based threshold instead of fixed 3%.
+        Uses 1.5x ATR as threshold, capped between 2.5% and 6%.
 
         Args:
             df: DataFrame with OHLCV data
@@ -1372,22 +1541,28 @@ class ImprovedEntryLogic:
             # Calculate intraday change
             intraday_change = (current_price - today_open) / today_open
 
+            # NEW v9.8: Dynamic threshold based on ATR
+            dynamic_threshold = self._get_dynamic_momentum_threshold(df, current_price)
+
             # Check if already moved significantly
-            if abs(intraday_change) >= self.intraday_momentum_threshold:
+            if abs(intraday_change) >= dynamic_threshold:
                 if intraday_change > 0:
-                    # Price already up >3% - risky to chase
-                    if intraday_change >= self.intraday_momentum_threshold * 1.5:  # >4.5%
+                    # Price already up - risky to chase
+                    block_threshold = dynamic_threshold * INTRADAY_MOMENTUM_BLOCK_MULTIPLIER
+                    if intraday_change >= block_threshold:
                         result["blocked"] = True
                         result["reason"] = (
-                            f"Price already up {intraday_change*100:.1f}% today - too extended"
+                            f"Price already up {intraday_change*100:.1f}% today "
+                            f"(threshold: {block_threshold*100:.1f}%) - too extended"
                         )
                     else:
                         result["warning"] = f"⚠️ Intraday up {intraday_change*100:.1f}% - extended"
                         result["adjustment"] = -10
                         result["note"] = f"Chasing momentum ({intraday_change*100:.1f}%)"
                 else:
-                    # Price down >3% - might be catching falling knife
-                    if intraday_change <= -self.intraday_momentum_threshold * 1.5:  # <-4.5%
+                    # Price down - might be catching falling knife
+                    block_threshold = -dynamic_threshold * INTRADAY_MOMENTUM_BLOCK_MULTIPLIER
+                    if intraday_change <= block_threshold:
                         result["blocked"] = True
                         result["reason"] = (
                             f"Price down {intraday_change*100:.1f}% today - potential falling knife"
@@ -1410,6 +1585,57 @@ class ImprovedEntryLogic:
             logger.debug(f"Intraday momentum check error: {e}")
 
         return result
+
+    def _get_dynamic_momentum_threshold(self, df: pd.DataFrame, current_price: float) -> float:
+        """
+        Calculate dynamic intraday momentum threshold based on ATR.
+
+        NEW v9.8: Instead of fixed 3%, use 1.5x ATR capped between 2.5% and 6%.
+        This adapts to stock volatility - volatile stocks get wider threshold.
+
+        Args:
+            df: DataFrame with OHLCV data
+            current_price: Current price
+
+        Returns:
+            Dynamic threshold as decimal (e.g., 0.035 for 3.5%)
+        """
+        try:
+            # Try to get ATR from dataframe
+            if "atr" in df.columns:
+                atr = safe_get_latest(df, "atr", 0)
+            elif "atr_14" in df.columns:
+                atr = safe_get_latest(df, "atr_14", 0)
+            else:
+                # Calculate ATR manually if not available
+                if all(col in df.columns for col in ["high", "low", "close"]):
+                    high = df["high"].tail(14)
+                    low = df["low"].tail(14)
+                    close = df["close"].tail(14)
+                    tr = pd.concat(
+                        [high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()],
+                        axis=1,
+                    ).max(axis=1)
+                    atr = tr.mean()
+                else:
+                    return self.intraday_momentum_threshold  # Fallback to fixed
+
+            if atr <= 0 or current_price <= 0:
+                return self.intraday_momentum_threshold
+
+            # Calculate ATR as percentage of price
+            atr_pct = atr / current_price
+
+            # Dynamic threshold = 1.5x ATR, capped between min and max
+            dynamic_threshold = atr_pct * INTRADAY_MOMENTUM_ATR_MULTIPLIER
+            dynamic_threshold = max(INTRADAY_MOMENTUM_MIN_THRESHOLD, dynamic_threshold)
+            dynamic_threshold = min(INTRADAY_MOMENTUM_MAX_THRESHOLD, dynamic_threshold)
+
+            return dynamic_threshold
+
+        except Exception as e:
+            logger.debug(f"Dynamic momentum threshold error: {e}")
+            return self.intraday_momentum_threshold  # Fallback
 
     def _check_vn30_divergence(
         self, df: pd.DataFrame, symbol: str, market_regime: Optional[Dict]
@@ -1775,6 +2001,155 @@ class ImprovedEntryLogic:
         regime = market_regime.get("regime", "SIDEWAYS")
         return self.REGIME_THRESHOLDS.get(regime, {}).get("max_warnings", self.base_max_warnings)
 
+    def _should_use_fast_path(
+        self, confidence: float, df: pd.DataFrame, current_price: float
+    ) -> bool:
+        """
+        Determine if fast path should be used for high-confidence signals.
+
+        NEW v9.8: Fast path skips optional filters when:
+        - Confidence >= 80%
+        - Estimated R:R >= 2.5
+
+        This reduces over-filtering for strong signals.
+
+        Args:
+            confidence: Initial confidence score
+            df: DataFrame with OHLCV data
+            current_price: Current price
+
+        Returns:
+            True if fast path should be used
+        """
+        try:
+            # Check confidence threshold
+            if confidence < FAST_PATH_MIN_CONFIDENCE:
+                return False
+
+            # Estimate R:R (quick check without full calculation)
+            sr_check = self._technical_checker.check_support_resistance(df, current_price)
+            if sr_check.get("support_level"):
+                support = sr_check["support_level"]
+                risk = current_price - support
+                if risk > 0:
+                    # Estimate reward as 2x risk (conservative)
+                    estimated_rr = 2.0
+                    # If bouncing from support, likely better R:R
+                    if sr_check.get("bouncing_from_support"):
+                        estimated_rr = 2.5
+                    if estimated_rr >= FAST_PATH_MIN_RR:
+                        return True
+
+            return False
+
+        except Exception as e:
+            logger.debug(f"Fast path check error: {e}")
+            return False
+
+    def _calculate_entry_quality_score(
+        self,
+        reasons: List[str],
+        warnings: List[str],
+        adjustments: List[int],
+        market_regime: Optional[Dict],
+    ) -> float:
+        """
+        Calculate Entry Quality Score based on filter results.
+
+        NEW v9.8: Weighted scoring system instead of binary pass/fail.
+        - Critical filters: 2x weight
+        - Important filters: 1.5x weight
+        - Optional filters: 1x weight
+
+        Score ranges:
+        - >= 0.85: Excellent entry
+        - >= 0.70: Good entry
+        - >= 0.55: Acceptable entry
+        - >= 0.40: Poor entry (reduce size)
+        - < 0.40: Reject entry
+
+        Args:
+            reasons: List of positive reasons
+            warnings: List of warnings
+            adjustments: List of confidence adjustments
+            market_regime: Market regime info
+
+        Returns:
+            Entry quality score (0.0 - 1.0)
+        """
+        try:
+            # Start with base score from filter_scores
+            if not self._filter_scores:
+                # Fallback: estimate from reasons/warnings
+                positive_count = len(reasons)
+                warning_count = len(warnings)
+                total_checks = positive_count + warning_count + 5  # Assume 5 neutral
+                base_score = (positive_count + 2.5) / total_checks  # Neutral = 0.5
+            else:
+                # Calculate weighted average from filter scores
+                total_weight = 0.0
+                weighted_sum = 0.0
+
+                for filter_name, score in self._filter_scores.items():
+                    # Determine filter weight
+                    if filter_name in FILTER_PRIORITY_CRITICAL:
+                        weight = FILTER_WEIGHT_CRITICAL
+                    elif filter_name in FILTER_PRIORITY_IMPORTANT:
+                        weight = FILTER_WEIGHT_IMPORTANT
+                    else:
+                        weight = FILTER_WEIGHT_OPTIONAL
+
+                    weighted_sum += score * weight
+                    total_weight += weight
+
+                base_score = weighted_sum / total_weight if total_weight > 0 else 0.5
+
+            # Adjust for warnings
+            warning_penalty = len(warnings) * 0.03  # 3% penalty per warning
+            base_score -= warning_penalty
+
+            # Adjust for positive adjustments
+            positive_adjustments = sum(a for a in adjustments if a > 0)
+            negative_adjustments = sum(a for a in adjustments if a < 0)
+            adjustment_factor = (positive_adjustments + negative_adjustments) / 100
+            base_score += adjustment_factor * 0.1  # 10% of adjustment impact
+
+            # Regime adjustment
+            if market_regime:
+                regime = market_regime.get("regime", "SIDEWAYS")
+                if regime == "BULL":
+                    base_score += 0.05  # Bonus in bull market
+                elif regime == "BEAR":
+                    base_score -= 0.05  # Penalty in bear market
+
+            # Clamp to 0-1 range
+            return max(0.0, min(1.0, base_score))
+
+        except Exception as e:
+            logger.debug(f"Entry quality score error: {e}")
+            return 0.5  # Default to neutral
+
+    def get_entry_quality_label(self, score: float) -> str:
+        """
+        Get human-readable label for entry quality score.
+
+        Args:
+            score: Entry quality score (0.0 - 1.0)
+
+        Returns:
+            Label string (EXCELLENT, GOOD, ACCEPTABLE, POOR, REJECT)
+        """
+        if score >= ENTRY_QUALITY_EXCELLENT:
+            return "EXCELLENT"
+        elif score >= ENTRY_QUALITY_GOOD:
+            return "GOOD"
+        elif score >= ENTRY_QUALITY_ACCEPTABLE:
+            return "ACCEPTABLE"
+        elif score >= ENTRY_QUALITY_REJECT:
+            return "POOR"
+        else:
+            return "REJECT"
+
     def _calculate_signal_strength(
         self, confidence: int, risk_reward: float, warnings: list
     ) -> SignalStrength:
@@ -1894,9 +2269,9 @@ class ImprovedEntryLogic:
         """
         Check session timing for optimal entry.
 
-        NEW v9.5: ATO/ATC session timing optimization for Vietnam market.
+        IMPROVED v9.8: Enhanced time-of-day optimization with constants.
 
-        Optimal Entry Windows:
+        Optimal Entry Windows (from constants):
         - 9:30-10:30: After opening volatility settles (BEST)
         - 13:30-14:15: After lunch gap settles, before ATC (GOOD)
 
@@ -1918,14 +2293,15 @@ class ImprovedEntryLogic:
         }
 
         try:
+            # NEW v9.8: Fallback to simple time check if session manager not available
             if not SESSION_TRADING_AVAILABLE:
-                return result
+                return self._check_time_of_day_simple()
 
             session_manager = get_session_manager()
             session_info = session_manager.get_current_session()
 
             if session_info is None:
-                return result
+                return self._check_time_of_day_simple()
 
             session_type = session_info.session_type
             entry_quality = session_info.entry_quality
@@ -1964,7 +2340,7 @@ class ImprovedEntryLogic:
             # Warning during pre-lunch period (11:00-11:30)
             if entry_quality == "AVOID":
                 result["warning"] = "⚠️ Pre-lunch period - selling pressure likely"
-                result["adjustment"] = -10
+                result["adjustment"] = ENTRY_TIME_AVOID_PENALTY
                 result["note"] = "Pre-lunch selling pressure"
                 result["position_multiplier"] = 0.7
                 return result
@@ -1972,7 +2348,7 @@ class ImprovedEntryLogic:
             # Optimal entry window
             if entry_quality == "OPTIMAL":
                 result["positive"] = f"✅ Optimal entry timing ({session_type.value})"
-                result["adjustment"] = 10
+                result["adjustment"] = ENTRY_TIME_OPTIMAL_BONUS
                 result["note"] = "Best entry window"
                 result["position_multiplier"] = 1.1
                 return result
@@ -1989,6 +2365,65 @@ class ImprovedEntryLogic:
 
         except Exception as e:
             logger.debug(f"Session timing check error: {e}")
+
+        return result
+
+    def _check_time_of_day_simple(self) -> Dict:
+        """
+        Simple time-of-day check when session manager not available.
+
+        NEW v9.8: Fallback time optimization using constants.
+
+        Returns:
+            Dict with warning, positive, adjustment, note, position_multiplier
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "positive": None,
+            "adjustment": 0,
+            "note": None,
+            "position_multiplier": 1.0,
+        }
+
+        try:
+            now = datetime.now()
+            current_hour = now.hour
+            current_minute = now.minute
+            current_time = (current_hour, current_minute)
+
+            # Check optimal morning window (9:30-10:30)
+            morning_start = ENTRY_OPTIMAL_MORNING_START
+            morning_end = ENTRY_OPTIMAL_MORNING_END
+            if morning_start <= current_time <= morning_end:
+                result["positive"] = "✅ Optimal morning entry window"
+                result["adjustment"] = ENTRY_TIME_OPTIMAL_BONUS
+                result["note"] = "Best morning entry time"
+                result["position_multiplier"] = 1.1
+                return result
+
+            # Check optimal afternoon window (13:30-14:15)
+            afternoon_start = ENTRY_OPTIMAL_AFTERNOON_START
+            afternoon_end = ENTRY_OPTIMAL_AFTERNOON_END
+            if afternoon_start <= current_time <= afternoon_end:
+                result["positive"] = "✅ Optimal afternoon entry window"
+                result["adjustment"] = ENTRY_TIME_OPTIMAL_BONUS
+                result["note"] = "Best afternoon entry time"
+                result["position_multiplier"] = 1.1
+                return result
+
+            # Check avoid window (11:00-11:30 pre-lunch)
+            avoid_start = ENTRY_AVOID_LUNCH_START
+            avoid_end = ENTRY_AVOID_LUNCH_END
+            if avoid_start <= current_time <= avoid_end:
+                result["warning"] = "⚠️ Pre-lunch period - avoid new entries"
+                result["adjustment"] = ENTRY_TIME_AVOID_PENALTY
+                result["note"] = "Pre-lunch selling pressure"
+                result["position_multiplier"] = 0.7
+                return result
+
+        except Exception as e:
+            logger.debug(f"Simple time check error: {e}")
 
         return result
 
@@ -2220,13 +2655,10 @@ class ImprovedEntryLogic:
         """
         Check overnight gap risk to avoid buying into large gap openings.
 
-        NEW v9.6: Avoid chasing gap-up stocks which often retrace.
-
-        Gap Types:
-        - Gap Up > 5%: BLOCK (likely to retrace, don't chase)
-        - Gap Up 3-5%: WARNING (elevated risk)
-        - Gap Down > 5%: BLOCK (potential falling knife)
-        - Gap Down 3-5%: Could be opportunity if fundamentals intact
+        IMPROVED v9.8: Dynamic ATR-based thresholds + breakout gap detection.
+        - Uses 2x ATR as gap threshold (capped 4-8%)
+        - Allows breakout gaps with 2x volume confirmation
+        - Better handles volatile vs stable stocks
 
         Args:
             df: DataFrame with OHLCV data
@@ -2260,24 +2692,46 @@ class ImprovedEntryLogic:
             # Calculate gap percentage
             gap_pct = (today_open - prev_close) / prev_close
 
-            # Large gap up - don't chase
-            if gap_pct >= ENTRY_GAP_BLOCK_THRESHOLD:  # > 5%
-                result["blocked"] = True
-                result["reason"] = (
-                    f"🚫 Large gap up: +{gap_pct*100:.1f}% - "
-                    "Don't chase extended opening, wait for pullback"
-                )
+            # NEW v9.8: Dynamic threshold based on ATR
+            dynamic_block_threshold = self._get_dynamic_gap_threshold(df, current_price)
+            dynamic_warn_threshold = dynamic_block_threshold * 0.6  # Warn at 60% of block
+
+            # NEW v9.8: Check for breakout gap with volume confirmation
+            is_breakout_gap = self._is_breakout_gap(df, gap_pct)
+
+            # Large gap up
+            if gap_pct >= dynamic_block_threshold:
+                if is_breakout_gap:
+                    # Breakout gap with volume - allow with warning
+                    result["warning"] = (
+                        f"⚠️ Breakout gap +{gap_pct*100:.1f}% with volume - "
+                        "valid but use tight stop"
+                    )
+                    result["adjustment"] = -5
+                    result["note"] = f"Breakout gap {gap_pct*100:.1f}%"
+                else:
+                    result["blocked"] = True
+                    result["reason"] = (
+                        f"🚫 Large gap up: +{gap_pct*100:.1f}% "
+                        f"(threshold: {dynamic_block_threshold*100:.1f}%) - "
+                        "Don't chase, wait for pullback"
+                    )
                 return result
 
             # Moderate gap up - warning
-            if gap_pct >= ENTRY_GAP_WARN_THRESHOLD:  # > 3%
-                result["warning"] = f"⚠️ Gap up +{gap_pct*100:.1f}% - risk of retracement"
-                result["adjustment"] = -10
-                result["note"] = f"Gap up {gap_pct*100:.1f}%"
+            if gap_pct >= dynamic_warn_threshold:
+                if is_breakout_gap:
+                    result["positive"] = f"✅ Breakout gap +{gap_pct*100:.1f}% with volume"
+                    result["adjustment"] = 5
+                    result["note"] = "Volume-confirmed breakout"
+                else:
+                    result["warning"] = f"⚠️ Gap up +{gap_pct*100:.1f}% - risk of retracement"
+                    result["adjustment"] = -10
+                    result["note"] = f"Gap up {gap_pct*100:.1f}%"
                 return result
 
             # Large gap down - potential falling knife
-            if gap_pct <= -ENTRY_GAP_BLOCK_THRESHOLD:  # < -5%
+            if gap_pct <= -dynamic_block_threshold:
                 result["blocked"] = True
                 result["reason"] = (
                     f"🚫 Large gap down: {gap_pct*100:.1f}% - "
@@ -2286,19 +2740,18 @@ class ImprovedEntryLogic:
                 return result
 
             # Moderate gap down - cautious
-            if gap_pct <= -ENTRY_GAP_WARN_THRESHOLD:  # < -3%
+            if gap_pct <= -dynamic_warn_threshold:
                 result["warning"] = f"⚠️ Gap down {gap_pct*100:.1f}% - catching knife risk"
                 result["adjustment"] = -8
                 result["note"] = f"Gap down {gap_pct*100:.1f}%"
                 return result
 
             # Small gap down with recovery - potential gap fill opportunity
-            # Using constants: ENTRY_GAP_FILL_MIN (-0.02) to ENTRY_GAP_FILL_MAX (-0.005)
             from src.config.constants import ENTRY_GAP_FILL_MIN, ENTRY_GAP_FILL_MAX
 
-            if ENTRY_GAP_FILL_MIN <= gap_pct < ENTRY_GAP_FILL_MAX:  # -2% to -0.5% gap
+            if ENTRY_GAP_FILL_MIN <= gap_pct < ENTRY_GAP_FILL_MAX:
                 gap_fill_potential = (prev_close - current_price) / prev_close
-                if gap_fill_potential > 0.01:  # Price recovering toward prev close
+                if gap_fill_potential > 0.01:
                     result["positive"] = f"✅ Gap fill opportunity ({gap_pct*100:.1f}% gap)"
                     result["adjustment"] = 5
                     result["note"] = "Gap fill potential"
@@ -2307,6 +2760,86 @@ class ImprovedEntryLogic:
             logger.debug(f"Gap risk check error: {e}")
 
         return result
+
+    def _get_dynamic_gap_threshold(self, df: pd.DataFrame, current_price: float) -> float:
+        """
+        Calculate dynamic gap threshold based on ATR.
+
+        NEW v9.8: Uses 2x ATR as threshold, capped between 4% and 8%.
+
+        Args:
+            df: DataFrame with OHLCV data
+            current_price: Current price
+
+        Returns:
+            Dynamic threshold as decimal
+        """
+        try:
+            # Try to get ATR
+            if "atr" in df.columns:
+                atr = safe_get_latest(df, "atr", 0)
+            elif "atr_14" in df.columns:
+                atr = safe_get_latest(df, "atr_14", 0)
+            else:
+                return ENTRY_GAP_BLOCK_THRESHOLD  # Fallback to fixed 5%
+
+            if atr <= 0 or current_price <= 0:
+                return ENTRY_GAP_BLOCK_THRESHOLD
+
+            # Calculate ATR as percentage
+            atr_pct = atr / current_price
+
+            # Dynamic threshold = 2x ATR, capped
+            dynamic_threshold = atr_pct * GAP_ATR_MULTIPLIER
+            dynamic_threshold = max(GAP_MIN_BLOCK_THRESHOLD, dynamic_threshold)
+            dynamic_threshold = min(GAP_MAX_BLOCK_THRESHOLD, dynamic_threshold)
+
+            return dynamic_threshold
+
+        except Exception:
+            return ENTRY_GAP_BLOCK_THRESHOLD
+
+    def _is_breakout_gap(self, df: pd.DataFrame, gap_pct: float) -> bool:
+        """
+        Check if gap is a valid breakout gap with volume confirmation.
+
+        NEW v9.8: Breakout gaps (with 2x volume) are valid entry opportunities.
+
+        Args:
+            df: DataFrame with OHLCV data
+            gap_pct: Gap percentage
+
+        Returns:
+            True if breakout gap with volume confirmation
+        """
+        try:
+            if gap_pct <= 0:  # Only for gap ups
+                return False
+
+            if "volume" not in df.columns or len(df) < 20:
+                return False
+
+            # Get current and average volume
+            current_volume = safe_get_latest(df, "volume", 0)
+            avg_volume = df["volume"].tail(20).mean()
+
+            if avg_volume <= 0:
+                return False
+
+            # Check volume confirmation (2x average)
+            volume_ratio = current_volume / avg_volume
+            if volume_ratio >= GAP_BREAKOUT_VOLUME_CONFIRM:
+                # Also check if breaking above recent high
+                if "high" in df.columns:
+                    recent_high = df["high"].tail(20).max()
+                    current_price = safe_get_latest(df, "close", 0)
+                    if current_price > recent_high:
+                        return True
+
+            return False
+
+        except Exception:
+            return False
 
     def _check_accumulation_distribution(self, df: pd.DataFrame) -> Dict:
         """
@@ -2668,8 +3201,11 @@ class ImprovedEntryLogic:
         """
         Check for consecutive losses on the symbol.
 
-        NEW v9.6: Block entries after 3 consecutive losing trades
-        on the same symbol to prevent revenge trading.
+        IMPROVED v9.8: Weighted loss tracking based on loss magnitude.
+        - Small loss (<3%): counts as 0.5
+        - Medium loss (3-6%): counts as 1.0
+        - Large loss (>6%): counts as 2.0
+        - Block when weighted sum >= 3.0
 
         Args:
             symbol: Stock symbol
@@ -2693,55 +3229,67 @@ class ImprovedEntryLogic:
                 days_since = (datetime.now() - last_loss).days
 
                 if days_since < self.consecutive_loss_cooldown_days:
+                    # NEW v9.8: Use weighted loss instead of simple count
+                    weighted_loss = self._weighted_losses.get(symbol, 0)
                     loss_count = self._consecutive_losses.get(symbol, 0)
 
-                    if loss_count >= self.consecutive_loss_limit:
+                    if weighted_loss >= CONSECUTIVE_LOSS_WEIGHTED_LIMIT:
                         result["blocked"] = True
                         result["reason"] = (
-                            f"🚫 {symbol}: {loss_count} consecutive losses - "
+                            f"🚫 {symbol}: Weighted loss {weighted_loss:.1f} "
+                            f"({loss_count} trades) - "
                             f"Cool-down: {self.consecutive_loss_cooldown_days - days_since} days remaining"
                         )
                         return result
 
-            # Check current consecutive loss count
+            # Check current weighted loss
+            weighted_loss = self._weighted_losses.get(symbol, 0)
             loss_count = self._consecutive_losses.get(symbol, 0)
 
-            if loss_count >= self.consecutive_loss_limit:
+            if weighted_loss >= CONSECUTIVE_LOSS_WEIGHTED_LIMIT:
                 result["blocked"] = True
                 result["reason"] = (
-                    f"🚫 {symbol}: {loss_count} consecutive losses - "
+                    f"🚫 {symbol}: Weighted loss {weighted_loss:.1f} ({loss_count} trades) - "
                     f"Blocked for {self.consecutive_loss_cooldown_days} days"
                 )
                 return result
 
-            # Warning if approaching limit
-            if loss_count >= self.consecutive_loss_limit - 1:
+            # Warning if approaching limit (>= 70% of limit)
+            if weighted_loss >= CONSECUTIVE_LOSS_WEIGHTED_LIMIT * 0.7:
                 result["warning"] = (
-                    f"⚠️ {symbol}: {loss_count} recent losses - next loss triggers block"
+                    f"⚠️ {symbol}: Weighted loss {weighted_loss:.1f} - approaching block"
                 )
                 result["adjustment"] = -15
-                result["note"] = f"Near loss limit ({loss_count}/{self.consecutive_loss_limit})"
+                result["note"] = (
+                    f"Near loss limit ({weighted_loss:.1f}/{CONSECUTIVE_LOSS_WEIGHTED_LIMIT})"
+                )
                 return result
 
-            if loss_count > 0:
-                result["warning"] = f"⚠️ {symbol}: {loss_count} recent loss(es)"
-                result["adjustment"] = -5 * loss_count
-                result["note"] = f"Recent losses ({loss_count})"
+            # Light warning for any recent losses
+            if weighted_loss > 0:
+                result["warning"] = (
+                    f"⚠️ {symbol}: {loss_count} recent loss(es) (weighted: {weighted_loss:.1f})"
+                )
+                result["adjustment"] = int(-5 * weighted_loss)
+                result["note"] = f"Recent losses (weighted: {weighted_loss:.1f})"
 
         except Exception as e:
             logger.debug(f"Consecutive loss check error: {e}")
 
         return result
 
-    def record_trade_result(self, symbol: str, is_win: bool) -> None:
+    def record_trade_result(
+        self, symbol: str, is_win: bool, loss_pct: Optional[float] = None
+    ) -> None:
         """
         Record trade result for consecutive loss tracking.
 
-        Call this method after each trade closes to update loss tracking.
+        IMPROVED v9.8: Weighted loss tracking based on loss magnitude.
 
         Args:
             symbol: Stock symbol
             is_win: True if trade was profitable, False otherwise
+            loss_pct: Loss percentage as decimal (e.g., 0.05 for 5% loss)
         """
         try:
             symbol = symbol.upper()
@@ -2749,6 +3297,7 @@ class ImprovedEntryLogic:
             if is_win:
                 # Reset consecutive losses on win
                 self._consecutive_losses[symbol] = 0
+                self._weighted_losses[symbol] = 0
                 if symbol in self._last_loss_date:
                     del self._last_loss_date[symbol]
             else:
@@ -2756,17 +3305,51 @@ class ImprovedEntryLogic:
                 self._consecutive_losses[symbol] = self._consecutive_losses.get(symbol, 0) + 1
                 self._last_loss_date[symbol] = datetime.now()
 
+                # NEW v9.8: Calculate weighted loss
+                loss_weight = self._calculate_loss_weight(loss_pct)
+                self._weighted_losses[symbol] = self._weighted_losses.get(symbol, 0) + loss_weight
+
                 logger.info(
                     f"[{symbol}] Recorded loss #{self._consecutive_losses[symbol]} "
-                    f"(limit: {self.consecutive_loss_limit})"
+                    f"(weight: {loss_weight:.1f}, total: {self._weighted_losses[symbol]:.1f}, "
+                    f"limit: {CONSECUTIVE_LOSS_WEIGHTED_LIMIT})"
                 )
 
         except Exception as e:
             logger.debug(f"Record trade result error: {e}")
 
+    def _calculate_loss_weight(self, loss_pct: Optional[float]) -> float:
+        """
+        Calculate loss weight based on magnitude.
+
+        NEW v9.8: Weighted loss system.
+        - Small loss (<3%): 0.5 weight
+        - Medium loss (3-6%): 1.0 weight
+        - Large loss (>6%): 2.0 weight
+
+        Args:
+            loss_pct: Loss percentage as decimal (e.g., 0.05 for 5%)
+
+        Returns:
+            Loss weight (0.5, 1.0, or 2.0)
+        """
+        if loss_pct is None:
+            return CONSECUTIVE_LOSS_MEDIUM_WEIGHT  # Default to medium
+
+        abs_loss = abs(loss_pct)
+
+        if abs_loss < CONSECUTIVE_LOSS_SMALL_THRESHOLD:
+            return CONSECUTIVE_LOSS_SMALL_WEIGHT  # 0.5
+        elif abs_loss < CONSECUTIVE_LOSS_MEDIUM_THRESHOLD:
+            return CONSECUTIVE_LOSS_MEDIUM_WEIGHT  # 1.0
+        else:
+            return CONSECUTIVE_LOSS_LARGE_WEIGHT  # 2.0
+
     def reset_loss_tracking(self, symbol: Optional[str] = None) -> None:
         """
         Reset consecutive loss tracking.
+
+        IMPROVED v9.8: Also resets weighted losses.
 
         Args:
             symbol: Specific symbol to reset, or None to reset all
@@ -2775,9 +3358,333 @@ class ImprovedEntryLogic:
             symbol = symbol.upper()
             self._consecutive_losses.pop(symbol, None)
             self._last_loss_date.pop(symbol, None)
+            self._weighted_losses.pop(symbol, None)  # NEW v9.8
         else:
             self._consecutive_losses.clear()
             self._last_loss_date.clear()
+            self._weighted_losses.clear()  # NEW v9.8
+
+    def _check_sector_breadth(self, symbol: str) -> Dict:
+        """
+        Check sector breadth indicator - % of stocks bullish in sector.
+
+        NEW v9.9: Sector breadth helps confirm sector-wide momentum.
+        - Strong breadth (>60% bullish): Good sector support
+        - Neutral breadth (40-60%): Mixed signals
+        - Weak breadth (<40%): Sector headwind
+
+        Args:
+            symbol: Stock symbol to get sector for
+
+        Returns:
+            Dict with blocked, warning, positive, adjustment, note
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "positive": None,
+            "adjustment": 0,
+            "note": None,
+        }
+
+        try:
+            # Get sector for symbol
+            sector = self._get_symbol_sector(symbol)
+            if sector == "DEFAULT":
+                return result
+
+            # Try to get sector breadth data
+            breadth_data = None
+
+            # Option 1: From sector rotation strategy
+            try:
+                from src.strategies.sector_rotation_strategy import (
+                    get_sector_rotation_strategy,
+                    get_sector_symbols,
+                )
+
+                strategy = get_sector_rotation_strategy()
+                sector_symbols = get_sector_symbols(sector)
+
+                if sector_symbols:
+                    bullish_count = 0
+                    total_count = 0
+
+                    # Quick breadth check using available data
+                    for sym in sector_symbols[:15]:  # Check top 15 stocks
+                        try:
+                            from src.data.cache import get_cached_data
+
+                            sym_df = get_cached_data(sym)
+                            if sym_df is not None and len(sym_df) >= 20:
+                                # Check if bullish: price > EMA20 and RSI > 45
+                                close = sym_df["close"].iloc[-1]
+                                ema20 = sym_df["close"].tail(20).mean()
+                                rsi = self._calculate_rsi_quick(sym_df)
+
+                                if close > ema20 and (rsi is None or rsi > 45):
+                                    bullish_count += 1
+                                total_count += 1
+                        except Exception:
+                            continue
+
+                    if total_count >= 5:
+                        breadth_data = {
+                            "bullish_pct": bullish_count / total_count,
+                            "bullish_count": bullish_count,
+                            "total_count": total_count,
+                            "sector": sector,
+                        }
+            except ImportError:
+                pass
+
+            # Option 2: From market breadth analyzer
+            if breadth_data is None and self._breadth_analyzer:
+                try:
+                    sector_breadth = self._breadth_analyzer.get_sector_breadth(sector)
+                    if sector_breadth:
+                        breadth_data = {
+                            "bullish_pct": sector_breadth.get("advance_decline_ratio", 0.5),
+                            "sector": sector,
+                        }
+                except Exception:
+                    pass
+
+            if breadth_data is None:
+                return result
+
+            bullish_pct = breadth_data.get("bullish_pct", 0.5)
+
+            # Strong sector breadth (>60% bullish)
+            if bullish_pct >= 0.60:
+                result["positive"] = (
+                    f"✅ Strong sector breadth: {bullish_pct*100:.0f}% bullish in {sector}"
+                )
+                result["adjustment"] = 10
+                result["note"] = f"Sector breadth {bullish_pct*100:.0f}%"
+                return result
+
+            # Good breadth (50-60%)
+            if bullish_pct >= 0.50:
+                result["positive"] = (
+                    f"✅ Neutral+ sector breadth: {bullish_pct*100:.0f}% in {sector}"
+                )
+                result["adjustment"] = 3
+                result["note"] = f"Neutral sector breadth"
+                return result
+
+            # Weak breadth (40-50%) - warning
+            if bullish_pct >= 0.40:
+                result["warning"] = (
+                    f"⚠️ Weak sector breadth: {bullish_pct*100:.0f}% bullish in {sector}"
+                )
+                result["adjustment"] = -5
+                result["note"] = f"Weak sector breadth {bullish_pct*100:.0f}%"
+                return result
+
+            # Very weak breadth (<40%) - strong warning
+            if bullish_pct >= 0.25:
+                result["warning"] = (
+                    f"⚠️ Very weak sector: only {bullish_pct*100:.0f}% bullish in {sector}"
+                )
+                result["adjustment"] = -15
+                result["note"] = f"Sector downtrend ({bullish_pct*100:.0f}%)"
+                return result
+
+            # Extremely weak breadth (<25%) - block
+            result["blocked"] = True
+            result["reason"] = (
+                f"🚫 Sector collapse: only {bullish_pct*100:.0f}% bullish in {sector} - "
+                "Don't fight the sector trend"
+            )
+
+        except Exception as e:
+            logger.debug(f"Sector breadth check error: {e}")
+
+        return result
+
+    def _calculate_rsi_quick(self, df: pd.DataFrame, period: int = 14) -> Optional[float]:
+        """
+        Quick RSI calculation for sector breadth analysis.
+
+        Args:
+            df: DataFrame with close prices
+            period: RSI period
+
+        Returns:
+            RSI value or None
+        """
+        try:
+            if len(df) < period + 1:
+                return None
+
+            close = df["close"]
+            delta = close.diff()
+
+            gain = (delta.where(delta > 0, 0)).tail(period).mean()
+            loss = (-delta.where(delta < 0, 0)).tail(period).mean()
+
+            if loss == 0:
+                return 100.0
+
+            rs = gain / loss
+            return 100 - (100 / (1 + rs))
+        except Exception:
+            return None
+
+    def _check_earnings_event_block(self, symbol: str) -> Dict:
+        """
+        Check if symbol has upcoming earnings or high-impact events.
+
+        NEW v9.9: Block or reduce size before earnings to avoid
+        binary event risk.
+
+        Event Risk Handling:
+        - Earnings < 3 days: BLOCK entry
+        - Earnings 3-7 days: WARNING, reduce size 50%
+        - Major corporate action (M&A, rights issue): WARNING
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Dict with blocked, warning, adjustment, note, position_multiplier
+        """
+        result = {
+            "blocked": False,
+            "warning": None,
+            "adjustment": 0,
+            "note": None,
+            "position_multiplier": 1.0,
+        }
+
+        try:
+            # Option 1: Check from fundamental analyzer
+            if FUNDAMENTAL_AVAILABLE:
+                try:
+                    earnings_info = is_near_earnings(symbol)
+                    if earnings_info:
+                        days_to_earnings = earnings_info.get("days_until", 999)
+
+                        # Block if earnings < 3 days
+                        if days_to_earnings <= 3:
+                            result["blocked"] = True
+                            result["reason"] = (
+                                f"🚫 {symbol}: Earnings in {days_to_earnings} day(s) - "
+                                "Binary event risk, avoid new positions"
+                            )
+                            return result
+
+                        # Warning if earnings 3-7 days
+                        if days_to_earnings <= 7:
+                            result["warning"] = f"⚠️ {symbol}: Earnings in {days_to_earnings} days"
+                            result["adjustment"] = -15
+                            result["note"] = f"Earnings in {days_to_earnings} days"
+                            result["position_multiplier"] = 0.5
+                            return result
+
+                        # Light warning if earnings 7-14 days
+                        if days_to_earnings <= 14:
+                            result["warning"] = (
+                                f"⚠️ {symbol}: Earnings approaching ({days_to_earnings} days)"
+                            )
+                            result["adjustment"] = -5
+                            result["note"] = "Earnings approaching"
+                            result["position_multiplier"] = 0.75
+                            return result
+
+                except Exception as e:
+                    logger.debug(f"Earnings check error: {e}")
+
+            # Option 2: Check from event calendar
+            if self._event_calendar:
+                try:
+                    events = self._event_calendar.get_symbol_events(symbol, days_ahead=14)
+                    if events:
+                        for event in events:
+                            event_type = event.get("type", "")
+                            days_until = event.get("days_until", 999)
+                            impact = event.get("impact", "LOW")
+
+                            # High-impact corporate events
+                            if event_type in ("EARNINGS", "DIVIDEND_EX", "AGM", "RIGHTS"):
+                                if days_until <= 3 and impact == "HIGH":
+                                    result["blocked"] = True
+                                    result["reason"] = (
+                                        f"🚫 {symbol}: {event_type} in {days_until} day(s) - "
+                                        "High-impact event, avoid entry"
+                                    )
+                                    return result
+
+                                if days_until <= 7:
+                                    result["warning"] = (
+                                        f"⚠️ {symbol}: {event_type} in {days_until} days"
+                                    )
+                                    result["adjustment"] = -10
+                                    result["note"] = f"{event_type} approaching"
+                                    result["position_multiplier"] = 0.6
+                                    return result
+
+                except Exception as e:
+                    logger.debug(f"Event calendar check error: {e}")
+
+            # Option 3: Fallback - check earnings season (Q1: Feb-Mar, Q2: May-Jun, etc.)
+            try:
+                from datetime import datetime
+
+                now = datetime.now()
+                month = now.month
+
+                # Vietnam earnings seasons (approximate)
+                # Q4: Jan-Feb | Q1: Apr-May | Q2: Jul-Aug | Q3: Oct-Nov
+                earnings_months = [1, 2, 4, 5, 7, 8, 10, 11]
+
+                if month in earnings_months:
+                    # High probability of earnings season
+                    result["warning"] = "⚠️ Earnings season - verify no pending announcements"
+                    result["adjustment"] = -3
+                    result["note"] = "Earnings season caution"
+                    result["position_multiplier"] = 0.9
+
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.debug(f"Earnings event block check error: {e}")
+
+        return result
+
+    def get_filter_priority(self, filter_name: str) -> str:
+        """
+        Get priority level for a filter.
+
+        NEW v9.8: Returns CRITICAL, IMPORTANT, or OPTIONAL.
+
+        Args:
+            filter_name: Name of the filter
+
+        Returns:
+            Priority level string
+        """
+        if filter_name in FILTER_PRIORITY_CRITICAL:
+            return "CRITICAL"
+        elif filter_name in FILTER_PRIORITY_IMPORTANT:
+            return "IMPORTANT"
+        else:
+            return "OPTIONAL"
+
+    def get_last_entry_quality(self) -> Tuple[float, str]:
+        """
+        Get the last calculated entry quality score and label.
+
+        NEW v9.8: Returns (score, label) tuple.
+
+        Returns:
+            Tuple of (score, label)
+        """
+        score = self._last_entry_quality
+        label = self.get_entry_quality_label(score)
+        return score, label
 
     # =========================================================================
     # NEW v9.7: Filter Performance Analytics

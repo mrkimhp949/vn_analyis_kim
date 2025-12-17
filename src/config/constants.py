@@ -720,6 +720,99 @@ SECTOR_EXPOSURE_BEAR_MULTIPLIER = 0.6  # Reduce by 40% in BEAR/HIGH_VOL
 SR_HIGH_DISTANCE_THRESHOLD = 0.005  # 0.5% from high
 SR_AVG_PRICE_MULTIPLIER = 1.01  # 1% above 3-bar avg for sustained move
 
+# ============================================================================
+# NEW v9.8: Entry Logic Improvements (Recommendations Implementation)
+# ============================================================================
+
+# Filter Priority System - Categorize filters by importance
+# CRITICAL: Must pass, no exceptions
+# IMPORTANT: High weight, can add warnings
+# OPTIONAL: Low weight, informational
+FILTER_PRIORITY_CRITICAL = ["price_limit", "liquidity", "margin_check", "consecutive_loss"]
+FILTER_PRIORITY_IMPORTANT = ["trend", "rsi", "foreign_flow", "volatility", "correlation"]
+FILTER_PRIORITY_OPTIONAL = ["session_timing", "gap_analysis", "pre_holiday", "order_book"]
+
+# Filter Weights for Entry Quality Score
+FILTER_WEIGHT_CRITICAL = 2.0  # Critical filters have 2x weight
+FILTER_WEIGHT_IMPORTANT = 1.5  # Important filters have 1.5x weight
+FILTER_WEIGHT_OPTIONAL = 1.0  # Optional filters have 1x weight
+
+# Entry Quality Score Thresholds
+ENTRY_QUALITY_EXCELLENT = 0.85  # >= 85% = excellent entry
+ENTRY_QUALITY_GOOD = 0.70  # >= 70% = good entry
+ENTRY_QUALITY_ACCEPTABLE = 0.55  # >= 55% = acceptable entry
+ENTRY_QUALITY_POOR = 0.40  # >= 40% = poor entry, reduce size
+ENTRY_QUALITY_REJECT = 0.40  # < 40% = reject entry
+
+# Dynamic Intraday Momentum Thresholds (ATR-based)
+# Instead of fixed 3%, use ATR multiplier
+INTRADAY_MOMENTUM_ATR_MULTIPLIER = 1.5  # 1.5x ATR as threshold
+INTRADAY_MOMENTUM_MIN_THRESHOLD = 0.025  # Min 2.5% threshold
+INTRADAY_MOMENTUM_MAX_THRESHOLD = 0.06  # Max 6% threshold
+INTRADAY_MOMENTUM_BLOCK_MULTIPLIER = 1.5  # Block at 1.5x threshold
+
+# Dynamic Gap Thresholds (ATR-based)
+GAP_ATR_MULTIPLIER = 2.0  # 2x ATR as gap threshold
+GAP_MIN_BLOCK_THRESHOLD = 0.04  # Min 4% to block
+GAP_MAX_BLOCK_THRESHOLD = 0.08  # Max 8% to block
+GAP_BREAKOUT_VOLUME_CONFIRM = 2.0  # 2x volume confirms breakout gap
+
+# Consecutive Loss Protection - Weighted by Loss Magnitude
+CONSECUTIVE_LOSS_SMALL_THRESHOLD = 0.03  # < 3% loss = small
+CONSECUTIVE_LOSS_MEDIUM_THRESHOLD = 0.06  # 3-6% loss = medium
+CONSECUTIVE_LOSS_LARGE_THRESHOLD = 0.10  # > 6% loss = large
+CONSECUTIVE_LOSS_SMALL_WEIGHT = 0.5  # Small loss counts as 0.5
+CONSECUTIVE_LOSS_MEDIUM_WEIGHT = 1.0  # Medium loss counts as 1.0
+CONSECUTIVE_LOSS_LARGE_WEIGHT = 2.0  # Large loss counts as 2.0
+CONSECUTIVE_LOSS_WEIGHTED_LIMIT = 3.0  # Block when weighted sum >= 3.0
+
+# Fast Path for High Confidence Signals
+FAST_PATH_MIN_CONFIDENCE = 80  # Skip optional filters if confidence >= 80%
+FAST_PATH_MIN_RR = 2.5  # And R:R >= 2.5
+FAST_PATH_SKIP_FILTERS = ["session_timing", "gap_analysis", "pre_holiday"]
+
+# Time-of-Day Entry Optimization (Vietnam Market)
+# Best entry times based on historical analysis
+ENTRY_OPTIMAL_MORNING_START = (9, 30)  # 9:30 AM
+ENTRY_OPTIMAL_MORNING_END = (10, 30)  # 10:30 AM
+ENTRY_OPTIMAL_AFTERNOON_START = (13, 30)  # 1:30 PM
+ENTRY_OPTIMAL_AFTERNOON_END = (14, 15)  # 2:15 PM
+ENTRY_AVOID_LUNCH_START = (11, 0)  # 11:00 AM
+ENTRY_AVOID_LUNCH_END = (11, 30)  # 11:30 AM
+ENTRY_TIME_OPTIMAL_BONUS = 5  # +5 confidence for optimal time
+ENTRY_TIME_AVOID_PENALTY = -10  # -10 confidence for avoid time
+
+# ============================================================================
+# NEW v9.9: Sector Breadth & Earnings Event Constants
+# ============================================================================
+
+# Sector Breadth Thresholds
+SECTOR_BREADTH_STRONG = 0.60  # >= 60% bullish = strong sector
+SECTOR_BREADTH_NEUTRAL = 0.50  # >= 50% bullish = neutral
+SECTOR_BREADTH_WEAK = 0.40  # >= 40% bullish = weak
+SECTOR_BREADTH_VERY_WEAK = 0.25  # >= 25% bullish = very weak
+SECTOR_BREADTH_BLOCK = 0.25  # < 25% bullish = block entry
+
+# Sector Breadth Adjustments
+SECTOR_BREADTH_STRONG_BONUS = 10  # +10 confidence for strong breadth
+SECTOR_BREADTH_NEUTRAL_BONUS = 3  # +3 confidence for neutral breadth
+SECTOR_BREADTH_WEAK_PENALTY = -5  # -5 confidence for weak breadth
+SECTOR_BREADTH_VERY_WEAK_PENALTY = -15  # -15 confidence for very weak breadth
+
+# Earnings Event Block Thresholds (Days before earnings)
+EARNINGS_BLOCK_DAYS = 3  # Block entry if earnings < 3 days
+EARNINGS_WARNING_DAYS = 7  # Warning if earnings 3-7 days
+EARNINGS_CAUTION_DAYS = 14  # Light warning if earnings 7-14 days
+
+# Earnings Event Position Multipliers
+EARNINGS_WARNING_POSITION_MULT = 0.50  # 50% position if earnings 3-7 days
+EARNINGS_CAUTION_POSITION_MULT = 0.75  # 75% position if earnings 7-14 days
+EARNINGS_SEASON_POSITION_MULT = 0.90  # 90% position during earnings season
+
+# Vietnam Earnings Seasons (months when earnings typically released)
+# Q4: Jan-Feb | Q1: Apr-May | Q2: Jul-Aug | Q3: Oct-Nov
+VN_EARNINGS_MONTHS = [1, 2, 4, 5, 7, 8, 10, 11]
+
 # Export all constants
 __all__ = [
     # Dynamic Functions
@@ -968,4 +1061,59 @@ __all__ = [
     "SECTOR_EXPOSURE_BEAR_MULTIPLIER",
     "SR_HIGH_DISTANCE_THRESHOLD",
     "SR_AVG_PRICE_MULTIPLIER",
+    # NEW v9.8: Entry Logic Improvements
+    "FILTER_PRIORITY_CRITICAL",
+    "FILTER_PRIORITY_IMPORTANT",
+    "FILTER_PRIORITY_OPTIONAL",
+    "FILTER_WEIGHT_CRITICAL",
+    "FILTER_WEIGHT_IMPORTANT",
+    "FILTER_WEIGHT_OPTIONAL",
+    "ENTRY_QUALITY_EXCELLENT",
+    "ENTRY_QUALITY_GOOD",
+    "ENTRY_QUALITY_ACCEPTABLE",
+    "ENTRY_QUALITY_POOR",
+    "ENTRY_QUALITY_REJECT",
+    "INTRADAY_MOMENTUM_ATR_MULTIPLIER",
+    "INTRADAY_MOMENTUM_MIN_THRESHOLD",
+    "INTRADAY_MOMENTUM_MAX_THRESHOLD",
+    "INTRADAY_MOMENTUM_BLOCK_MULTIPLIER",
+    "GAP_ATR_MULTIPLIER",
+    "GAP_MIN_BLOCK_THRESHOLD",
+    "GAP_MAX_BLOCK_THRESHOLD",
+    "GAP_BREAKOUT_VOLUME_CONFIRM",
+    "CONSECUTIVE_LOSS_SMALL_THRESHOLD",
+    "CONSECUTIVE_LOSS_MEDIUM_THRESHOLD",
+    "CONSECUTIVE_LOSS_LARGE_THRESHOLD",
+    "CONSECUTIVE_LOSS_SMALL_WEIGHT",
+    "CONSECUTIVE_LOSS_MEDIUM_WEIGHT",
+    "CONSECUTIVE_LOSS_LARGE_WEIGHT",
+    "CONSECUTIVE_LOSS_WEIGHTED_LIMIT",
+    "FAST_PATH_MIN_CONFIDENCE",
+    "FAST_PATH_MIN_RR",
+    "FAST_PATH_SKIP_FILTERS",
+    "ENTRY_OPTIMAL_MORNING_START",
+    "ENTRY_OPTIMAL_MORNING_END",
+    "ENTRY_OPTIMAL_AFTERNOON_START",
+    "ENTRY_OPTIMAL_AFTERNOON_END",
+    "ENTRY_AVOID_LUNCH_START",
+    "ENTRY_AVOID_LUNCH_END",
+    "ENTRY_TIME_OPTIMAL_BONUS",
+    "ENTRY_TIME_AVOID_PENALTY",
+    # NEW v9.9: Sector Breadth & Earnings Event Constants
+    "SECTOR_BREADTH_STRONG",
+    "SECTOR_BREADTH_NEUTRAL",
+    "SECTOR_BREADTH_WEAK",
+    "SECTOR_BREADTH_VERY_WEAK",
+    "SECTOR_BREADTH_BLOCK",
+    "SECTOR_BREADTH_STRONG_BONUS",
+    "SECTOR_BREADTH_NEUTRAL_BONUS",
+    "SECTOR_BREADTH_WEAK_PENALTY",
+    "SECTOR_BREADTH_VERY_WEAK_PENALTY",
+    "EARNINGS_BLOCK_DAYS",
+    "EARNINGS_WARNING_DAYS",
+    "EARNINGS_CAUTION_DAYS",
+    "EARNINGS_WARNING_POSITION_MULT",
+    "EARNINGS_CAUTION_POSITION_MULT",
+    "EARNINGS_SEASON_POSITION_MULT",
+    "VN_EARNINGS_MONTHS",
 ]

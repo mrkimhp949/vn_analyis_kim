@@ -323,11 +323,12 @@ class SectorRotationStrategy:
         rs_scores = {}
 
         for sector, ret in sector_returns.items():
-            if benchmark_return == 0:
+            denominator = 1 + benchmark_return
+            if abs(denominator) < 1e-6:  # Guard against division by zero
                 rs = 1.0
             else:
                 # Relative strength = (1 + sector_return) / (1 + benchmark_return)
-                rs = (1 + ret) / (1 + benchmark_return)
+                rs = (1 + ret) / denominator
             rs_scores[sector] = rs
 
         return rs_scores
@@ -351,27 +352,84 @@ class SectorRotationStrategy:
         strong_mom = self.config.strong_momentum_threshold
         weak_mom = self.config.weak_momentum_threshold
 
-        # Accumulation: beaten down but showing signs of life
-        if momentum_long < weak_mom and momentum_short > momentum_long and foreign_flow > 0:
-            return SectorPhase.ACCUMULATION
+        # Calculate phase score for more robust detection
+        accumulation_score = 0
+        markup_score = 0
+        distribution_score = 0
+        markdown_score = 0
 
-        # Markup: strong uptrend
-        elif momentum_short > strong_mom and relative_strength > 1.0:
-            return SectorPhase.MARKUP
+        # Momentum improving from low base = accumulation signal
+        if momentum_long < weak_mom:
+            accumulation_score += 2
+        if momentum_short > momentum_long:
+            accumulation_score += 2
+        if foreign_flow > 0.1:  # More meaningful threshold
+            accumulation_score += 1
 
-        # Distribution: momentum slowing, smart money exiting
-        elif momentum_short < momentum_long and foreign_flow < -0.3:
-            return SectorPhase.DISTRIBUTION
+        # Strong uptrend = markup signal
+        if momentum_short > strong_mom:
+            markup_score += 2
+        if momentum_short > 0.02:  # Moderate positive momentum
+            markup_score += 1
+        if relative_strength > 1.0:
+            markup_score += 2
+        if foreign_flow > 0.2:
+            markup_score += 1
 
-        # Markdown: downtrend
-        elif momentum_short < weak_mom and relative_strength < 0.95:
-            return SectorPhase.MARKDOWN
+        # Momentum slowing from high = distribution signal
+        if momentum_long > strong_mom and momentum_short < momentum_long:
+            distribution_score += 2
+        if momentum_short > 0 and momentum_short < momentum_long * 0.5:
+            distribution_score += 1
+        if foreign_flow < -0.2:
+            distribution_score += 2
+        if relative_strength < 1.0 and momentum_short > 0:
+            distribution_score += 1
 
-        # Default based on momentum
-        elif momentum_short > 0:
-            return SectorPhase.MARKUP
-        else:
-            return SectorPhase.MARKDOWN
+        # Downtrend = markdown signal
+        if momentum_short < weak_mom:
+            markdown_score += 2
+        if relative_strength < 0.95:
+            markdown_score += 2
+        if foreign_flow < -0.3:
+            markdown_score += 1
+        if momentum_short < momentum_long and momentum_long < 0:
+            markdown_score += 1
+
+        # Return phase with highest score
+        scores = {
+            SectorPhase.ACCUMULATION: accumulation_score,
+            SectorPhase.MARKUP: markup_score,
+            SectorPhase.DISTRIBUTION: distribution_score,
+            SectorPhase.MARKDOWN: markdown_score,
+        }
+
+        max_score = max(scores.values())
+        top_phases = [phase for phase, score in scores.items() if score == max_score]
+
+        # Tie-breaker: prefer based on momentum direction
+        if len(top_phases) > 1:
+            if momentum_short > 0:
+                # Prefer bullish phases
+                priority = [
+                    SectorPhase.MARKUP,
+                    SectorPhase.ACCUMULATION,
+                    SectorPhase.DISTRIBUTION,
+                    SectorPhase.MARKDOWN,
+                ]
+            else:
+                # Prefer bearish phases
+                priority = [
+                    SectorPhase.MARKDOWN,
+                    SectorPhase.DISTRIBUTION,
+                    SectorPhase.ACCUMULATION,
+                    SectorPhase.MARKUP,
+                ]
+            for phase in priority:
+                if phase in top_phases:
+                    return phase
+
+        return top_phases[0]
 
     def generate_sector_signal(
         self,
@@ -439,14 +497,14 @@ class SectorRotationStrategy:
                 score -= 15
 
         # Convert score to signal
-        # Score range: -100 to +100
-        if score >= 60:
+        # Score range: -115 to +115 (adjusted thresholds)
+        if score >= 70:
             signal = SectorSignal.STRONG_BUY
-        elif score >= 30:
+        elif score >= 35:
             signal = SectorSignal.BUY
-        elif score >= -20:
+        elif score >= -25:
             signal = SectorSignal.HOLD
-        elif score >= -50:
+        elif score >= -55:
             signal = SectorSignal.REDUCE
         else:
             signal = SectorSignal.SELL
@@ -475,6 +533,22 @@ class SectorRotationStrategy:
         Returns:
             SectorMetrics with full analysis
         """
+        # Validate sector
+        if sector not in self.sectors:
+            logger.warning(f"Unknown sector: {sector}")
+            return SectorMetrics(
+                sector=sector,
+                momentum_1m=0.0,
+                momentum_3m=0.0,
+                relative_strength=1.0,
+                foreign_flow_score=0.0,
+                volatility=0.20,
+                phase=SectorPhase.MARKDOWN,
+                signal=SectorSignal.HOLD,
+                confidence=0.0,
+                top_stocks=[],
+            )
+
         # Calculate momentum
         returns_s = self.calculate_sector_returns(
             {sector: sector_df},
@@ -500,13 +574,17 @@ class SectorRotationStrategy:
         else:
             bench_return = 0
 
-        # Relative strength
-        rs = (1 + momentum_1m) / (1 + bench_return) if bench_return != -1 else 1.0
+        # Relative strength (safe division)
+        denominator = 1 + bench_return
+        if abs(denominator) < 1e-6:  # Guard against division by zero
+            rs = 1.0
+        else:
+            rs = (1 + momentum_1m) / denominator
 
         # Foreign flow (placeholder - would integrate with foreign flow analyzer)
         foreign_flow = self._get_sector_foreign_flow(sector)
 
-        # Calculate volatility
+        # Calculate volatility (with division safety)
         if sector_df is not None and not sector_df.empty:
             close = (
                 sector_df["close"].values
@@ -514,8 +592,14 @@ class SectorRotationStrategy:
                 else sector_df.iloc[:, 0].values
             )
             if len(close) > 20:
-                returns = np.diff(close) / close[:-1]
-                volatility = np.std(returns[-20:]) * np.sqrt(252)  # Annualized
+                # Safe returns calculation - avoid division by zero
+                close_prev = close[:-1]
+                valid_mask = close_prev > 1e-6  # Filter out zero/near-zero prices
+                if np.sum(valid_mask) > 10:  # Need enough valid data points
+                    valid_returns = np.diff(close)[valid_mask] / close_prev[valid_mask]
+                    volatility = np.std(valid_returns[-20:]) * np.sqrt(252)  # Annualized
+                else:
+                    volatility = 0.20  # Default 20%
             else:
                 volatility = 0.20  # Default 20%
         else:
@@ -547,25 +631,41 @@ class SectorRotationStrategy:
 
     def _get_sector_foreign_flow(self, sector: str) -> float:
         """Get foreign flow score for sector (-1 to 1)"""
-        if not self._has_foreign_flow:
-            return 0.0
-
         try:
             # Aggregate foreign flow for sector symbols
             symbols = self.sectors.get(sector, {}).get("symbols", [])
             if not symbols:
                 return 0.0
 
-            total_flow = 0.0
-            count = 0
+            if self._has_foreign_flow:
+                total_flow = 0.0
+                count = 0
 
-            for symbol in symbols[:10]:  # Top 10 symbols
-                flow = self.foreign_flow_analyzer.get_flow_score(symbol)
-                if flow is not None:
-                    total_flow += flow
-                    count += 1
+                for symbol in symbols[:10]:  # Top 10 symbols
+                    flow = self.foreign_flow_analyzer.get_flow_score(symbol)
+                    if flow is not None:
+                        total_flow += flow
+                        count += 1
 
-            return total_flow / count if count > 0 else 0.0
+                if count > 0:
+                    return total_flow / count
+
+            # Fallback: estimate from sector characteristics
+            # Banking/Securities typically have higher foreign interest
+            sector_foreign_bias = {
+                "BANKING": 0.1,
+                "SECURITIES": 0.05,
+                "TECHNOLOGY": 0.05,
+                "CONSUMER": 0.02,
+                "REAL_ESTATE": -0.05,
+                "INDUSTRIAL": 0.0,
+                "ENERGY": 0.0,
+                "MATERIALS": 0.0,
+                "UTILITIES": -0.02,
+                "AVIATION_TOURISM": 0.0,
+            }
+            return sector_foreign_bias.get(sector, 0.0)
+
         except Exception as e:
             logger.warning(f"Error getting foreign flow for {sector}: {e}")
             return 0.0
@@ -574,6 +674,284 @@ class SectorRotationStrategy:
         """Get top N stocks in sector by market cap/liquidity"""
         symbols = self.sectors.get(sector, {}).get("symbols", [])
         return symbols[:n]  # Simple approach - return first N
+
+    def confirm_entry(
+        self,
+        sector_metrics: SectorMetrics,
+        market_regime: Optional[str] = None,
+        sector_correlations: Optional[Dict[str, float]] = None,
+        sector_df: Optional[pd.DataFrame] = None,
+        volume_data: Optional[pd.DataFrame] = None,
+    ) -> Tuple[bool, List[str], float]:
+        """
+        Confirm entry with comprehensive filters for Vietnam market
+
+        Args:
+            sector_metrics: Metrics for the sector to enter
+            market_regime: Current market regime ('BULL', 'BEAR', 'NEUTRAL')
+            sector_correlations: Correlation with existing positions
+            sector_df: Price DataFrame for additional technical checks
+            volume_data: Volume DataFrame for liquidity confirmation
+
+        Returns:
+            (can_enter, rejection_reasons, entry_quality_score)
+        """
+        reasons = []
+        quality_score = 100.0  # Start with perfect score, deduct for issues
+
+        # =========================================================================
+        # CORE FILTERS (Hard rejection)
+        # =========================================================================
+
+        # 1. Minimum confidence check
+        if sector_metrics.confidence < self.config.min_confidence:
+            reasons.append(
+                f"Low confidence: {sector_metrics.confidence:.0%} < {self.config.min_confidence:.0%}"
+            )
+            quality_score -= 30
+
+        # 2. Avoid entry during extreme volatility
+        if sector_metrics.volatility > 0.45:  # 45% annualized
+            reasons.append(f"High volatility: {sector_metrics.volatility:.0%}")
+            quality_score -= 25
+        elif sector_metrics.volatility > 0.35:
+            quality_score -= 10  # Moderate penalty
+
+        # 3. Avoid distribution and markdown phases for new entries
+        if sector_metrics.phase == SectorPhase.DISTRIBUTION:
+            reasons.append("Sector in DISTRIBUTION phase - avoid new entries")
+            quality_score -= 35
+        elif sector_metrics.phase == SectorPhase.MARKDOWN:
+            reasons.append("Sector in MARKDOWN phase - strong avoid")
+            quality_score -= 50
+
+        # =========================================================================
+        # MOMENTUM & TREND FILTERS
+        # =========================================================================
+
+        # 4. Require positive momentum alignment for BUY signals
+        if sector_metrics.signal in [SectorSignal.BUY, SectorSignal.STRONG_BUY]:
+            # Short-term momentum should be positive or recovering
+            if sector_metrics.momentum_1m < -0.03:
+                reasons.append(f"Negative ST momentum: {sector_metrics.momentum_1m:.1%}")
+                quality_score -= 20
+            elif sector_metrics.momentum_1m < 0:
+                quality_score -= 5  # Minor penalty for flat momentum
+
+            # Momentum should be improving (1M > 3M/3 for acceleration)
+            momentum_acceleration = sector_metrics.momentum_1m - (sector_metrics.momentum_3m / 3)
+            if momentum_acceleration < -0.02:
+                reasons.append(f"Decelerating momentum: {momentum_acceleration:.1%}")
+                quality_score -= 15
+
+        # 5. Trend confirmation using price data
+        if sector_df is not None and not sector_df.empty and len(sector_df) >= 20:
+            close = (
+                sector_df["close"].values
+                if "close" in sector_df.columns
+                else sector_df.iloc[:, 0].values
+            )
+
+            # Check price above short-term MA (trend confirmation)
+            ma_10 = np.mean(close[-10:]) if len(close) >= 10 else close[-1]
+            ma_20 = np.mean(close[-20:]) if len(close) >= 20 else close[-1]
+            current_price = close[-1]
+
+            if current_price < ma_10 < ma_20:
+                reasons.append("Price below declining MAs - bearish structure")
+                quality_score -= 20
+            elif current_price < ma_10:
+                quality_score -= 10  # Below short MA
+            elif current_price > ma_10 > ma_20:
+                quality_score += 5  # Bullish structure bonus
+
+            # Check for recent lower lows (downtrend confirmation)
+            if len(close) >= 10:
+                recent_low = np.min(close[-5:])
+                prior_low = np.min(close[-10:-5])
+                if recent_low < prior_low * 0.98:  # Making lower lows
+                    quality_score -= 10
+
+        # =========================================================================
+        # MARKET REGIME FILTERS
+        # =========================================================================
+
+        # 6. Market regime filter - more nuanced
+        if market_regime == "BEAR":
+            if sector_metrics.signal != SectorSignal.STRONG_BUY:
+                reasons.append("Only STRONG_BUY allowed in BEAR market")
+                quality_score -= 25
+            # In bear market, require stronger RS
+            if sector_metrics.relative_strength < 1.08:
+                reasons.append(f"Weak RS in bear market: {sector_metrics.relative_strength:.2f}")
+                quality_score -= 15
+            # Additional: require foreign flow support in bear market
+            if sector_metrics.foreign_flow_score < 0.2:
+                reasons.append("Insufficient foreign support in bear market")
+                quality_score -= 10
+        elif market_regime == "NEUTRAL":
+            # Neutral market: be more selective
+            if sector_metrics.signal == SectorSignal.BUY and sector_metrics.confidence < 0.70:
+                quality_score -= 10
+        elif market_regime == "BULL":
+            # Bull market: bonus for strong signals
+            if sector_metrics.signal == SectorSignal.STRONG_BUY:
+                quality_score += 10
+
+        # =========================================================================
+        # RELATIVE STRENGTH FILTERS
+        # =========================================================================
+
+        # 7. Relative strength should be supportive
+        if sector_metrics.relative_strength < 0.92:
+            reasons.append(
+                f"Significant underperformance: RS={sector_metrics.relative_strength:.2f}"
+            )
+            quality_score -= 20
+        elif sector_metrics.relative_strength < 0.98:
+            quality_score -= 10
+        elif sector_metrics.relative_strength > 1.10:
+            quality_score += 5  # Strong outperformance bonus
+
+        # =========================================================================
+        # VOLUME/LIQUIDITY FILTERS (Vietnam market specific)
+        # =========================================================================
+
+        # 8. Volume confirmation (if data available)
+        if volume_data is not None and not volume_data.empty:
+            vol = volume_data.values.flatten()
+            if len(vol) >= 20:
+                avg_vol_20 = np.mean(vol[-20:])
+                recent_vol = np.mean(vol[-5:])
+
+                # For BUY signals, prefer increasing volume
+                if sector_metrics.signal in [SectorSignal.BUY, SectorSignal.STRONG_BUY]:
+                    if recent_vol < avg_vol_20 * 0.7:
+                        reasons.append("Low volume - weak conviction")
+                        quality_score -= 15
+                    elif recent_vol > avg_vol_20 * 1.3:
+                        quality_score += 5  # Volume confirmation bonus
+
+        # =========================================================================
+        # FOREIGN FLOW FILTERS (Critical for VN market)
+        # =========================================================================
+
+        # 9. Foreign flow should support entry
+        if sector_metrics.foreign_flow_score < -0.3:
+            reasons.append(f"Strong foreign outflow: {sector_metrics.foreign_flow_score:.2f}")
+            quality_score -= 20
+        elif sector_metrics.foreign_flow_score > 0.3:
+            quality_score += 10  # Foreign support bonus
+
+        # =========================================================================
+        # CORRELATION FILTERS
+        # =========================================================================
+
+        # 10. Correlation check (avoid concentrated risk)
+        if sector_correlations:
+            high_corr_sectors = [
+                s
+                for s, corr in sector_correlations.items()
+                if corr > 0.70 and s != sector_metrics.sector
+            ]
+            if len(high_corr_sectors) >= 2:
+                reasons.append(
+                    f"High correlation with multiple sectors: {', '.join(high_corr_sectors)}"
+                )
+                quality_score -= 20
+            elif high_corr_sectors:
+                reasons.append(f"High correlation with: {', '.join(high_corr_sectors)}")
+                quality_score -= 10
+
+        # =========================================================================
+        # FINAL DECISION
+        # =========================================================================
+
+        # Normalize quality score
+        quality_score = max(0, min(100, quality_score))
+
+        # Entry allowed if no hard rejections AND quality score >= 50
+        can_enter = len(reasons) == 0 or (
+            quality_score >= 50 and not any("MARKDOWN" in r or "DISTRIBUTION" in r for r in reasons)
+        )
+
+        return can_enter, reasons, quality_score
+
+    def get_sector_correlation(self, sector1: str, sector2: str) -> float:
+        """
+        Get correlation between two sectors
+
+        Returns pre-defined correlation based on Vietnam market characteristics
+        """
+        # High correlation pairs in Vietnam market
+        high_corr_pairs = [
+            ("BANKING", "SECURITIES"),
+            ("BANKING", "REAL_ESTATE"),
+            ("SECURITIES", "REAL_ESTATE"),
+            ("INDUSTRIAL", "MATERIALS"),
+            ("ENERGY", "MATERIALS"),
+        ]
+
+        # Medium correlation pairs
+        medium_corr_pairs = [
+            ("BANKING", "CONSUMER"),
+            ("REAL_ESTATE", "INDUSTRIAL"),
+            ("TECHNOLOGY", "SECURITIES"),
+        ]
+
+        pair = tuple(sorted([sector1, sector2]))
+
+        for p in high_corr_pairs:
+            if tuple(sorted(p)) == pair:
+                return 0.75
+
+        for p in medium_corr_pairs:
+            if tuple(sorted(p)) == pair:
+                return 0.50
+
+        return 0.30  # Default low correlation
+
+    def detect_market_regime(
+        self,
+        benchmark_df: pd.DataFrame,
+        lookback_short: int = 20,
+        lookback_long: int = 60,
+    ) -> str:
+        """
+        Detect current market regime based on VNINDEX
+
+        Returns:
+            'BULL', 'BEAR', or 'NEUTRAL'
+        """
+        if benchmark_df is None or benchmark_df.empty:
+            return "NEUTRAL"
+
+        close = (
+            benchmark_df["close"].values
+            if "close" in benchmark_df.columns
+            else benchmark_df.iloc[:, 0].values
+        )
+
+        if len(close) < lookback_long:
+            return "NEUTRAL"
+
+        # Calculate returns
+        ret_short = close[-1] / close[-lookback_short] - 1 if close[-lookback_short] > 0 else 0
+        ret_long = close[-1] / close[-lookback_long] - 1 if close[-lookback_long] > 0 else 0
+
+        # Calculate trend using moving averages
+        ma_short = np.mean(close[-lookback_short:])
+        ma_long = np.mean(close[-lookback_long:])
+
+        # Bull: positive returns and price above MAs
+        if ret_short > 0.03 and ret_long > 0.05 and close[-1] > ma_short > ma_long:
+            return "BULL"
+
+        # Bear: negative returns and price below MAs
+        if ret_short < -0.03 and ret_long < -0.05 and close[-1] < ma_short < ma_long:
+            return "BEAR"
+
+        return "NEUTRAL"
 
     def analyze_all_sectors(
         self,
@@ -604,6 +982,7 @@ class SectorRotationStrategy:
         self,
         current_allocations: Optional[Dict[str, float]] = None,
         available_capital: float = 100_000_000,
+        benchmark_df: Optional[pd.DataFrame] = None,
     ) -> Dict[str, Any]:
         """
         Generate sector rotation recommendations
@@ -611,12 +990,18 @@ class SectorRotationStrategy:
         Args:
             current_allocations: Current sector allocations (weights)
             available_capital: Available capital for rotation
+            benchmark_df: VNINDEX DataFrame for market regime detection
 
         Returns:
             Dict with recommendations
         """
         if not self.sector_metrics:
             return {"error": "No sector metrics available. Run analyze_all_sectors first."}
+
+        # Detect market regime
+        market_regime = (
+            self.detect_market_regime(benchmark_df) if benchmark_df is not None else "NEUTRAL"
+        )
 
         current = current_allocations or self.current_allocations
 
@@ -694,13 +1079,42 @@ class SectorRotationStrategy:
         # Sort changes by importance
         changes.sort(key=lambda x: abs(x["weight_change"]), reverse=True)
 
+        # Validate entries with confirmation logic
+        validated_changes = []
+        for change in changes:
+            if change["action"] == "INCREASE":
+                sector = change["sector"]
+                metrics = self.sector_metrics[sector]
+
+                # Check correlations with other increasing sectors
+                other_increasing = [
+                    c["sector"] for c in validated_changes if c["action"] == "INCREASE"
+                ]
+                correlations = {s: self.get_sector_correlation(sector, s) for s in other_increasing}
+
+                can_enter, reasons, quality_score = self.confirm_entry(
+                    metrics, market_regime, correlations
+                )
+                change["entry_confirmed"] = can_enter
+                change["rejection_reasons"] = reasons
+                change["entry_quality_score"] = quality_score
+            else:
+                change["entry_confirmed"] = True
+                change["rejection_reasons"] = []
+                change["entry_quality_score"] = 100.0  # Exit always allowed
+
+            validated_changes.append(change)
+
         return {
             "timestamp": datetime.now().isoformat(),
+            "market_regime": market_regime,
             "target_allocations": target_allocations,
             "current_allocations": current,
-            "recommended_changes": changes,
+            "recommended_changes": validated_changes,
             "sector_rankings": [(s, sc, m.signal.value) for s, sc, m in sector_scores],
-            "total_rebalance_amount": sum(c["amount"] for c in changes),
+            "total_rebalance_amount": sum(
+                c["amount"] for c in validated_changes if c["entry_confirmed"]
+            ),
         }
 
     def get_sector_stock_recommendations(self, sector: str, n_stocks: int = 5) -> List[Dict]:
