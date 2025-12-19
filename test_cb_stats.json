@@ -1,0 +1,14 @@
+{
+  "today": {
+    "date": "2025-12-19",
+    "trades_count": 13,
+    "total_loss": 800000.0,
+    "total_profit": 1800000.0,
+    "net_pnl": 1000000.0,
+    "consecutive_losses": 0,
+    "consecutive_wins": 8,
+    "morning_trades": 0,
+    "afternoon_trades": 0,
+    "last_updated": "2025-12-19T21:45:43.385501"
+  }
+}
