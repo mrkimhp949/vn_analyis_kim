@@ -88,9 +88,9 @@ DEFAULT_SHORT_MA_PERIOD = 20  # 20-period short moving average
 DEFAULT_MEDIUM_MA_PERIOD = 50  # 50-period medium moving average
 DEFAULT_LONG_MA_PERIOD = 200  # 200-period long moving average
 
-# Risk/Reward Ratios - TIGHTENED v3.0
-DEFAULT_MIN_RISK_REWARD = 2.0  # TIGHTENED: Minimum 2:1 risk/reward (was 1.5)
-DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 2.5, 4.0]  # OPTIMIZED: Better R:R ratios
+# Risk/Reward Ratios - RELAXED v10.3 for more signals
+DEFAULT_MIN_RISK_REWARD = 1.5  # RELAXED: Minimum 1.5:1 risk/reward (was 2.0)
+DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 2.5, 4.0]  # Keep TP ratios as is
 
 # Position Sizing Multipliers
 MIN_POSITION_MULTIPLIER = 0.3  # Minimum position size multiplier

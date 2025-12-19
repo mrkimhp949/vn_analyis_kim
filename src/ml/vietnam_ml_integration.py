@@ -11,10 +11,11 @@ Comprehensive ML integration specifically designed for Vietnam stock market:
 6. Model explainability with feature importance
 7. Integration with entry/exit logic for seamless trading
 
-Target: 65-70% accuracy with proper confidence calibration
+Target: 55-60% accuracy with proper confidence calibration (REALISTIC v10.3)
+Note: 65-70% accuracy is unrealistic for most ML models in trading
 
 Author: Trading Bot Team
-Version: 4.0.0
+Version: 4.1.0
 """
 
 import logging
@@ -51,21 +52,21 @@ class VietnamMarketSession(Enum):
 
 
 class SignalQuality(Enum):
-    """Signal quality levels based on confidence calibration"""
+    """Signal quality levels based on confidence calibration - RELAXED v10.3"""
 
-    PREMIUM = "PREMIUM"  # 75%+ confidence, historically 70%+ win rate
-    HIGH = "HIGH"  # 65-75% confidence, historically 60%+ win rate
-    MEDIUM = "MEDIUM"  # 55-65% confidence, historically 55%+ win rate
-    LOW = "LOW"  # Below 55% confidence
+    PREMIUM = "PREMIUM"  # 65%+ confidence, historically 60%+ win rate (RELAXED)
+    HIGH = "HIGH"  # 55-65% confidence, historically 55%+ win rate (RELAXED)
+    MEDIUM = "MEDIUM"  # 45-55% confidence, historically 50%+ win rate (RELAXED)
+    LOW = "LOW"  # Below 45% confidence
     UNRELIABLE = "UNRELIABLE"  # Model showing drift or poor performance
 
 
-# Session-specific ML adjustments for Vietnam market
+# Session-specific ML adjustments for Vietnam market - RELAXED v10.3
 SESSION_ML_ADJUSTMENTS = {
     VietnamMarketSession.ATO: {
-        "confidence_penalty": -10,  # Reduce confidence during ATO (high volatility)
-        "min_confidence_override": 70,  # Require higher confidence
-        "reason": "ATO session - high volatility, reduced confidence",
+        "confidence_penalty": -5,  # RELAXED: was -10
+        "min_confidence_override": 55,  # RELAXED: was 70
+        "reason": "ATO session - high volatility, slightly reduced confidence",
     },
     VietnamMarketSession.MORNING_CONTINUOUS: {
         "confidence_penalty": 0,
@@ -129,7 +130,7 @@ class MLPredictionRecord:
 
 @dataclass
 class ConfidenceCalibrationConfig:
-    """Configuration for confidence calibration"""
+    """Configuration for confidence calibration - RELAXED v10.3"""
 
     # Lookback periods
     short_term_days: int = 7
@@ -141,18 +142,18 @@ class ConfidenceCalibrationConfig:
     medium_term_weight: float = 0.4
     long_term_weight: float = 0.2
 
-    # Calibration adjustments
-    max_confidence_boost: float = 15.0  # Max +15%
-    max_confidence_penalty: float = 25.0  # Max -25%
-    min_samples_for_calibration: int = 20
+    # Calibration adjustments - RELAXED v10.3
+    max_confidence_boost: float = 20.0  # RELAXED: Max +20% (was 15%)
+    max_confidence_penalty: float = 15.0  # RELAXED: Max -15% (was 25%)
+    min_samples_for_calibration: int = 10  # RELAXED: 10 samples (was 20)
 
     # Session-specific adjustments
     apply_session_adjustments: bool = True
 
-    # Quality thresholds
-    premium_threshold: float = 75.0
-    high_threshold: float = 65.0
-    medium_threshold: float = 55.0
+    # Quality thresholds - RELAXED v10.3 for more signals
+    premium_threshold: float = 65.0  # RELAXED: was 75.0
+    high_threshold: float = 55.0  # RELAXED: was 65.0
+    medium_threshold: float = 45.0  # RELAXED: was 55.0
 
 
 @dataclass

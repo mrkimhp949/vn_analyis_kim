@@ -278,41 +278,42 @@ class ImprovedEntryLogic:
     - SentimentAnalyzer: Sentiment analysis
     """
 
-    # Adaptive thresholds by market regime
+    # Adaptive thresholds by market regime - RELAXED v10.3 for more signals
     REGIME_THRESHOLDS = {
         "BULL": {
-            "min_confidence": 50,
-            "min_risk_reward": 1.8,
+            "min_confidence": 40,  # RELAXED from 50 - easier entry in bull
+            "min_risk_reward": 1.5,  # RELAXED from 1.8
             "position_multiplier": 1.2,
-            "max_warnings": 6,
+            "max_warnings": 8,  # RELAXED from 6
         },
         "SIDEWAYS": {
-            "min_confidence": 60,
-            "min_risk_reward": 2.0,
+            "min_confidence": 50,  # RELAXED from 60
+            "min_risk_reward": 1.5,  # RELAXED from 2.0
             "position_multiplier": 1.0,
-            "max_warnings": 5,
+            "max_warnings": 7,  # RELAXED from 5
         },
         "BEAR": {
-            "min_confidence": 70,
-            "min_risk_reward": 2.5,
+            "min_confidence": 60,  # RELAXED from 70
+            "min_risk_reward": 2.0,  # RELAXED from 2.5
             "position_multiplier": 0.6,
-            "max_warnings": 3,
+            "max_warnings": 5,  # RELAXED from 3
         },
         "HIGH_VOLATILITY": {
-            "min_confidence": 75,
-            "min_risk_reward": 3.0,
+            "min_confidence": 65,  # RELAXED from 75
+            "min_risk_reward": 2.0,  # RELAXED from 3.0
             "position_multiplier": 0.5,
-            "max_warnings": 2,
+            "max_warnings": 4,  # RELAXED from 2
         },
     }
 
     # NEW v10.2: Fast-path configuration for high-confidence signals
     # Skip non-critical filters when signal is very strong to reduce complexity
+    # RELAXED v10.3: Lower thresholds to allow more fast-path entries
     FAST_PATH_CONFIG = {
         "enabled": True,
-        "min_confidence": 70,  # Must have >= 70% confidence
-        "min_risk_reward": 2.5,  # Must have >= 2.5 R:R
-        "min_volume_ratio": 1.2,  # Must have volume > 1.2x average
+        "min_confidence": 55,  # RELAXED from 70 - allow more fast-path
+        "min_risk_reward": 1.5,  # RELAXED from 2.5
+        "min_volume_ratio": 1.0,  # RELAXED from 1.2 - normal volume OK
         # Filters to SKIP in fast-path (non-critical):
         "skip_filters": [
             "sector_strength",  # Skip sector analysis
@@ -339,7 +340,7 @@ class ImprovedEntryLogic:
 
     def __init__(
         self,
-        min_confidence: int = 55,  # IMPROVED: Raised from 45 for VN market volatility
+        min_confidence: int = 45,  # RELAXED v10.3: Lowered from 55 for more signals
         min_risk_reward: float = 1.0,
         support_distance_percent: float = 7.0,
         require_trend_alignment: bool = False,
@@ -347,33 +348,33 @@ class ImprovedEntryLogic:
         regime_aware_filtering: bool = True,
         portfolio_manager: Optional["PortfolioManager"] = None,
         performance_monitor: Optional["PerformanceMonitor"] = None,
-        min_liquidity_value: float = 1_000_000_000,
-        min_avg_volume: int = 50_000,
+        min_liquidity_value: float = 500_000_000,  # RELAXED v10.3: 500M VND (was 1B)
+        min_avg_volume: int = 30_000,  # RELAXED v10.3: 30k shares (was 50k)
         use_tiered_liquidity: bool = True,
         use_price_action_filter: bool = False,
-        use_sector_strength_filter: bool = True,
-        use_market_breadth_filter: bool = True,  # ENABLED: Important for regime confirmation
+        use_sector_strength_filter: bool = False,  # DISABLED v10.3: Too restrictive
+        use_market_breadth_filter: bool = False,  # DISABLED v10.3: Too restrictive
         use_monthly_timeframe: bool = False,
         soft_filter_mode: bool = True,
-        max_warnings_allowed: int = 5,
-        use_order_book_timing: bool = True,  # NEW: Enable order book integration
-        use_intraday_momentum_filter: bool = True,  # NEW: Block entries when price moved >3% intraday
-        use_vn30_correlation_filter: bool = True,  # NEW: Check correlation with VN30
-        use_vn_news_sentiment_filter: bool = True,  # NEW v9.2: Vietnamese news sentiment integration
-        use_session_timing_filter: bool = True,  # NEW v9.5: ATO/ATC session timing optimization
-        use_pre_holiday_filter: bool = True,  # NEW v9.5: Pre-holiday risk reduction
-        use_gap_analysis_filter: bool = True,  # NEW v9.6: Gap opening risk analysis
-        use_accumulation_filter: bool = True,  # NEW v9.6: A/D volume analysis
-        use_foreign_flow_filter: bool = True,  # NEW v9.6: Foreign investor flow
-        use_margin_check: bool = True,  # NEW v9.6: T+2.5 margin availability
-        use_consecutive_loss_protection: bool = True,  # NEW v9.6: Block after 3 losses
-        intraday_momentum_threshold: float = 0.03,  # NEW: 3% intraday move threshold
-        vn30_divergence_threshold: float = 0.04,  # NEW: 4% divergence from VN30 threshold
-        pre_holiday_days: int = 3,  # NEW v9.5: Days before major holiday to reduce exposure
-        gap_block_threshold: float = 0.05,  # NEW v9.6: Block entry if gap > 5%
-        gap_warn_threshold: float = 0.03,  # NEW v9.6: Warn if gap > 3%
-        consecutive_loss_limit: int = 3,  # NEW v9.6: Block after N consecutive losses
-        consecutive_loss_cooldown_days: int = 5,  # NEW v9.6: Cool-down period in days
+        max_warnings_allowed: int = 8,  # RELAXED v10.3: was 5
+        use_order_book_timing: bool = False,  # DISABLED v10.3: Often unavailable
+        use_intraday_momentum_filter: bool = False,  # DISABLED v10.3: Too restrictive
+        use_vn30_correlation_filter: bool = False,  # DISABLED v10.3: Too restrictive
+        use_vn_news_sentiment_filter: bool = False,  # DISABLED v10.3: Data often unavailable
+        use_session_timing_filter: bool = False,  # DISABLED v10.3: Limits trading windows
+        use_pre_holiday_filter: bool = False,  # DISABLED v10.3: Too conservative
+        use_gap_analysis_filter: bool = False,  # DISABLED v10.3: Blocks momentum entries
+        use_accumulation_filter: bool = False,  # DISABLED v10.3: Too restrictive
+        use_foreign_flow_filter: bool = False,  # DISABLED v10.3: Data often delayed
+        use_margin_check: bool = False,  # DISABLED v10.3: Not always relevant
+        use_consecutive_loss_protection: bool = True,  # KEEP: Important safety
+        intraday_momentum_threshold: float = 0.05,  # RELAXED v10.3: 5% (was 3%)
+        vn30_divergence_threshold: float = 0.06,  # RELAXED v10.3: 6% (was 4%)
+        pre_holiday_days: int = 1,  # RELAXED v10.3: 1 day (was 3)
+        gap_block_threshold: float = 0.07,  # RELAXED v10.3: 7% = VN limit (was 5%)
+        gap_warn_threshold: float = 0.05,  # RELAXED v10.3: 5% (was 3%)
+        consecutive_loss_limit: int = 5,  # RELAXED v10.3: 5 losses (was 3)
+        consecutive_loss_cooldown_days: int = 3,  # RELAXED v10.3: 3 days (was 5)
     ) -> None:
         """Initialize entry logic with configurable parameters."""
         # Core settings
@@ -3052,7 +3053,7 @@ class ImprovedEntryLogic:
             # Option 2: Try to get from market data service
             if foreign_data is None:
                 try:
-                    from src.data.market_data import get_foreign_flow
+                    from src.data.market_data import get_foreign_flow  # type: ignore
 
                     foreign_data = get_foreign_flow(symbol, days=5)
                 except ImportError:
@@ -3061,7 +3062,7 @@ class ImprovedEntryLogic:
             # Option 3: Try from SSI data source
             if foreign_data is None:
                 try:
-                    from src.data.ssi_data import get_ssi_foreign_flow
+                    from src.data.ssi_data import get_ssi_foreign_flow  # type: ignore
 
                     foreign_data = get_ssi_foreign_flow(symbol)
                 except ImportError:

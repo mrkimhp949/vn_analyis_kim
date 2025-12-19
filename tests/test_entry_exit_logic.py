@@ -165,6 +165,7 @@ class TestImprovedEntryLogic:
             warnings,
             adjustments,
             adjustment_breakdown,
+            use_fast_path=False,  # Added to match new signature
         ):
             # Add large negative adjustment to drop confidence below threshold
             adjustments.append(-50)

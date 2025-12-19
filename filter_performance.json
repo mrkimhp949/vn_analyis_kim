@@ -81,19 +81,19 @@
   },
   "liquidity": {
     "filter_name": "liquidity",
-    "total_checks": 272,
-    "blocked_count": 253,
+    "total_checks": 521,
+    "blocked_count": 495,
     "warning_count": 0,
-    "passed_count": 19,
+    "passed_count": 26,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
     "passed_that_lost": 0,
-    "block_rate": 0.9301470588235294,
+    "block_rate": 0.9500959692898272,
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-19T14:53:49.033989"
+    "last_updated": "2025-12-19T17:30:38.660381"
   },
   "volatility": {
     "filter_name": "volatility",
@@ -193,42 +193,42 @@
   },
   "price_limit": {
     "filter_name": "price_limit",
-    "total_checks": 376,
-    "blocked_count": 42,
+    "total_checks": 693,
+    "blocked_count": 62,
     "warning_count": 0,
-    "passed_count": 334,
+    "passed_count": 631,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
     "passed_that_lost": 0,
-    "block_rate": 0.11170212765957446,
+    "block_rate": 0.08946608946608947,
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-19T14:53:50.158653"
+    "last_updated": "2025-12-19T17:30:38.731191"
   },
   "trend": {
     "filter_name": "trend",
-    "total_checks": 355,
-    "blocked_count": 84,
+    "total_checks": 686,
+    "blocked_count": 166,
     "warning_count": 0,
-    "passed_count": 271,
+    "passed_count": 520,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 1,
     "passed_that_lost": 0,
-    "block_rate": 0.23661971830985915,
+    "block_rate": 0.24198250728862974,
     "false_negative_rate": 0.0,
     "precision": 1.0,
     "effectiveness_score": 100.0,
-    "last_updated": "2025-12-19T14:53:50.143691"
+    "last_updated": "2025-12-19T17:30:38.655365"
   },
   "intraday_momentum": {
     "filter_name": "intraday_momentum",
-    "total_checks": 36,
+    "total_checks": 42,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 36,
+    "passed_count": 42,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -237,12 +237,12 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-19T14:53:29.547686"
+    "last_updated": "2025-12-19T16:35:17.727791"
   },
   "session_timing": {
     "filter_name": "session_timing",
-    "total_checks": 35,
-    "blocked_count": 35,
+    "total_checks": 41,
+    "blocked_count": 41,
     "warning_count": 0,
     "passed_count": 0,
     "blocked_that_won": 0,
@@ -253,7 +253,7 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-19T14:53:29.975383"
+    "last_updated": "2025-12-19T16:35:17.739748"
   },
   "vn30_correlation": {
     "filter_name": "vn30_correlation",
@@ -321,10 +321,10 @@
   },
   "event_calendar": {
     "filter_name": "event_calendar",
-    "total_checks": 17,
+    "total_checks": 29,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 17,
+    "passed_count": 29,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -333,6 +333,38 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 0.0,
-    "last_updated": "2025-12-19T14:53:29.971394"
+    "last_updated": "2025-12-19T17:30:38.014027"
+  },
+  "consecutive_loss": {
+    "filter_name": "consecutive_loss",
+    "total_checks": 12,
+    "blocked_count": 0,
+    "warning_count": 0,
+    "passed_count": 12,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 0.0,
+    "last_updated": "2025-12-19T17:30:38.020012"
+  },
+  "earnings_block": {
+    "filter_name": "earnings_block",
+    "total_checks": 12,
+    "blocked_count": 0,
+    "warning_count": 0,
+    "passed_count": 12,
+    "blocked_that_won": 0,
+    "blocked_that_lost": 0,
+    "passed_that_won": 0,
+    "passed_that_lost": 0,
+    "block_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "precision": 0.0,
+    "effectiveness_score": 0.0,
+    "last_updated": "2025-12-19T17:30:38.027990"
   }
 }

@@ -168,76 +168,81 @@ class ExitConfig:
     Centralized exit configuration - loại bỏ magic numbers.
     Tất cả thresholds có thể config được.
 
-    IMPROVED v10.0: Optimized R:R ratio >= 1.5 for Vietnam market.
+    RELAXED v10.3: Lower TP levels for faster profit taking in VN market.
 
     Key improvements:
-    - TP levels adjusted for better R:R
-    - Stop loss tightened to 4% (net ~2.5% after costs)
+    - TP levels lowered for more frequent exits
+    - Stop loss relaxed to 5% for more room
     - Dynamic TP based on market regime
     - Transaction cost aware calculations
     """
 
-    # Take Profit levels - IMPROVED v10.0 for optimal R:R >= 1.5
+    # Take Profit levels - RELAXED v10.3 for faster profit taking
     # Vietnam market characteristics:
     # - Shorter cycles (2-4 weeks typical)
     # - Higher volatility (±7% daily limit)
     # - T+2 settlement affects holding decisions
     # - Transaction costs ~1.5% round trip
     #
-    # R:R Calculation (v10.0):
-    # - Stop Loss: 4% gross = ~2.5% net loss after costs
-    # - TP1: 7% gross = ~5.5% net profit → R:R = 5.5/2.5 = 2.2 ✓
-    # - TP2: 12% gross = ~10.5% net profit → R:R = 10.5/2.5 = 4.2 ✓
-    # - TP3: 18% gross = ~16.5% net profit → R:R = 16.5/2.5 = 6.6 ✓
-    take_profit_levels: Tuple[float, float, float] = (0.07, 0.12, 0.18)
+    # R:R Calculation (v10.3 RELAXED):
+    # - Stop Loss: 5% gross = ~3.5% net loss after costs
+    # - TP1: 5% gross = ~3.5% net profit → R:R = 1.0 (quick exit)
+    # - TP2: 8% gross = ~6.5% net profit → R:R = 1.85 ✓
+    # - TP3: 12% gross = ~10.5% net profit → R:R = 3.0 ✓
+    take_profit_levels: Tuple[float, float, float] = (0.05, 0.08, 0.12)  # RELAXED
 
-    # IMPROVED v10.0: Dynamic TP levels by market regime with R:R >= 1.5
-    # BULL: Wider targets to capture momentum (R:R ~2.5-7.0)
-    # BEAR: Tighter targets to lock profits quickly (R:R ~1.5-3.0)
-    # SIDEWAYS: Standard targets (R:R ~2.0-5.0)
-    # HIGH_VOL: Quick exits (R:R ~1.5-3.5)
+    # RELAXED v10.3: Dynamic TP levels by market regime
+    # Lower targets to lock profits faster
     use_dynamic_tp_levels: bool = True
-    tp_levels_bull: Tuple[float, float, float] = (0.10, 0.18, 0.28)  # SL 4% → R:R = 2.5, 4.5, 7.0
-    tp_levels_bear: Tuple[float, float, float] = (0.05, 0.08, 0.12)  # SL 3% → R:R = 1.5, 2.5, 3.5
-    tp_levels_sideways: Tuple[float, float, float] = (
+    tp_levels_bull: Tuple[float, float, float] = (
         0.07,
         0.12,
-        0.18,
-    )  # SL 4% → R:R = 1.75, 3.0, 4.5
+        0.20,
+    )  # RELAXED from (0.10, 0.18, 0.28)
+    tp_levels_bear: Tuple[float, float, float] = (
+        0.03,
+        0.05,
+        0.08,
+    )  # RELAXED from (0.05, 0.08, 0.12)
+    tp_levels_sideways: Tuple[float, float, float] = (
+        0.05,
+        0.08,
+        0.12,
+    )  # RELAXED from (0.07, 0.12, 0.18)
     tp_levels_high_volatility: Tuple[float, float, float] = (
-        0.06,
+        0.04,
+        0.07,
         0.10,
-        0.15,
-    )  # SL 4% → R:R = 1.5, 2.5, 3.75
+    )  # RELAXED from (0.06, 0.10, 0.15)
 
-    # Stop Loss - IMPROVED v10.0 with R:R optimization
-    # Tightened to improve R:R ratio while accounting for ~1.5% round trip cost
-    stop_loss_atr_multiplier: float = 1.8  # TIGHTENED from 2.0
-    default_stop_loss_pct: float = 0.04  # IMPROVED: 4% below entry (net ~2.5% after costs)
-    min_stop_loss_pct: float = 0.025  # Min 2.5% risk (net ~1% after costs) - for low beta
-    max_stop_loss_pct: float = 0.06  # Max 6% risk (net ~4.5% after costs) - for high beta
+    # Stop Loss - RELAXED v10.3 for more room to breathe
+    # Wider stops to avoid premature stop-outs
+    stop_loss_atr_multiplier: float = 2.0  # RELAXED from 1.8
+    default_stop_loss_pct: float = 0.05  # RELAXED: 5% below entry (was 4%)
+    min_stop_loss_pct: float = 0.03  # RELAXED: Min 3% risk (was 2.5%)
+    max_stop_loss_pct: float = 0.07  # RELAXED: Max 7% risk = VN limit (was 6%)
 
-    # Beta-adjusted stop loss - IMPROVED v10.0 for R:R consistency
+    # Beta-adjusted stop loss - RELAXED v10.3
     use_beta_adjusted_stops: bool = True
-    high_beta_stop_loss_pct: float = 0.06  # 6% for beta > 1.2 (wider for volatile stocks)
-    low_beta_stop_loss_pct: float = 0.03  # 3% for beta < 0.8 (tighter for stable stocks)
+    high_beta_stop_loss_pct: float = 0.07  # RELAXED: 7% for beta > 1.2 (was 6%)
+    low_beta_stop_loss_pct: float = 0.04  # RELAXED: 4% for beta < 0.8 (was 3%)
     high_beta_threshold: float = 1.2
     low_beta_threshold: float = 0.8
 
-    # NEW v10.0: Minimum R:R enforcement
-    min_risk_reward_ratio: float = 1.5  # Minimum acceptable R:R
-    target_risk_reward_ratio: float = 2.0  # Target R:R for position sizing
+    # RELAXED v10.3: Minimum R:R enforcement
+    min_risk_reward_ratio: float = 1.0  # RELAXED: was 1.5 - allow smaller R:R
+    target_risk_reward_ratio: float = 1.5  # RELAXED: was 2.0
 
-    # Trailing Stop - IMPROVED v10.2 for VN market
-    # Balance between locking profits and allowing room to breathe
-    trailing_stop_activation: float = 0.04  # RELAXED: Activate at 4% profit (was 3%)
-    trailing_stop_distance: float = 0.025  # RELAXED: Trail 2.5% below peak (was 1.5%)
-    trailing_stop_atr_multiplier: float = 1.8  # RELAXED: ATR multiplier (was 1.5)
+    # Trailing Stop - RELAXED v10.3 for VN market
+    # Wider trailing to avoid whipsaws
+    trailing_stop_activation: float = 0.05  # RELAXED: Activate at 5% profit (was 4%)
+    trailing_stop_distance: float = 0.03  # RELAXED: Trail 3% below peak (was 2.5%)
+    trailing_stop_atr_multiplier: float = 2.0  # RELAXED: ATR multiplier (was 1.8)
     use_dynamic_trailing: bool = True
 
-    # v10.2: Accelerated trailing after TP1 - BALANCED
-    trailing_after_tp1_distance: float = 0.015  # RELAXED: 1.5% after TP1 (was 1%)
-    trailing_acceleration_factor: float = 0.85  # RELAXED: Tighten by 15% (was 20%)
+    # v10.3: Accelerated trailing after TP1 - RELAXED
+    trailing_after_tp1_distance: float = 0.02  # RELAXED: 2% after TP1 (was 1.5%)
+    trailing_acceleration_factor: float = 0.90  # RELAXED: Tighten by 10% (was 15%)
 
     # NEW v10.2: Volatility-aware trailing
     # Widen trailing stop in high volatility to avoid premature exits
@@ -245,8 +250,8 @@ class ExitConfig:
     high_vol_trailing_multiplier: float = 1.5  # 50% wider in high volatility
     low_vol_trailing_multiplier: float = 0.8  # 20% tighter in low volatility
 
-    # Time Decay - IMPROVED v10.2 with balanced approach
-    # Previous settings too aggressive, missing longer trends
+    # Time Decay - RELAXED v10.3 with more patience
+    # Allow longer holding for trends to develop
     max_holding_days: int = MAX_HOLDING_DAYS  # 15 days (reasonable for VN market)
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
     t2_settlement_days: int = 2
