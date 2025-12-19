@@ -1,0 +1,2 @@
+{"timestamp": "2025-12-19T15:00:05.915408", "event_type": "SESSION_START", "symbol": null, "action": null, "details": {"session_id": "20251219_150005"}, "source": "AuditLogger", "session_id": "20251219_150005"}
+{"timestamp": "2025-12-19T15:02:49.872086", "event_type": "SESSION_START", "symbol": null, "action": null, "details": {"session_id": "20251219_150249"}, "source": "AuditLogger", "session_id": "20251219_150249"}

@@ -306,6 +306,30 @@ class ImprovedEntryLogic:
         },
     }
 
+    # NEW v10.2: Fast-path configuration for high-confidence signals
+    # Skip non-critical filters when signal is very strong to reduce complexity
+    FAST_PATH_CONFIG = {
+        "enabled": True,
+        "min_confidence": 70,  # Must have >= 70% confidence
+        "min_risk_reward": 2.5,  # Must have >= 2.5 R:R
+        "min_volume_ratio": 1.2,  # Must have volume > 1.2x average
+        # Filters to SKIP in fast-path (non-critical):
+        "skip_filters": [
+            "sector_strength",  # Skip sector analysis
+            "market_breadth",  # Skip breadth check (already confident)
+            "monthly_timeframe",  # Skip monthly check
+            "vn30_correlation",  # Skip correlation check
+            "pre_holiday",  # Skip holiday check
+        ],
+        # Filters to ALWAYS run (critical safety):
+        "required_filters": [
+            "price_limit",  # ALWAYS check Vietnam price limits
+            "liquidity",  # ALWAYS check liquidity
+            "stop_loss_valid",  # ALWAYS validate stop loss
+            "consecutive_loss",  # ALWAYS check loss protection
+        ],
+    }
+
     # Liquidity tiers for Vietnam market
     DEFAULT_LIQUIDITY_TIERS = {
         "large": {"min_value": 10_000_000_000, "min_volume": 500_000},  # VN30
@@ -777,7 +801,9 @@ class ImprovedEntryLogic:
         self._filter_scores = {}
 
         # 1. Vietnam Price Limit Check (Blocking)
-        price_limit = self._technical_checker.check_vietnam_price_limits(df, current_price, symbol or "")
+        price_limit = self._technical_checker.check_vietnam_price_limits(
+            df, current_price, symbol or ""
+        )
         if price_limit["near_limit"]:
             if price_limit["limit_type"] == "CEILING":
                 self._track_filter("price_limit", False, symbol or "")

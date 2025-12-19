@@ -213,8 +213,11 @@ def _check_portfolio(now, current_weekday, current_hour, current_minute, last_po
             send_portfolio_update_to_telegram()
             print("✅ Đã hoàn thành kiểm tra portfolio")
             return True, 61, now.date()
-        except Exception:
-            print("❌ Lỗi kiểm tra portfolio")
+        except Exception as e:
+            import traceback
+
+            print(f"❌ Lỗi kiểm tra portfolio: {e}")
+            traceback.print_exc()
             return True, 61, last_portfolio_check
     return False, None, last_portfolio_check
 
@@ -426,8 +429,11 @@ def schedule_job():
             # Short sleep to be responsive during trading hours
             time.sleep(30)
 
-        except Exception:
-            print("❌ Lỗi scheduler")
+        except Exception as e:
+            import traceback
+
+            print(f"❌ Lỗi scheduler: {e}")
+            traceback.print_exc()
             time.sleep(60)
 
 

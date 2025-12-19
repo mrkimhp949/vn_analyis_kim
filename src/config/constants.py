@@ -138,25 +138,36 @@ ADX_STRONG_TREND_THRESHOLD = 25  # ADX threshold for strong trend
 ADX_WEAK_TREND_THRESHOLD = 20  # ADX threshold for weak trend
 
 
-def get_adaptive_holding_days(regime: str, adx: float = 20, volatility: float = 0.02) -> int:
+def get_adaptive_holding_days(
+    regime: str,
+    adx: float = 20,
+    volatility: float = 0.02,
+    atr_percent: float = 0.0,
+    current_profit_pct: float = 0.0,
+    is_trending_up: bool = False,
+) -> int:
     """
-    Get adaptive max holding days based on market regime and trend strength.
+    Get adaptive max holding days based on market regime, trend strength, and ATR.
 
-    IMPROVED v5.0: Added volatility parameter for more dynamic adjustment.
+    IMPROVED v10.2: Added ATR-based calculation and profit-aware extension.
 
     Vietnam market characteristics:
     - T+2.5 settlement → minimum 3 days practical holding
     - High volatility → shorter holding to lock profits
     - Strong trends (ADX > 25) → can hold longer
     - ±7% daily limit → faster mean reversion
+    - ATR-based adjustment for more precision
 
     Args:
         regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
         adx: Average Directional Index (trend strength, default 20)
         volatility: Market volatility as decimal (e.g., 0.02 = 2%)
+        atr_percent: ATR as percentage of price (e.g., 0.025 = 2.5%)
+        current_profit_pct: Current unrealized profit (for extension logic)
+        is_trending_up: Whether price is in uptrend (EMA alignment)
 
     Returns:
-        Maximum holding days (4-15)
+        Maximum holding days (4-20)
     """
     # Base days by regime
     if regime == "BULL":
@@ -179,16 +190,79 @@ def get_adaptive_holding_days(regime: str, adx: float = 20, volatility: float = 
     else:
         base_days = HOLDING_DAYS_DEFAULT  # 10 days default
 
-    # NEW v5.0: Further reduce based on volatility
-    # High volatility = shorter holding period
-    if volatility > 0.04:  # > 4% daily volatility
-        base_days = max(4, int(base_days * 0.6))  # Reduce by 40%
-    elif volatility > 0.03:  # > 3% daily volatility
-        base_days = max(4, int(base_days * 0.75))  # Reduce by 25%
-    elif volatility > 0.02:  # > 2% daily volatility
-        base_days = max(5, int(base_days * 0.9))  # Reduce by 10%
+    # NEW v10.2: ATR-based adjustment (more precise than volatility alone)
+    # Low ATR = stable price action = can hold longer
+    # High ATR = volatile = shorter holding
+    if atr_percent > 0:
+        if atr_percent > 0.04:  # ATR > 4% of price (very volatile)
+            base_days = max(4, int(base_days * 0.65))
+        elif atr_percent > 0.03:  # ATR 3-4%
+            base_days = max(5, int(base_days * 0.80))
+        elif atr_percent < 0.015:  # ATR < 1.5% (low volatility, stable)
+            base_days = min(20, int(base_days * 1.2))  # Extend by 20%
+    else:
+        # Fallback to volatility-based adjustment
+        if volatility > 0.04:  # > 4% daily volatility
+            base_days = max(4, int(base_days * 0.6))
+        elif volatility > 0.03:  # > 3% daily volatility
+            base_days = max(4, int(base_days * 0.75))
+        elif volatility > 0.02:  # > 2% daily volatility
+            base_days = max(5, int(base_days * 0.9))
+
+    # NEW v10.2: Profit-aware extension
+    # If trade is profitable and trending, allow more time
+    if current_profit_pct > 0.05 and is_trending_up:  # > 5% profit + uptrend
+        base_days = min(20, base_days + 5)  # Extend up to 5 days
+    elif current_profit_pct > 0.03 and is_trending_up:  # > 3% profit + uptrend
+        base_days = min(18, base_days + 3)  # Extend up to 3 days
+    elif current_profit_pct < -0.02:  # Losing position
+        base_days = max(4, base_days - 2)  # Shorten by 2 days
 
     return base_days
+
+
+# NEW v10.2: ATR-based holding days calculator
+def calculate_atr_based_holding_days(
+    atr: float,
+    price: float,
+    target_move_atr_multiple: float = 3.0,
+    min_days: int = 4,
+    max_days: int = 20,
+) -> int:
+    """
+    Calculate holding days based on expected ATR moves to reach target.
+
+    Logic: If target is 3 ATR away and average daily move is 1 ATR,
+    we need approximately 3-5 days to reach target (accounting for noise).
+
+    Args:
+        atr: Average True Range value
+        price: Current price
+        target_move_atr_multiple: How many ATRs to target profit (default 3)
+        min_days: Minimum holding days
+        max_days: Maximum holding days
+
+    Returns:
+        Recommended holding days
+    """
+    if atr <= 0 or price <= 0:
+        return 10  # Default fallback
+
+    atr_percent = atr / price
+
+    # Expected days = target ATR multiple * adjustment factor
+    # Adjustment factor accounts for noise (not every day moves 1 ATR)
+    noise_factor = 1.5  # Takes ~1.5x days due to market noise
+
+    expected_days = int(target_move_atr_multiple * noise_factor)
+
+    # Adjust for volatility level
+    if atr_percent > 0.03:  # High volatility - faster moves
+        expected_days = max(min_days, int(expected_days * 0.7))
+    elif atr_percent < 0.015:  # Low volatility - slower moves
+        expected_days = min(max_days, int(expected_days * 1.3))
+
+    return max(min_days, min(max_days, expected_days))
 
 
 # Commission and Slippage (Vietnam Market) - IMPROVED v4.0

@@ -67,16 +67,18 @@ NEWS_SOURCES = {
     "cafef": {
         "name": "CafeF",
         "base_url": "https://cafef.vn",
-        "rss_url": "https://cafef.vn/rss/thi-truong-chung-khoan.rss",  # Updated RSS path
-        "section_url": "https://cafef.vn/thi-truong-chung-khoan.chn",  # Fallback HTML page
+        # RSS không còn hoạt động - sử dụng web scraping
+        "rss_url": None,
+        "section_url": "https://cafef.vn/thi-truong-chung-khoan.chn",  # Main stock news page
         "search_url": "https://cafef.vn/tim-kiem.chn?keysearch=",
         "stock_news_url": "https://cafef.vn/du-lieu/cotphieuxxx-{symbol}.chn",
         "selectors": {
-            "article_list": ".list-news article, .tlitem",
-            "title": "h3 a, .tit a, .title a",
-            "link": "h3 a, .tit a, .title a",
-            "summary": ".sapo, .des, p",
-            "date": ".time, .date, time",
+            # Updated selectors for CafeF current layout
+            "article_list": ".tlitem, .item-news, .box-category-item, article",
+            "title": "h3 a, h2 a, .tit a, .title a, .title-news a",
+            "link": "h3 a, h2 a, .tit a, .title a, .title-news a",
+            "summary": ".sapo, .summary, .des, p.des, .description",
+            "date": ".time, .date, time, span.time",
         },
         "weight": 1.0,
         "priority": 1,
@@ -88,11 +90,11 @@ NEWS_SOURCES = {
         "stock_section": "https://vnexpress.net/kinh-doanh/chung-khoan",
         "search_url": "https://timkiem.vnexpress.net/?q=",
         "selectors": {
-            "article_list": "article.item-news",
-            "title": ".title-news a",
-            "link": ".title-news a",
-            "summary": ".description a",
-            "date": ".time-public, .time",
+            "article_list": "article.item-news, .item-news-common",
+            "title": ".title-news a, h3 a",
+            "link": ".title-news a, h3 a",
+            "summary": ".description a, p.description",
+            "date": ".time-public, .time, span.time",
         },
         "weight": 1.0,
         "priority": 1,
@@ -100,22 +102,40 @@ NEWS_SOURCES = {
     "vietstock": {
         "name": "VietStock",
         "base_url": "https://vietstock.vn",
-        "rss_url": "https://vietstock.vn/rss/chung-khoan.rss",
+        # VietStock RSS not reliable - use direct scraping
+        "rss_url": None,
+        "section_url": "https://vietstock.vn/chung-khoan.htm",
         "search_url": "https://vietstock.vn/tim-kiem.htm?q=",
         "selectors": {
-            "article_list": ".article-item, .news-item",
-            "title": "h3 a, .title a",
-            "link": "h3 a, .title a",
-            "summary": ".summary, .desc",
-            "date": ".date, .time",
+            # Updated selectors for VietStock 2025 layout
+            "article_list": "article, .news-item, .item-news, .content-item, div[class*='item']",
+            "title": "h3 a, h2 a, .title a, a.title, a[href*='.htm']",
+            "link": "h3 a, h2 a, .title a, a.title, a[href*='.htm']",
+            "summary": ".summary, .desc, p, .description",
+            "date": ".date, .time, span.date, time",
         },
         "weight": 0.9,
+        "priority": 2,
+    },
+    "tinnhanhchungkhoan": {
+        "name": "Tin nhanh chứng khoán",
+        "base_url": "https://tinnhanhchungkhoan.vn",
+        "rss_url": None,
+        "section_url": "https://tinnhanhchungkhoan.vn/chung-khoan/",
+        "selectors": {
+            "article_list": ".post-item, article, .news-item",
+            "title": "h3 a, h2 a, .title a",
+            "link": "h3 a, h2 a, .title a",
+            "summary": ".excerpt, .summary, p",
+            "date": ".date, .time, time",
+        },
+        "weight": 0.85,
         "priority": 2,
     },
     "stockbiz": {
         "name": "StockBiz",
         "base_url": "https://stockbiz.vn",
-        "section_url": "https://stockbiz.vn/tin-tuc/chung-khoan",  # Updated URL path
+        "section_url": "https://stockbiz.vn/tin-tuc/chung-khoan",
         "enabled": False,  # Disabled due to frequent 404 errors
         "selectors": {
             "article_list": ".news-list li, .article-list article",
@@ -130,7 +150,7 @@ NEWS_SOURCES = {
     "ndh": {
         "name": "Người Đồng Hành",
         "base_url": "https://ndh.vn",
-        "section_url": "https://ndh.vn/chung-khoan.html",  # Updated URL with .html
+        "section_url": "https://ndh.vn/chung-khoan.html",
         "enabled": False,  # Disabled due to frequent timeout errors
         "selectors": {
             "article_list": ".news-item, article",
@@ -392,7 +412,8 @@ class VNNewsCrawler:
         # Filter to only enabled sources
         all_sources = sources or list(NEWS_SOURCES.keys())
         self.sources = [
-            s for s in all_sources
+            s
+            for s in all_sources
             if NEWS_SOURCES.get(s, {}).get("enabled", True)  # Default to enabled
         ]
         self.cache_ttl = cache_ttl
@@ -596,10 +617,12 @@ class VNNewsCrawler:
 
         try:
             base_url = source_config.get("base_url", "")
+            source_name = source_config.get("name", source_key)
 
-            # Try RSS first (faster and more reliable)
+            # Try RSS first if available (faster and more reliable)
             rss_url = source_config.get("rss_url")
             if rss_url:
+                logger.debug(f"Trying RSS for {source_name}: {rss_url}")
                 articles = self._parse_rss(rss_url, source_key)
                 if articles:
                     return CrawlResult(
@@ -608,27 +631,37 @@ class VNNewsCrawler:
                         success=True,
                         crawl_time=time.time() - start_time,
                     )
+                logger.warning(f"RSS failed for {source_name}, falling back to HTML scraping")
+            else:
+                logger.debug(f"No RSS URL for {source_name}, using HTML scraping")
 
             # Fallback to HTML scraping
             section_url = source_config.get("section_url") or source_config.get("stock_section")
             if not section_url:
                 section_url = base_url
 
+            logger.debug(f"Scraping HTML for {source_name}: {section_url}")
             soup = self._fetch_page(section_url, source_key)
             if soup:
                 articles = self._parse_articles(soup, source_key, base_url)
-                return CrawlResult(
-                    source=source_key,
-                    articles=articles,
-                    success=True,
-                    crawl_time=time.time() - start_time,
-                )
+                if articles:
+                    logger.info(f"✅ Scraped {len(articles)} articles from {source_name}")
+                    return CrawlResult(
+                        source=source_key,
+                        articles=articles,
+                        success=True,
+                        crawl_time=time.time() - start_time,
+                    )
+                else:
+                    logger.warning(f"No articles found from {source_name} HTML scraping")
+            else:
+                logger.warning(f"Failed to fetch page for {source_name}")
 
             return CrawlResult(
                 source=source_key,
                 articles=[],
                 success=False,
-                error="Failed to fetch page",
+                error="Failed to fetch page or no articles found",
                 crawl_time=time.time() - start_time,
             )
 
@@ -644,9 +677,19 @@ class VNNewsCrawler:
 
     def _parse_rss(self, rss_url: str, source_key: str) -> List[NewsArticle]:
         """Parse RSS feed."""
+        if not rss_url:
+            return []
+
         try:
             response = self._session.get(rss_url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
+
+            # Check if we got actual RSS content
+            content_type = response.headers.get("Content-Type", "")
+            if "xml" not in content_type.lower() and "rss" not in content_type.lower():
+                if "html" in content_type.lower():
+                    logger.warning(f"RSS URL returned HTML instead of XML: {rss_url}")
+                    return []
 
             soup = BeautifulSoup(response.content, "xml")
             articles = []
@@ -708,6 +751,15 @@ class VNNewsCrawler:
             logger.info(f"✅ Parsed {len(articles)} articles from {source_name} RSS")
             return articles
 
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"RSS feed not found (404): {rss_url}")
+            else:
+                logger.warning(f"HTTP error fetching RSS {rss_url}: {e}")
+            return []
+        except requests.Timeout:
+            logger.warning(f"Timeout fetching RSS: {rss_url}")
+            return []
         except Exception as e:
             logger.warning(f"RSS parsing failed for {rss_url}: {e}")
             return []
@@ -748,8 +800,17 @@ class VNNewsCrawler:
                     f"({result.crawl_time:.1f}s)"
                 )
 
-        # Sort by date (newest first)
-        all_articles.sort(key=lambda a: a.published_at, reverse=True)
+        # Sort by date (newest first) - handle timezone-aware vs naive datetime
+        def safe_datetime_key(article):
+            dt = article.published_at
+            if dt is None:
+                return datetime.min
+            # Remove timezone info for consistent sorting
+            if hasattr(dt, "tzinfo") and dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+
+        all_articles.sort(key=safe_datetime_key, reverse=True)
 
         # Deduplicate by title similarity
         unique_articles = self._deduplicate_articles(all_articles)

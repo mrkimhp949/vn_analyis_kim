@@ -1178,6 +1178,96 @@ def get_portfolio_manager() -> PortfolioManager:
     return _manager
 
 
+def send_portfolio_update_to_telegram():
+    """
+    Gửi cập nhật portfolio qua Telegram.
+
+    Được gọi vào chiều thứ 6 để báo cáo tình trạng portfolio cuối tuần.
+    """
+    import asyncio
+
+    try:
+        manager = get_portfolio_manager()
+
+        # Lấy thông tin portfolio
+        portfolio = manager.get_portfolio_value()
+        positions = manager.get_positions()
+
+        if not positions:
+            message = "💼 *PORTFOLIO UPDATE (THỨ 6)*\n\n📭 Không có vị thế nào đang mở."
+        else:
+            # Build message
+            total_value = portfolio.get("total_value", 0)
+            cash = portfolio.get("cash", 0)
+            positions_value = portfolio.get("positions_value", 0)
+            total_pnl = portfolio.get("unrealized_pnl", 0)
+            total_pnl_pct = portfolio.get("unrealized_pnl_percent", 0)
+
+            message = f"💼 *PORTFOLIO UPDATE (THỨ 6)*\n\n"
+            message += f"📊 *Tổng giá trị:* {total_value:,.0f} VNĐ\n"
+            message += f"💵 *Tiền mặt:* {cash:,.0f} VNĐ\n"
+            message += f"📈 *Giá trị cổ phiếu:* {positions_value:,.0f} VNĐ\n"
+            message += f"{'🟢' if total_pnl >= 0 else '🔴'} *P&L:* {total_pnl:+,.0f} VNĐ ({total_pnl_pct:+.2f}%)\n\n"
+
+            message += f"*📋 Danh sách vị thế ({len(positions)}):*\n"
+
+            for symbol, pos in positions.items():
+                shares = pos.get("shares", 0)
+                entry_price = pos.get("avg_price", 0)
+                current_price = pos.get("metadata", {}).get("last_price", entry_price)
+                pnl = (current_price - entry_price) * shares
+                pnl_pct = (
+                    ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                )
+
+                emoji = "🟢" if pnl >= 0 else "🔴"
+                message += f"\n{emoji} *{symbol}*: {shares} CP @ {entry_price:,.0f}\n"
+                message += f"   └ Giá hiện tại: {current_price:,.0f} ({pnl_pct:+.2f}%)\n"
+
+            message += f"\n⚠️ *Lưu ý:* Vốn bị khóa T+2 qua cuối tuần"
+
+        # Gửi qua Telegram
+        try:
+            from src.notifications.telegram import bot_instance
+            from src.config.legacy_config import CHAT_ID
+
+            if bot_instance and CHAT_ID:
+                # Handle running in existing event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If there's a running loop, create a task
+                    loop.create_task(
+                        bot_instance.send_message(
+                            chat_id=CHAT_ID,
+                            text=message,
+                            parse_mode="Markdown",
+                        )
+                    )
+                except RuntimeError:
+                    # No running loop, use asyncio.run
+                    asyncio.run(
+                        bot_instance.send_message(
+                            chat_id=CHAT_ID,
+                            text=message,
+                            parse_mode="Markdown",
+                        )
+                    )
+                logger.info("✅ Đã gửi portfolio update qua Telegram")
+            else:
+                # Fallback: chỉ print nếu không có bot
+                print(message.replace("*", ""))
+                logger.warning("⚠️ Bot Telegram chưa được khởi tạo, chỉ print message")
+
+        except ImportError:
+            # Không có telegram module
+            print(message.replace("*", ""))
+            logger.warning("⚠️ Module telegram không available")
+
+    except Exception as e:
+        logger.error(f"❌ Lỗi send_portfolio_update_to_telegram: {e}")
+        raise
+
+
 if __name__ == "__main__":
     print("Testing Portfolio Manager...")
 

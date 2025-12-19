@@ -244,7 +244,9 @@ class TechnicalChecker:
             "distance_to_resistance": distance_to_resistance,
         }
 
-    def check_vietnam_price_limits(self, df: pd.DataFrame, current_price: float, symbol: str = "") -> Dict:
+    def check_vietnam_price_limits(
+        self, df: pd.DataFrame, current_price: float, symbol: str = ""
+    ) -> Dict:
         """
         Check if price is near Vietnam market floor/ceiling limits (±7%).
 

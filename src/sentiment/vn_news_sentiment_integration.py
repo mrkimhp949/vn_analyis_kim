@@ -56,6 +56,7 @@ def _normalize_datetime(dt: Optional[datetime]) -> datetime:
         return dt.replace(tzinfo=timezone.utc)
     return dt
 
+
 # =============================================================================
 # IMPORT VALIDATED NEWS SOURCES
 # =============================================================================
@@ -1305,7 +1306,11 @@ class VNNewsSentimentIntegration:
             for symbol in list(self._events.keys()):
                 old_len = len(self._events[symbol])
                 self._events[symbol] = deque(
-                    [e for e in self._events[symbol] if _normalize_datetime(e.published_at) > cutoff],
+                    [
+                        e
+                        for e in self._events[symbol]
+                        if _normalize_datetime(e.published_at) > cutoff
+                    ],
                     maxlen=self._max_events,
                 )
                 new_len = len(self._events[symbol])

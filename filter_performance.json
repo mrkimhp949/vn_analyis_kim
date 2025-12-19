@@ -81,19 +81,19 @@
   },
   "liquidity": {
     "filter_name": "liquidity",
-    "total_checks": 213,
-    "blocked_count": 194,
+    "total_checks": 272,
+    "blocked_count": 253,
     "warning_count": 0,
     "passed_count": 19,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
     "passed_that_lost": 0,
-    "block_rate": 0.9107981220657277,
+    "block_rate": 0.9301470588235294,
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-17T23:17:44.971797"
+    "last_updated": "2025-12-19T14:53:49.033989"
   },
   "volatility": {
     "filter_name": "volatility",
@@ -193,42 +193,42 @@
   },
   "price_limit": {
     "filter_name": "price_limit",
-    "total_checks": 299,
-    "blocked_count": 36,
+    "total_checks": 376,
+    "blocked_count": 42,
     "warning_count": 0,
-    "passed_count": 263,
+    "passed_count": 334,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
     "passed_that_lost": 0,
-    "block_rate": 0.12040133779264214,
+    "block_rate": 0.11170212765957446,
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-17T23:17:45.071986"
+    "last_updated": "2025-12-19T14:53:50.158653"
   },
   "trend": {
     "filter_name": "trend",
-    "total_checks": 275,
-    "blocked_count": 63,
+    "total_checks": 355,
+    "blocked_count": 84,
     "warning_count": 0,
-    "passed_count": 212,
+    "passed_count": 271,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 1,
     "passed_that_lost": 0,
-    "block_rate": 0.2290909090909091,
+    "block_rate": 0.23661971830985915,
     "false_negative_rate": 0.0,
     "precision": 1.0,
     "effectiveness_score": 100.0,
-    "last_updated": "2025-12-17T23:17:45.087245"
+    "last_updated": "2025-12-19T14:53:50.143691"
   },
   "intraday_momentum": {
     "filter_name": "intraday_momentum",
-    "total_checks": 33,
+    "total_checks": 36,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 33,
+    "passed_count": 36,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -237,12 +237,12 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-17T23:17:42.594543"
+    "last_updated": "2025-12-19T14:53:29.547686"
   },
   "session_timing": {
     "filter_name": "session_timing",
-    "total_checks": 32,
-    "blocked_count": 32,
+    "total_checks": 35,
+    "blocked_count": 35,
     "warning_count": 0,
     "passed_count": 0,
     "blocked_that_won": 0,
@@ -253,14 +253,14 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 64.99999999999999,
-    "last_updated": "2025-12-17T23:17:44.326001"
+    "last_updated": "2025-12-19T14:53:29.975383"
   },
   "vn30_correlation": {
     "filter_name": "vn30_correlation",
-    "total_checks": 15,
+    "total_checks": 18,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 15,
+    "passed_count": 18,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -269,14 +269,14 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 0.0,
-    "last_updated": "2025-12-17T23:17:42.594543"
+    "last_updated": "2025-12-19T14:53:29.549680"
   },
   "order_book": {
     "filter_name": "order_book",
-    "total_checks": 15,
+    "total_checks": 18,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 15,
+    "passed_count": 18,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -285,14 +285,14 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 0.0,
-    "last_updated": "2025-12-17T23:17:42.594543"
+    "last_updated": "2025-12-19T14:53:29.550678"
   },
   "vn_news_sentiment": {
     "filter_name": "vn_news_sentiment",
-    "total_checks": 14,
+    "total_checks": 17,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 14,
+    "passed_count": 17,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -301,14 +301,14 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 0.0,
-    "last_updated": "2025-12-17T23:17:43.838300"
+    "last_updated": "2025-12-19T14:53:29.552672"
   },
   "advanced_breadth": {
     "filter_name": "advanced_breadth",
-    "total_checks": 14,
+    "total_checks": 17,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 14,
+    "passed_count": 17,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -317,14 +317,14 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 0.0,
-    "last_updated": "2025-12-17T23:17:44.323010"
+    "last_updated": "2025-12-19T14:53:29.964428"
   },
   "event_calendar": {
     "filter_name": "event_calendar",
-    "total_checks": 14,
+    "total_checks": 17,
     "blocked_count": 0,
     "warning_count": 0,
-    "passed_count": 14,
+    "passed_count": 17,
     "blocked_that_won": 0,
     "blocked_that_lost": 0,
     "passed_that_won": 0,
@@ -333,6 +333,6 @@
     "false_negative_rate": 0.0,
     "precision": 0.0,
     "effectiveness_score": 0.0,
-    "last_updated": "2025-12-17T23:17:44.325004"
+    "last_updated": "2025-12-19T14:53:29.971394"
   }
 }

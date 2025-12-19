@@ -58,6 +58,7 @@ from src.strategies.base import EntryAnalysisResult, ExitSignal, PositionSizeRes
 # TYPE DEFINITIONS
 # =============================================================================
 
+
 class MarketRegime(TypedDict, total=False):
     """Type definition for market regime data."""
 
@@ -127,9 +128,13 @@ class MLCircuitBreakerConfig:
         if self.min_samples < 1:
             raise ValueError(f"min_samples must be >= 1, got {self.min_samples}")
         if not 0 < self.strict_confidence_threshold <= 100:
-            raise ValueError(f"strict_confidence_threshold must be in (0, 100], got {self.strict_confidence_threshold}")
+            raise ValueError(
+                f"strict_confidence_threshold must be in (0, 100], got {self.strict_confidence_threshold}"
+            )
         if not 0 < self.strict_size_multiplier <= 1:
-            raise ValueError(f"strict_size_multiplier must be in (0, 1], got {self.strict_size_multiplier}")
+            raise ValueError(
+                f"strict_size_multiplier must be in (0, 1], got {self.strict_size_multiplier}"
+            )
 
     @classmethod
     def from_env(cls) -> "MLCircuitBreakerConfig":
@@ -459,7 +464,7 @@ class TelegramMessageFormatter:
         )
 
         # Escape reasons to prevent Markdown parsing errors
-        safe_reasons = cls.escape_markdown(', '.join(entry_signal.reasons))
+        safe_reasons = cls.escape_markdown(", ".join(entry_signal.reasons))
 
         return (
             "**🚀 TÍN HIỆU MUA MỚI 🚀**\n\n"
@@ -1628,7 +1633,9 @@ class TradingOrchestrator:
                 self._logger.warning(f"Markdown parsing failed, retrying as plain text: {e}")
                 try:
                     # Strip markdown formatting for plain text
-                    plain_text = text.replace("**", "").replace("*", "").replace("`", "").replace("_", "")
+                    plain_text = (
+                        text.replace("**", "").replace("*", "").replace("`", "").replace("_", "")
+                    )
                     await self.bot.send_message(
                         chat_id=self.chat_id,
                         text=plain_text,
@@ -1686,7 +1693,7 @@ class TradingOrchestrator:
 
             # Build summary message - escape dynamic content
             escape_md = TelegramMessageFormatter.escape_markdown
-            
+
             summary = "🔍 *TỔNG HỢP KHÔNG TÌM THẤY TÍN HIỆU MUA*\n"
             summary += f"📊 Đã quét: {len(all_tickers)} mã\n"
             summary += f"📉 Không tìm thấy tín hiệu: {len(no_signal_symbols)} mã\n\n"
@@ -1763,7 +1770,9 @@ class TradingOrchestrator:
                     "shares": pos.get("shares", 0),
                     "avg_price": pos.get("avg_price", 0),
                     "current_price": pos.get("current_price", pos.get("avg_price", 0)),
-                    "stop_loss": pos.get("stop_loss", pos.get("avg_price", 0) * DEFAULT_STOP_LOSS_MULTIPLIER),
+                    "stop_loss": pos.get(
+                        "stop_loss", pos.get("avg_price", 0) * DEFAULT_STOP_LOSS_MULTIPLIER
+                    ),
                 }
                 for sym, pos in active_positions.items()
             }

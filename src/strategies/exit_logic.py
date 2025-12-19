@@ -228,32 +228,46 @@ class ExitConfig:
     min_risk_reward_ratio: float = 1.5  # Minimum acceptable R:R
     target_risk_reward_ratio: float = 2.0  # Target R:R for position sizing
 
-    # Trailing Stop - IMPROVED v10.0 for VN market
-    # More aggressive trailing to lock profits
-    trailing_stop_activation: float = 0.03  # Activate at 3% profit (net ~1.5% after costs)
-    trailing_stop_distance: float = 0.015  # TIGHTENED: Trail 1.5% below peak
-    trailing_stop_atr_multiplier: float = 1.5  # Tighter ATR multiplier
+    # Trailing Stop - IMPROVED v10.2 for VN market
+    # Balance between locking profits and allowing room to breathe
+    trailing_stop_activation: float = 0.04  # RELAXED: Activate at 4% profit (was 3%)
+    trailing_stop_distance: float = 0.025  # RELAXED: Trail 2.5% below peak (was 1.5%)
+    trailing_stop_atr_multiplier: float = 1.8  # RELAXED: ATR multiplier (was 1.5)
     use_dynamic_trailing: bool = True
 
-    # NEW v10.0: Accelerated trailing after TP1
-    trailing_after_tp1_distance: float = 0.01  # 1% trailing after TP1 hit
-    trailing_acceleration_factor: float = 0.8  # Tighten trailing by 20% after each TP
+    # v10.2: Accelerated trailing after TP1 - BALANCED
+    trailing_after_tp1_distance: float = 0.015  # RELAXED: 1.5% after TP1 (was 1%)
+    trailing_acceleration_factor: float = 0.85  # RELAXED: Tighten by 15% (was 20%)
 
-    # Time Decay - IMPROVED v10.0 with T+2 awareness
-    max_holding_days: int = MAX_HOLDING_DAYS  # Now 15 days (was 20)
+    # NEW v10.2: Volatility-aware trailing
+    # Widen trailing stop in high volatility to avoid premature exits
+    use_volatility_adjusted_trailing: bool = True
+    high_vol_trailing_multiplier: float = 1.5  # 50% wider in high volatility
+    low_vol_trailing_multiplier: float = 0.8  # 20% tighter in low volatility
+
+    # Time Decay - IMPROVED v10.2 with balanced approach
+    # Previous settings too aggressive, missing longer trends
+    max_holding_days: int = MAX_HOLDING_DAYS  # 15 days (reasonable for VN market)
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
     t2_settlement_days: int = 2
 
-    # NEW v10.0: Time-based exit acceleration - TIGHTENED for VN market
-    time_decay_start_day: int = 7  # TIGHTENED: Start reducing targets after day 7 (was 10)
-    time_decay_tp_reduction: float = 0.12  # TIGHTENED: Reduce TP by 12% per day (was 10%)
+    # v10.2: Time-based exit - BALANCED (not too aggressive)
+    # Start later and reduce slower to capture trends
+    time_decay_start_day: int = 10  # RELAXED: Start after day 10 (was 7)
+    time_decay_tp_reduction: float = 0.08  # RELAXED: Reduce TP by 8% per day (was 12%)
 
-    # NEW v10.1: Aggressive time decay in BEAR market
-    # In BEAR market, time works against you - exit faster
-    bear_market_max_holding_days: int = 5  # Max 5 days in BEAR (very aggressive)
-    bear_market_time_decay_threshold: float = 0.01  # Exit if only 1% profit after 3 days in BEAR
-    bear_market_time_decay_start_day: int = 3  # Start time pressure after 3 days in BEAR
-    use_aggressive_bear_time_decay: bool = True  # Enable aggressive BEAR time decay
+    # v10.2: BEAR market time decay - BALANCED
+    # Still exit faster in BEAR but allow mean reversion
+    bear_market_max_holding_days: int = 8  # RELAXED: 8 days in BEAR (was 5)
+    bear_market_time_decay_threshold: float = 0.015  # RELAXED: 1.5% profit (was 1%)
+    bear_market_time_decay_start_day: int = 5  # RELAXED: Start after 5 days (was 3)
+    use_aggressive_bear_time_decay: bool = True  # Keep enabled but with relaxed settings
+
+    # NEW v10.2: Trend-aware time decay
+    # If price is trending up, extend holding period
+    use_trend_aware_time_decay: bool = True
+    trend_extension_days: int = 5  # Extend up to 5 days if in strong uptrend
+    trend_extension_min_profit: float = 0.03  # Min 3% profit to qualify for extension
 
     # NEW v10.1: Momentum reversal exit
     # Exit when trend momentum reverses sharply (avoid giving back profits)
