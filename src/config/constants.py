@@ -1,7 +1,76 @@
 """
 Trading Constants - Centralized configuration values
 Replaces magic numbers throughout the codebase
+
+IMPROVEMENTS v4.2 (2025-01):
+- Integrated vn_market_data module for validated slippage
+- Realistic ML accuracy targets (55-60% not 65-70%)
+- Dynamic VN30 list with quarterly refresh
+- Comprehensive sector mapping
 """
+
+# =============================================================================
+# IMPORT VALIDATED VN MARKET DATA
+# =============================================================================
+try:
+    from src.utils.vn_market_data import (
+        # Slippage
+        get_validated_slippage,
+        VALIDATED_SLIPPAGE_VN,
+        # Sector
+        VN_SECTOR_MAP,
+        get_sector_for_symbol,
+        get_symbols_in_sector,
+        # VN30
+        is_vn30_dynamic,
+        get_vn30_dynamic,
+        # ML
+        calibrate_ml_confidence,
+        get_realistic_ml_config,
+    )
+
+    VN_MARKET_DATA_AVAILABLE = True
+except ImportError:
+    VN_MARKET_DATA_AVAILABLE = False
+    # Fallback implementations provided in this file
+
+# Sector mapping (fallback if vn_market_data not available)
+if not VN_MARKET_DATA_AVAILABLE:
+    # Basic sector mapping - see vn_market_data.py for complete mapping
+    SECTOR_MAP = {
+        "VCB": "BANKING",
+        "BID": "BANKING",
+        "CTG": "BANKING",
+        "TCB": "BANKING",
+        "MBB": "BANKING",
+        "ACB": "BANKING",
+        "VPB": "BANKING",
+        "HDB": "BANKING",
+        "VIC": "REAL_ESTATE",
+        "VHM": "REAL_ESTATE",
+        "VRE": "REAL_ESTATE",
+        "NVL": "REAL_ESTATE",
+        "FPT": "TECHNOLOGY",
+        "CMG": "TECHNOLOGY",
+        "VNM": "CONSUMER",
+        "MSN": "CONSUMER",
+        "SAB": "CONSUMER",
+        "MWG": "CONSUMER",
+        "GAS": "ENERGY",
+        "PLX": "ENERGY",
+        "PVD": "ENERGY",
+        "HPG": "INDUSTRIAL",
+        "HSG": "INDUSTRIAL",
+        "SSI": "SECURITIES",
+        "VND": "SECURITIES",
+        "HCM": "SECURITIES",
+    }
+
+    def get_sector_for_symbol(symbol: str) -> str:
+        return SECTOR_MAP.get(symbol.upper(), "UNKNOWN")
+
+else:
+    SECTOR_MAP = VN_SECTOR_MAP
 
 # Risk Management Constants - OPTIMIZED v3.0
 DEFAULT_RISK_PER_TRADE = 0.015  # TIGHTENED: 1.5% risk per trade (was 2%)
@@ -26,6 +95,20 @@ DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 2.5, 4.0]  # OPTIMIZED: Better R:R ratios
 # Position Sizing Multipliers
 MIN_POSITION_MULTIPLIER = 0.3  # Minimum position size multiplier
 MAX_POSITION_MULTIPLIER = 1.5  # Maximum position size multiplier
+
+# =============================================================================
+# ORCHESTRATOR CONSTANTS - v5.1
+# =============================================================================
+# Data Quality Constants
+MIN_DATA_ROWS_FOR_ANALYSIS = 50  # Minimum rows required for technical/ML analysis
+MIN_DATA_ROWS_FOR_ML = 50  # Minimum rows for ML feature extraction
+
+# Default Take Profit / Stop Loss Multipliers
+DEFAULT_TAKE_PROFIT_MULTIPLIER = 1.10  # 10% take profit if not specified
+DEFAULT_STOP_LOSS_MULTIPLIER = 0.93  # 7% stop loss if not specified
+
+# Pending Exit TTL (seconds)
+PENDING_EXIT_TTL_SECONDS = 3600  # 1 hour TTL for pending exit confirmations
 
 # Market Regime Thresholds
 BULL_MARKET_THRESHOLD = 0.02  # 2% threshold for bull market
@@ -572,7 +655,7 @@ TECH_SCORE_POOR = 0.2
 
 # Technical Confidence Threshold
 # IMPROVED v5.0: Increased from 55 to 60 for higher signal quality
-TECH_ONLY_MIN_CONFIDENCE = 60  # Min confidence for technical-only signals (was 55)
+TECH_ONLY_MIN_CONFIDENCE = 55  # Min confidence for technical-only signals (lowered from 60)
 
 # Per-Symbol Performance Tracking
 MIN_TRADES_FOR_POOR_PERFORMER = (

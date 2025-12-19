@@ -777,7 +777,7 @@ class ImprovedEntryLogic:
         self._filter_scores = {}
 
         # 1. Vietnam Price Limit Check (Blocking)
-        price_limit = self._technical_checker.check_vietnam_price_limits(df, current_price)
+        price_limit = self._technical_checker.check_vietnam_price_limits(df, current_price, symbol or "")
         if price_limit["near_limit"]:
             if price_limit["limit_type"] == "CEILING":
                 self._track_filter("price_limit", False, symbol or "")

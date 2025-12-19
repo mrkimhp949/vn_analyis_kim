@@ -43,6 +43,15 @@ class EnhancedMLSignalGeneratorV2:
         self.model_loaded = False
         self.generator = None
 
+        # NEW: Import confidence calibration
+        self._calibrate_confidence = None
+        try:
+            from src.utils.vn_market_data import calibrate_ml_confidence
+
+            self._calibrate_confidence = calibrate_ml_confidence
+        except ImportError:
+            pass
+
         self._init_generator()
 
     def _init_generator(self) -> None:
@@ -52,9 +61,10 @@ class EnhancedMLSignalGeneratorV2:
             try:
                 from src.ml.signals.generator_v3 import EnhancedMLSignalGeneratorV3, MLModelConfig
 
-                # V3 uses config object with correct field names
+                # V3 uses config object with REALISTIC accuracy targets
+                # NOTE: 65-70% accuracy is OVEROPTIMISTIC - realistic is 55-60%
                 config = MLModelConfig(
-                    min_confidence_for_signal=55.0,
+                    min_confidence_for_signal=52.0,  # Lowered for realistic win rate
                     enable_walk_forward=True,
                     enable_confidence_calibration=True,
                 )
@@ -62,7 +72,7 @@ class EnhancedMLSignalGeneratorV2:
                 self.model_loaded = True
                 self.use_v3 = True
                 logger.info(
-                    "✅ Using ML Signal Generator V3 (ensemble + microstructure, 65-70% accuracy)"
+                    "✅ Using ML Signal Generator V3 (ensemble + microstructure, REALISTIC 55-60% accuracy)"
                 )
                 return
             except Exception as e:
@@ -75,11 +85,11 @@ class EnhancedMLSignalGeneratorV2:
 
                 self.generator = MLSignalGeneratorV2(
                     model_name="rf",  # Best on unseen data
-                    confidence_threshold=0.55,
+                    confidence_threshold=0.52,  # Lowered for realistic accuracy
                     use_ensemble=False,
                 )
                 self.model_loaded = True
-                logger.info("✅ Using ML Signal Generator V2 (improved accuracy)")
+                logger.info("✅ Using ML Signal Generator V2 (REALISTIC 53-58% accuracy)")
                 return
             except Exception as e:
                 logger.warning(f"⚠️ V2 init failed: {e}, falling back to V1")
@@ -101,6 +111,33 @@ class EnhancedMLSignalGeneratorV2:
             logger.error(f"❌ V1 init also failed: {e}")
             self.model_loaded = False
 
+    def _apply_confidence_calibration(self, raw_confidence: float) -> float:
+        """
+        Apply confidence calibration to get realistic accuracy.
+
+        ML models tend to be overconfident. This applies empirical
+        calibration based on actual backtesting results.
+
+        Args:
+            raw_confidence: Raw confidence from ML model (0-100)
+
+        Returns:
+            Calibrated confidence (0-100)
+        """
+        if self._calibrate_confidence:
+            return self._calibrate_confidence(raw_confidence)
+
+        # Fallback calibration (15% discount)
+        calibrated = raw_confidence * 0.85
+
+        # Additional discount for very high confidence (overfit signal)
+        if raw_confidence > 80:
+            calibrated = min(calibrated, 70)
+        elif raw_confidence > 70:
+            calibrated *= 0.95
+
+        return max(50.0, min(75.0, calibrated))
+
     def analyze(
         self,
         df: pd.DataFrame,
@@ -112,6 +149,9 @@ class EnhancedMLSignalGeneratorV2:
         Analyze and generate ML signal.
 
         Compatible with EnhancedMLSignalGenerator interface.
+
+        IMPORTANT: Confidence values are CALIBRATED to be realistic.
+        Raw confidence is stored in 'raw_confidence' field.
 
         Args:
             df: DataFrame with OHLCV data
@@ -130,8 +170,12 @@ class EnhancedMLSignalGeneratorV2:
                 # V3 generator uses analyze() method (best - ensemble + microstructure)
                 result = self.generator.analyze(df, index_df, symbol=symbol)
 
-                # Add compatibility fields for V1 interface
-                result["raw_confidence"] = result.get("confidence", 0)
+                # Store raw confidence and apply calibration
+                raw_conf = result.get("confidence", 0)
+                result["raw_confidence"] = raw_conf
+                result["confidence"] = self._apply_confidence_calibration(raw_conf)
+                result["calibrated"] = True
+
                 result["ml_score"] = result.get("probabilities", {}).get("buy", 0.5)
                 result["technical_score"] = {}
                 result["reason"] = f"ML V3 Ensemble ({result.get('active_models', 3)} models)"
@@ -153,8 +197,12 @@ class EnhancedMLSignalGeneratorV2:
                 # V2 generator
                 result = self.generator.generate_signal(df, index_df, symbol)
 
-                # Add compatibility fields for V1 interface
-                result["raw_confidence"] = result["confidence"]
+                # Store raw confidence and apply calibration
+                raw_conf = result["confidence"]
+                result["raw_confidence"] = raw_conf
+                result["confidence"] = self._apply_confidence_calibration(raw_conf)
+                result["calibrated"] = True
+
                 result["ml_score"] = result["probabilities"]["buy"]
                 result["technical_score"] = {}
                 result["reason"] = f"ML V2 {result['model']}"

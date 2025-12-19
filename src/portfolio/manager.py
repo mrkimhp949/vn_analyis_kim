@@ -568,6 +568,11 @@ class PortfolioManager:
 
     def close_position(self, symbol: str, exit_price: float, reason: str = "Exit signal"):
         """Close a position entirely."""
+        # CRITICAL FIX: Validate exit_price before processing
+        if exit_price is None or exit_price <= 0:
+            print(f"❌ Invalid exit_price: {exit_price}. Cannot close position for {symbol}.")
+            return
+
         positions = self.db.get_positions()
 
         if symbol not in positions:

@@ -244,7 +244,7 @@ class TechnicalChecker:
             "distance_to_resistance": distance_to_resistance,
         }
 
-    def check_vietnam_price_limits(self, df: pd.DataFrame, current_price: float) -> Dict:
+    def check_vietnam_price_limits(self, df: pd.DataFrame, current_price: float, symbol: str = "") -> Dict:
         """
         Check if price is near Vietnam market floor/ceiling limits (±7%).
 
@@ -255,6 +255,7 @@ class TechnicalChecker:
         Args:
             df: DataFrame with OHLCV data
             current_price: Current stock price
+            symbol: Stock symbol for logging
 
         Returns:
             Dict with near_limit, limit_type, warning, and price levels
@@ -296,8 +297,9 @@ class TechnicalChecker:
         if near_ceiling:
             result["near_limit"] = True
             result["limit_type"] = "CEILING"
+            symbol_tag = f"[{symbol}] " if symbol else ""
             result["warning"] = (
-                f"Giá gần trần ({current_price:,.0f} / {ceiling_price:,.0f}), "
+                f"{symbol_tag}Giá gần trần ({current_price:,.0f} / {ceiling_price:,.0f}), "
                 f"chỉ còn {distance_to_ceiling:.2f}% - RỦI RO CAO, không thể mua thêm"
             )
             logger.warning(f"🚫 {result['warning']}")
@@ -305,8 +307,9 @@ class TechnicalChecker:
         elif near_floor:
             result["near_limit"] = True
             result["limit_type"] = "FLOOR"
+            symbol_tag = f"[{symbol}] " if symbol else ""
             result["warning"] = (
-                f"Giá gần sàn ({current_price:,.0f} / {floor_price:,.0f}), "
+                f"{symbol_tag}Giá gần sàn ({current_price:,.0f} / {floor_price:,.0f}), "
                 f"chỉ còn {distance_to_floor:.2f}% - Có thể là panic selling"
             )
             logger.warning(f"⚠️ {result['warning']}")

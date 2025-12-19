@@ -2,12 +2,13 @@
 Circuit Breaker - Giới hạn trades và loss per day
 Bảo vệ khỏi lỗi logic hoặc market anomaly
 
-IMPROVED v6.1:
+IMPROVED v6.2:
 - Database-backed storage option (see circuit_breaker_db.py)
 - Regime-aware consecutive loss limits
 - Distributed locking for multiple bots
 - Sector-specific circuit breakers (Banking, Real Estate more sensitive)
 - Enhanced gradual response system
+- Integrated with vn_market_data for sector classification
 """
 
 import json
@@ -20,15 +21,50 @@ from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Import sector mapping from vn_market_data
+try:
+    from src.utils.vn_market_data import get_sector_for_symbol, VN_SECTOR_MAP
+
+    VN_SECTOR_AVAILABLE = True
+except ImportError:
+    VN_SECTOR_AVAILABLE = False
+
+    def get_sector_for_symbol(symbol: str) -> str:
+        """Fallback sector lookup."""
+        # Basic fallback mapping
+        BASIC_SECTOR_MAP = {
+            "VCB": "BANKING",
+            "BID": "BANKING",
+            "CTG": "BANKING",
+            "TCB": "BANKING",
+            "MBB": "BANKING",
+            "ACB": "BANKING",
+            "VPB": "BANKING",
+            "HDB": "BANKING",
+            "VIC": "REAL_ESTATE",
+            "VHM": "REAL_ESTATE",
+            "VRE": "REAL_ESTATE",
+            "SSI": "SECURITIES",
+            "VND": "SECURITIES",
+            "HCM": "SECURITIES",
+            "FPT": "TECHNOLOGY",
+            "VNM": "CONSUMER",
+            "GAS": "ENERGY",
+            "HPG": "INDUSTRIAL",
+        }
+        return BASIC_SECTOR_MAP.get(symbol.upper(), "DEFAULT")
+
 
 # =============================================================================
-# SECTOR-SPECIFIC THRESHOLDS - IMPROVED v6.1
+# SECTOR-SPECIFIC THRESHOLDS - IMPROVED v6.2
 # =============================================================================
 # Different sectors have different risk profiles in Vietnam market:
 # - BANKING: Most sensitive to market drops, high correlation with VNINDEX
 # - REAL_ESTATE: High volatility, can drop faster than market
 # - TECHNOLOGY: Can recover quickly, more resilient
 # - CONSUMER: Defensive, less volatile
+#
+# Use get_sector_for_symbol() for comprehensive sector lookup
 # =============================================================================
 
 SECTOR_CIRCUIT_BREAKER_THRESHOLDS = {

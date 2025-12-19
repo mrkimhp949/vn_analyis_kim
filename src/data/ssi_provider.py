@@ -210,7 +210,16 @@ class SSIProvider:
             response = self._session.get(url, timeout=self.timeout)
             response.raise_for_status()
 
-            data = response.json()
+            # Check for empty response before parsing JSON
+            if not response.text or not response.text.strip():
+                logger.warning("SSI returned empty response for all stocks")
+                return None
+
+            try:
+                data = response.json()
+            except ValueError as json_err:
+                logger.warning(f"SSI returned invalid JSON for all stocks: {json_err}")
+                return None
 
             if not data:
                 logger.warning("Empty response from SSI all stocks API")
@@ -246,8 +255,11 @@ class SSIProvider:
 
             return df
 
+        except requests.RequestException as req_err:
+            logger.warning(f"SSI all stocks request failed: {req_err}")
+            return None
         except Exception as e:
-            logger.error(f"SSI all stocks fetch failed: {e}")
+            logger.warning(f"SSI all stocks fetch failed: {e}")
             return None
 
     def get_stock_data(self, symbol: str, force_refresh: bool = False) -> Optional[SSIStockData]:
@@ -303,7 +315,7 @@ class SSIProvider:
             return stock_data
 
         except Exception as e:
-            logger.error(f"SSI stock data fetch failed for {symbol}: {e}")
+            logger.warning(f"SSI stock data fetch failed for {symbol}: {e}")
             return None
 
     # =========================================================================
@@ -378,7 +390,7 @@ class SSIProvider:
             return df
 
         except Exception as e:
-            logger.error(f"SSI foreign flow fetch failed: {e}")
+            logger.warning(f"SSI foreign flow fetch failed: {e}")
             return None
 
     def get_top_foreign_trades(
@@ -418,7 +430,7 @@ class SSIProvider:
             return {"top_buy": top_buy, "top_sell": top_sell}
 
         except Exception as e:
-            logger.error(f"SSI top foreign trades fetch failed: {e}")
+            logger.warning(f"SSI top foreign trades fetch failed: {e}")
             return {"top_buy": [], "top_sell": []}
 
     # =========================================================================
@@ -441,7 +453,22 @@ class SSIProvider:
             response = self._session.get(url, timeout=self.timeout)
             response.raise_for_status()
 
-            data = response.json()
+            # Check for empty response before parsing JSON
+            if not response.text or not response.text.strip():
+                logger.warning(f"SSI returned empty response for index {index}")
+                return None
+
+            # Try parsing JSON with proper error handling
+            try:
+                data = response.json()
+            except ValueError as json_err:
+                logger.warning(f"SSI returned invalid JSON for index {index}: {json_err}")
+                return None
+
+            # Ensure data is a list
+            if not isinstance(data, list):
+                logger.warning(f"SSI returned unexpected data type for index: {type(data)}")
+                return None
 
             for item in data:
                 if item.get("code", "").upper() == index.upper():
@@ -460,6 +487,9 @@ class SSIProvider:
             logger.warning(f"Index {index} not found in SSI data")
             return None
 
+        except requests.RequestException as req_err:
+            logger.warning(f"SSI index data request failed: {req_err}")
+            return None
         except Exception as e:
             logger.error(f"SSI index data fetch failed: {e}")
             return None
@@ -518,7 +548,16 @@ class SSIProvider:
             response = self._session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
 
-            data = response.json()
+            # Check for empty response before parsing JSON
+            if not response.text or not response.text.strip():
+                logger.warning(f"SSI returned empty response for {symbol} historical data")
+                return None
+
+            try:
+                data = response.json()
+            except ValueError as json_err:
+                logger.warning(f"SSI returned invalid JSON for {symbol} historical: {json_err}")
+                return None
 
             if data.get("s") != "ok":
                 logger.warning(f"SSI historical data not available for {symbol}")
@@ -540,8 +579,11 @@ class SSIProvider:
             logger.info(f"✅ Fetched {len(df)} historical bars for {symbol} from SSI")
             return df
 
+        except requests.RequestException as req_err:
+            logger.warning(f"SSI historical data request failed for {symbol}: {req_err}")
+            return None
         except Exception as e:
-            logger.error(f"SSI historical data fetch failed for {symbol}: {e}")
+            logger.warning(f"SSI historical data fetch failed for {symbol}: {e}")
             return None
 
 

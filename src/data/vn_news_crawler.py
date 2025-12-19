@@ -67,7 +67,8 @@ NEWS_SOURCES = {
     "cafef": {
         "name": "CafeF",
         "base_url": "https://cafef.vn",
-        "rss_url": "https://cafef.vn/rss/chung-khoan.rss",
+        "rss_url": "https://cafef.vn/rss/thi-truong-chung-khoan.rss",  # Updated RSS path
+        "section_url": "https://cafef.vn/thi-truong-chung-khoan.chn",  # Fallback HTML page
         "search_url": "https://cafef.vn/tim-kiem.chn?keysearch=",
         "stock_news_url": "https://cafef.vn/du-lieu/cotphieuxxx-{symbol}.chn",
         "selectors": {
@@ -114,7 +115,8 @@ NEWS_SOURCES = {
     "stockbiz": {
         "name": "StockBiz",
         "base_url": "https://stockbiz.vn",
-        "section_url": "https://stockbiz.vn/tin-chung-khoan.html",
+        "section_url": "https://stockbiz.vn/tin-tuc/chung-khoan",  # Updated URL path
+        "enabled": False,  # Disabled due to frequent 404 errors
         "selectors": {
             "article_list": ".news-list li, .article-list article",
             "title": "a.title, h3 a",
@@ -128,7 +130,8 @@ NEWS_SOURCES = {
     "ndh": {
         "name": "Người Đồng Hành",
         "base_url": "https://ndh.vn",
-        "section_url": "https://ndh.vn/chung-khoan",
+        "section_url": "https://ndh.vn/chung-khoan.html",  # Updated URL with .html
+        "enabled": False,  # Disabled due to frequent timeout errors
         "selectors": {
             "article_list": ".news-item, article",
             "title": "h3 a, .title a",
@@ -386,7 +389,12 @@ class VNNewsCrawler:
             cache_ttl: Cache TTL in seconds
             max_articles: Max articles to fetch per source
         """
-        self.sources = sources or list(NEWS_SOURCES.keys())
+        # Filter to only enabled sources
+        all_sources = sources or list(NEWS_SOURCES.keys())
+        self.sources = [
+            s for s in all_sources
+            if NEWS_SOURCES.get(s, {}).get("enabled", True)  # Default to enabled
+        ]
         self.cache_ttl = cache_ttl
         self.max_articles = max_articles
 
