@@ -863,11 +863,17 @@ class TechnicalChecker:
             too_high = max_correlation > 0.70
             good_diversification = max_correlation < 0.30 and avg_correlation < 0.25
 
+            # FIXED v11.0: Add sector diversification check
+            # Prevent buying multiple stocks in same sector close together
+            sector_check = self._check_sector_concentration(symbol, existing_symbols)
+
             return {
-                "too_high": too_high,
-                "good_diversification": good_diversification,
+                "too_high": too_high or sector_check["blocked"],
+                "good_diversification": good_diversification and not sector_check["warning"],
                 "max_correlation": max_correlation,
                 "avg_correlation": avg_correlation,
+                "sector_concentration": sector_check.get("concentration", 0.0),
+                "sector_warning": sector_check.get("message", ""),
             }
         except Exception as e:
             logger.warning(f"⚠️ Error checking portfolio correlation: {e}")
@@ -876,6 +882,75 @@ class TechnicalChecker:
                 "good_diversification": False,
                 "max_correlation": 0.0,
             }
+
+    def _check_sector_concentration(self, new_symbol: str, existing_symbols: List[str]) -> Dict:
+        """
+        FIXED v11.0: Check if adding new symbol would create excessive sector concentration.
+
+        Rules:
+        - If already have 2+ positions in same sector → BLOCK new entry
+        - If already have 1 position in same sector → WARNING (reduce position size)
+        - Sensitive sectors (Banking, Real Estate, Securities) have stricter limits
+
+        Args:
+            new_symbol: Symbol being considered for entry
+            existing_symbols: Symbols already in portfolio
+
+        Returns:
+            Dict with blocked, warning, concentration, message
+        """
+        try:
+            from src.config.constants import SECTOR_MAP, get_sector_for_symbol
+
+            if not existing_symbols:
+                return {"blocked": False, "warning": False, "concentration": 0.0}
+
+            # Get sector of new symbol
+            new_sector = get_sector_for_symbol(new_symbol)
+
+            # Count existing positions in same sector
+            same_sector_count = 0
+            for sym in existing_symbols:
+                if get_sector_for_symbol(sym) == new_sector:
+                    same_sector_count += 1
+
+            concentration = same_sector_count / len(existing_symbols) if existing_symbols else 0.0
+
+            # Sensitive sectors have stricter limits
+            sensitive_sectors = ["BANKING", "REAL_ESTATE", "SECURITIES"]
+
+            # BLOCK if too concentrated
+            if new_sector in sensitive_sectors:
+                # For sensitive sectors: max 1 position
+                if same_sector_count >= 1:
+                    return {
+                        "blocked": True,
+                        "warning": False,
+                        "concentration": concentration,
+                        "message": f"❌ Already have {same_sector_count} position(s) in {new_sector} (sensitive sector)",
+                    }
+            else:
+                # For other sectors: max 2 positions
+                if same_sector_count >= 2:
+                    return {
+                        "blocked": True,
+                        "warning": False,
+                        "concentration": concentration,
+                        "message": f"❌ Already have {same_sector_count} positions in {new_sector} (max 2)",
+                    }
+                elif same_sector_count == 1:
+                    return {
+                        "blocked": False,
+                        "warning": True,
+                        "concentration": concentration,
+                        "message": f"⚠️ Already have 1 position in {new_sector}",
+                    }
+
+            return {"blocked": False, "warning": False, "concentration": concentration}
+
+        except Exception as e:
+            logger.debug(f"Sector concentration check error: {e}")
+            return {"blocked": False, "warning": False, "concentration": 0.0}
 
     def check_volume_manipulation(self, df: pd.DataFrame) -> Dict:
         """

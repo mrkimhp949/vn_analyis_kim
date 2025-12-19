@@ -913,13 +913,31 @@ class ImprovedEntryLogic:
         # 7. Portfolio Correlation
         correlation = self._technical_checker.check_portfolio_correlation(df, symbol)
         if correlation["too_high"]:
-            warnings.append(f"⚠️ High correlation: {correlation['max_correlation']:.2f}")
+            # FIXED v11.0: This now includes sector concentration blocking
+            sector_msg = correlation.get("sector_warning", "")
+            if sector_msg and "❌" in sector_msg:
+                # Sector concentration block
+                self._track_filter("correlation", False, symbol or "")
+                return sector_msg
+            else:
+                # Regular correlation warning
+                warnings.append(f"⚠️ High correlation: {correlation['max_correlation']:.2f}")
+                self._add_adjustment(
+                    adjustments,
+                    adjustment_breakdown,
+                    "correlation",
+                    -10,
+                    f"Correlation: {correlation['max_correlation']:.2f}",
+                )
+        elif correlation.get("sector_warning"):
+            # FIXED v11.0: Sector concentration warning (not blocking)
+            warnings.append(correlation["sector_warning"])
             self._add_adjustment(
                 adjustments,
                 adjustment_breakdown,
-                "correlation",
-                -10,
-                f"Correlation: {correlation['max_correlation']:.2f}",
+                "sector_concentration",
+                -8,
+                "Same sector position exists",
             )
         elif correlation["good_diversification"]:
             reasons.append("✅ Good diversification")

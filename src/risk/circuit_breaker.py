@@ -70,59 +70,59 @@ except ImportError:
 
 SECTOR_CIRCUIT_BREAKER_THRESHOLDS = {
     "BANKING": {
-        "vnindex_drop_threshold": -0.025,  # RELAXED: -2.5% (was -1.5%)
-        "max_consecutive_losses": 4,  # RELAXED: was 2
-        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
-        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
+        "vnindex_drop_threshold": -0.020,  # FIXED v11.0: -2.0% (tightened from -2.5%)
+        "max_consecutive_losses": 3,  # FIXED v11.0: 3 losses (was 4 - too loose)
+        "max_sector_exposure": 0.30,  # FIXED v11.0: 30% max (was 35%)
+        "max_sector_exposure_bear": 0.15,  # FIXED v11.0: 15% in BEAR
         "description": "Banking sector - high correlation with market",
     },
     "REAL_ESTATE": {
-        "vnindex_drop_threshold": -0.035,  # RELAXED: -3.5% (was -2.5%)
-        "max_consecutive_losses": 4,  # RELAXED: was 2
-        "max_sector_exposure": 0.30,  # RELAXED: 30% max (was 20%)
-        "max_sector_exposure_bear": 0.15,  # RELAXED: 15% in BEAR (was 10%)
+        "vnindex_drop_threshold": -0.025,  # FIXED v11.0: -2.5% (tightened from -3.5%)
+        "max_consecutive_losses": 3,  # FIXED v11.0: 3 losses (was 4)
+        "max_sector_exposure": 0.25,  # FIXED v11.0: 25% max (was 30%)
+        "max_sector_exposure_bear": 0.12,  # FIXED v11.0: 12% in BEAR
         "description": "Real Estate - high volatility sector",
     },
     "SECURITIES": {
-        "vnindex_drop_threshold": -0.025,  # RELAXED: -2.5% (was -1.5%)
-        "max_consecutive_losses": 4,  # RELAXED: was 2
-        "max_sector_exposure": 0.25,  # RELAXED: 25% max (was 15%)
-        "max_sector_exposure_bear": 0.10,  # RELAXED: 10% in BEAR (was 5%)
+        "vnindex_drop_threshold": -0.020,  # FIXED v11.0: -2.0% (tightened from -2.5%)
+        "max_consecutive_losses": 2,  # FIXED v11.0: 2 losses (was 4 - very sensitive sector)
+        "max_sector_exposure": 0.20,  # FIXED v11.0: 20% max (was 25%)
+        "max_sector_exposure_bear": 0.08,  # FIXED v11.0: 8% in BEAR
         "description": "Securities - extremely sensitive to market",
     },
     "TECHNOLOGY": {
-        "vnindex_drop_threshold": -0.040,  # RELAXED: -4.0% (was -3.0%)
-        "max_consecutive_losses": 5,  # RELAXED: was 4
-        "max_sector_exposure": 0.40,  # RELAXED: 40% max (was 30%)
-        "max_sector_exposure_bear": 0.25,  # RELAXED: 25% in BEAR (was 20%)
+        "vnindex_drop_threshold": -0.030,  # FIXED v11.0: -3.0% (tightened from -4.0%)
+        "max_consecutive_losses": 4,  # FIXED v11.0: 4 losses (was 5)
+        "max_sector_exposure": 0.35,  # FIXED v11.0: 35% max (was 40%)
+        "max_sector_exposure_bear": 0.22,  # FIXED v11.0: 22% in BEAR
         "description": "Technology - can recover quickly",
     },
     "CONSUMER": {
-        "vnindex_drop_threshold": -0.040,  # RELAXED: -4.0% (was -3.0%)
-        "max_consecutive_losses": 5,  # RELAXED: was 4
-        "max_sector_exposure": 0.40,  # RELAXED: 40% max (was 30%)
-        "max_sector_exposure_bear": 0.30,  # RELAXED: 30% in BEAR (was 25%)
+        "vnindex_drop_threshold": -0.030,  # FIXED v11.0: -3.0% (tightened from -4.0%)
+        "max_consecutive_losses": 4,  # FIXED v11.0: 4 losses (was 5)
+        "max_sector_exposure": 0.35,  # FIXED v11.0: 35% max (was 40%)
+        "max_sector_exposure_bear": 0.25,  # FIXED v11.0: 25% in BEAR
         "description": "Consumer - defensive sector",
     },
     "ENERGY": {
-        "vnindex_drop_threshold": -0.035,  # RELAXED: -3.5% (was -2.5%)
-        "max_consecutive_losses": 4,  # RELAXED: was 3
-        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
-        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
+        "vnindex_drop_threshold": -0.025,  # FIXED v11.0: -2.5% (tightened from -3.5%)
+        "max_consecutive_losses": 3,  # FIXED v11.0: 3 losses (was 4)
+        "max_sector_exposure": 0.30,  # FIXED v11.0: 30% max (was 35%)
+        "max_sector_exposure_bear": 0.18,  # FIXED v11.0: 18% in BEAR
         "description": "Energy - moderate volatility",
     },
     "INDUSTRIAL": {
-        "vnindex_drop_threshold": -0.035,  # RELAXED: -3.5% (was -2.5%)
-        "max_consecutive_losses": 4,  # RELAXED: was 3
-        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
-        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
+        "vnindex_drop_threshold": -0.025,  # FIXED v11.0: -2.5% (tightened from -3.5%)
+        "max_consecutive_losses": 3,  # FIXED v11.0: 3 losses (was 4)
+        "max_sector_exposure": 0.30,  # FIXED v11.0: 30% max (was 35%)
+        "max_sector_exposure_bear": 0.18,  # FIXED v11.0: 18% in BEAR
         "description": "Industrial - cyclical sector",
     },
     "DEFAULT": {
-        "vnindex_drop_threshold": -0.030,  # RELAXED: -3.0% (was -2.0%)
-        "max_consecutive_losses": 5,  # RELAXED: was 3
-        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
-        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
+        "vnindex_drop_threshold": -0.025,  # FIXED v11.0: -2.5% (tightened from -3.0%)
+        "max_consecutive_losses": 3,  # FIXED v11.0: 3 losses (was 5 - too loose)
+        "max_sector_exposure": 0.30,  # FIXED v11.0: 30% max (was 35%)
+        "max_sector_exposure_bear": 0.18,  # FIXED v11.0: 18% in BEAR
         "description": "Default sector settings",
     },
 }
