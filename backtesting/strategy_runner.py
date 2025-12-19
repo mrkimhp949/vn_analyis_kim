@@ -295,6 +295,16 @@ class StrategyRunner:
                     exit_decision.exit_reason.value if exit_decision.exit_reason else "Unknown"
                 )
 
+                # Use exit_price from exit_decision (should equal current_price, but use decision for consistency)
+                # Validate exit_price to prevent calculation errors
+                actual_exit_price = exit_decision.exit_price
+                if actual_exit_price is None or actual_exit_price <= 0:
+                    actual_exit_price = current_price  # Fallback to current_price
+                    logger.warning(
+                        f"⚠️ [{symbol}] exit_decision.exit_price invalid ({exit_decision.exit_price}), "
+                        f"using current_price ({current_price:,.0f})"
+                    )
+
                 # Handle partial vs full exit
                 if exit_decision.exit_type.startswith("PARTIAL"):
                     # Extract percentage from exit_type (e.g., "PARTIAL_50%" -> 0.5)
@@ -307,7 +317,7 @@ class StrategyRunner:
                     self.engine.partial_close_position(
                         symbol=symbol,
                         date=exit_date,
-                        exit_price=current_price,
+                        exit_price=actual_exit_price,
                         exit_percent=exit_pct,
                         reason=exit_reason,
                     )
@@ -316,7 +326,7 @@ class StrategyRunner:
                     self.engine.close_position(
                         symbol=symbol,
                         date=exit_date,
-                        exit_price=current_price,
+                        exit_price=actual_exit_price,
                         reason=exit_reason,
                     )
 

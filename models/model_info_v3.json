@@ -1,0 +1,51 @@
+{
+  "version": "v3",
+  "created_at": "2025-12-17T18:55:48.992108",
+  "feature_columns": [
+    "sma20",
+    "ema20",
+    "ema50",
+    "rsi",
+    "rsi_signal",
+    "atr",
+    "macd",
+    "macd_signal",
+    "macd_dif",
+    "macd_signal_line",
+    "bb_width",
+    "bb_position",
+    "momentum_5",
+    "momentum_10",
+    "momentum_20",
+    "volume_ratio",
+    "volume_surge",
+    "volatility_20",
+    "roc_10",
+    "stoch_k",
+    "obv_signal",
+    "price_vs_vwap",
+    "hv_ratio",
+    "close_position",
+    "rs",
+    "rs_momentum",
+    "price_vs_sma20",
+    "adx"
+  ],
+  "n_features": 28,
+  "training_samples": 5208,
+  "test_samples": 1302,
+  "models": {
+    "random_forest": {
+      "accuracy": 0.5422427035330261,
+      "f1": 0.4491682070240296
+    },
+    "gradient_boosting": {
+      "accuracy": 0.5476190476190477,
+      "f1": 0.38065194532071506
+    },
+    "xgboost": {
+      "accuracy": 0.5637480798771122,
+      "f1": 0.47309833024118736
+    }
+  }
+}

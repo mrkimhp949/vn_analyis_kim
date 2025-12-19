@@ -34,6 +34,12 @@ from telegram import Bot
 
 from src.config.exceptions import DataLoadError
 from src.config.trading_config import get_config
+from src.config.constants import (
+    MIN_DATA_ROWS_FOR_ANALYSIS,
+    DEFAULT_TAKE_PROFIT_MULTIPLIER,
+    DEFAULT_STOP_LOSS_MULTIPLIER,
+    PENDING_EXIT_TTL_SECONDS,
+)
 from src.data.loader import load_data
 from src.data.ticker_loader import get_ticker_loader
 from src.market.regime_proxy import ProxyMarketRegimeAnalyzer
@@ -46,6 +52,7 @@ from src.portfolio.paper_trading import get_paper_account
 from src.portfolio.risk_manager import get_portfolio_risk_manager
 from src.risk.circuit_breaker import get_circuit_breaker
 from src.strategies.manager import get_strategy_manager
+from src.strategies.base import EntryAnalysisResult, ExitSignal, PositionSizeResult
 
 # =============================================================================
 # TYPE DEFINITIONS
@@ -110,6 +117,25 @@ class MLCircuitBreakerConfig:
     strict_confidence_threshold: int = 70  # Higher confidence required
     strict_size_multiplier: float = 0.5  # Reduce position size by 50%
 
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if not 0 < self.failure_threshold <= 1:
+            raise ValueError(f"failure_threshold must be in (0, 1], got {self.failure_threshold}")
+        if not 0 < self.recovery_threshold <= 1:
+            raise ValueError(f"recovery_threshold must be in (0, 1], got {self.recovery_threshold}")
+        if self.recovery_threshold >= self.failure_threshold:
+            raise ValueError("recovery_threshold must be less than failure_threshold")
+        if self.min_samples < 1:
+            raise ValueError(f"min_samples must be >= 1, got {self.min_samples}")
+        if not 0 < self.strict_confidence_threshold <= 100:
+            raise ValueError(
+                f"strict_confidence_threshold must be in (0, 100], got {self.strict_confidence_threshold}"
+            )
+        if not 0 < self.strict_size_multiplier <= 1:
+            raise ValueError(
+                f"strict_size_multiplier must be in (0, 1], got {self.strict_size_multiplier}"
+            )
+
     @classmethod
     def from_env(cls) -> "MLCircuitBreakerConfig":
         """Load config from environment variables."""
@@ -129,6 +155,13 @@ class VNIndexCacheConfig:
     ttl_seconds: int = 3600  # Cache for 1 hour
     min_rows: int = 50  # Minimum rows required
 
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.ttl_seconds <= 0:
+            raise ValueError(f"ttl_seconds must be positive, got {self.ttl_seconds}")
+        if self.min_rows < 1:
+            raise ValueError(f"min_rows must be >= 1, got {self.min_rows}")
+
     @classmethod
     def from_env(cls) -> "VNIndexCacheConfig":
         """Load config from environment variables."""
@@ -145,6 +178,15 @@ class MLAnalysisConfig:
     max_retries: int = 2
     retry_delay_base: float = 0.5  # Base delay in seconds
     timeout_seconds: float = 30.0  # Increased for enhanced features (63 features)
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {self.max_retries}")
+        if self.retry_delay_base <= 0:
+            raise ValueError(f"retry_delay_base must be positive, got {self.retry_delay_base}")
+        if self.timeout_seconds <= 0:
+            raise ValueError(f"timeout_seconds must be positive, got {self.timeout_seconds}")
 
     @classmethod
     def from_env(cls) -> "MLAnalysisConfig":
@@ -421,6 +463,9 @@ class TelegramMessageFormatter:
             else "🟡" if entry_signal.confidence >= 50 else "🔴"
         )
 
+        # Escape reasons to prevent Markdown parsing errors
+        safe_reasons = cls.escape_markdown(", ".join(entry_signal.reasons))
+
         return (
             "**🚀 TÍN HIỆU MUA MỚI 🚀**\n\n"
             f"**Mã:** `{symbol}`\n"
@@ -429,7 +474,7 @@ class TelegramMessageFormatter:
             f"**Mục tiêu 1:** `{tp1_target:,.0f}`\n"
             f"**Dừng lỗ:** `{entry_signal.stop_loss:,.0f}`\n"
             f"**R:R (TP1):** `{risk_reward_ratio:.2f}`\n\n"
-            f"**Lý do:** {', '.join(entry_signal.reasons)}\n\n"
+            f"**Lý do:** {safe_reasons}\n\n"
             "**--- Quản lý vốn ---**\n"
             f"**Số CP mua:** `{position_size_info.shares}`\n"
             f"**Giá trị lệnh:** `{position_size_info.value:,.0f} VNĐ`\n"
@@ -439,7 +484,7 @@ class TelegramMessageFormatter:
 
 
 class VNIndexCache:
-    """Cache manager for VNINDEX data with TTL support."""
+    """Cache manager for VNINDEX data with TTL support and async loading."""
 
     def __init__(self, config: VNIndexCacheConfig, lookback: int = 200):
         self._config = config
@@ -447,10 +492,12 @@ class VNIndexCache:
         self._cached_df: Optional[pd.DataFrame] = None
         self._cache_timestamp: Optional[float] = None
         self._logger = logging.getLogger(__name__)
+        self._lock = asyncio.Lock()  # Prevent concurrent refresh
 
     def get(self) -> Optional[pd.DataFrame]:
         """
-        Get cached VNINDEX data or load fresh if cache expired.
+        Get cached VNINDEX data synchronously (for backward compatibility).
+        Prefer using get_async() in async context.
 
         Returns:
             VNINDEX DataFrame or None if load fails
@@ -463,8 +510,31 @@ class VNIndexCache:
             self._logger.debug(f"✅ Using cached VNINDEX (age: {cache_age:.0f}s)")
             return self._cached_df
 
-        # Load fresh VNINDEX
-        return self._load_fresh()
+        # Load fresh VNINDEX (blocking)
+        return self._load_fresh_sync()
+
+    async def get_async(self) -> Optional[pd.DataFrame]:
+        """
+        Get cached VNINDEX data asynchronously (non-blocking).
+        This is the preferred method in async context.
+
+        Returns:
+            VNINDEX DataFrame or None if load fails
+        """
+        current_time = time.time()
+
+        # Check if cache is still valid
+        if self._is_cache_valid(current_time):
+            cache_age = current_time - self._cache_timestamp
+            self._logger.debug(f"✅ Using cached VNINDEX (age: {cache_age:.0f}s)")
+            return self._cached_df
+
+        # Load fresh VNINDEX asynchronously with lock to prevent concurrent loads
+        async with self._lock:
+            # Double-check after acquiring lock
+            if self._is_cache_valid(time.time()):
+                return self._cached_df
+            return await self._load_fresh_async()
 
     def _is_cache_valid(self, current_time: float) -> bool:
         """Check if cache is still valid."""
@@ -473,11 +543,32 @@ class VNIndexCache:
         cache_age = current_time - self._cache_timestamp
         return cache_age < self._config.ttl_seconds
 
-    def _load_fresh(self) -> Optional[pd.DataFrame]:
-        """Load fresh VNINDEX data."""
+    def _load_fresh_sync(self) -> Optional[pd.DataFrame]:
+        """Load fresh VNINDEX data synchronously."""
         try:
             self._logger.info("📊 Loading VNINDEX for ML analysis...")
             index_df = load_data("VNINDEX", lookback=self._lookback, is_index=True)
+
+            if self._validate_data(index_df):
+                self._cached_df = index_df
+                self._cache_timestamp = time.time()
+                self._logger.info(f"✅ VNINDEX loaded successfully ({len(index_df)} rows)")
+                return index_df
+
+            self._logger.warning("⚠️ VNINDEX data is empty or insufficient")
+            return self._get_stale_fallback()
+
+        except Exception as e:
+            self._logger.error(f"❌ Failed to load VNINDEX: {e}")
+            return self._get_stale_fallback()
+
+    async def _load_fresh_async(self) -> Optional[pd.DataFrame]:
+        """Load fresh VNINDEX data asynchronously (non-blocking)."""
+        try:
+            self._logger.info("📊 Loading VNINDEX for ML analysis (async)...")
+            index_df = await asyncio.to_thread(
+                load_data, "VNINDEX", lookback=self._lookback, is_index=True
+            )
 
             if self._validate_data(index_df):
                 self._cached_df = index_df
@@ -620,9 +711,10 @@ class TradingOrchestrator:
         # Initialize VNINDEX cache
         self._vnindex_cache = VNIndexCache(self._vnindex_cache_config, self._lookback)
 
-        # Initialize pending exits tracking
+        # Initialize pending exits tracking with thread-safe lock
         self._pending_exits: Dict[str, PendingExitData] = {}
-        self._pending_exits_ttl = 3600  # 1 hour
+        self._pending_exits_lock = asyncio.Lock()  # Prevent race conditions
+        self._pending_exits_ttl = PENDING_EXIT_TTL_SECONDS  # From constants.py
 
         # Message formatter
         self._formatter = TelegramMessageFormatter()
@@ -714,27 +806,28 @@ class TradingOrchestrator:
         Returns:
             True if successful
         """
-        if symbol not in self._pending_exits:
-            await self._send_message(f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}")
-            return False
+        async with self._pending_exits_lock:
+            if symbol not in self._pending_exits:
+                await self._send_message(f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}")
+                return False
 
-        pending = self._pending_exits[symbol]
+            pending = self._pending_exits[symbol]
 
-        # Update exit type if partial
-        if percent < 100:
-            pending["exit_decision"].exit_type = f"PARTIAL_{int(percent)}%"
+            # Update exit type if partial
+            if percent < 100:
+                pending["exit_decision"].exit_type = f"PARTIAL_{int(percent)}%"
 
-        # Execute the exit
-        await self._execute_exit(
-            symbol,
-            pending["pos_data"],
-            pending["exit_decision"],
-            pending["current_price"],
-        )
+            # Execute the exit
+            await self._execute_exit(
+                symbol,
+                pending["pos_data"],
+                pending["exit_decision"],
+                pending["current_price"],
+            )
 
-        # Remove from pending
-        del self._pending_exits[symbol]
-        return True
+            # Remove from pending
+            del self._pending_exits[symbol]
+            return True
 
     async def cancel_exit(self, symbol: str) -> bool:
         """
@@ -746,11 +839,12 @@ class TradingOrchestrator:
         Returns:
             True if successful
         """
-        if symbol not in self._pending_exits:
-            await self._send_message(f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}")
-            return False
+        async with self._pending_exits_lock:
+            if symbol not in self._pending_exits:
+                await self._send_message(f"❌ Không tìm thấy khuyến nghị thoát lệnh cho {symbol}")
+                return False
 
-        del self._pending_exits[symbol]
+            del self._pending_exits[symbol]
 
         await self._send_message(
             f"✅ Đã hủy khuyến nghị thoát lệnh cho {symbol}. Tiếp tục giữ vị thế.",
@@ -1014,13 +1108,14 @@ class TradingOrchestrator:
                 f"📤 Đã gửi khuyến nghị THOÁT LỆNH cho {symbol}, chờ xác nhận từ user"
             )
 
-            # Store pending exit
-            self._pending_exits[symbol] = {
-                "pos_data": pos_data,
-                "exit_decision": exit_decision,
-                "current_price": current_price,
-                "timestamp": datetime.now().isoformat(),
-            }
+            # Store pending exit with lock
+            async with self._pending_exits_lock:
+                self._pending_exits[symbol] = {
+                    "pos_data": pos_data,
+                    "exit_decision": exit_decision,
+                    "current_price": current_price,
+                    "timestamp": datetime.now().isoformat(),
+                }
 
         except Exception:
             self._logger.error(f"Lỗi khi gửi khuyến nghị thoát lệnh {symbol}", exc_info=True)
@@ -1096,7 +1191,7 @@ class TradingOrchestrator:
         try:
             # Load data
             df = load_data(symbol, lookback=self._lookback)
-            if df.empty or len(df) < 50:
+            if df.empty or len(df) < MIN_DATA_ROWS_FOR_ANALYSIS:
                 return {
                     "symbol": symbol,
                     "warnings": ["Không đủ dữ liệu lịch sử"],
@@ -1173,7 +1268,7 @@ class TradingOrchestrator:
         self,
         symbol: str,
         df: pd.DataFrame,
-        entry_signal: Any,
+        entry_signal: EntryAnalysisResult,
         market_regime: MarketRegime,
         ml_cb_strict_mode: bool,
         is_ml_signal: bool,
@@ -1210,15 +1305,15 @@ class TradingOrchestrator:
     def _calculate_position_size(
         self,
         symbol: str,
-        entry_signal: Any,
+        entry_signal: EntryAnalysisResult,
         market_regime: MarketRegime,
         ml_cb_strict_mode: bool,
-    ) -> Optional[Any]:
+    ) -> Optional[PositionSizeResult]:
         """Calculate position size with optional strict mode reduction."""
         take_profit_price = (
             entry_signal.take_profit_targets[0]
             if entry_signal.take_profit_targets
-            else entry_signal.entry_price * 1.1
+            else entry_signal.entry_price * DEFAULT_TAKE_PROFIT_MULTIPLIER
         )
 
         position_size_info = self.position_sizer.calculate_position_size(
@@ -1250,8 +1345,8 @@ class TradingOrchestrator:
     async def _execute_buy(
         self,
         symbol: str,
-        entry_signal: Any,
-        position_size_info: Any,
+        entry_signal: EntryAnalysisResult,
+        position_size_info: PositionSizeResult,
         active_positions: Dict[str, Any],
         is_ml_signal: bool,
     ) -> Optional[ScanResult]:
@@ -1266,6 +1361,17 @@ class TradingOrchestrator:
         ) as (can_add, reason):
             if not can_add:
                 self._logger.info(f"⚠️ [{symbol}] Cannot add position: {reason}")
+                # Notify user about rejected position
+                try:
+                    await self._send_message(
+                        f"⚠️ *Không thể mở vị thế {symbol}*\n\n"
+                        f"📊 Lý do: {reason}\n"
+                        f"💰 Giá trị lệnh: {position_size_info.value:,.0f} VNĐ\n"
+                        f"🎯 Confidence: {entry_signal.confidence}%",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass  # Don't fail on notification error
                 return None
 
             take_profit = (
@@ -1336,14 +1442,14 @@ class TradingOrchestrator:
         for attempt in range(config.max_retries + 1):
             try:
                 # Validate data
-                if df is None or len(df) < 50:
+                if df is None or len(df) < MIN_DATA_ROWS_FOR_ANALYSIS:
                     raise ValueError(f"Insufficient data: {len(df) if df is not None else 0} rows")
 
                 if "close" not in df.columns or "volume" not in df.columns:
                     raise ValueError(f"Missing required columns: {list(df.columns)}")
 
-                # Get cached VNINDEX
-                cached_vnindex = self._vnindex_cache.get()
+                # Get cached VNINDEX asynchronously (non-blocking)
+                cached_vnindex = await self._vnindex_cache.get_async()
 
                 # Run ML analysis with timeout
                 ml_signal = await asyncio.wait_for(
@@ -1521,7 +1627,24 @@ class TradingOrchestrator:
                 parse_mode=parse_mode,
             )
         except Exception as e:
-            self._logger.error(f"Failed to send Telegram message: {e}")
+            error_msg = str(e)
+            # If Markdown/HTML parsing failed, retry without parse_mode
+            if "parse entities" in error_msg.lower() or "can't parse" in error_msg.lower():
+                self._logger.warning(f"Markdown parsing failed, retrying as plain text: {e}")
+                try:
+                    # Strip markdown formatting for plain text
+                    plain_text = (
+                        text.replace("**", "").replace("*", "").replace("`", "").replace("_", "")
+                    )
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=plain_text,
+                        parse_mode=None,
+                    )
+                except Exception as e2:
+                    self._logger.error(f"Failed to send plain text message: {e2}")
+            else:
+                self._logger.error(f"Failed to send Telegram message: {e}")
 
     async def _send_scan_start_message(
         self,
@@ -1543,8 +1666,8 @@ class TradingOrchestrator:
     async def _send_buy_notification(
         self,
         symbol: str,
-        entry_signal: Any,
-        position_size_info: Any,
+        entry_signal: EntryAnalysisResult,
+        position_size_info: PositionSizeResult,
     ) -> None:
         """Send buy signal notification."""
         message = self._formatter.format_buy_signal(symbol, entry_signal, position_size_info)
@@ -1568,7 +1691,9 @@ class TradingOrchestrator:
                     )
                     reason_counts[clean_reason] = reason_counts.get(clean_reason, 0) + 1
 
-            # Build summary message
+            # Build summary message - escape dynamic content
+            escape_md = TelegramMessageFormatter.escape_markdown
+
             summary = "🔍 *TỔNG HỢP KHÔNG TÌM THẤY TÍN HIỆU MUA*\n"
             summary += f"📊 Đã quét: {len(all_tickers)} mã\n"
             summary += f"📉 Không tìm thấy tín hiệu: {len(no_signal_symbols)} mã\n\n"
@@ -1576,7 +1701,8 @@ class TradingOrchestrator:
             summary += "*CHI TIẾT THEO NGUYÊN NHÂN:*\n"
             for reason, count in sorted(reason_counts.items(), key=lambda x: x[1], reverse=True):
                 percentage = (count / len(no_signal_symbols)) * 100
-                summary += f"• {reason}: {count} mã ({percentage:.1f}%)\n"
+                safe_reason = escape_md(reason)
+                summary += f"• {safe_reason}: {count} mã ({percentage:.1f}%)\n"
 
             # Add examples
             top_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:3]
@@ -1589,7 +1715,8 @@ class TradingOrchestrator:
                         if any(r.startswith(reason) for r in reasons)
                     ][:2]
                     if examples:
-                        summary += f"• {reason}: {', '.join(examples)}\n"
+                        safe_reason = escape_md(reason)
+                        summary += f"• {safe_reason}: {', '.join(examples)}\n"
 
             summary += f"\n⏰ {datetime.now().strftime('%H:%M %d/%m/%Y')}"
 
@@ -1643,7 +1770,9 @@ class TradingOrchestrator:
                     "shares": pos.get("shares", 0),
                     "avg_price": pos.get("avg_price", 0),
                     "current_price": pos.get("current_price", pos.get("avg_price", 0)),
-                    "stop_loss": pos.get("stop_loss", pos.get("avg_price", 0) * 0.93),
+                    "stop_loss": pos.get(
+                        "stop_loss", pos.get("avg_price", 0) * DEFAULT_STOP_LOSS_MULTIPLIER
+                    ),
                 }
                 for sym, pos in active_positions.items()
             }
@@ -1663,23 +1792,24 @@ class TradingOrchestrator:
     # UTILITY METHODS
     # =========================================================================
 
-    def _cleanup_stale_pending_exits(self) -> None:
+    async def _cleanup_stale_pending_exits(self) -> None:
         """Remove pending exits older than TTL."""
         now = datetime.now()
         stale_symbols = []
 
-        for symbol, data in self._pending_exits.items():
-            try:
-                timestamp = datetime.fromisoformat(data["timestamp"])
-                age_seconds = (now - timestamp).total_seconds()
-                if age_seconds > self._pending_exits_ttl:
+        async with self._pending_exits_lock:
+            for symbol, data in self._pending_exits.items():
+                try:
+                    timestamp = datetime.fromisoformat(data["timestamp"])
+                    age_seconds = (now - timestamp).total_seconds()
+                    if age_seconds > self._pending_exits_ttl:
+                        stale_symbols.append(symbol)
+                except (KeyError, ValueError):
                     stale_symbols.append(symbol)
-            except (KeyError, ValueError):
-                stale_symbols.append(symbol)
 
-        for symbol in stale_symbols:
-            del self._pending_exits[symbol]
-            self._logger.debug(f"🧹 Cleaned up stale pending exit for {symbol}")
+            for symbol in stale_symbols:
+                del self._pending_exits[symbol]
+                self._logger.debug(f"🧹 Cleaned up stale pending exit for {symbol}")
 
         if stale_symbols:
             self._logger.info(f"🧹 Cleaned up {len(stale_symbols)} stale pending exits")

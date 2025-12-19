@@ -2,13 +2,14 @@
 """
 Backtesting Engine - Test Trading Strategies with Historical Data
 
-IMPROVEMENTS V3:
+IMPROVEMENTS V4 (2025-01):
 - Vietnam lot size (100 shares) and tick size enforcement
 - Synchronized transaction costs from constants.py
 - Partial exit support
 - Circuit breaker and risk guards
 - Position size multiplier support
-- DYNAMIC SLIPPAGE based on symbol liquidity and order size (NEW v3)
+- VALIDATED SLIPPAGE based on real VN market data (NEW v4)
+- Session-aware slippage estimation
 """
 
 import logging
@@ -34,6 +35,19 @@ from src.config.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Try to import validated slippage from vn_market_data
+VN_VALIDATED_SLIPPAGE_AVAILABLE = False
+try:
+    from src.utils.vn_market_data import (
+        get_validated_slippage,
+        VALIDATED_SLIPPAGE_VN,
+    )
+
+    VN_VALIDATED_SLIPPAGE_AVAILABLE = True
+    logger.info("✅ Using validated VN market slippage data")
+except ImportError:
+    pass
 
 # Try to import VN30 fetcher for dynamic VN30 check
 VN30_DYNAMIC_AVAILABLE = False
@@ -79,8 +93,9 @@ class BacktestConfig:
     max_consecutive_losses: int = 3  # Block trading after N consecutive losses
     daily_loss_circuit_breaker: bool = True  # Enable daily loss circuit breaker
 
-    # IMPROVED v3: Dynamic slippage settings
+    # IMPROVED v4: Validated slippage settings based on real VN market data
     use_dynamic_slippage: bool = True  # Use dynamic slippage based on liquidity
+    use_validated_slippage: bool = True  # NEW v4: Use validated slippage from real market data
     slippage_vn30: float = VN_SLIPPAGE_VN30  # 0.3% for VN30 blue chips
     slippage_liquid: float = VN_SLIPPAGE_LIQUID  # 0.4% for liquid stocks
     slippage_medium: float = VN_SLIPPAGE_MEDIUM  # 0.6% for medium liquidity
@@ -97,7 +112,12 @@ def calculate_dynamic_slippage(
     """
     Calculate dynamic slippage based on symbol liquidity and order size.
 
-    IMPROVED v3: Matches production slippage calculation.
+    IMPROVED v4: Uses VALIDATED slippage from real VN market trading data.
+
+    Key improvements:
+    - Session-aware slippage (higher during lunch break, ATO/ATC)
+    - Order size impact using square-root model
+    - Validated against actual trading execution data
 
     Args:
         symbol: Stock symbol
@@ -107,13 +127,30 @@ def calculate_dynamic_slippage(
         config: BacktestConfig (optional)
 
     Returns:
-        Slippage rate (0.003 - 0.010)
+        Slippage rate (0.002 - 0.030)
     """
     if config is None:
         config = BacktestConfig()
 
     if not config.use_dynamic_slippage:
         return config.slippage
+
+    # NEW v4: Use validated slippage if available
+    if config.use_validated_slippage and VN_VALIDATED_SLIPPAGE_AVAILABLE:
+        try:
+            avg_daily_value = (
+                avg_daily_volume * avg_price if avg_daily_volume > 0 and avg_price > 0 else 0
+            )
+            result = get_validated_slippage(
+                symbol=symbol,
+                order_value=order_value,
+                avg_daily_value=avg_daily_value,
+                price=avg_price,
+                is_market_order=True,
+            )
+            return result.get("total_slippage", config.slippage)
+        except Exception as e:
+            logger.debug(f"Validated slippage failed for {symbol}: {e}")
 
     # Check if VN30 using dynamic fetcher
     is_vn30 = False
@@ -188,6 +225,12 @@ class Trade:
         slippage: float,
     ):
         """Close the trade and calculate PnL"""
+        # CRITICAL FIX: Validate exit_price to prevent calculation errors
+        if exit_price is None or exit_price <= 0:
+            raise ValueError(
+                f"Invalid exit_price: {exit_price}. " f"Must be a positive number for {self.symbol}"
+            )
+
         self.exit_date = exit_date
         self.exit_price = exit_price
         self.exit_reason = exit_reason
@@ -562,6 +605,11 @@ class BacktestEngine:
             logger.warning(f"Cannot close {symbol}: No open position")
             return None
 
+        # CRITICAL FIX: Validate exit_price before processing
+        if exit_price is None or exit_price <= 0:
+            logger.error(f"❌ [{symbol}] Invalid exit_price: {exit_price}. Cannot close position.")
+            return None
+
         trade = self.positions[symbol]
 
         # Round exit price to tick size
@@ -630,6 +678,13 @@ class BacktestEngine:
         """
         if symbol not in self.positions:
             logger.warning(f"Cannot partial close {symbol}: No open position")
+            return None
+
+        # CRITICAL FIX: Validate exit_price before processing
+        if exit_price is None or exit_price <= 0:
+            logger.error(
+                f"❌ [{symbol}] Invalid exit_price: {exit_price}. Cannot partial close position."
+            )
             return None
 
         trade = self.positions[symbol]

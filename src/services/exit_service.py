@@ -224,6 +224,22 @@ class ExitManagementService:
         decision = exit_decision["decision"]
         pos_data = exit_decision["position"]
 
+        # CRITICAL FIX: Use exit_price from decision if available, fallback to current_price
+        actual_exit_price = getattr(decision, "exit_price", None)
+        if actual_exit_price is None or actual_exit_price <= 0:
+            actual_exit_price = current_price
+            logger.warning(
+                f"⚠️ [{symbol}] decision.exit_price invalid ({getattr(decision, 'exit_price', 'N/A')}), "
+                f"using current_price ({current_price:,.0f})"
+            )
+
+        # Validate exit_price
+        if actual_exit_price <= 0:
+            logger.error(
+                f"❌ [{symbol}] Invalid exit_price: {actual_exit_price}. Cannot execute exit."
+            )
+            return False
+
         # Validate entry price
         if pos_data["avg_price"] <= 0:
             logger.error(
@@ -235,14 +251,14 @@ class ExitManagementService:
         # Calculate P&L
         pnl, pnl_pct = self._calculate_pnl(
             entry_price=pos_data["avg_price"],
-            current_price=current_price,
+            current_price=actual_exit_price,
             shares=pos_data["shares"],
         )
 
         # Execute paper trade
         success, message, _ = self.paper_account.execute_sell(
             symbol=symbol,
-            price=current_price,
+            price=actual_exit_price,
             exit_type=decision.exit_type,
             reason=decision.exit_reason.value,
         )

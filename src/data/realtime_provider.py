@@ -13,9 +13,10 @@ Features:
 - Circuit breaker pattern for API failures
 - Multi-source failover
 - Connection health monitoring
+- Data staleness handling with quality scoring
 
 Author: Trading Bot Team
-Version: 2.0.0 - Enhanced Error Handling
+Version: 2.1.0 - Added Data Staleness Handling
 """
 
 import asyncio
@@ -31,6 +32,13 @@ from queue import Queue
 from functools import wraps
 
 import pandas as pd
+
+from src.utils.data_staleness import (
+    DataStalenessMixin,
+    DataFreshness,
+    StalenessConfig,
+    STALENESS_CONFIGS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -404,8 +412,15 @@ class MarketDepth:
         return self.spread_score >= 70
 
 
-class BaseRealtimeProvider(ABC):
-    """Abstract base class for real-time data providers with enhanced error handling"""
+class BaseRealtimeProvider(DataStalenessMixin, ABC):
+    """Abstract base class for real-time data providers with enhanced error handling
+
+    Features data staleness handling:
+    - Per-symbol quote freshness tracking
+    - Stale data (>1 min) reduces weight by 15%
+    - Very stale data (>3 min) reduces weight by 50%
+    - Expired data (>5 min) not used for trading decisions
+    """
 
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
         self.api_key = api_key
@@ -415,6 +430,9 @@ class BaseRealtimeProvider(ABC):
         self._quote_cache: Dict[str, RealtimeQuote] = {}
         self._orderbook_cache: Dict[str, OrderBook] = {}
 
+        # Initialize staleness tracking with realtime config (strict)
+        self._init_staleness("realtime")
+
         # Error handling
         self._retry_config = RetryConfig()
         self._circuit_breaker = CircuitBreaker(self.__class__.__name__)
@@ -422,7 +440,7 @@ class BaseRealtimeProvider(ABC):
         self._error_count = 0
         self._consecutive_failures = 0
 
-        # Cache settings
+        # Cache settings - per-symbol timestamps
         self._cache_ttl_seconds = 5
         self._cache_timestamps: Dict[str, datetime] = {}
 
@@ -509,6 +527,99 @@ class BaseRealtimeProvider(ABC):
             "last_error": self._last_error,
             "cache_size": len(self._quote_cache),
         }
+
+    def is_quote_stale(self, symbol: str, max_delay_seconds: int = 60) -> bool:
+        """
+        Check if quote data for a symbol is stale.
+
+        Args:
+            symbol: Stock symbol
+            max_delay_seconds: Threshold in seconds (default 60)
+
+        Returns:
+            True if data is older than threshold
+        """
+        if symbol not in self._cache_timestamps:
+            return True
+
+        age = (datetime.now() - self._cache_timestamps[symbol]).total_seconds()
+        return age > max_delay_seconds
+
+    def get_quote_age_seconds(self, symbol: str) -> float:
+        """Get age of cached quote in seconds."""
+        if symbol not in self._cache_timestamps:
+            return float("inf")
+
+        return (datetime.now() - self._cache_timestamps[symbol]).total_seconds()
+
+    def get_quote_freshness(self, symbol: str) -> DataFreshness:
+        """
+        Get freshness level of quote data.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            DataFreshness level (FRESH, SLIGHTLY_STALE, STALE, VERY_STALE, EXPIRED)
+        """
+        age_seconds = self.get_quote_age_seconds(symbol)
+        age_minutes = age_seconds / 60
+
+        config = self._staleness_config
+        if age_minutes < config.fresh_threshold_minutes:
+            return DataFreshness.FRESH
+        elif age_minutes < config.slightly_stale_minutes:
+            return DataFreshness.SLIGHTLY_STALE
+        elif age_minutes < config.stale_threshold_minutes:
+            return DataFreshness.STALE
+        elif age_minutes < config.very_stale_threshold_minutes:
+            return DataFreshness.VERY_STALE
+        else:
+            return DataFreshness.EXPIRED
+
+    def get_quote_quality_weight(self, symbol: str) -> float:
+        """
+        Get quality weight for quote data based on freshness.
+
+        Args:
+            symbol: Stock symbol
+
+        Returns:
+            Weight factor 0.0-1.0
+        """
+        freshness = self.get_quote_freshness(symbol)
+        return self._staleness_config.get_weight_for_freshness(freshness)
+
+    def get_data_quality_status(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get data quality status for quote cache.
+
+        Args:
+            symbol: Specific symbol or None for overall status
+
+        Returns:
+            Dict with freshness, age, weight for decision making
+        """
+        if symbol:
+            return {
+                "symbol": symbol,
+                "freshness": self.get_quote_freshness(symbol).value,
+                "age_seconds": self.get_quote_age_seconds(symbol),
+                "weight_factor": self.get_quote_quality_weight(symbol),
+                "is_stale": self.is_quote_stale(symbol),
+                "has_data": symbol in self._quote_cache,
+            }
+        else:
+            # Overall status
+            stale_count = sum(1 for s in self._cache_timestamps if self.is_quote_stale(s))
+            fresh_count = len(self._cache_timestamps) - stale_count
+            return {
+                "cached_symbols": len(self._quote_cache),
+                "fresh_quotes": fresh_count,
+                "stale_quotes": stale_count,
+                "connected": self._connected,
+                "provider": self.provider_name,
+            }
 
 
 class SSIRealtimeProvider(BaseRealtimeProvider):

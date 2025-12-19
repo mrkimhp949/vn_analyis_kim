@@ -19,7 +19,7 @@ Tests cover:
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
 
 from src.strategies.exit_logic import (
@@ -32,6 +32,21 @@ from src.strategies.exit_logic import (
 # ============================================================================
 # FIXTURES
 # ============================================================================
+
+
+@pytest.fixture
+def mock_not_friday():
+    """Mock datetime to be Wednesday (not Friday) to avoid SESSION_END exit"""
+    import pytz
+
+    vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+    # Wednesday at 10:00 AM Vietnam time
+    mock_datetime = datetime(2024, 12, 18, 10, 0, 0, tzinfo=vn_tz)
+
+    with patch("src.strategies.exit_logic.datetime") as mock_dt:
+        mock_dt.now.return_value = mock_datetime
+        mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        yield mock_datetime
 
 
 @pytest.fixture
@@ -102,17 +117,17 @@ def sell_ml_signal():
 
 
 def test_exit_strategy_init_default():
-    """Test default initialization (v10.0 - refactored with ExitConfig)"""
+    """Test default initialization (v10.3 - RELAXED with ExitConfig)"""
     strategy = ImprovedExitStrategy()
 
-    # v10.0: Uses ExitConfig with VN market optimized defaults for R:R >= 1.5
-    # IMPROVED: 7%, 12%, 18% for better R:R ratio (net ~5.5%, ~10.5%, ~16.5% after costs)
-    assert strategy.tp_levels == [0.07, 0.12, 0.18]  # 3 TP levels (7%, 12%, 18%)
-    assert strategy.trailing_activation == 0.03  # v10.0: Activate at 3% profit
-    assert strategy.trailing_distance == 0.015  # v10.0: Trail 1.5% below peak
-    assert strategy.max_holding_days == 20  # v4.1: 20 days max
-    assert strategy.time_decay_threshold == 0.02  # v4.1: 2% threshold
-    assert strategy.default_stop_loss_pct == 0.04  # v10.0: 4% stop loss
+    # v10.3 RELAXED: Uses ExitConfig with VN market optimized defaults
+    # Lower targets to lock profits faster, wider stops to avoid premature stop-outs
+    assert strategy.tp_levels == [0.05, 0.08, 0.12]  # RELAXED: 5%, 8%, 12%
+    assert strategy.trailing_activation == 0.05  # RELAXED: Activate at 5% profit
+    assert strategy.trailing_distance == 0.03  # RELAXED: Trail 3% below peak
+    assert strategy.max_holding_days == 15  # 15 days max
+    assert strategy.time_decay_threshold == 0.02  # 2% threshold
+    assert strategy.default_stop_loss_pct == 0.05  # RELAXED: 5% stop loss
 
 
 def test_exit_strategy_init_custom():
@@ -484,6 +499,7 @@ def test_check_exit_time_decay_triggered(sample_stock_data):
     strategy = ImprovedExitStrategy(
         max_holding_days=15,
         time_decay_threshold=0.03,  # 3% threshold
+        exit_friday_if_marginal=False,  # Disable Friday check for predictable test
     )
 
     entry_price = 10000
@@ -600,7 +616,9 @@ def test_check_exit_market_crash_with_profit(sample_stock_data, bear_market_regi
 
 def test_check_exit_market_crash_small_loss(sample_stock_data, bear_market_regime):
     """Test market crash exit when in small loss"""
-    strategy = ImprovedExitStrategy()
+    strategy = ImprovedExitStrategy(
+        exit_friday_if_marginal=False,  # Disable Friday check for predictable test
+    )
 
     entry_price = 10000
     # With 1.6% transaction costs, need gross loss < 0.4% to have net loss > -2%
@@ -656,7 +674,9 @@ def test_check_exit_no_market_crash_bull(sample_stock_data, bull_market_regime):
 
 def test_check_exit_ml_sell_signal(sample_stock_data, sell_ml_signal):
     """Test ML sell signal exit"""
-    strategy = ImprovedExitStrategy()
+    strategy = ImprovedExitStrategy(
+        exit_friday_if_marginal=False,  # Disable Friday check for predictable test
+    )
 
     entry_price = 10000
     current_price = 10200  # +2% profit
@@ -1114,7 +1134,9 @@ def test_full_workflow_take_profit(sample_stock_data):
 
 def test_full_workflow_hold(sample_stock_data):
     """Test complete workflow - hold position"""
-    strategy = ImprovedExitStrategy()
+    strategy = ImprovedExitStrategy(
+        exit_friday_if_marginal=False,  # Disable Friday check for predictable test
+    )
 
     # Create simple bullish data to avoid triggering reversal patterns
     df = sample_stock_data.copy()

@@ -102,6 +102,20 @@ try:
 except ImportError:
     pass
 
+# NEW v10.2: Odd-Lot Trading Integration
+ODD_LOT_AVAILABLE = False
+try:
+    from src.utils.odd_lot_handler import get_odd_lot_handler, OddLotHandler
+
+    ODD_LOT_AVAILABLE = True
+except ImportError:
+    try:
+        from src.strategies.special_instruments import get_odd_lot_logic, OddLotTradingLogic
+
+        ODD_LOT_AVAILABLE = True
+    except ImportError:
+        pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +144,7 @@ class ExitReason(Enum):
     PANIC_SELLING = "Panic Selling (High volume at floor)"  # NEW v6.0
     GAP_DOWN_EMERGENCY = "Gap Down Emergency Exit"  # NEW v6.0
     NEWS_SENTIMENT_FORCE_EXIT = "Negative News Sentiment (Force Exit)"  # NEW v9.2
+    ODD_LOT_CLEANUP = "Odd-Lot Cleanup (Sell remaining <100 shares)"  # NEW v10.2
 
 
 @dataclass
@@ -153,85 +168,119 @@ class ExitConfig:
     Centralized exit configuration - loại bỏ magic numbers.
     Tất cả thresholds có thể config được.
 
-    IMPROVED v10.0: Optimized R:R ratio >= 1.5 for Vietnam market.
+    RELAXED v10.3: Lower TP levels for faster profit taking in VN market.
 
     Key improvements:
-    - TP levels adjusted for better R:R
-    - Stop loss tightened to 4% (net ~2.5% after costs)
+    - TP levels lowered for more frequent exits
+    - Stop loss relaxed to 5% for more room
     - Dynamic TP based on market regime
     - Transaction cost aware calculations
     """
 
-    # Take Profit levels - IMPROVED v10.0 for optimal R:R >= 1.5
+    # Take Profit levels - RELAXED v10.3 for faster profit taking
     # Vietnam market characteristics:
     # - Shorter cycles (2-4 weeks typical)
     # - Higher volatility (±7% daily limit)
     # - T+2 settlement affects holding decisions
     # - Transaction costs ~1.5% round trip
     #
-    # R:R Calculation (v10.0):
-    # - Stop Loss: 4% gross = ~2.5% net loss after costs
-    # - TP1: 7% gross = ~5.5% net profit → R:R = 5.5/2.5 = 2.2 ✓
-    # - TP2: 12% gross = ~10.5% net profit → R:R = 10.5/2.5 = 4.2 ✓
-    # - TP3: 18% gross = ~16.5% net profit → R:R = 16.5/2.5 = 6.6 ✓
-    take_profit_levels: Tuple[float, float, float] = (0.07, 0.12, 0.18)
+    # R:R Calculation (v10.3 RELAXED):
+    # - Stop Loss: 5% gross = ~3.5% net loss after costs
+    # - TP1: 5% gross = ~3.5% net profit → R:R = 1.0 (quick exit)
+    # - TP2: 8% gross = ~6.5% net profit → R:R = 1.85 ✓
+    # - TP3: 12% gross = ~10.5% net profit → R:R = 3.0 ✓
+    take_profit_levels: Tuple[float, float, float] = (0.05, 0.08, 0.12)  # RELAXED
 
-    # IMPROVED v10.0: Dynamic TP levels by market regime with R:R >= 1.5
-    # BULL: Wider targets to capture momentum (R:R ~2.5-7.0)
-    # BEAR: Tighter targets to lock profits quickly (R:R ~1.5-3.0)
-    # SIDEWAYS: Standard targets (R:R ~2.0-5.0)
-    # HIGH_VOL: Quick exits (R:R ~1.5-3.5)
+    # RELAXED v10.3: Dynamic TP levels by market regime
+    # Lower targets to lock profits faster
     use_dynamic_tp_levels: bool = True
-    tp_levels_bull: Tuple[float, float, float] = (0.10, 0.18, 0.28)  # SL 4% → R:R = 2.5, 4.5, 7.0
-    tp_levels_bear: Tuple[float, float, float] = (0.05, 0.08, 0.12)  # SL 3% → R:R = 1.5, 2.5, 3.5
-    tp_levels_sideways: Tuple[float, float, float] = (
+    tp_levels_bull: Tuple[float, float, float] = (
         0.07,
         0.12,
-        0.18,
-    )  # SL 4% → R:R = 1.75, 3.0, 4.5
+        0.20,
+    )  # RELAXED from (0.10, 0.18, 0.28)
+    tp_levels_bear: Tuple[float, float, float] = (
+        0.03,
+        0.05,
+        0.08,
+    )  # RELAXED from (0.05, 0.08, 0.12)
+    tp_levels_sideways: Tuple[float, float, float] = (
+        0.05,
+        0.08,
+        0.12,
+    )  # RELAXED from (0.07, 0.12, 0.18)
     tp_levels_high_volatility: Tuple[float, float, float] = (
-        0.06,
+        0.04,
+        0.07,
         0.10,
-        0.15,
-    )  # SL 4% → R:R = 1.5, 2.5, 3.75
+    )  # RELAXED from (0.06, 0.10, 0.15)
 
-    # Stop Loss - IMPROVED v10.0 with R:R optimization
-    # Tightened to improve R:R ratio while accounting for ~1.5% round trip cost
-    stop_loss_atr_multiplier: float = 1.8  # TIGHTENED from 2.0
-    default_stop_loss_pct: float = 0.04  # IMPROVED: 4% below entry (net ~2.5% after costs)
-    min_stop_loss_pct: float = 0.025  # Min 2.5% risk (net ~1% after costs) - for low beta
-    max_stop_loss_pct: float = 0.06  # Max 6% risk (net ~4.5% after costs) - for high beta
+    # Stop Loss - RELAXED v10.3 for more room to breathe
+    # Wider stops to avoid premature stop-outs
+    stop_loss_atr_multiplier: float = 2.0  # RELAXED from 1.8
+    default_stop_loss_pct: float = 0.05  # RELAXED: 5% below entry (was 4%)
+    min_stop_loss_pct: float = 0.03  # RELAXED: Min 3% risk (was 2.5%)
+    max_stop_loss_pct: float = 0.07  # RELAXED: Max 7% risk = VN limit (was 6%)
 
-    # Beta-adjusted stop loss - IMPROVED v10.0 for R:R consistency
+    # Beta-adjusted stop loss - RELAXED v10.3
     use_beta_adjusted_stops: bool = True
-    high_beta_stop_loss_pct: float = 0.06  # 6% for beta > 1.2 (wider for volatile stocks)
-    low_beta_stop_loss_pct: float = 0.03  # 3% for beta < 0.8 (tighter for stable stocks)
+    high_beta_stop_loss_pct: float = 0.07  # RELAXED: 7% for beta > 1.2 (was 6%)
+    low_beta_stop_loss_pct: float = 0.04  # RELAXED: 4% for beta < 0.8 (was 3%)
     high_beta_threshold: float = 1.2
     low_beta_threshold: float = 0.8
 
-    # NEW v10.0: Minimum R:R enforcement
-    min_risk_reward_ratio: float = 1.5  # Minimum acceptable R:R
-    target_risk_reward_ratio: float = 2.0  # Target R:R for position sizing
+    # RELAXED v10.3: Minimum R:R enforcement
+    min_risk_reward_ratio: float = 1.0  # RELAXED: was 1.5 - allow smaller R:R
+    target_risk_reward_ratio: float = 1.5  # RELAXED: was 2.0
 
-    # Trailing Stop - IMPROVED v10.0 for VN market
-    # More aggressive trailing to lock profits
-    trailing_stop_activation: float = 0.03  # Activate at 3% profit (net ~1.5% after costs)
-    trailing_stop_distance: float = 0.015  # TIGHTENED: Trail 1.5% below peak
-    trailing_stop_atr_multiplier: float = 1.5  # Tighter ATR multiplier
+    # Trailing Stop - RELAXED v10.3 for VN market
+    # Wider trailing to avoid whipsaws
+    trailing_stop_activation: float = 0.05  # RELAXED: Activate at 5% profit (was 4%)
+    trailing_stop_distance: float = 0.03  # RELAXED: Trail 3% below peak (was 2.5%)
+    trailing_stop_atr_multiplier: float = 2.0  # RELAXED: ATR multiplier (was 1.8)
     use_dynamic_trailing: bool = True
 
-    # NEW v10.0: Accelerated trailing after TP1
-    trailing_after_tp1_distance: float = 0.01  # 1% trailing after TP1 hit
-    trailing_acceleration_factor: float = 0.8  # Tighten trailing by 20% after each TP
+    # v10.3: Accelerated trailing after TP1 - RELAXED
+    trailing_after_tp1_distance: float = 0.02  # RELAXED: 2% after TP1 (was 1.5%)
+    trailing_acceleration_factor: float = 0.90  # RELAXED: Tighten by 10% (was 15%)
 
-    # Time Decay - IMPROVED v10.0 with T+2 awareness
-    max_holding_days: int = MAX_HOLDING_DAYS  # Now 15 days (was 20)
+    # NEW v10.2: Volatility-aware trailing
+    # Widen trailing stop in high volatility to avoid premature exits
+    use_volatility_adjusted_trailing: bool = True
+    high_vol_trailing_multiplier: float = 1.5  # 50% wider in high volatility
+    low_vol_trailing_multiplier: float = 0.8  # 20% tighter in low volatility
+
+    # Time Decay - RELAXED v10.3 with more patience
+    # Allow longer holding for trends to develop
+    max_holding_days: int = MAX_HOLDING_DAYS  # 15 days (reasonable for VN market)
     time_decay_threshold: float = DEFAULT_TIME_DECAY_THRESHOLD
     t2_settlement_days: int = 2
 
-    # NEW v10.0: Time-based exit acceleration - TIGHTENED for VN market
-    time_decay_start_day: int = 7  # TIGHTENED: Start reducing targets after day 7 (was 10)
-    time_decay_tp_reduction: float = 0.12  # TIGHTENED: Reduce TP by 12% per day (was 10%)
+    # v10.2: Time-based exit - BALANCED (not too aggressive)
+    # Start later and reduce slower to capture trends
+    time_decay_start_day: int = 10  # RELAXED: Start after day 10 (was 7)
+    time_decay_tp_reduction: float = 0.08  # RELAXED: Reduce TP by 8% per day (was 12%)
+
+    # v10.2: BEAR market time decay - BALANCED
+    # Still exit faster in BEAR but allow mean reversion
+    bear_market_max_holding_days: int = 8  # RELAXED: 8 days in BEAR (was 5)
+    bear_market_time_decay_threshold: float = 0.015  # RELAXED: 1.5% profit (was 1%)
+    bear_market_time_decay_start_day: int = 5  # RELAXED: Start after 5 days (was 3)
+    use_aggressive_bear_time_decay: bool = True  # Keep enabled but with relaxed settings
+
+    # NEW v10.2: Trend-aware time decay
+    # If price is trending up, extend holding period
+    use_trend_aware_time_decay: bool = True
+    trend_extension_days: int = 5  # Extend up to 5 days if in strong uptrend
+    trend_extension_min_profit: float = 0.03  # Min 3% profit to qualify for extension
+
+    # NEW v10.1: Momentum reversal exit
+    # Exit when trend momentum reverses sharply (avoid giving back profits)
+    use_momentum_reversal_exit: bool = True
+    momentum_reversal_rsi_drop: float = 15.0  # RSI drops 15+ points from peak = reversal
+    momentum_reversal_ema_cross: bool = True  # EMA 5 crosses below EMA 20 = bearish
+    momentum_reversal_min_profit: float = 0.02  # Only exit if in profit (2%+)
+    momentum_reversal_volume_confirm: float = 1.5  # Confirm with volume > 1.5x avg
 
     # Profit Protection - IMPROVED v10.0
     profit_protection_activation: float = 0.02  # Activate at 2% profit
@@ -276,6 +325,13 @@ class ExitConfig:
     poor_performer_tighter_stop_pct: float = 0.03
     poor_performer_win_rate_threshold: float = 0.35
     poor_performer_consecutive_losses: int = 2
+
+    # NEW v10.2: Odd-Lot Trading Settings
+    use_odd_lot_optimization: bool = True  # Enable odd-lot exit optimization
+    odd_lot_auto_cleanup: bool = True  # Auto-sell odd-lots when profitable
+    odd_lot_cleanup_min_profit_pct: float = 0.01  # Min 1% profit to cleanup odd-lot
+    odd_lot_max_hold_days: int = 5  # Max days to hold odd-lot before forced cleanup
+    odd_lot_cost_threshold_pct: float = 2.0  # Warn if costs > 2% for odd-lot
 
 
 # =============================================================================
@@ -641,6 +697,8 @@ class ImprovedExitStrategy:
             self._check_stop_loss,
             self._check_gap_down,  # NEW: Check gap down protection
             self._check_news_sentiment,  # NEW v9.2: Check news sentiment force exit
+            self._check_momentum_reversal,  # NEW v10.1: Momentum reversal detection
+            self._check_odd_lot_cleanup,  # NEW v10.2: Odd-lot remaining shares cleanup
             self._check_friday_weekend,  # NEW v4.2: Friday/weekend risk management
             self._check_breakeven_stop,  # Check breakeven stop after 1R profit
             self._check_session_boundary,
@@ -2081,6 +2139,11 @@ class ImprovedExitStrategy:
         1. Market regime (BULL/SIDEWAYS/BEAR)
         2. Trend strength (ADX)
         3. Per-symbol performance
+
+        IMPROVED v10.1: Aggressive time decay in BEAR market
+        - In BEAR, time works against you - exit faster
+        - Max 5 days holding in BEAR (vs 15 in BULL)
+        - Start time pressure after 3 days (vs 7 in BULL)
         """
         days_held = ctx["days_held"]
         pnl_percent = ctx["pnl_percent"]
@@ -2091,7 +2154,65 @@ class ImprovedExitStrategy:
         is_poor_performer = ctx["is_poor_performer"]
         symbol = ctx["symbol"]
 
-        # Calculate adaptive max holding days
+        # Get current regime
+        regime = market_regime.get("regime", "SIDEWAYS") if market_regime else "SIDEWAYS"
+
+        # NEW v10.1: Aggressive BEAR market time decay
+        if self.config.use_aggressive_bear_time_decay and regime == "BEAR":
+            bear_start_day = self.config.bear_market_time_decay_start_day  # 3 days
+            bear_max_days = self.config.bear_market_max_holding_days  # 5 days
+            bear_threshold = self.config.bear_market_time_decay_threshold * 100  # 1%
+
+            # Early exit check in BEAR - start pressure after 3 days
+            if days_held >= bear_start_day:
+                # Calculate minimum expected profit for days held
+                # Day 3: need 1%, Day 4: need 1.5%, Day 5: need 2%
+                min_expected_profit = bear_threshold + (days_held - bear_start_day) * 0.5
+
+                if pnl_percent < min_expected_profit:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.TIME_DECAY,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"⏰🐻 BEAR MARKET TIME PRESSURE ({days_held} days): "
+                            f"P&L {pnl_percent:+.2f}% < required {min_expected_profit:.1f}% - "
+                            f"Exit early to avoid further losses"
+                        ),
+                        urgency=3,
+                        metadata={
+                            "days_held": days_held,
+                            "bear_max_days": bear_max_days,
+                            "min_expected_profit": min_expected_profit,
+                            "regime": "BEAR",
+                        },
+                    )
+
+            # Force exit at bear max days
+            if days_held >= bear_max_days:
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.TIME_DECAY,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"⏰🐻 BEAR MAX HOLDING ({days_held} >= {bear_max_days} days): "
+                        f"Force exit with P&L {pnl_percent:+.2f}% - No edge holding longer in BEAR"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "days_held": days_held,
+                        "bear_max_days": bear_max_days,
+                        "regime": "BEAR",
+                    },
+                )
+
+        # Calculate adaptive max holding days (normal logic)
         adaptive_max_days = self._calculate_adaptive_holding_days(
             market_regime, df, is_poor_performer
         )
@@ -2224,6 +2345,287 @@ class ImprovedExitStrategy:
 
         except Exception as e:
             logger.debug(f"News sentiment exit check error: {e}")
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK #12: MOMENTUM REVERSAL (NEW v10.1)
+    # =========================================================================
+
+    def _check_momentum_reversal(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check for momentum reversal to exit before trend changes.
+
+        NEW v10.1: Detects sharp momentum reversals to protect profits.
+
+        Triggers when:
+        1. RSI drops 15+ points from recent peak (momentum loss)
+        2. EMA 5 crosses below EMA 20 (short-term trend reversal)
+        3. Confirmed by volume surge (distribution)
+
+        Only applies when position is in profit to protect gains.
+
+        Returns:
+            ExitDecision if momentum reversal detected, None otherwise
+        """
+        if not self.config.use_momentum_reversal_exit:
+            return None
+
+        df = ctx["df"]
+        pnl_percent = ctx["pnl_percent"]
+        pnl_amount = ctx["pnl_amount"]
+        current_price = ctx["current_price"]
+        symbol = ctx["symbol"]
+
+        # Only check if in profit (above threshold)
+        min_profit = self.config.momentum_reversal_min_profit * 100  # 2%
+        if pnl_percent < min_profit:
+            return None
+
+        if df is None or len(df) < 20:
+            return None
+
+        try:
+            reversal_signals = []
+            signal_strength = 0
+
+            # Signal 1: RSI Drop from peak
+            if "rsi" in df.columns:
+                current_rsi = safe_get_latest(df, "rsi", 50)
+                # Get RSI peak in last 10 periods
+                rsi_peak = df["rsi"].tail(10).max()
+                rsi_drop = rsi_peak - current_rsi
+
+                if rsi_drop >= self.config.momentum_reversal_rsi_drop:  # 15 points
+                    reversal_signals.append(
+                        f"RSI dropped {rsi_drop:.1f} points (peak: {rsi_peak:.0f})"
+                    )
+                    signal_strength += 2
+
+            # Signal 2: EMA Cross (bearish)
+            if self.config.momentum_reversal_ema_cross:
+                # Calculate EMA 5 and EMA 20
+                if len(df) >= 20:
+                    ema5 = df["close"].ewm(span=5).mean()
+                    ema20 = df["close"].ewm(span=20).mean()
+
+                    # Check for bearish cross (EMA5 just crossed below EMA20)
+                    if len(ema5) >= 2 and len(ema20) >= 2:
+                        prev_ema5 = ema5.iloc[-2]
+                        prev_ema20 = ema20.iloc[-2]
+                        curr_ema5 = ema5.iloc[-1]
+                        curr_ema20 = ema20.iloc[-1]
+
+                        # Bearish cross: EMA5 was above EMA20, now below
+                        if prev_ema5 >= prev_ema20 and curr_ema5 < curr_ema20:
+                            reversal_signals.append("EMA5 crossed below EMA20 (bearish)")
+                            signal_strength += 2
+
+                        # Already in bearish alignment
+                        elif curr_ema5 < curr_ema20:
+                            reversal_signals.append("EMA5 < EMA20 (bearish alignment)")
+                            signal_strength += 1
+
+            # Signal 3: Volume Confirmation
+            if "volume" in df.columns:
+                current_volume = safe_get_latest(df, "volume", 0)
+                avg_volume = df["volume"].tail(20).mean()
+
+                if avg_volume > 0:
+                    volume_ratio = current_volume / avg_volume
+                    if volume_ratio >= self.config.momentum_reversal_volume_confirm:  # 1.5x
+                        # Check if down day
+                        is_down = safe_get_latest(df, "close", 0) < safe_get_latest(df, "open", 0)
+                        if is_down:
+                            reversal_signals.append(f"Distribution volume ({volume_ratio:.1f}x)")
+                            signal_strength += 1
+
+            # Trigger exit if enough signals (need at least 2 signals or high strength)
+            if signal_strength >= 3 or (signal_strength >= 2 and len(reversal_signals) >= 2):
+                signals_text = " | ".join(reversal_signals[:3])
+
+                return ExitDecision(
+                    should_exit=True,
+                    exit_reason=ExitReason.REVERSAL_PATTERN,
+                    exit_type="FULL",
+                    exit_price=current_price,
+                    expected_pnl=pnl_amount,
+                    expected_pnl_percent=pnl_percent,
+                    message=(
+                        f"📉 MOMENTUM REVERSAL: {signals_text} | "
+                        f"Protecting {pnl_percent:+.2f}% profit"
+                    ),
+                    urgency=4,
+                    metadata={
+                        "reversal_signals": reversal_signals,
+                        "signal_strength": signal_strength,
+                        "pattern": "momentum_reversal",
+                    },
+                )
+
+            # Log potential reversal for monitoring
+            if reversal_signals:
+                logger.debug(
+                    f"📊 {symbol}: Potential momentum reversal: {reversal_signals} "
+                    f"(strength: {signal_strength}, threshold: 3)"
+                )
+
+        except Exception as e:
+            logger.debug(f"Momentum reversal check error: {e}")
+
+        return None
+
+    # =========================================================================
+    # EXIT CHECK: ODD-LOT CLEANUP (NEW v10.2)
+    # =========================================================================
+
+    def _check_odd_lot_cleanup(self, ctx: Dict) -> Optional[ExitDecision]:
+        """
+        Check if position has odd-lot shares that should be cleaned up.
+
+        NEW v10.2: Optimizes handling of remaining shares < 100.
+
+        Vietnam market rules:
+        - Standard lot size: 100 shares
+        - Odd-lot (1-99 shares): Higher spreads, minimum commission
+        - Best to sell when profitable to avoid cost inefficiency
+
+        Logic:
+        - If remaining shares < 100 AND profitable > 1% → SELL
+        - If holding odd-lot > 5 days → SELL (free up capital)
+        - Warn if cost ratio > 2%
+
+        Args:
+            ctx: Exit context dict
+
+        Returns:
+            ExitDecision or None
+        """
+        if not self.config.use_odd_lot_optimization:
+            return None
+
+        if not ODD_LOT_AVAILABLE:
+            return None
+
+        symbol = ctx.get("symbol", "")
+        entry_price = ctx.get("entry_price", 0)
+        current_price = ctx.get("current_price", 0)
+        pnl_percent = ctx.get("pnl_percent", 0)
+        pnl_amount = ctx.get("pnl_amount", 0)
+        days_held = ctx.get("days_held", 0)
+
+        try:
+            # Get remaining shares from context or position manager
+            remaining_shares = ctx.get("remaining_shares", 0)
+
+            if remaining_shares <= 0:
+                # Try to get from partial exit tracker
+                if self.partial_exit_tracker.has_partial_exit(symbol):
+                    # After partial exit, remaining is likely odd-lot
+                    # This needs position info from portfolio manager
+                    remaining_shares = ctx.get("position_quantity", 0)
+
+            if remaining_shares <= 0 or remaining_shares >= 100:
+                return None  # Not an odd-lot situation
+
+            # This is an odd-lot situation
+            logger.debug(f"📦 {symbol}: Odd-lot detected: {remaining_shares} shares")
+
+            # Get odd-lot handler
+            try:
+                odd_lot_handler = get_odd_lot_handler()
+            except NameError:
+                try:
+                    odd_lot_handler = get_odd_lot_logic()
+                except NameError:
+                    return None
+
+            # Analyze odd-lot
+            if hasattr(odd_lot_handler, "optimize_odd_lot_exit"):
+                result = odd_lot_handler.optimize_odd_lot_exit(
+                    remaining_shares=remaining_shares,
+                    current_price=current_price,
+                    avg_cost=entry_price,
+                )
+            else:
+                # Use basic analysis
+                result = odd_lot_handler.analyze_order(
+                    quantity=remaining_shares, price=current_price, is_sell=True
+                )
+
+            # Check if profitable and should cleanup
+            if self.config.odd_lot_auto_cleanup:
+                # Case 1: Profitable odd-lot → cleanup immediately
+                if pnl_percent >= self.config.odd_lot_cleanup_min_profit_pct * 100:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.ODD_LOT_CLEANUP,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount * remaining_shares,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"📦 ODD-LOT CLEANUP: Selling {remaining_shares} shares @ "
+                            f"{current_price:,.0f} | Net P&L: {pnl_percent:+.2f}%"
+                        ),
+                        urgency=2,
+                        metadata={
+                            "odd_lot_shares": remaining_shares,
+                            "action": "CLEANUP_PROFITABLE",
+                            "cost_analysis": result,
+                        },
+                    )
+
+                # Case 2: Held too long → cleanup to free capital
+                if days_held >= self.config.odd_lot_max_hold_days:
+                    return ExitDecision(
+                        should_exit=True,
+                        exit_reason=ExitReason.ODD_LOT_CLEANUP,
+                        exit_type="FULL",
+                        exit_price=current_price,
+                        expected_pnl=pnl_amount * remaining_shares,
+                        expected_pnl_percent=pnl_percent,
+                        message=(
+                            f"📦 ODD-LOT TIME LIMIT: Held {remaining_shares} shares for "
+                            f"{days_held} days (max: {self.config.odd_lot_max_hold_days}) | "
+                            f"P&L: {pnl_percent:+.2f}%"
+                        ),
+                        urgency=2,
+                        metadata={
+                            "odd_lot_shares": remaining_shares,
+                            "action": "CLEANUP_TIME_LIMIT",
+                            "days_held": days_held,
+                        },
+                    )
+
+            # Case 3: Check if worth trading (cost vs return)
+            if hasattr(odd_lot_handler, "is_worth_trading"):
+                is_worth, reason = odd_lot_handler.is_worth_trading(
+                    quantity=remaining_shares,
+                    price=current_price,
+                    expected_return_pct=max(0, pnl_percent),
+                )
+
+                if not is_worth and pnl_percent > 0:
+                    # Not worth selling now, but warn
+                    logger.info(
+                        f"📦 {symbol}: Odd-lot of {remaining_shares} shares - "
+                        f"not worth trading yet. {reason}"
+                    )
+
+            # Check cost efficiency warning
+            if hasattr(odd_lot_handler, "calculate_effective_cost"):
+                costs = odd_lot_handler.calculate_effective_cost(remaining_shares, current_price)
+                cost_pct = costs.get("cost_pct", 0)
+
+                if cost_pct > self.config.odd_lot_cost_threshold_pct:
+                    logger.warning(
+                        f"📦 {symbol}: Odd-lot costs high: {cost_pct:.1f}% > "
+                        f"{self.config.odd_lot_cost_threshold_pct}%"
+                    )
+
+        except Exception as e:
+            logger.debug(f"Odd-lot cleanup check error: {e}")
 
         return None
 

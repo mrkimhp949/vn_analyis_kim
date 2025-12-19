@@ -108,5 +108,38 @@
     "last_trade_date": "2025-12-03",
     "blocked": false,
     "blocked_reason": ""
+  },
+  "ABB": {
+    "symbol": "ABB",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-12-17",
+    "blocked": false,
+    "blocked_reason": ""
+  },
+  "DRC": {
+    "symbol": "DRC",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-12-17",
+    "blocked": false,
+    "blocked_reason": ""
+  },
+  "ACB": {
+    "symbol": "ACB",
+    "consecutive_losses": 1,
+    "total_trades": 1,
+    "total_wins": 0,
+    "total_losses": 1,
+    "win_rate": 0.0,
+    "last_trade_date": "2025-12-17",
+    "blocked": false,
+    "blocked_reason": ""
   }
 }

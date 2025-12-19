@@ -4,10 +4,21 @@ Pytest configuration and fixtures
 """
 import os
 import sys
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
+
+# Mock vnstock and vnai before any imports to prevent Unicode encoding issues on Windows
+sys.modules["vnai"] = MagicMock()
+sys.modules["vnai.scope"] = MagicMock()
+sys.modules["vnai.scope.promo"] = MagicMock()
+
+mock_vnstock = MagicMock()
+mock_vnstock_class = MagicMock()
+mock_vnstock.Vnstock = mock_vnstock_class
+sys.modules["vnstock"] = mock_vnstock
 
 
 @pytest.fixture(autouse=True, scope="session")

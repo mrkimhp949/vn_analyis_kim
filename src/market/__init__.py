@@ -45,6 +45,35 @@ try:
 except ImportError:
     VIETNAM_INDICATORS_AVAILABLE = False
 
+# Market Breadth Analyzer (NEW v9.3)
+try:
+    from src.market.market_breadth import (
+        MarketBreadthAnalyzer,
+        MarketBreadthData,
+        BreadthAnalysis,
+        BreadthSignal,
+        get_breadth_analyzer,
+    )
+
+    MARKET_BREADTH_AVAILABLE = True
+except ImportError:
+    MARKET_BREADTH_AVAILABLE = False
+
+# Event Calendar (NEW v9.4)
+try:
+    from src.market.event_calendar import (
+        VietnamEventCalendar,
+        EconomicEvent,
+        EventCalendarSummary,
+        EventType,
+        EventImpact,
+        get_event_calendar,
+    )
+
+    EVENT_CALENDAR_AVAILABLE = True
+except ImportError:
+    EVENT_CALENDAR_AVAILABLE = False
+
 __all__ = [
     # Core regime detection
     "MarketRegime",
@@ -75,4 +104,19 @@ __all__ = [
     "VietnamMarketIndicators",
     "get_vietnam_indicators",
     "VIETNAM_INDICATORS_AVAILABLE",
+    # Market Breadth (NEW v9.3)
+    "MarketBreadthAnalyzer",
+    "MarketBreadthData",
+    "BreadthAnalysis",
+    "BreadthSignal",
+    "get_breadth_analyzer",
+    "MARKET_BREADTH_AVAILABLE",
+    # Event Calendar (NEW v9.4)
+    "VietnamEventCalendar",
+    "EconomicEvent",
+    "EventCalendarSummary",
+    "EventType",
+    "EventImpact",
+    "get_event_calendar",
+    "EVENT_CALENDAR_AVAILABLE",
 ]

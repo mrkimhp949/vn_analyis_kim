@@ -1,7 +1,76 @@
 """
 Trading Constants - Centralized configuration values
 Replaces magic numbers throughout the codebase
+
+IMPROVEMENTS v4.2 (2025-01):
+- Integrated vn_market_data module for validated slippage
+- Realistic ML accuracy targets (55-60% not 65-70%)
+- Dynamic VN30 list with quarterly refresh
+- Comprehensive sector mapping
 """
+
+# =============================================================================
+# IMPORT VALIDATED VN MARKET DATA
+# =============================================================================
+try:
+    from src.utils.vn_market_data import (
+        # Slippage
+        get_validated_slippage,
+        VALIDATED_SLIPPAGE_VN,
+        # Sector
+        VN_SECTOR_MAP,
+        get_sector_for_symbol,
+        get_symbols_in_sector,
+        # VN30
+        is_vn30_dynamic,
+        get_vn30_dynamic,
+        # ML
+        calibrate_ml_confidence,
+        get_realistic_ml_config,
+    )
+
+    VN_MARKET_DATA_AVAILABLE = True
+except ImportError:
+    VN_MARKET_DATA_AVAILABLE = False
+    # Fallback implementations provided in this file
+
+# Sector mapping (fallback if vn_market_data not available)
+if not VN_MARKET_DATA_AVAILABLE:
+    # Basic sector mapping - see vn_market_data.py for complete mapping
+    SECTOR_MAP = {
+        "VCB": "BANKING",
+        "BID": "BANKING",
+        "CTG": "BANKING",
+        "TCB": "BANKING",
+        "MBB": "BANKING",
+        "ACB": "BANKING",
+        "VPB": "BANKING",
+        "HDB": "BANKING",
+        "VIC": "REAL_ESTATE",
+        "VHM": "REAL_ESTATE",
+        "VRE": "REAL_ESTATE",
+        "NVL": "REAL_ESTATE",
+        "FPT": "TECHNOLOGY",
+        "CMG": "TECHNOLOGY",
+        "VNM": "CONSUMER",
+        "MSN": "CONSUMER",
+        "SAB": "CONSUMER",
+        "MWG": "CONSUMER",
+        "GAS": "ENERGY",
+        "PLX": "ENERGY",
+        "PVD": "ENERGY",
+        "HPG": "INDUSTRIAL",
+        "HSG": "INDUSTRIAL",
+        "SSI": "SECURITIES",
+        "VND": "SECURITIES",
+        "HCM": "SECURITIES",
+    }
+
+    def get_sector_for_symbol(symbol: str) -> str:
+        return SECTOR_MAP.get(symbol.upper(), "UNKNOWN")
+
+else:
+    SECTOR_MAP = VN_SECTOR_MAP
 
 # Risk Management Constants - OPTIMIZED v3.0
 DEFAULT_RISK_PER_TRADE = 0.015  # TIGHTENED: 1.5% risk per trade (was 2%)
@@ -19,13 +88,27 @@ DEFAULT_SHORT_MA_PERIOD = 20  # 20-period short moving average
 DEFAULT_MEDIUM_MA_PERIOD = 50  # 50-period medium moving average
 DEFAULT_LONG_MA_PERIOD = 200  # 200-period long moving average
 
-# Risk/Reward Ratios - TIGHTENED v3.0
-DEFAULT_MIN_RISK_REWARD = 2.0  # TIGHTENED: Minimum 2:1 risk/reward (was 1.5)
-DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 2.5, 4.0]  # OPTIMIZED: Better R:R ratios
+# Risk/Reward Ratios - RELAXED v10.3 for more signals
+DEFAULT_MIN_RISK_REWARD = 1.5  # RELAXED: Minimum 1.5:1 risk/reward (was 2.0)
+DEFAULT_TAKE_PROFIT_RATIOS = [1.5, 2.5, 4.0]  # Keep TP ratios as is
 
 # Position Sizing Multipliers
 MIN_POSITION_MULTIPLIER = 0.3  # Minimum position size multiplier
 MAX_POSITION_MULTIPLIER = 1.5  # Maximum position size multiplier
+
+# =============================================================================
+# ORCHESTRATOR CONSTANTS - v5.1
+# =============================================================================
+# Data Quality Constants
+MIN_DATA_ROWS_FOR_ANALYSIS = 50  # Minimum rows required for technical/ML analysis
+MIN_DATA_ROWS_FOR_ML = 50  # Minimum rows for ML feature extraction
+
+# Default Take Profit / Stop Loss Multipliers
+DEFAULT_TAKE_PROFIT_MULTIPLIER = 1.10  # 10% take profit if not specified
+DEFAULT_STOP_LOSS_MULTIPLIER = 0.93  # 7% stop loss if not specified
+
+# Pending Exit TTL (seconds)
+PENDING_EXIT_TTL_SECONDS = 3600  # 1 hour TTL for pending exit confirmations
 
 # Market Regime Thresholds
 BULL_MARKET_THRESHOLD = 0.02  # 2% threshold for bull market
@@ -55,25 +138,36 @@ ADX_STRONG_TREND_THRESHOLD = 25  # ADX threshold for strong trend
 ADX_WEAK_TREND_THRESHOLD = 20  # ADX threshold for weak trend
 
 
-def get_adaptive_holding_days(regime: str, adx: float = 20, volatility: float = 0.02) -> int:
+def get_adaptive_holding_days(
+    regime: str,
+    adx: float = 20,
+    volatility: float = 0.02,
+    atr_percent: float = 0.0,
+    current_profit_pct: float = 0.0,
+    is_trending_up: bool = False,
+) -> int:
     """
-    Get adaptive max holding days based on market regime and trend strength.
+    Get adaptive max holding days based on market regime, trend strength, and ATR.
 
-    IMPROVED v5.0: Added volatility parameter for more dynamic adjustment.
+    IMPROVED v10.2: Added ATR-based calculation and profit-aware extension.
 
     Vietnam market characteristics:
     - T+2.5 settlement → minimum 3 days practical holding
     - High volatility → shorter holding to lock profits
     - Strong trends (ADX > 25) → can hold longer
     - ±7% daily limit → faster mean reversion
+    - ATR-based adjustment for more precision
 
     Args:
         regime: Market regime (BULL, BEAR, SIDEWAYS, HIGH_VOLATILITY)
         adx: Average Directional Index (trend strength, default 20)
         volatility: Market volatility as decimal (e.g., 0.02 = 2%)
+        atr_percent: ATR as percentage of price (e.g., 0.025 = 2.5%)
+        current_profit_pct: Current unrealized profit (for extension logic)
+        is_trending_up: Whether price is in uptrend (EMA alignment)
 
     Returns:
-        Maximum holding days (4-15)
+        Maximum holding days (4-20)
     """
     # Base days by regime
     if regime == "BULL":
@@ -96,16 +190,79 @@ def get_adaptive_holding_days(regime: str, adx: float = 20, volatility: float = 
     else:
         base_days = HOLDING_DAYS_DEFAULT  # 10 days default
 
-    # NEW v5.0: Further reduce based on volatility
-    # High volatility = shorter holding period
-    if volatility > 0.04:  # > 4% daily volatility
-        base_days = max(4, int(base_days * 0.6))  # Reduce by 40%
-    elif volatility > 0.03:  # > 3% daily volatility
-        base_days = max(4, int(base_days * 0.75))  # Reduce by 25%
-    elif volatility > 0.02:  # > 2% daily volatility
-        base_days = max(5, int(base_days * 0.9))  # Reduce by 10%
+    # NEW v10.2: ATR-based adjustment (more precise than volatility alone)
+    # Low ATR = stable price action = can hold longer
+    # High ATR = volatile = shorter holding
+    if atr_percent > 0:
+        if atr_percent > 0.04:  # ATR > 4% of price (very volatile)
+            base_days = max(4, int(base_days * 0.65))
+        elif atr_percent > 0.03:  # ATR 3-4%
+            base_days = max(5, int(base_days * 0.80))
+        elif atr_percent < 0.015:  # ATR < 1.5% (low volatility, stable)
+            base_days = min(20, int(base_days * 1.2))  # Extend by 20%
+    else:
+        # Fallback to volatility-based adjustment
+        if volatility > 0.04:  # > 4% daily volatility
+            base_days = max(4, int(base_days * 0.6))
+        elif volatility > 0.03:  # > 3% daily volatility
+            base_days = max(4, int(base_days * 0.75))
+        elif volatility > 0.02:  # > 2% daily volatility
+            base_days = max(5, int(base_days * 0.9))
+
+    # NEW v10.2: Profit-aware extension
+    # If trade is profitable and trending, allow more time
+    if current_profit_pct > 0.05 and is_trending_up:  # > 5% profit + uptrend
+        base_days = min(20, base_days + 5)  # Extend up to 5 days
+    elif current_profit_pct > 0.03 and is_trending_up:  # > 3% profit + uptrend
+        base_days = min(18, base_days + 3)  # Extend up to 3 days
+    elif current_profit_pct < -0.02:  # Losing position
+        base_days = max(4, base_days - 2)  # Shorten by 2 days
 
     return base_days
+
+
+# NEW v10.2: ATR-based holding days calculator
+def calculate_atr_based_holding_days(
+    atr: float,
+    price: float,
+    target_move_atr_multiple: float = 3.0,
+    min_days: int = 4,
+    max_days: int = 20,
+) -> int:
+    """
+    Calculate holding days based on expected ATR moves to reach target.
+
+    Logic: If target is 3 ATR away and average daily move is 1 ATR,
+    we need approximately 3-5 days to reach target (accounting for noise).
+
+    Args:
+        atr: Average True Range value
+        price: Current price
+        target_move_atr_multiple: How many ATRs to target profit (default 3)
+        min_days: Minimum holding days
+        max_days: Maximum holding days
+
+    Returns:
+        Recommended holding days
+    """
+    if atr <= 0 or price <= 0:
+        return 10  # Default fallback
+
+    atr_percent = atr / price
+
+    # Expected days = target ATR multiple * adjustment factor
+    # Adjustment factor accounts for noise (not every day moves 1 ATR)
+    noise_factor = 1.5  # Takes ~1.5x days due to market noise
+
+    expected_days = int(target_move_atr_multiple * noise_factor)
+
+    # Adjust for volatility level
+    if atr_percent > 0.03:  # High volatility - faster moves
+        expected_days = max(min_days, int(expected_days * 0.7))
+    elif atr_percent < 0.015:  # Low volatility - slower moves
+        expected_days = min(max_days, int(expected_days * 1.3))
+
+    return max(min_days, min(max_days, expected_days))
 
 
 # Commission and Slippage (Vietnam Market) - IMPROVED v4.0
@@ -572,7 +729,7 @@ TECH_SCORE_POOR = 0.2
 
 # Technical Confidence Threshold
 # IMPROVED v5.0: Increased from 55 to 60 for higher signal quality
-TECH_ONLY_MIN_CONFIDENCE = 60  # Min confidence for technical-only signals (was 55)
+TECH_ONLY_MIN_CONFIDENCE = 55  # Min confidence for technical-only signals (lowered from 60)
 
 # Per-Symbol Performance Tracking
 MIN_TRADES_FOR_POOR_PERFORMER = (
@@ -661,6 +818,157 @@ VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME = (
 
 # Circuit Breaker Improvements
 VN_MAX_CONSECUTIVE_WINS = 7  # Pause after 7 consecutive wins (was 5)
+
+# ============================================================================
+# NEW v9.7: Entry Logic Magic Numbers (Centralized)
+# ============================================================================
+# These constants were previously hardcoded in entry_logic.py
+# Centralizing them here for easier tuning and consistency
+
+# Gap Analysis Thresholds
+ENTRY_GAP_BLOCK_THRESHOLD = 0.05  # Block entry if gap > 5%
+ENTRY_GAP_WARN_THRESHOLD = 0.03  # Warn if gap > 3%
+ENTRY_GAP_FILL_MIN = -0.02  # Min gap for gap-fill opportunity
+ENTRY_GAP_FILL_MAX = -0.005  # Max gap for gap-fill opportunity
+
+# Accumulation/Distribution Thresholds
+AD_STRONG_ACCUMULATION_CMF = 0.10  # CMF > 0.10 = strong accumulation
+AD_MODERATE_ACCUMULATION_CMF = 0.05  # CMF > 0.05 = moderate accumulation
+AD_STRONG_DISTRIBUTION_CMF = -0.10  # CMF < -0.10 = strong distribution
+AD_MODERATE_DISTRIBUTION_CMF = -0.05  # CMF < -0.05 = moderate distribution
+AD_OBV_RISING_THRESHOLD = 1.05  # OBV short > long * 1.05 = rising
+AD_OBV_FALLING_THRESHOLD = 0.95  # OBV short < long * 0.95 = falling
+AD_PRICE_DIVERGENCE_THRESHOLD = 0.03  # 3% price rise with distribution = bearish divergence
+
+# Foreign Flow Thresholds
+FOREIGN_HEAVY_SELLING_PCT = -0.30  # Net selling > 30% = block
+FOREIGN_MODERATE_SELLING_PCT = -0.15  # Net selling > 15% = warning
+FOREIGN_LIGHT_SELLING_PCT = -0.05  # Net selling > 5% = light warning
+FOREIGN_HEAVY_BUYING_PCT = 0.25  # Net buying > 25% = strong positive
+FOREIGN_MODERATE_BUYING_PCT = 0.10  # Net buying > 10% = positive
+
+# Margin Availability Thresholds
+MARGIN_CRITICAL_THRESHOLD = 0.05  # < 5% available = block
+MARGIN_LOW_THRESHOLD = 0.15  # < 15% available = warning
+MARGIN_MODERATE_THRESHOLD = 0.30  # < 30% available = reduce position
+MARGIN_HIGH_PENDING_THRESHOLD = 0.30  # > 30% pending settlement = warning
+
+# Consecutive Loss Protection
+CONSECUTIVE_LOSS_DEFAULT_LIMIT = 3  # Block after 3 consecutive losses
+CONSECUTIVE_LOSS_DEFAULT_COOLDOWN = 5  # 5 days cool-down period
+
+# Intraday Momentum Thresholds
+INTRADAY_MOMENTUM_THRESHOLD = 0.03  # 3% intraday move threshold
+VN30_DIVERGENCE_THRESHOLD = 0.04  # 4% divergence from VN30 threshold
+
+# Pre-Holiday Risk
+PRE_HOLIDAY_DEFAULT_DAYS = 3  # Days before major holiday to reduce exposure
+
+# Sector Exposure Defaults (when circuit_breaker not available)
+SECTOR_EXPOSURE_BANKING = 0.25
+SECTOR_EXPOSURE_REAL_ESTATE = 0.20
+SECTOR_EXPOSURE_SECURITIES = 0.15
+SECTOR_EXPOSURE_TECHNOLOGY = 0.30
+SECTOR_EXPOSURE_CONSUMER = 0.30
+SECTOR_EXPOSURE_DEFAULT = 0.25
+SECTOR_EXPOSURE_BEAR_MULTIPLIER = 0.6  # Reduce by 40% in BEAR/HIGH_VOL
+
+# Support/Resistance Additional
+SR_HIGH_DISTANCE_THRESHOLD = 0.005  # 0.5% from high
+SR_AVG_PRICE_MULTIPLIER = 1.01  # 1% above 3-bar avg for sustained move
+
+# ============================================================================
+# NEW v9.8: Entry Logic Improvements (Recommendations Implementation)
+# ============================================================================
+
+# Filter Priority System - Categorize filters by importance
+# CRITICAL: Must pass, no exceptions
+# IMPORTANT: High weight, can add warnings
+# OPTIONAL: Low weight, informational
+FILTER_PRIORITY_CRITICAL = ["price_limit", "liquidity", "margin_check", "consecutive_loss"]
+FILTER_PRIORITY_IMPORTANT = ["trend", "rsi", "foreign_flow", "volatility", "correlation"]
+FILTER_PRIORITY_OPTIONAL = ["session_timing", "gap_analysis", "pre_holiday", "order_book"]
+
+# Filter Weights for Entry Quality Score
+FILTER_WEIGHT_CRITICAL = 2.0  # Critical filters have 2x weight
+FILTER_WEIGHT_IMPORTANT = 1.5  # Important filters have 1.5x weight
+FILTER_WEIGHT_OPTIONAL = 1.0  # Optional filters have 1x weight
+
+# Entry Quality Score Thresholds
+ENTRY_QUALITY_EXCELLENT = 0.85  # >= 85% = excellent entry
+ENTRY_QUALITY_GOOD = 0.70  # >= 70% = good entry
+ENTRY_QUALITY_ACCEPTABLE = 0.55  # >= 55% = acceptable entry
+ENTRY_QUALITY_POOR = 0.40  # >= 40% = poor entry, reduce size
+ENTRY_QUALITY_REJECT = 0.40  # < 40% = reject entry
+
+# Dynamic Intraday Momentum Thresholds (ATR-based)
+# Instead of fixed 3%, use ATR multiplier
+INTRADAY_MOMENTUM_ATR_MULTIPLIER = 1.5  # 1.5x ATR as threshold
+INTRADAY_MOMENTUM_MIN_THRESHOLD = 0.025  # Min 2.5% threshold
+INTRADAY_MOMENTUM_MAX_THRESHOLD = 0.06  # Max 6% threshold
+INTRADAY_MOMENTUM_BLOCK_MULTIPLIER = 1.5  # Block at 1.5x threshold
+
+# Dynamic Gap Thresholds (ATR-based)
+GAP_ATR_MULTIPLIER = 2.0  # 2x ATR as gap threshold
+GAP_MIN_BLOCK_THRESHOLD = 0.04  # Min 4% to block
+GAP_MAX_BLOCK_THRESHOLD = 0.08  # Max 8% to block
+GAP_BREAKOUT_VOLUME_CONFIRM = 2.0  # 2x volume confirms breakout gap
+
+# Consecutive Loss Protection - Weighted by Loss Magnitude
+CONSECUTIVE_LOSS_SMALL_THRESHOLD = 0.03  # < 3% loss = small
+CONSECUTIVE_LOSS_MEDIUM_THRESHOLD = 0.06  # 3-6% loss = medium
+CONSECUTIVE_LOSS_LARGE_THRESHOLD = 0.10  # > 6% loss = large
+CONSECUTIVE_LOSS_SMALL_WEIGHT = 0.5  # Small loss counts as 0.5
+CONSECUTIVE_LOSS_MEDIUM_WEIGHT = 1.0  # Medium loss counts as 1.0
+CONSECUTIVE_LOSS_LARGE_WEIGHT = 2.0  # Large loss counts as 2.0
+CONSECUTIVE_LOSS_WEIGHTED_LIMIT = 3.0  # Block when weighted sum >= 3.0
+
+# Fast Path for High Confidence Signals
+FAST_PATH_MIN_CONFIDENCE = 80  # Skip optional filters if confidence >= 80%
+FAST_PATH_MIN_RR = 2.5  # And R:R >= 2.5
+FAST_PATH_SKIP_FILTERS = ["session_timing", "gap_analysis", "pre_holiday"]
+
+# Time-of-Day Entry Optimization (Vietnam Market)
+# Best entry times based on historical analysis
+ENTRY_OPTIMAL_MORNING_START = (9, 30)  # 9:30 AM
+ENTRY_OPTIMAL_MORNING_END = (10, 30)  # 10:30 AM
+ENTRY_OPTIMAL_AFTERNOON_START = (13, 30)  # 1:30 PM
+ENTRY_OPTIMAL_AFTERNOON_END = (14, 15)  # 2:15 PM
+ENTRY_AVOID_LUNCH_START = (11, 0)  # 11:00 AM
+ENTRY_AVOID_LUNCH_END = (11, 30)  # 11:30 AM
+ENTRY_TIME_OPTIMAL_BONUS = 5  # +5 confidence for optimal time
+ENTRY_TIME_AVOID_PENALTY = -10  # -10 confidence for avoid time
+
+# ============================================================================
+# NEW v9.9: Sector Breadth & Earnings Event Constants
+# ============================================================================
+
+# Sector Breadth Thresholds
+SECTOR_BREADTH_STRONG = 0.60  # >= 60% bullish = strong sector
+SECTOR_BREADTH_NEUTRAL = 0.50  # >= 50% bullish = neutral
+SECTOR_BREADTH_WEAK = 0.40  # >= 40% bullish = weak
+SECTOR_BREADTH_VERY_WEAK = 0.25  # >= 25% bullish = very weak
+SECTOR_BREADTH_BLOCK = 0.25  # < 25% bullish = block entry
+
+# Sector Breadth Adjustments
+SECTOR_BREADTH_STRONG_BONUS = 10  # +10 confidence for strong breadth
+SECTOR_BREADTH_NEUTRAL_BONUS = 3  # +3 confidence for neutral breadth
+SECTOR_BREADTH_WEAK_PENALTY = -5  # -5 confidence for weak breadth
+SECTOR_BREADTH_VERY_WEAK_PENALTY = -15  # -15 confidence for very weak breadth
+
+# Earnings Event Block Thresholds (Days before earnings)
+EARNINGS_BLOCK_DAYS = 3  # Block entry if earnings < 3 days
+EARNINGS_WARNING_DAYS = 7  # Warning if earnings 3-7 days
+EARNINGS_CAUTION_DAYS = 14  # Light warning if earnings 7-14 days
+
+# Earnings Event Position Multipliers
+EARNINGS_WARNING_POSITION_MULT = 0.50  # 50% position if earnings 3-7 days
+EARNINGS_CAUTION_POSITION_MULT = 0.75  # 75% position if earnings 7-14 days
+EARNINGS_SEASON_POSITION_MULT = 0.90  # 90% position during earnings season
+
+# Vietnam Earnings Seasons (months when earnings typically released)
+# Q4: Jan-Feb | Q1: Apr-May | Q2: Jul-Aug | Q3: Oct-Nov
+VN_EARNINGS_MONTHS = [1, 2, 4, 5, 7, 8, 10, 11]
 
 # Export all constants
 __all__ = [
@@ -875,4 +1183,94 @@ __all__ = [
     "VN_FLOOR_BOUNCE_IMMEDIATE_EXIT_VOLUME",
     # NEW v5.0: Circuit Breaker
     "VN_MAX_CONSECUTIVE_WINS",
+    # NEW v9.7: Entry Logic Magic Numbers
+    "ENTRY_GAP_BLOCK_THRESHOLD",
+    "ENTRY_GAP_WARN_THRESHOLD",
+    "ENTRY_GAP_FILL_MIN",
+    "ENTRY_GAP_FILL_MAX",
+    "AD_STRONG_ACCUMULATION_CMF",
+    "AD_MODERATE_ACCUMULATION_CMF",
+    "AD_STRONG_DISTRIBUTION_CMF",
+    "AD_MODERATE_DISTRIBUTION_CMF",
+    "AD_OBV_RISING_THRESHOLD",
+    "AD_OBV_FALLING_THRESHOLD",
+    "AD_PRICE_DIVERGENCE_THRESHOLD",
+    "FOREIGN_HEAVY_SELLING_PCT",
+    "FOREIGN_MODERATE_SELLING_PCT",
+    "FOREIGN_LIGHT_SELLING_PCT",
+    "FOREIGN_HEAVY_BUYING_PCT",
+    "FOREIGN_MODERATE_BUYING_PCT",
+    "MARGIN_CRITICAL_THRESHOLD",
+    "MARGIN_LOW_THRESHOLD",
+    "MARGIN_MODERATE_THRESHOLD",
+    "MARGIN_HIGH_PENDING_THRESHOLD",
+    "CONSECUTIVE_LOSS_DEFAULT_LIMIT",
+    "CONSECUTIVE_LOSS_DEFAULT_COOLDOWN",
+    "INTRADAY_MOMENTUM_THRESHOLD",
+    "VN30_DIVERGENCE_THRESHOLD",
+    "PRE_HOLIDAY_DEFAULT_DAYS",
+    "SECTOR_EXPOSURE_BANKING",
+    "SECTOR_EXPOSURE_REAL_ESTATE",
+    "SECTOR_EXPOSURE_SECURITIES",
+    "SECTOR_EXPOSURE_TECHNOLOGY",
+    "SECTOR_EXPOSURE_CONSUMER",
+    "SECTOR_EXPOSURE_DEFAULT",
+    "SECTOR_EXPOSURE_BEAR_MULTIPLIER",
+    "SR_HIGH_DISTANCE_THRESHOLD",
+    "SR_AVG_PRICE_MULTIPLIER",
+    # NEW v9.8: Entry Logic Improvements
+    "FILTER_PRIORITY_CRITICAL",
+    "FILTER_PRIORITY_IMPORTANT",
+    "FILTER_PRIORITY_OPTIONAL",
+    "FILTER_WEIGHT_CRITICAL",
+    "FILTER_WEIGHT_IMPORTANT",
+    "FILTER_WEIGHT_OPTIONAL",
+    "ENTRY_QUALITY_EXCELLENT",
+    "ENTRY_QUALITY_GOOD",
+    "ENTRY_QUALITY_ACCEPTABLE",
+    "ENTRY_QUALITY_POOR",
+    "ENTRY_QUALITY_REJECT",
+    "INTRADAY_MOMENTUM_ATR_MULTIPLIER",
+    "INTRADAY_MOMENTUM_MIN_THRESHOLD",
+    "INTRADAY_MOMENTUM_MAX_THRESHOLD",
+    "INTRADAY_MOMENTUM_BLOCK_MULTIPLIER",
+    "GAP_ATR_MULTIPLIER",
+    "GAP_MIN_BLOCK_THRESHOLD",
+    "GAP_MAX_BLOCK_THRESHOLD",
+    "GAP_BREAKOUT_VOLUME_CONFIRM",
+    "CONSECUTIVE_LOSS_SMALL_THRESHOLD",
+    "CONSECUTIVE_LOSS_MEDIUM_THRESHOLD",
+    "CONSECUTIVE_LOSS_LARGE_THRESHOLD",
+    "CONSECUTIVE_LOSS_SMALL_WEIGHT",
+    "CONSECUTIVE_LOSS_MEDIUM_WEIGHT",
+    "CONSECUTIVE_LOSS_LARGE_WEIGHT",
+    "CONSECUTIVE_LOSS_WEIGHTED_LIMIT",
+    "FAST_PATH_MIN_CONFIDENCE",
+    "FAST_PATH_MIN_RR",
+    "FAST_PATH_SKIP_FILTERS",
+    "ENTRY_OPTIMAL_MORNING_START",
+    "ENTRY_OPTIMAL_MORNING_END",
+    "ENTRY_OPTIMAL_AFTERNOON_START",
+    "ENTRY_OPTIMAL_AFTERNOON_END",
+    "ENTRY_AVOID_LUNCH_START",
+    "ENTRY_AVOID_LUNCH_END",
+    "ENTRY_TIME_OPTIMAL_BONUS",
+    "ENTRY_TIME_AVOID_PENALTY",
+    # NEW v9.9: Sector Breadth & Earnings Event Constants
+    "SECTOR_BREADTH_STRONG",
+    "SECTOR_BREADTH_NEUTRAL",
+    "SECTOR_BREADTH_WEAK",
+    "SECTOR_BREADTH_VERY_WEAK",
+    "SECTOR_BREADTH_BLOCK",
+    "SECTOR_BREADTH_STRONG_BONUS",
+    "SECTOR_BREADTH_NEUTRAL_BONUS",
+    "SECTOR_BREADTH_WEAK_PENALTY",
+    "SECTOR_BREADTH_VERY_WEAK_PENALTY",
+    "EARNINGS_BLOCK_DAYS",
+    "EARNINGS_WARNING_DAYS",
+    "EARNINGS_CAUTION_DAYS",
+    "EARNINGS_WARNING_POSITION_MULT",
+    "EARNINGS_CAUTION_POSITION_MULT",
+    "EARNINGS_SEASON_POSITION_MULT",
+    "VN_EARNINGS_MONTHS",
 ]

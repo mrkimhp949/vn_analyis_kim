@@ -2,12 +2,13 @@
 Circuit Breaker - Giới hạn trades và loss per day
 Bảo vệ khỏi lỗi logic hoặc market anomaly
 
-IMPROVED v6.1:
+IMPROVED v6.2:
 - Database-backed storage option (see circuit_breaker_db.py)
 - Regime-aware consecutive loss limits
 - Distributed locking for multiple bots
 - Sector-specific circuit breakers (Banking, Real Estate more sensitive)
 - Enhanced gradual response system
+- Integrated with vn_market_data for sector classification
 """
 
 import json
@@ -20,67 +21,144 @@ from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Import sector mapping from vn_market_data
+try:
+    from src.utils.vn_market_data import get_sector_for_symbol, VN_SECTOR_MAP
+
+    VN_SECTOR_AVAILABLE = True
+except ImportError:
+    VN_SECTOR_AVAILABLE = False
+
+    def get_sector_for_symbol(symbol: str) -> str:
+        """Fallback sector lookup."""
+        # Basic fallback mapping
+        BASIC_SECTOR_MAP = {
+            "VCB": "BANKING",
+            "BID": "BANKING",
+            "CTG": "BANKING",
+            "TCB": "BANKING",
+            "MBB": "BANKING",
+            "ACB": "BANKING",
+            "VPB": "BANKING",
+            "HDB": "BANKING",
+            "VIC": "REAL_ESTATE",
+            "VHM": "REAL_ESTATE",
+            "VRE": "REAL_ESTATE",
+            "SSI": "SECURITIES",
+            "VND": "SECURITIES",
+            "HCM": "SECURITIES",
+            "FPT": "TECHNOLOGY",
+            "VNM": "CONSUMER",
+            "GAS": "ENERGY",
+            "HPG": "INDUSTRIAL",
+        }
+        return BASIC_SECTOR_MAP.get(symbol.upper(), "DEFAULT")
+
 
 # =============================================================================
-# SECTOR-SPECIFIC THRESHOLDS - IMPROVED v6.1
+# SECTOR-SPECIFIC THRESHOLDS - RELAXED v10.3
 # =============================================================================
 # Different sectors have different risk profiles in Vietnam market:
 # - BANKING: Most sensitive to market drops, high correlation with VNINDEX
 # - REAL_ESTATE: High volatility, can drop faster than market
 # - TECHNOLOGY: Can recover quickly, more resilient
 # - CONSUMER: Defensive, less volatile
+#
+# RELAXED v10.3: More lenient thresholds to allow more trading
+# Use get_sector_for_symbol() for comprehensive sector lookup
 # =============================================================================
 
 SECTOR_CIRCUIT_BREAKER_THRESHOLDS = {
     "BANKING": {
-        "vnindex_drop_threshold": -0.015,  # -1.5% (stricter - banks drop faster)
-        "max_consecutive_losses": 2,  # Stricter
-        "max_sector_exposure": 0.25,  # 25% max exposure to banking
+        "vnindex_drop_threshold": -0.025,  # RELAXED: -2.5% (was -1.5%)
+        "max_consecutive_losses": 4,  # RELAXED: was 2
+        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
+        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
         "description": "Banking sector - high correlation with market",
     },
     "REAL_ESTATE": {
-        "vnindex_drop_threshold": -0.025,  # -2.5% (more volatile)
-        "max_consecutive_losses": 2,  # Stricter
-        "max_sector_exposure": 0.20,  # 20% max exposure to RE
+        "vnindex_drop_threshold": -0.035,  # RELAXED: -3.5% (was -2.5%)
+        "max_consecutive_losses": 4,  # RELAXED: was 2
+        "max_sector_exposure": 0.30,  # RELAXED: 30% max (was 20%)
+        "max_sector_exposure_bear": 0.15,  # RELAXED: 15% in BEAR (was 10%)
         "description": "Real Estate - high volatility sector",
     },
     "SECURITIES": {
-        "vnindex_drop_threshold": -0.015,  # -1.5% (very sensitive)
-        "max_consecutive_losses": 2,  # Stricter
-        "max_sector_exposure": 0.15,  # 15% max exposure
+        "vnindex_drop_threshold": -0.025,  # RELAXED: -2.5% (was -1.5%)
+        "max_consecutive_losses": 4,  # RELAXED: was 2
+        "max_sector_exposure": 0.25,  # RELAXED: 25% max (was 15%)
+        "max_sector_exposure_bear": 0.10,  # RELAXED: 10% in BEAR (was 5%)
         "description": "Securities - extremely sensitive to market",
     },
     "TECHNOLOGY": {
-        "vnindex_drop_threshold": -0.030,  # -3.0% (more resilient)
-        "max_consecutive_losses": 4,  # More lenient
-        "max_sector_exposure": 0.30,  # 30% max exposure
+        "vnindex_drop_threshold": -0.040,  # RELAXED: -4.0% (was -3.0%)
+        "max_consecutive_losses": 5,  # RELAXED: was 4
+        "max_sector_exposure": 0.40,  # RELAXED: 40% max (was 30%)
+        "max_sector_exposure_bear": 0.25,  # RELAXED: 25% in BEAR (was 20%)
         "description": "Technology - can recover quickly",
     },
     "CONSUMER": {
-        "vnindex_drop_threshold": -0.030,  # -3.0% (defensive)
-        "max_consecutive_losses": 4,  # More lenient
-        "max_sector_exposure": 0.30,  # 30% max exposure
+        "vnindex_drop_threshold": -0.040,  # RELAXED: -4.0% (was -3.0%)
+        "max_consecutive_losses": 5,  # RELAXED: was 4
+        "max_sector_exposure": 0.40,  # RELAXED: 40% max (was 30%)
+        "max_sector_exposure_bear": 0.30,  # RELAXED: 30% in BEAR (was 25%)
         "description": "Consumer - defensive sector",
     },
     "ENERGY": {
-        "vnindex_drop_threshold": -0.025,  # -2.5% (standard)
-        "max_consecutive_losses": 3,  # Standard
-        "max_sector_exposure": 0.25,  # 25% max exposure
+        "vnindex_drop_threshold": -0.035,  # RELAXED: -3.5% (was -2.5%)
+        "max_consecutive_losses": 4,  # RELAXED: was 3
+        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
+        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
         "description": "Energy - moderate volatility",
     },
     "INDUSTRIAL": {
-        "vnindex_drop_threshold": -0.025,  # -2.5% (standard)
-        "max_consecutive_losses": 3,  # Standard
-        "max_sector_exposure": 0.25,  # 25% max exposure
+        "vnindex_drop_threshold": -0.035,  # RELAXED: -3.5% (was -2.5%)
+        "max_consecutive_losses": 4,  # RELAXED: was 3
+        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
+        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
         "description": "Industrial - cyclical sector",
     },
     "DEFAULT": {
-        "vnindex_drop_threshold": -0.020,  # -2.0% (conservative default)
-        "max_consecutive_losses": 3,  # Standard
-        "max_sector_exposure": 0.25,  # 25% max exposure
+        "vnindex_drop_threshold": -0.030,  # RELAXED: -3.0% (was -2.0%)
+        "max_consecutive_losses": 5,  # RELAXED: was 3
+        "max_sector_exposure": 0.35,  # RELAXED: 35% max (was 25%)
+        "max_sector_exposure_bear": 0.20,  # RELAXED: 20% in BEAR (was 15%)
         "description": "Default sector settings",
     },
 }
+
+
+def get_sector_max_exposure(sector: str, market_regime: str = "SIDEWAYS") -> float:
+    """
+    Get dynamic max sector exposure based on market regime.
+
+    NEW v6.2: Reduces sector exposure in BEAR market.
+
+    In BEAR market:
+    - Banking: 25% → 15% (high correlation with market drops)
+    - Real Estate: 20% → 10% (very volatile in downturns)
+    - Securities: 15% → 5% (extremely sensitive)
+    - Technology: 30% → 20% (more resilient)
+    - Consumer: 30% → 25% (defensive, holds better)
+
+    Args:
+        sector: Sector name (e.g., "BANKING", "REAL_ESTATE")
+        market_regime: Market regime ("BULL", "BEAR", "SIDEWAYS", "HIGH_VOLATILITY")
+
+    Returns:
+        Max sector exposure as decimal (e.g., 0.25 = 25%)
+    """
+    sector_config = SECTOR_CIRCUIT_BREAKER_THRESHOLDS.get(
+        sector.upper(), SECTOR_CIRCUIT_BREAKER_THRESHOLDS["DEFAULT"]
+    )
+
+    if market_regime in ("BEAR", "HIGH_VOLATILITY"):
+        return sector_config.get(
+            "max_sector_exposure_bear",
+            sector_config["max_sector_exposure"] * 0.6,  # Fallback: 60% of normal
+        )
+    else:
+        return sector_config["max_sector_exposure"]
 
 
 @dataclass

@@ -420,12 +420,15 @@ class TechnicalScorer:
         Determine signal type from technical analysis.
         Multi-indicator check instead of simple 2-candle comparison.
 
-        Scoring System (need >= 3 points for BUY, <= -3 for SELL):
+        Scoring System (need >= 2.5 points for BUY, <= -3 for SELL):
         - EMA20 > EMA50: +2 (trend alignment)
-        - RSI < 40: +1 (not overbought)
+        - RSI 30-65: +1 (healthy zone)
         - Price > EMA20: +1 (above short-term MA)
-        - Volume > 20-day avg: +1 (volume confirmation)
-        - MACD > 0 or MACD crossover: +1 (momentum)
+        - Volume > 1.2x avg: +1 (volume confirmation)
+        - MACD > Signal AND MACD > 0: +1 (momentum)
+
+        FIX v9.9: Auto-calculate indicators if not present in DataFrame
+        ADJUSTED: BUY threshold lowered from 3 to 2.5 points
 
         Args:
             df: DataFrame with OHLCV and indicator data
@@ -436,57 +439,96 @@ class TechnicalScorer:
         if len(df) < 50:
             return "HOLD"
 
-        score = 0
+        score = 0.0
 
-        # Get indicators
+        # Get indicators - calculate if not present
         current_price = safe_get_latest(df, "close", 0)
-        ema20 = safe_get_latest(df, "ema20", 0)
-        ema50 = safe_get_latest(df, "ema50", 0)
-        rsi = safe_get_latest(df, "rsi", 50)
+
+        # Calculate EMA if not present
+        if "ema20" not in df.columns or df["ema20"].isnull().all():
+            ema20_series = df["close"].ewm(span=20, adjust=False).mean()
+            ema20 = ema20_series.iloc[-1]
+        else:
+            ema20 = safe_get_latest(df, "ema20", 0)
+
+        if "ema50" not in df.columns or df["ema50"].isnull().all():
+            ema50_series = df["close"].ewm(span=50, adjust=False).mean()
+            ema50 = ema50_series.iloc[-1]
+        else:
+            ema50 = safe_get_latest(df, "ema50", 0)
+
+        # Calculate RSI if not present
+        if "rsi" not in df.columns or df["rsi"].isnull().all():
+            delta = df["close"].diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / loss.replace(0, 1e-10)
+            rsi_series = 100 - (100 / (1 + rs))
+            rsi = rsi_series.iloc[-1] if not pd.isna(rsi_series.iloc[-1]) else 50
+        else:
+            rsi = safe_get_latest(df, "rsi", 50)
+
         current_volume = safe_get_latest(df, "volume", 0)
         avg_volume = df["volume"].tail(20).mean() if "volume" in df.columns else 0
 
-        # 1. EMA alignment (most important - 2 points)
+        # Calculate MACD if not present
+        if "macd" not in df.columns or df["macd"].isnull().all():
+            ema12 = df["close"].ewm(span=12, adjust=False).mean()
+            ema26 = df["close"].ewm(span=26, adjust=False).mean()
+            macd_series = ema12 - ema26
+            macd_signal_series = macd_series.ewm(span=9, adjust=False).mean()
+            macd = macd_series.iloc[-1]
+            macd_signal = macd_signal_series.iloc[-1]
+        else:
+            macd = safe_get_latest(df, "macd", 0)
+            macd_signal = safe_get_latest(df, "macd_signal", 0)
+
+        # 1. EMA alignment (RELAXED - was 2 points, now 1.5)
+        if ema20 > 0 and ema50 > 0:
+            if ema20 > ema50:
+                score += 1.5  # Bullish trend (was +2)
+            elif ema20 > ema50 * 0.99:  # Within 1% - potential crossover
+                score += 0.5  # NEW: Approaching crossover
+            elif ema20 < ema50 * 0.97:  # 3% below (was 2%)
+                score -= 2  # Bearish trend
+
+        # 1. EMA alignment (+2 points for bullish trend)
         if ema20 > 0 and ema50 > 0:
             if ema20 > ema50:
                 score += 2  # Bullish trend
             elif ema20 < ema50 * 0.98:  # 2% below
                 score -= 2  # Bearish trend
 
-        # 2. RSI check (1 point)
+        # 2. RSI check (+1 point)
         if 30 <= rsi <= 65:
             score += 1  # Healthy RSI zone for buying
         elif rsi > 70:
             score -= 1  # Overbought
 
-        # 3. Price vs EMA20 (1 point)
+        # 3. Price vs EMA20 (+1 point)
         if ema20 > 0:
             if current_price > ema20:
                 score += 1
             elif current_price < ema20 * 0.98:
                 score -= 1
 
-        # 4. Volume confirmation (1 point)
+        # 4. Volume confirmation (+1 point)
         if avg_volume > 0:
-            if current_volume > avg_volume * 1.2:
-                score += 1
-            elif current_volume < avg_volume * 0.5:
-                score -= 1
+            vol_ratio = current_volume / avg_volume
+            if vol_ratio > 1.2:
+                score += 1  # Above average volume
+            elif vol_ratio < 0.5:
+                score -= 1  # Low volume
 
-        # 5. MACD check
-        try:
-            if "macd" in df.columns:
-                macd = safe_get_latest(df, "macd", 0)
-                macd_signal = safe_get_latest(df, "macd_signal", 0)
-                if macd > macd_signal and macd > 0:
-                    score += 1
-                elif macd < macd_signal and macd < 0:
-                    score -= 1
-        except Exception:
-            pass
+        # 5. MACD check (+1 point)
+        # MACD already calculated above
+        if macd > macd_signal and macd > 0:
+            score += 1
+        elif macd < macd_signal and macd < 0:
+            score -= 1
 
-        # Decision
-        if score >= 3:
+        # Decision (ADJUSTED: BUY threshold lowered from 3 to 2.5)
+        if score >= 2.5:
             return "BUY"
         elif score <= -3:
             return "SELL"

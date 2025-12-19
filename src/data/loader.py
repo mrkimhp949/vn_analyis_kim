@@ -1,5 +1,5 @@
 """
-Data loader sử dụng TCBS API thay vì Yahoo Finance
+Data loader sử dụng vnstock library (VCI source)
 Hỗ trợ tốt cổ phiếu Việt Nam
 """
 
@@ -12,14 +12,19 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import pandas as pd
-import requests
 from src.config.exceptions import DataLoadError
 from src.utils.rate_limiter import tcbs_limiter
 
+# Import vnstock
+try:
+    from vnstock import Vnstock
+
+    VNSTOCK_AVAILABLE = True
+except ImportError:
+    VNSTOCK_AVAILABLE = False
+
 DATA_CACHE_DIR = "data_cache"
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
-
-TCBS_API_BASE = "https://apipubaws.tcbs.com.vn"
 
 # ✅ FIX: Ensure UTF-8 output trên mọi platform
 if hasattr(sys.stdout, "reconfigure"):
@@ -89,11 +94,11 @@ def load_data(
         except Exception:
             logger.warning(f"⚠️ Cache load failed for {symbol}. Refetching...")
 
-    # logger.info("📥 Downloading {symbol} from TCBS API...")
+    # logger.info("📥 Downloading {symbol} from vnstock...")
     try:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        df = _download_from_tcbs(symbol, start_dt, end_dt, resolution, data_type)
+        df = _download_from_vnstock(symbol, start_dt, end_dt, resolution, data_type)
     except Exception:
         logger.error(f"Failed to download data for {symbol}", exc_info=False)
         return pd.DataFrame()  # Return empty DataFrame on download failure
@@ -161,7 +166,7 @@ def load_data(
     return df
 
 
-def _download_from_tcbs(
+def _download_from_vnstock(
     symbol: str,
     start: datetime,
     end: datetime,
@@ -169,92 +174,106 @@ def _download_from_tcbs(
     data_type: str,
 ) -> pd.DataFrame:
     """
-    Tải dữ liệu từ TCBS API với rate limiting và retry logic
+    Tải dữ liệu từ vnstock library với VCI source
     """
     import time
+    import warnings
 
-    max_retries = 5
-    retry_delays = [5, 10, 20, 40, 60]  # Aggressive backoff để tránh 429
+    # Suppress vnstock advertising messages and warnings
+    warnings.filterwarnings("ignore")
+
+    # Suppress vnstock INFO logs (e.g., "Not a stock" messages)
+    logging.getLogger("vnstock").setLevel(logging.WARNING)
+    logging.getLogger("vnstock.common.data").setLevel(logging.WARNING)
+
+    if not VNSTOCK_AVAILABLE:
+        raise DataLoadError(
+            "vnstock library not installed. Run: pip install vnstock",
+            context={"symbol": symbol},
+        )
+
+    max_retries = 3
+    retry_delays = [2, 5, 10]
 
     for attempt in range(max_retries):
         try:
             # Apply rate limiting
             tcbs_limiter.wait()
 
-            url = f"{TCBS_API_BASE}/stock-insight/v1/stock/bars-long-term"
+            # Format dates for vnstock
+            start_str = start.strftime("%Y-%m-%d")
+            end_str = end.strftime("%Y-%m-%d")
 
-            # Convert resolution format: "1D" -> "D", "1H" -> "H", etc.
-            # TCBS API expects single letter format
-            api_resolution = resolution.upper().replace("1", "")
+            # Determine source based on data type
+            if data_type == "index":
+                # For index, use VCI source
+                stock = Vnstock().stock(symbol=symbol, source="VCI")
+            else:
+                # For regular stocks, use VCI source
+                stock = Vnstock().stock(symbol=symbol, source="VCI")
 
-            params = {
-                "ticker": symbol,
-                "type": data_type,
-                "resolution": api_resolution,
-                "from": int(start.timestamp()),
-                "to": int(end.timestamp()),
+            # Map resolution to vnstock interval
+            interval_map = {
+                "D": "1D",
+                "1D": "1D",
+                "W": "1W",
+                "1W": "1W",
+                "M": "1M",
+                "1M": "1M",
             }
+            interval = interval_map.get(resolution.upper(), "1D")
 
-            response = requests.get(url, params=params, timeout=10)
+            # Download data
+            df = stock.quote.history(start=start_str, end=end_str, interval=interval)
 
-            if response.status_code != 200:
-                if response.status_code in [429, 500, 502, 503, 504] and attempt < max_retries - 1:
-                    logger.warning(
-                        f"⚠️ TCBS API error {response.status_code} for {symbol}, retrying in {retry_delays[attempt]}s..."
-                    )
-                    time.sleep(retry_delays[attempt])
-                    continue
-                raise DataLoadError(
-                    f"TCBS API returned status {response.status_code}",
-                    context={"symbol": symbol, "status_code": response.status_code},
-                )
+            if df is None or df.empty:
+                empty_df = pd.DataFrame()
+                empty_df.source_error = "No data available"
+                return empty_df
 
-            data = response.json()
+            # Ensure correct column names
+            if "time" not in df.columns and "date" in df.columns:
+                df = df.rename(columns={"date": "time"})
 
-            if not isinstance(data, dict) or "data" not in data:
-                raise DataLoadError(
-                    "TCBS API returned invalid format",
-                    context={
-                        "symbol": symbol,
-                        "response_keys": (list(data.keys()) if isinstance(data, dict) else None),
-                    },
-                )
+            # Standardize columns
+            required_cols = ["time", "open", "high", "low", "close", "volume"]
+            for col in required_cols:
+                if col not in df.columns:
+                    # Try to find similar column
+                    for existing_col in df.columns:
+                        if col.lower() in existing_col.lower():
+                            df = df.rename(columns={existing_col: col})
+                            break
 
-            bars = data.get("data")
+            # Convert time column to datetime
+            if "time" in df.columns:
+                df["time"] = pd.to_datetime(df["time"])
 
-            if not bars:
-                df = pd.DataFrame()
-                df.source_error = "No data available"  # Attach info for caller
-                return df
+            # Select and clean columns
+            available_cols = [c for c in required_cols if c in df.columns]
+            df = df[available_cols]
 
-            df = pd.DataFrame(bars)
-            df = df.rename(columns={"tradingDate": "time"})
-            df["time"] = pd.to_datetime(df["time"])
-            df = df[["time", "open", "high", "low", "close", "volume"]]
-            df = df.dropna(subset=["time", "close"])
+            # Clean data
+            df = df.dropna(subset=["time", "close"] if "time" in df.columns else ["close"])
             df = df[df["close"] > 0]
-            df = df.drop_duplicates(subset=["time"], keep="last")
+            if "time" in df.columns:
+                df = df.drop_duplicates(subset=["time"], keep="last")
 
             return df
 
-        except DataLoadError:
-            # Re-raise DataLoadError as-is (don't wrap it)
-            raise
-
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            if attempt < max_retries - 1:
-                logger.warning(
-                    f"⚠️ Network error for {symbol}, retrying in {retry_delays[attempt]}s..."
-                )
-                time.sleep(retry_delays[attempt])
-                continue
-            raise DataLoadError(
-                f"Network error after {max_retries} retries", context={"symbol": symbol}
-            ) from e
-
         except Exception as e:
+            error_msg = str(e).lower()
+            # Check if it's a rate limit or network error
+            if any(x in error_msg for x in ["rate", "limit", "timeout", "connection", "network"]):
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"⚠️ vnstock error for {symbol}, retrying in {retry_delays[attempt]}s..."
+                    )
+                    time.sleep(retry_delays[attempt])
+                    continue
+
             raise DataLoadError(
-                "Unexpected error during download", context={"symbol": symbol}
+                f"vnstock download error: {str(e)[:100]}", context={"symbol": symbol}
             ) from e
 
     return pd.DataFrame()  # Return empty df if all retries fail
@@ -262,20 +281,18 @@ def _download_from_tcbs(
 
 # Test function
 if __name__ == "__main__":
-    print("Testing TCBS Data Loader...")
+    print("Testing vnstock Data Loader...")
 
-    test_symbols = ["VCB", "FPT", "VNM", "HPG", "VNINDEX"]
-    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    test_symbols = ["VCB", "FPT", "VNM", "HPG"]
+    start_date = (datetime.now() - timedelta(days=100)).strftime("%Y-%m-%d")
     end_date = datetime.now().strftime("%Y-%m-%d")
 
     for symbol in test_symbols:
         try:
-            data_type = "index" if symbol == "VNINDEX" else "stock"
             df = load_data(
                 symbol,
                 start_date=start_date,
                 end_date=end_date,
-                data_type=data_type,
                 use_cache=False,
             )
             if not df.empty:
@@ -284,5 +301,5 @@ if __name__ == "__main__":
                 print(f"   Latest close: {df['close'].iloc[-1]:,.0f}")
             else:
                 print(f"⚠️ {symbol}: No data returned.")
-        except Exception:
-            print(f"❌ {symbol}")
+        except Exception as e:
+            print(f"❌ {symbol}: {e}")

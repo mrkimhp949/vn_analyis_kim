@@ -85,10 +85,13 @@ WARRANT_SETTLEMENT = 0  # T+0 settlement
 WARRANT_LOT_SIZE = 100
 WARRANT_MIN_DAYS_TO_EXPIRY = 3  # Don't trade if < 3 days
 WARRANT_WARNING_DAYS = 30  # Warning if < 30 days
+WARRANT_DEFAULT_STOP_LOSS_PCT = 0.25  # 25% stop loss (wider due to high volatility)
+WARRANT_MAX_POSITION_PCT = 0.05  # Max 5% of portfolio in warrants
 
 # ETF trading rules
 ETF_PRICE_LIMIT = 0.07  # ±7% (same as stocks)
 ETF_LOT_SIZE = 100
+ETF_DEFAULT_STOP_LOSS_PCT = 0.05  # 5% stop loss (tighter due to lower volatility)
 
 
 class InstrumentType(Enum):
@@ -247,6 +250,131 @@ def get_price_limit(symbol: str) -> float:
         return WARRANT_PRICE_LIMIT
     else:
         return ETF_PRICE_LIMIT  # Same as stocks
+
+
+def get_settlement_days(symbol: str) -> int:
+    """
+    Get settlement days for instrument.
+
+    Vietnam market:
+    - Stocks/ETFs: T+2.5 (effectively T+2 for selling, T+3 for cash)
+    - Warrants: T+0 (same day settlement)
+
+    Args:
+        symbol: Instrument symbol
+
+    Returns:
+        Settlement days (0 for T+0, 2 for T+2)
+    """
+    instrument_type = detect_instrument_type(symbol)
+
+    if instrument_type == InstrumentType.WARRANT:
+        return WARRANT_SETTLEMENT  # T+0
+    else:
+        return 2  # T+2.5 for stocks/ETFs
+
+
+def get_stop_loss_pct(symbol: str) -> float:
+    """
+    Get recommended stop loss percentage for instrument.
+
+    Warrants need wider stops due to higher volatility (±50% limit).
+    ETFs can use tighter stops due to lower volatility.
+
+    Args:
+        symbol: Instrument symbol
+
+    Returns:
+        Stop loss as decimal (0.25 for 25%, 0.05 for 5%)
+    """
+    instrument_type = detect_instrument_type(symbol)
+
+    if instrument_type == InstrumentType.WARRANT:
+        return WARRANT_DEFAULT_STOP_LOSS_PCT  # 25%
+    elif instrument_type == InstrumentType.ETF:
+        return ETF_DEFAULT_STOP_LOSS_PCT  # 5%
+    else:
+        return 0.07  # 7% for stocks
+
+
+def check_price_limits(
+    symbol: str,
+    current_price: float,
+    reference_price: float,
+) -> Dict:
+    """
+    Check if current price is near price limits.
+
+    IMPORTANT: Warrants have ±50% limit vs ±7% for stocks/ETFs.
+
+    Args:
+        symbol: Instrument symbol
+        current_price: Current price
+        reference_price: Reference price (previous close)
+
+    Returns:
+        Dict with ceiling, floor, near_limit, limit_type
+    """
+    limit_pct = get_price_limit(symbol)
+
+    ceiling = reference_price * (1 + limit_pct)
+    floor = reference_price * (1 - limit_pct)
+
+    # Check distance to limits
+    ceiling_distance = (ceiling - current_price) / ceiling if ceiling > 0 else 0
+    floor_distance = (current_price - floor) / current_price if current_price > 0 else 0
+
+    result = {
+        "symbol": symbol,
+        "instrument_type": detect_instrument_type(symbol).value,
+        "limit_pct": limit_pct * 100,
+        "ceiling": ceiling,
+        "floor": floor,
+        "current_price": current_price,
+        "ceiling_distance_pct": ceiling_distance * 100,
+        "floor_distance_pct": floor_distance * 100,
+        "near_ceiling": ceiling_distance < 0.02,  # Within 2%
+        "near_floor": floor_distance < 0.02,
+        "at_ceiling": current_price >= ceiling * 0.999,
+        "at_floor": current_price <= floor * 1.001,
+    }
+
+    # Determine if near any limit
+    result["near_limit"] = result["near_ceiling"] or result["near_floor"]
+
+    if result["at_ceiling"]:
+        result["limit_type"] = "CEILING"
+        result["warning"] = f"⚠️ At ceiling price ({limit_pct*100:.0f}% limit)"
+    elif result["at_floor"]:
+        result["limit_type"] = "FLOOR"
+        result["warning"] = f"⚠️ At floor price (-{limit_pct*100:.0f}% limit)"
+    elif result["near_ceiling"]:
+        result["limit_type"] = "NEAR_CEILING"
+        result["warning"] = f"Near ceiling: {ceiling_distance*100:.1f}% away"
+    elif result["near_floor"]:
+        result["limit_type"] = "NEAR_FLOOR"
+        result["warning"] = f"Near floor: {floor_distance*100:.1f}% away"
+    else:
+        result["limit_type"] = None
+        result["warning"] = None
+
+    return result
+
+
+def can_day_trade(symbol: str) -> bool:
+    """
+    Check if instrument can be day traded.
+
+    Warrants with T+0 settlement can be day traded.
+    Stocks/ETFs with T+2.5 cannot be day traded with same capital.
+
+    Args:
+        symbol: Instrument symbol
+
+    Returns:
+        True if can day trade
+    """
+    return get_settlement_days(symbol) == 0
 
 
 # =============================================================================
@@ -507,6 +635,137 @@ class WarrantStrategy:
         shares = (shares // WARRANT_LOT_SIZE) * WARRANT_LOT_SIZE
 
         return max(WARRANT_LOT_SIZE, shares)
+
+    def calculate_stop_loss(
+        self,
+        entry_price: float,
+        warrant_info: WarrantInfo,
+        underlying_price: float,
+    ) -> Dict:
+        """
+        Calculate stop loss for warrant position.
+
+        IMPORTANT: Warrants have ±50% daily limit, so stops need to be wider.
+        Also consider time decay and delta.
+
+        Args:
+            entry_price: Warrant entry price
+            warrant_info: Warrant information
+            underlying_price: Underlying stock price
+
+        Returns:
+            Dict with stop_loss, stop_pct, reasoning
+        """
+        # Base stop loss percentage based on days to expiry
+        if warrant_info.days_to_expiry <= 7:
+            base_stop_pct = 0.35  # 35% - very tight due to expiry risk
+        elif warrant_info.days_to_expiry <= 14:
+            base_stop_pct = 0.30  # 30%
+        elif warrant_info.days_to_expiry <= 30:
+            base_stop_pct = 0.25  # 25%
+        else:
+            base_stop_pct = 0.20  # 20% - more room for longer-dated
+
+        # Adjust based on delta (higher delta = tighter stop)
+        delta = abs(self._estimate_delta(underlying_price, warrant_info))
+
+        if delta > 0.7:  # Deep ITM - behaves more like stock
+            stop_pct = base_stop_pct * 0.7
+        elif delta > 0.5:  # ATM
+            stop_pct = base_stop_pct
+        else:  # OTM - more volatile
+            stop_pct = min(0.40, base_stop_pct * 1.3)
+
+        stop_loss = entry_price * (1 - stop_pct)
+
+        return {
+            "stop_loss": stop_loss,
+            "stop_pct": stop_pct * 100,
+            "base_stop_pct": base_stop_pct * 100,
+            "delta_adjusted": True,
+            "delta": delta,
+            "days_to_expiry": warrant_info.days_to_expiry,
+            "reasoning": (
+                f"Warrant stop {stop_pct*100:.0f}% "
+                f"(base: {base_stop_pct*100:.0f}%, delta: {delta:.2f})"
+            ),
+        }
+
+    def check_intraday_opportunity(
+        self,
+        warrant_info: WarrantInfo,
+        warrant_df: pd.DataFrame,
+        underlying_df: pd.DataFrame,
+    ) -> Dict:
+        """
+        Check for intraday trading opportunity (T+0 settlement).
+
+        Warrants with T+0 settlement allow same-day round trips.
+
+        Args:
+            warrant_info: Warrant information
+            warrant_df: Warrant price data
+            underlying_df: Underlying stock price data
+
+        Returns:
+            Dict with can_daytrade, opportunity_type, reasoning
+        """
+        result = {
+            "can_daytrade": True,  # Warrants are T+0
+            "settlement": "T+0",
+            "opportunity_type": None,
+            "reasoning": [],
+            "confidence": 50,
+        }
+
+        try:
+            if warrant_df is None or underlying_df is None:
+                return result
+
+            # Get current prices
+            warrant_price = float(warrant_df["close"].iloc[-1])
+            underlying_price = float(underlying_df["close"].iloc[-1])
+
+            # Check intraday range
+            if len(warrant_df) > 0:
+                warrant_high = float(warrant_df["high"].iloc[-1])
+                warrant_low = float(warrant_df["low"].iloc[-1])
+                intraday_range = (
+                    (warrant_high - warrant_low) / warrant_low if warrant_low > 0 else 0
+                )
+
+                if intraday_range > 0.10:  # >10% intraday range
+                    result["opportunity_type"] = "HIGH_VOLATILITY_SCALP"
+                    result["reasoning"].append(f"High intraday range: {intraday_range*100:.1f}%")
+                    result["confidence"] += 15
+
+            # Check delta for quick moves
+            delta = abs(self._estimate_delta(underlying_price, warrant_info))
+
+            if delta > 0.6:
+                result["opportunity_type"] = result["opportunity_type"] or "DELTA_PLAY"
+                result["reasoning"].append(f"High delta ({delta:.2f}): tracks underlying closely")
+                result["confidence"] += 10
+
+            # Check time decay warning
+            if warrant_info.days_to_expiry <= 7:
+                result["reasoning"].append("⚠️ Heavy time decay - intraday only recommended")
+                result["confidence"] -= 10
+
+            # Check leverage
+            if warrant_price > 0:
+                leverage = underlying_price / (warrant_price * warrant_info.conversion_ratio)
+                if 3 <= leverage <= 8:
+                    result["reasoning"].append(f"Good leverage ({leverage:.1f}x) for day trade")
+                    result["confidence"] += 5
+                elif leverage > 10:
+                    result["reasoning"].append(f"⚠️ High leverage ({leverage:.1f}x) - risky")
+                    result["confidence"] -= 10
+
+        except Exception as e:
+            logger.debug(f"Intraday opportunity check error: {e}")
+
+        return result
 
 
 # =============================================================================
@@ -769,6 +1028,119 @@ class SpecialInstrumentsHandler:
             return 1.2  # Can take larger position in ETFs
         else:
             return 1.0
+
+    def get_stop_loss(
+        self,
+        symbol: str,
+        entry_price: float,
+        **kwargs,
+    ) -> Dict:
+        """
+        Get stop loss for special instrument.
+
+        Args:
+            symbol: Instrument symbol
+            entry_price: Entry price
+            **kwargs: Additional parameters (warrant_info, underlying_price)
+
+        Returns:
+            Dict with stop_loss, stop_pct, reasoning
+        """
+        instrument_type = detect_instrument_type(symbol)
+
+        if instrument_type == InstrumentType.WARRANT:
+            warrant_info = kwargs.get("warrant_info")
+            underlying_price = kwargs.get("underlying_price", 0)
+
+            if warrant_info and underlying_price > 0:
+                return self.warrant_strategy.calculate_stop_loss(
+                    entry_price, warrant_info, underlying_price
+                )
+            else:
+                # Default warrant stop
+                return {
+                    "stop_loss": entry_price * (1 - WARRANT_DEFAULT_STOP_LOSS_PCT),
+                    "stop_pct": WARRANT_DEFAULT_STOP_LOSS_PCT * 100,
+                    "reasoning": f"Default warrant stop: {WARRANT_DEFAULT_STOP_LOSS_PCT*100:.0f}%",
+                }
+
+        elif instrument_type == InstrumentType.ETF:
+            # ETF uses tighter stop
+            return {
+                "stop_loss": entry_price * (1 - ETF_DEFAULT_STOP_LOSS_PCT),
+                "stop_pct": ETF_DEFAULT_STOP_LOSS_PCT * 100,
+                "reasoning": f"ETF stop: {ETF_DEFAULT_STOP_LOSS_PCT*100:.0f}% (lower volatility)",
+            }
+
+        else:
+            # Default stock stop
+            return {
+                "stop_loss": entry_price * 0.93,  # 7% stop
+                "stop_pct": 7.0,
+                "reasoning": "Stock default stop: 7%",
+            }
+
+    def get_price_limits(
+        self,
+        symbol: str,
+        reference_price: float,
+    ) -> Dict:
+        """
+        Get price limits for instrument.
+
+        Args:
+            symbol: Instrument symbol
+            reference_price: Reference price (previous close)
+
+        Returns:
+            Dict with ceiling, floor, limit_pct
+        """
+        return check_price_limits(symbol, reference_price, reference_price)
+
+    def can_day_trade(self, symbol: str) -> bool:
+        """
+        Check if instrument can be day traded.
+
+        Warrants: Yes (T+0)
+        Stocks/ETFs: No (T+2.5)
+        """
+        return can_day_trade(symbol)
+
+    def get_settlement_days(self, symbol: str) -> int:
+        """Get settlement days for instrument."""
+        return get_settlement_days(symbol)
+
+    def check_intraday_opportunity(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        **kwargs,
+    ) -> Optional[Dict]:
+        """
+        Check for intraday trading opportunity.
+
+        Only applicable for warrants (T+0 settlement).
+
+        Args:
+            symbol: Instrument symbol
+            df: Price data
+            **kwargs: Additional parameters
+
+        Returns:
+            Dict with opportunity info or None
+        """
+        instrument_type = detect_instrument_type(symbol)
+
+        if instrument_type == InstrumentType.WARRANT:
+            warrant_info = kwargs.get("warrant_info")
+            underlying_df = kwargs.get("underlying_df")
+
+            if warrant_info and underlying_df is not None:
+                return self.warrant_strategy.check_intraday_opportunity(
+                    warrant_info, df, underlying_df
+                )
+
+        return None
 
 
 # Singleton instance
