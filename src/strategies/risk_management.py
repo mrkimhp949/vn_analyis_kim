@@ -12,8 +12,23 @@ class RiskManager:
         self.max_position_pct = max_position_pct
         self.risk_per_trade_pct = risk_per_trade_pct
 
+    def _normalize_price(self, price: float) -> float:
+        """Normalize price to VND (vnstock returns prices in thousands)."""
+        try:
+            from src.utils.vietnam_market import normalize_price_to_vnd
+            return normalize_price_to_vnd(price)
+        except ImportError:
+            # Fallback: if price < 1000, assume it's in thousands
+            if 0 < price < 1000:
+                return price * 1000
+            return price
+
     def calculate_position_size(self, price, atr, confidence, signal="BUY"):
         """Base position sizing calculation"""
+        # Normalize price to VND
+        price = self._normalize_price(price)
+        atr = self._normalize_price(atr) if atr < 1000 else atr
+        
         # Calculate max risk per trade
         max_risk = self.total_capital * self.risk_per_trade_pct
 

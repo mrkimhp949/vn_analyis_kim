@@ -12,7 +12,7 @@
     "sharpe_ratio": 0.0
   },
   "technical": {
-    "total_signals": 33,
+    "total_signals": 36,
     "total_trades": 9,
     "winning_trades": 1,
     "losing_trades": 8,
@@ -23,5 +23,5 @@
     "avg_pnl": -3771713.341666667,
     "sharpe_ratio": -0.9684154652239668
   },
-  "last_updated": "2025-12-17T18:32:14.941340"
+  "last_updated": "2025-12-23T20:18:00.061583"
 }

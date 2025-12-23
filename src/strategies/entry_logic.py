@@ -135,6 +135,9 @@ from src.utils.indicators import IndicatorUtils, StopLossCalculator
 from src.utils.validation import DataValidator
 from utils.dataframe_utils import safe_get_latest, safe_rolling_operation
 
+# Import realtime data for live pricing
+from src.data.realtime_provider import get_realtime_manager
+
 # Import modularized components
 from src.strategies.entry_signal import SignalStrength, EntrySignal, create_no_signal
 from src.strategies.technical_checks import TechnicalChecker
@@ -671,8 +674,21 @@ class ImprovedEntryLogic:
         if not is_valid or signal_type != "BUY":
             return create_no_signal(f"No buy signal: {signal_type}", telemetry)
 
-        # Get current price
+        # Get current price - try live price first, fallback to historical close
         current_price = safe_get_latest(df, "close", 0)
+        
+        # Try to get live price for more accurate current pricing
+        try:
+            realtime_manager = get_realtime_manager()
+            live_quote = realtime_manager.get_quote(symbol)
+            if live_quote and live_quote.price > 0:
+                current_price = live_quote.price
+                logger.debug(f"[{symbol}] Using live price: {current_price:.0f} VND")
+            else:
+                logger.debug(f"[{symbol}] Using historical close: {current_price:.0f} VND")
+        except Exception as e:
+            logger.debug(f"[{symbol}] Could not get live price, using historical: {e}")
+        
         if current_price <= 0:
             return create_no_signal("Invalid current price", telemetry)
 

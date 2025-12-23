@@ -8,7 +8,7 @@ These perform individual technical validations and return detailed results.
 import hashlib
 import logging
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -300,8 +300,17 @@ class TechnicalChecker:
             result["near_limit"] = True
             result["limit_type"] = "CEILING"
             symbol_tag = f"[{symbol}] " if symbol else ""
+            # Use helper function for price display
+            try:
+                from src.utils.vietnam_market import format_price_display
+                display_price = format_price_display(current_price, include_unit=False)
+                display_ceiling = format_price_display(ceiling_price, include_unit=False)
+            except ImportError:
+                # Fallback: vnstock returns price in thousands (17.05 = 17,050 VND)
+                display_price = f"{current_price * 1000 if current_price < 1000 else current_price:,.0f}"
+                display_ceiling = f"{ceiling_price * 1000 if ceiling_price < 1000 else ceiling_price:,.0f}"
             result["warning"] = (
-                f"{symbol_tag}Giá gần trần ({current_price:,.0f} / {ceiling_price:,.0f}), "
+                f"{symbol_tag}Giá gần trần ({display_price} / {display_ceiling} VND), "
                 f"chỉ còn {distance_to_ceiling:.2f}% - RỦI RO CAO, không thể mua thêm"
             )
             logger.warning(f"🚫 {result['warning']}")
@@ -310,8 +319,17 @@ class TechnicalChecker:
             result["near_limit"] = True
             result["limit_type"] = "FLOOR"
             symbol_tag = f"[{symbol}] " if symbol else ""
+            # Use helper function for price display
+            try:
+                from src.utils.vietnam_market import format_price_display
+                display_price = format_price_display(current_price, include_unit=False)
+                display_floor = format_price_display(floor_price, include_unit=False)
+            except ImportError:
+                # Fallback: vnstock returns price in thousands (17.05 = 17,050 VND)
+                display_price = f"{current_price * 1000 if current_price < 1000 else current_price:,.0f}"
+                display_floor = f"{floor_price * 1000 if floor_price < 1000 else floor_price:,.0f}"
             result["warning"] = (
-                f"{symbol_tag}Giá gần sàn ({current_price:,.0f} / {floor_price:,.0f}), "
+                f"{symbol_tag}Giá gần sàn ({display_price} / {display_floor} VND), "
                 f"chỉ còn {distance_to_floor:.2f}% - Có thể là panic selling"
             )
             logger.warning(f"⚠️ {result['warning']}")

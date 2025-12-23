@@ -160,6 +160,17 @@ class EnhancedEntryLogicV2:
             except ImportError:
                 logger.warning("Alert manager not available")
 
+    def _normalize_price(self, price: float) -> float:
+        """Normalize price to VND (vnstock returns prices in thousands)."""
+        try:
+            from src.utils.vietnam_market import normalize_price_to_vnd
+            return normalize_price_to_vnd(price)
+        except ImportError:
+            # Fallback: if price < 1000, assume it's in thousands
+            if 0 < price < 1000:
+                return price * 1000
+            return price
+
     def analyze_entry(
         self,
         symbol: str,
@@ -192,8 +203,9 @@ class EnhancedEntryLogicV2:
         warnings = []
         recommendations = []
 
-        # Get current price
+        # Get current price and normalize to VND
         current_price = df["close"].iloc[-1] if not df.empty else 0
+        current_price = self._normalize_price(current_price)
 
         # Initialize scores
         technical_score = 50.0
@@ -533,6 +545,7 @@ class EnhancedEntryLogicV2:
             return False, "Insufficient volume data"
 
         avg_volume = df["volume"].tail(20).mean()
+        # current_price is already normalized to VND
         avg_value = avg_volume * current_price
 
         min_liquidity = 2_000_000_000  # 2B VND
