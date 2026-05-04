@@ -1,20 +1,112 @@
-<h1>n8n-auto-upload</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>n8n-auto-upload</title>
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f7fa;
+    margin: 0;
+    padding: 0;
+}
 
-<p>This is a web-based application that allows users to upload video content to TikTok using the official TikTok API.</p>
+.container {
+    max-width: 800px;
+    margin: 50px auto;
+    background: #ffffff;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+}
 
-<h2>How it works</h2>
-<ol>
-<li>User logs in via TikTok OAuth</li>
-<li>User provides a video source</li>
-<li>The system processes the video</li>
-<li>The video is uploaded to TikTok</li>
-</ol>
+h1 {
+    color: #111;
+}
 
-<h2>Features</h2>
-<ul>
-<li>Secure OAuth authentication</li>
-<li>Video upload via TikTok Content Posting API</li>
-<li>No permanent data storage</li>
-</ul>
+h2 {
+    margin-top: 25px;
+    color: #333;
+}
 
-<p><a href="#">Login with TikTok (Demo)</a></p>
+p {
+    color: #555;
+    line-height: 1.6;
+}
+
+ul, ol {
+    padding-left: 20px;
+}
+
+li {
+    margin-bottom: 8px;
+}
+
+.button {
+    display: inline-block;
+    margin-top: 20px;
+    padding: 12px 20px;
+    background: #fe2c55;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: bold;
+}
+
+.button:hover {
+    background: #d61f45;
+}
+
+.footer {
+    margin-top: 40px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.footer a {
+    color: #555;
+    margin: 0 10px;
+    text-decoration: none;
+}
+
+.footer a:hover {
+    text-decoration: underline;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+    <h1>n8n-auto-upload</h1>
+
+    <p>
+        n8n-auto-upload is a web-based application that allows users to upload video content 
+        to TikTok using the official TikTok Content Posting API.
+    </p>
+
+    <h2>How it works</h2>
+    <ol>
+        <li>User logs in via TikTok OAuth</li>
+        <li>User provides a video source</li>
+        <li>The system processes the video</li>
+        <li>The video is uploaded to TikTok</li>
+    </ol>
+
+    <h2>Features</h2>
+    <ul>
+        <li>Secure OAuth authentication</li>
+        <li>Video publishing via official API</li>
+        <li>No permanent data storage</li>
+    </ul>
+
+    <a href="#" class="button">Login with TikTok</a>
+
+    <div class="footer">
+        <a href="/vn_analyis_kim/terms.html">Terms of Service</a> |
+        <a href="/vn_analyis_kim/privacy.html">Privacy Policy</a>
+    </div>
+</div>
+
+</body>
+</html>
