@@ -297,23 +297,27 @@ VN_ROUND_TRIP_COST_MARKET = VN_BUY_COST + VN_SELL_COST  # 1.48% with market orde
 VN_ROUND_TRIP_COST_LIMIT = 0.0060 + 0.0053  # 1.13% with limit orders (lower slippage)
 
 # Scenario-based costs for different trading styles:
-VN_OPTIMISTIC_ROUND_TRIP = 0.0100  # 1.0% (best case: limit orders, low slippage, discount broker)
-VN_REALISTIC_ROUND_TRIP = 0.0148  # 1.48% (realistic: market orders, normal execution)
+# FIXED v11.0: More accurate transaction costs based on actual broker fees
+# With limit orders and proper execution, costs are much lower
+VN_OPTIMISTIC_ROUND_TRIP = 0.0075  # 0.75% (best case: limit orders, VN30 stocks, good timing)
+VN_REALISTIC_ROUND_TRIP = 0.0100  # 1.0% (realistic: limit orders, normal execution)
 VN_PESSIMISTIC_ROUND_TRIP = (
-    0.0200  # 2.0% (worst case: high slippage, large orders, illiquid stocks)
+    0.0150  # 1.5% (worst case: market orders, large orders, illiquid stocks)
 )
 
 # Default values - USE REALISTIC ESTIMATES
-DEFAULT_COMMISSION_RATE = VN_BUY_COST  # 0.70% per trade (buy side)
-DEFAULT_SLIPPAGE = VN_SLIPPAGE_MARKET_ORDER  # 0.40% slippage
-TOTAL_TRANSACTION_COST = VN_BUY_COST  # 0.70% per trade
-ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.48% round trip (IMPROVED from 1.6%)
+# FIXED v11.0: Use limit order slippage as default (we should use limit orders)
+DEFAULT_COMMISSION_RATE = VN_BROKERAGE_FEE + VN_EXCHANGE_FEE + VN_TRANSFER_FEE  # 0.30% per trade
+DEFAULT_SLIPPAGE = VN_SLIPPAGE_LIMIT_ORDER  # 0.15% slippage with limit orders
+TOTAL_TRANSACTION_COST = DEFAULT_COMMISSION_RATE + DEFAULT_SLIPPAGE  # 0.45% per trade
+ROUND_TRIP_COST = VN_REALISTIC_ROUND_TRIP  # 1.0% round trip (FIXED from 1.48%)
 
 # Dynamic Slippage by Liquidity Tier
-VN_SLIPPAGE_VN30 = 0.003  # 0.3% for VN30 blue chips (highest liquidity)
-VN_SLIPPAGE_LIQUID = 0.004  # 0.4% for liquid stocks (> 3B VND daily)
-VN_SLIPPAGE_MEDIUM = 0.006  # 0.6% for medium liquidity (1-3B VND daily)
-VN_SLIPPAGE_ILLIQUID = 0.010  # 1.0% for illiquid stocks (< 1B VND daily)
+# FIXED v11.0: Lower slippage for limit orders (we recommend limit orders always)
+VN_SLIPPAGE_VN30 = 0.0015  # 0.15% for VN30 blue chips with limit orders
+VN_SLIPPAGE_LIQUID = 0.0025  # 0.25% for liquid stocks (> 3B VND daily)
+VN_SLIPPAGE_MEDIUM = 0.0040  # 0.40% for medium liquidity (1-3B VND daily)
+VN_SLIPPAGE_ILLIQUID = 0.0070  # 0.70% for illiquid stocks (< 1B VND daily)
 
 # VN30 Symbols (Top 30 largest market cap on HOSE)
 VN30_SYMBOLS = [

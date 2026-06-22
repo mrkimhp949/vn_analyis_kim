@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Odd-Lot Trading Handler for Vietnam Market
+Odd-Lot Handler - Handle odd-lot trading for Vietnam market
 
-Handles trading of shares less than standard lot size (100 shares).
-Odd-lot trading was enabled on Vietnam stock market since 2021.
+Vietnam market rules for odd-lots (<100 shares):
+1. Cannot trade odd-lots on main board (HOSE/HNX continuous session)
+2. Must use odd-lot board with different rules:
+   - Only sell orders allowed (no buying odd-lots)
+   - Price must be at or below reference price
+   - Matched at end of session only
+   - Lower liquidity, may not fill
 
-Key features:
-- Odd-lot validation
-- Spread premium calculation
-- Commission calculation (minimum commission applies)
-- Position reconciliation
+This module helps:
+- Detect odd-lot positions
+- Calculate optimal exit strategies
+- Track odd-lot cleanup performance
 
 Author: Trading Bot Team
 Version: 1.0.0
@@ -17,274 +21,390 @@ Version: 1.0.0
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
-
-from src.config.constants import (
-    VIETNAM_LOT_SIZE,
-    VN_ODD_LOT_ENABLED,
-    VN_ODD_LOT_MIN_QTY,
-    VN_ODD_LOT_MAX_QTY,
-    VN_ODD_LOT_SPREAD_PREMIUM,
-    VN_ODD_LOT_MIN_COMMISSION,
-    VN_BROKERAGE_FEE,
-)
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Vietnam lot size
+VN_LOT_SIZE = 100
+
 
 @dataclass
-class OddLotResult:
-    """Result of odd-lot calculation"""
+class OddLotPosition:
+    """Represents an odd-lot position."""
 
-    is_odd_lot: bool
-    quantity: int
-    standard_lots: int  # Full 100-share lots
-    odd_shares: int  # Remaining odd shares
+    symbol: str
+    odd_lot_shares: int  # Shares < 100
+    full_lot_shares: int  # Shares in full lots
+    total_shares: int
+    avg_price: float
+    current_price: float
+    unrealized_pnl_pct: float
 
-    # Cost estimates
-    spread_premium_pct: float = 0.0
-    estimated_slippage: float = 0.0
-    commission: float = 0.0
+    @property
+    def odd_lot_value(self) -> float:
+        """Value of odd-lot portion."""
+        return self.odd_lot_shares * self.current_price
 
-    # Recommendations
-    can_trade: bool = True
-    warning: str = ""
-    recommendation: str = ""
+    @property
+    def is_profitable(self) -> bool:
+        """Check if position is profitable."""
+        return self.unrealized_pnl_pct > 0
+
+
+@dataclass
+class OddLotExitRecommendation:
+    """Recommendation for handling odd-lot."""
+
+    symbol: str
+    action: str  # "SELL_NOW", "WAIT", "COMBINE", "IGNORE"
+    reason: str
+    recommended_price: float
+    expected_fill_probability: float  # 0-1
+    estimated_cost_pct: float  # Cost as % of odd-lot value
+    priority: int  # 1-5, 5 = highest priority
 
 
 class OddLotHandler:
     """
-    Handle odd-lot trading for Vietnam market
+    Handle odd-lot positions for Vietnam market.
 
-    Vietnam market rules:
-    - Standard lot size: 100 shares
-    - Odd-lot: 1-99 shares
-    - Odd-lots can only be traded through special odd-lot board
-    - Wider spreads and less liquidity for odd-lots
-    - Minimum commission may apply
-
-    Usage:
-        handler = OddLotHandler()
-
-        # Check if order is odd-lot
-        result = handler.analyze_order(150)  # 1 lot + 50 odd shares
-
-        # Split order into lots and odd-lot
-        lots, odds = handler.split_order(150)  # Returns (100, 50)
+    Key features:
+    - Detect odd-lots in portfolio
+    - Recommend optimal exit timing
+    - Calculate true cost of odd-lot cleanup
+    - Track odd-lot fill rates
     """
 
-    def __init__(
-        self,
-        lot_size: int = VIETNAM_LOT_SIZE,
-        odd_lot_enabled: bool = VN_ODD_LOT_ENABLED,
-        spread_premium: float = VN_ODD_LOT_SPREAD_PREMIUM,
-        min_commission: float = VN_ODD_LOT_MIN_COMMISSION,
-    ):
-        self.lot_size = lot_size
-        self.odd_lot_enabled = odd_lot_enabled
-        self.spread_premium = spread_premium
-        self.min_commission = min_commission
+    # Thresholds
+    MIN_ODD_LOT_VALUE_TO_CARE = 500_000  # 500K VND - below this, may not be worth effort
+    MAX_ODD_LOT_HOLD_DAYS = 5  # Max days to hold odd-lot before forced cleanup
+    ODD_LOT_DISCOUNT_PCT = 0.02  # Typical 2% discount for odd-lot sells
 
-    def is_odd_lot(self, quantity: int) -> bool:
-        """Check if quantity is odd-lot"""
-        return 0 < quantity < self.lot_size
+    # Fill probability by market conditions
+    FILL_PROB_BULL = 0.85  # Higher fill rate in bull market
+    FILL_PROB_SIDEWAYS = 0.70
+    FILL_PROB_BEAR = 0.50  # Lower fill rate in bear market
 
-    def has_odd_portion(self, quantity: int) -> bool:
-        """Check if quantity has odd portion"""
-        return quantity % self.lot_size != 0
+    def __init__(self):
+        self._odd_lot_history: Dict[str, List[Dict]] = {}
+        self._fill_stats: Dict[str, Dict] = {}
+        logger.info("✅ OddLotHandler initialized")
 
-    def split_order(self, quantity: int) -> Tuple[int, int]:
+    def detect_odd_lots(self, positions: Dict[str, Dict]) -> List[OddLotPosition]:
         """
-        Split order into standard lots and odd-lot portion
+        Detect odd-lot positions in portfolio.
 
         Args:
-            quantity: Total shares to trade
+            positions: Dict of symbol -> position data
 
         Returns:
-            Tuple of (standard_lot_shares, odd_lot_shares)
-
-        Example:
-            split_order(150) -> (100, 50)
-            split_order(100) -> (100, 0)
-            split_order(50) -> (0, 50)
+            List of OddLotPosition objects
         """
-        standard_lots = (quantity // self.lot_size) * self.lot_size
-        odd_shares = quantity % self.lot_size
-        return standard_lots, odd_shares
+        odd_lots = []
 
-    def analyze_order(
+        for symbol, pos in positions.items():
+            shares = pos.get("shares", 0)
+
+            if shares <= 0:
+                continue
+
+            odd_lot_shares = shares % VN_LOT_SIZE
+            full_lot_shares = shares - odd_lot_shares
+
+            if odd_lot_shares > 0:
+                avg_price = pos.get("avg_price", 0)
+                current_price = pos.get("metadata", {}).get("last_price", avg_price)
+
+                if avg_price > 0:
+                    pnl_pct = (current_price - avg_price) / avg_price
+                else:
+                    pnl_pct = 0
+
+                odd_lots.append(
+                    OddLotPosition(
+                        symbol=symbol,
+                        odd_lot_shares=odd_lot_shares,
+                        full_lot_shares=full_lot_shares,
+                        total_shares=shares,
+                        avg_price=avg_price,
+                        current_price=current_price,
+                        unrealized_pnl_pct=pnl_pct,
+                    )
+                )
+
+        return odd_lots
+
+    def get_exit_recommendation(
         self,
-        quantity: int,
-        price: float,
-        is_sell: bool = False,
-    ) -> OddLotResult:
+        odd_lot: OddLotPosition,
+        market_regime: str = "SIDEWAYS",
+        days_held: int = 0,
+        reference_price: float = 0,
+    ) -> OddLotExitRecommendation:
         """
-        Analyze order for odd-lot implications
+        Get recommendation for handling an odd-lot position.
 
         Args:
-            quantity: Number of shares
-            price: Share price
-            is_sell: True if selling
+            odd_lot: OddLotPosition to analyze
+            market_regime: Current market regime
+            days_held: Days position has been held
+            reference_price: Today's reference price (for odd-lot board)
 
         Returns:
-            OddLotResult with analysis
+            OddLotExitRecommendation
         """
-        standard_lots, odd_shares = self.split_order(quantity)
-        is_odd = odd_shares > 0
+        symbol = odd_lot.symbol
+        odd_value = odd_lot.odd_lot_value
 
-        result = OddLotResult(
-            is_odd_lot=self.is_odd_lot(quantity),
-            quantity=quantity,
-            standard_lots=standard_lots // self.lot_size,
-            odd_shares=odd_shares,
+        # Get fill probability based on market
+        if market_regime == "BULL":
+            fill_prob = self.FILL_PROB_BULL
+        elif market_regime == "BEAR":
+            fill_prob = self.FILL_PROB_BEAR
+        else:
+            fill_prob = self.FILL_PROB_SIDEWAYS
+
+        # Adjust fill probability based on historical data
+        if symbol in self._fill_stats:
+            historical_fill_rate = self._fill_stats[symbol].get("fill_rate", fill_prob)
+            fill_prob = (fill_prob + historical_fill_rate) / 2
+
+        # Calculate recommended price (at or below reference)
+        if reference_price > 0:
+            recommended_price = reference_price * (1 - self.ODD_LOT_DISCOUNT_PCT)
+        else:
+            recommended_price = odd_lot.current_price * (1 - self.ODD_LOT_DISCOUNT_PCT)
+
+        # Estimate cost (discount + potential non-fill cost)
+        estimated_cost_pct = self.ODD_LOT_DISCOUNT_PCT + (1 - fill_prob) * 0.02
+
+        # Determine action
+        if odd_value < self.MIN_ODD_LOT_VALUE_TO_CARE:
+            action = "IGNORE"
+            reason = f"Odd-lot value {odd_value:,.0f} VND too small to prioritize"
+            priority = 1
+
+        elif days_held >= self.MAX_ODD_LOT_HOLD_DAYS:
+            action = "SELL_NOW"
+            reason = f"Held {days_held} days, exceeds max hold period"
+            priority = 5
+
+        elif odd_lot.is_profitable and odd_lot.unrealized_pnl_pct > 0.02:
+            action = "SELL_NOW"
+            reason = f"Profitable ({odd_lot.unrealized_pnl_pct:.1%}), lock in gains"
+            priority = 4
+
+        elif market_regime == "BEAR":
+            action = "SELL_NOW"
+            reason = "Bear market - reduce exposure"
+            priority = 4
+
+        elif odd_lot.full_lot_shares == 0:
+            # Only odd-lot remaining
+            action = "SELL_NOW"
+            reason = "Only odd-lot remaining, cleanup position"
+            priority = 3
+
+        elif odd_lot.unrealized_pnl_pct < -0.05:
+            # Losing position
+            action = "SELL_NOW"
+            reason = f"Losing position ({odd_lot.unrealized_pnl_pct:.1%}), cut losses"
+            priority = 4
+
+        else:
+            action = "WAIT"
+            reason = "No urgency, wait for better conditions"
+            priority = 2
+
+        return OddLotExitRecommendation(
+            symbol=symbol,
+            action=action,
+            reason=reason,
+            recommended_price=recommended_price,
+            expected_fill_probability=fill_prob,
+            estimated_cost_pct=estimated_cost_pct,
+            priority=priority,
         )
 
-        if not is_odd:
-            result.recommendation = "Standard lot order - no special handling needed"
-            return result
-
-        # Check if odd-lot trading is enabled
-        if not self.odd_lot_enabled:
-            result.can_trade = False
-            result.warning = "Odd-lot trading is disabled"
-            result.recommendation = f"Round to nearest lot: {standard_lots} shares"
-            return result
-
-        # Calculate costs for odd-lot portion
-        odd_value = odd_shares * price
-
-        # Spread premium
-        result.spread_premium_pct = self.spread_premium
-        result.estimated_slippage = odd_value * self.spread_premium
-
-        # Commission (minimum applies for small orders)
-        standard_commission = odd_value * VN_BROKERAGE_FEE
-        result.commission = max(standard_commission, self.min_commission)
-
-        # Generate recommendation
-        if result.is_odd_lot:
-            # Pure odd-lot order
-            total_cost_pct = (result.commission + result.estimated_slippage) / odd_value * 100
-
-            if total_cost_pct > 2.0:
-                result.warning = f"High cost for odd-lot: {total_cost_pct:.1f}% of value"
-                result.recommendation = (
-                    "Consider waiting to accumulate 100+ shares for better execution"
-                )
-            else:
-                result.recommendation = "Odd-lot order acceptable"
-        else:
-            # Mixed order (lots + odd-lot)
-            if odd_shares < 50:
-                result.recommendation = (
-                    f"Consider selling {odd_shares} odd shares separately or "
-                    f"rounding down to {standard_lots} shares"
-                )
-            else:
-                result.recommendation = (
-                    f"Order will be split: {standard_lots} in standard board, "
-                    f"{odd_shares} in odd-lot board"
-                )
-
-        return result
-
-    def calculate_odd_lot_cost(
+    def calculate_cleanup_cost(
         self,
-        quantity: int,
-        price: float,
-    ) -> dict:
+        odd_lots: List[OddLotPosition],
+        market_regime: str = "SIDEWAYS",
+    ) -> Dict:
         """
-        Calculate total cost for odd-lot trade
+        Calculate total cost to cleanup all odd-lots.
+
+        Args:
+            odd_lots: List of odd-lot positions
+            market_regime: Current market regime
 
         Returns:
             Dict with cost breakdown
         """
-        value = quantity * price
+        total_odd_value = sum(ol.odd_lot_value for ol in odd_lots)
+        total_discount_cost = total_odd_value * self.ODD_LOT_DISCOUNT_PCT
 
-        # Standard fees
-        commission = max(value * VN_BROKERAGE_FEE, self.min_commission)
-        spread_cost = value * self.spread_premium
+        # Estimate non-fill risk cost
+        if market_regime == "BULL":
+            non_fill_risk = 0.15
+        elif market_regime == "BEAR":
+            non_fill_risk = 0.50
+        else:
+            non_fill_risk = 0.30
 
-        # Estimated total
-        total_cost = commission + spread_cost
-        total_cost_pct = (total_cost / value * 100) if value > 0 else 0
+        non_fill_cost = total_odd_value * non_fill_risk * 0.02  # 2% additional if not filled
 
         return {
-            "quantity": quantity,
-            "price": price,
-            "value": value,
-            "commission": commission,
-            "spread_cost": spread_cost,
-            "total_cost": total_cost,
-            "total_cost_pct": total_cost_pct,
-            "is_expensive": total_cost_pct > 2.0,
+            "total_odd_lot_value": total_odd_value,
+            "num_odd_lots": len(odd_lots),
+            "estimated_discount_cost": total_discount_cost,
+            "estimated_non_fill_cost": non_fill_cost,
+            "total_estimated_cost": total_discount_cost + non_fill_cost,
+            "cost_as_pct_of_value": (
+                (total_discount_cost + non_fill_cost) / total_odd_value * 100
+                if total_odd_value > 0
+                else 0
+            ),
+            "market_regime": market_regime,
         }
 
-    def reconcile_position(
+    def record_odd_lot_fill(
         self,
-        current_qty: int,
-        target_qty: int,
-    ) -> dict:
+        symbol: str,
+        shares: int,
+        order_price: float,
+        fill_price: float,
+        filled: bool,
+        fill_time_minutes: int = 0,
+    ) -> None:
         """
-        Calculate how to reconcile position with odd-lot handling
+        Record odd-lot fill result for tracking.
 
         Args:
-            current_qty: Current position quantity
-            target_qty: Desired position quantity
-
-        Returns:
-            Dict with reconciliation plan
+            symbol: Stock symbol
+            shares: Number of odd-lot shares
+            order_price: Price order was placed at
+            fill_price: Actual fill price (0 if not filled)
+            filled: Whether order was filled
+            fill_time_minutes: Time to fill in minutes
         """
-        diff = target_qty - current_qty
+        if symbol not in self._odd_lot_history:
+            self._odd_lot_history[symbol] = []
 
-        if diff == 0:
-            return {
-                "action": "NONE",
-                "standard_lot_qty": 0,
-                "odd_lot_qty": 0,
-                "total_qty": 0,
-            }
-
-        action = "BUY" if diff > 0 else "SELL"
-        abs_diff = abs(diff)
-
-        standard_lots, odd_shares = self.split_order(abs_diff)
-
-        return {
-            "action": action,
-            "standard_lot_qty": standard_lots,
-            "odd_lot_qty": odd_shares,
-            "total_qty": abs_diff,
-            "has_odd_lot": odd_shares > 0,
-            "recommendation": (
-                f"{action} {standard_lots} via standard board"
-                + (f" + {odd_shares} via odd-lot board" if odd_shares > 0 else "")
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "shares": shares,
+            "order_price": order_price,
+            "fill_price": fill_price,
+            "filled": filled,
+            "fill_time_minutes": fill_time_minutes,
+            "slippage_pct": (
+                (order_price - fill_price) / order_price if filled and order_price > 0 else 0
             ),
         }
 
-    def round_to_lot(self, quantity: int, round_up: bool = False) -> int:
+        self._odd_lot_history[symbol].append(record)
+
+        # Update fill stats
+        self._update_fill_stats(symbol)
+
+        logger.info(
+            f"📊 Odd-lot {'filled' if filled else 'not filled'}: "
+            f"{symbol} {shares} shares @ {fill_price:,.0f}"
+        )
+
+    def _update_fill_stats(self, symbol: str) -> None:
+        """Update fill statistics for a symbol."""
+        history = self._odd_lot_history.get(symbol, [])
+
+        if not history:
+            return
+
+        fills = [h for h in history if h["filled"]]
+
+        self._fill_stats[symbol] = {
+            "total_attempts": len(history),
+            "successful_fills": len(fills),
+            "fill_rate": len(fills) / len(history) if history else 0,
+            "avg_slippage_pct": sum(f["slippage_pct"] for f in fills) / len(fills) if fills else 0,
+            "avg_fill_time_minutes": (
+                sum(f["fill_time_minutes"] for f in fills) / len(fills) if fills else 0
+            ),
+        }
+
+    def get_fill_stats(self, symbol: Optional[str] = None) -> Dict:
+        """Get fill statistics."""
+        if symbol:
+            return self._fill_stats.get(symbol, {})
+        return self._fill_stats
+
+    def should_avoid_creating_odd_lot(
+        self,
+        current_shares: int,
+        shares_to_sell: int,
+    ) -> Tuple[bool, int]:
         """
-        Round quantity to nearest lot size
+        Check if a partial sell would create an odd-lot.
 
         Args:
-            quantity: Number of shares
+            current_shares: Current position size
+            shares_to_sell: Shares planning to sell
+
+        Returns:
+            Tuple of (would_create_odd_lot, recommended_shares_to_sell)
+        """
+        remaining = current_shares - shares_to_sell
+
+        if remaining <= 0:
+            return False, shares_to_sell
+
+        odd_lot_remaining = remaining % VN_LOT_SIZE
+
+        if odd_lot_remaining > 0:
+            # Would create odd-lot
+            # Option 1: Sell more to avoid odd-lot
+            sell_more = shares_to_sell + odd_lot_remaining
+
+            # Option 2: Sell less to keep full lots
+            sell_less = shares_to_sell - (VN_LOT_SIZE - odd_lot_remaining)
+            sell_less = max(0, (sell_less // VN_LOT_SIZE) * VN_LOT_SIZE)
+
+            # Recommend the option closer to original intent
+            if abs(sell_more - shares_to_sell) <= abs(sell_less - shares_to_sell):
+                recommended = sell_more
+            else:
+                recommended = sell_less if sell_less > 0 else sell_more
+
+            return True, recommended
+
+        return False, shares_to_sell
+
+    def round_to_lot_size(self, shares: int, round_up: bool = False) -> int:
+        """
+        Round shares to nearest lot size.
+
+        Args:
+            shares: Number of shares
             round_up: If True, round up; otherwise round down
 
         Returns:
-            Rounded quantity
+            Rounded share count
         """
         if round_up:
-            return ((quantity + self.lot_size - 1) // self.lot_size) * self.lot_size
-        return (quantity // self.lot_size) * self.lot_size
+            return ((shares + VN_LOT_SIZE - 1) // VN_LOT_SIZE) * VN_LOT_SIZE
+        else:
+            return (shares // VN_LOT_SIZE) * VN_LOT_SIZE
 
 
 # Singleton instance
-_odd_lot_handler: Optional[OddLotHandler] = None
+_handler_instance: Optional[OddLotHandler] = None
 
 
 def get_odd_lot_handler() -> OddLotHandler:
-    """Get singleton odd-lot handler"""
-    global _odd_lot_handler
-    if _odd_lot_handler is None:
-        _odd_lot_handler = OddLotHandler()
-    return _odd_lot_handler
+    """Get singleton OddLotHandler instance."""
+    global _handler_instance
+    if _handler_instance is None:
+        _handler_instance = OddLotHandler()
+    return _handler_instance

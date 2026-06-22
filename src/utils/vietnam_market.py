@@ -117,6 +117,79 @@ except ImportError as e:
 # Lot size (minimum trading unit)
 VN_LOT_SIZE = 100
 
+# =============================================================================
+# PRICE UNIT NORMALIZATION
+# =============================================================================
+# vnstock/VCI API returns prices in thousands (27.05 = 27,050 VND)
+# This threshold helps detect and normalize prices to VND
+
+VN_PRICE_UNIT_THRESHOLD = 1000  # Prices below this are likely in thousands
+
+
+def normalize_price_to_vnd(price: float) -> float:
+    """
+    Normalize price to VND.
+    
+    vnstock/VCI API returns prices in thousands (e.g., 27.05 = 27,050 VND).
+    This function detects and converts to full VND.
+    
+    Args:
+        price: Price value (may be in thousands or VND)
+        
+    Returns:
+        Price in VND
+        
+    Example:
+        >>> normalize_price_to_vnd(27.05)  # From vnstock
+        27050.0
+        >>> normalize_price_to_vnd(27050)  # Already in VND
+        27050.0
+    """
+    if price <= 0:
+        return price
+    # If price is below threshold, it's likely in thousands
+    if price < VN_PRICE_UNIT_THRESHOLD:
+        return price * 1000
+    return price
+
+
+def is_price_in_thousands(price: float) -> bool:
+    """
+    Check if price appears to be in thousands (vnstock format).
+    
+    Args:
+        price: Price value
+        
+    Returns:
+        True if price is likely in thousands
+    """
+    return 0 < price < VN_PRICE_UNIT_THRESHOLD
+
+
+def format_price_display(price: float, include_unit: bool = True) -> str:
+    """
+    Format price for display, auto-detecting unit.
+    
+    Args:
+        price: Price value (may be in thousands or VND)
+        include_unit: Whether to include "VND" suffix
+        
+    Returns:
+        Formatted price string
+        
+    Example:
+        >>> format_price_display(27.05)
+        "27,050 VND"
+        >>> format_price_display(27050)
+        "27,050 VND"
+    """
+    normalized = normalize_price_to_vnd(price)
+    formatted = f"{normalized:,.0f}"
+    if include_unit:
+        formatted += " VND"
+    return formatted
+
+
 # Tick sizes based on price ranges (HOSE rules)
 VN_TICK_SIZES = {
     "low": {"max_price": 10_000, "tick": 10},

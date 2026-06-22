@@ -1,0 +1,49 @@
+{
+  "symbol_stats": {
+    "VNM": {
+      "symbol": "VNM",
+      "total_executions": 2,
+      "avg_slippage_pct": 0.0018445121951219511,
+      "max_slippage_pct": 0.0024390243902439024,
+      "min_slippage_pct": 0.00125,
+      "avg_slippage_deviation": -0.001155487804878049,
+      "avg_execution_time_ms": 1000,
+      "buy_executions": 1,
+      "sell_executions": 1,
+      "market_order_count": 1,
+      "limit_order_count": 1,
+      "last_updated": "2025-12-19T20:41:14.604683"
+    },
+    "HPG": {
+      "symbol": "HPG",
+      "total_executions": 1,
+      "avg_slippage_pct": 0.002,
+      "max_slippage_pct": 0.002,
+      "min_slippage_pct": 0.002,
+      "avg_slippage_deviation": -0.001,
+      "avg_execution_time_ms": 2000,
+      "buy_executions": 1,
+      "sell_executions": 0,
+      "market_order_count": 0,
+      "limit_order_count": 1,
+      "last_updated": "2025-12-19T20:41:14.605682"
+    }
+  },
+  "daily_stats": {
+    "2025-12-19": {
+      "date": "2025-12-19",
+      "total_executions": 3,
+      "total_volume": 2000,
+      "total_value": 106000000.0,
+      "avg_slippage_pct": 0.001896341463414634,
+      "total_slippage_cost": 199918.5975609756,
+      "total_commission_cost": 265125.0,
+      "worst_slippage_symbol": "VNM",
+      "worst_slippage_pct": 0.0024390243902439024,
+      "best_slippage_symbol": "VNM",
+      "best_slippage_pct": 0.00125
+    }
+  },
+  "calibration": {},
+  "last_updated": "2025-12-19T20:41:14.605682"
+}
