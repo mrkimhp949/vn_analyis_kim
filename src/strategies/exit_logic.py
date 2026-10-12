@@ -57,7 +57,7 @@ except ImportError:
     MIN_TRADES_FOR_POOR_PERFORMER = 5
     POOR_PERFORMER_CONSECUTIVE_LOSSES = 2
     POOR_PERFORMER_WIN_RATE_THRESHOLD = 0.35
-    ROUND_TRIP_COST = 0.016
+    ROUND_TRIP_COST = 0.010  # FIXED v11.0: 1.0% with limit orders
     VOLUME_SURGE_THRESHOLD = 1.5
     HOLDING_DAYS_DEFAULT = 10  # TIGHTENED: was 15
     ADX_STRONG_TREND_THRESHOLD = 25
@@ -229,9 +229,10 @@ class ExitConfig:
     high_beta_threshold: float = 1.2
     low_beta_threshold: float = 0.8
 
-    # RELAXED v10.3: Minimum R:R enforcement
-    min_risk_reward_ratio: float = 1.0  # RELAXED: was 1.5 - allow smaller R:R
-    target_risk_reward_ratio: float = 1.5  # RELAXED: was 2.0
+    # FIXED v11.0: Minimum R:R enforcement - MUST be >= 1.5 for positive EV
+    # With ~1% round trip cost and 55% accuracy, R:R < 1.5 = negative expected value
+    min_risk_reward_ratio: float = 1.5  # FIXED: was 1.0 - minimum for positive EV
+    target_risk_reward_ratio: float = 2.0  # FIXED: was 1.5 - target for good trades
 
     # Trailing Stop - RELAXED v10.3 for VN market
     # Wider trailing to avoid whipsaws

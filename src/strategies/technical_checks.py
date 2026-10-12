@@ -8,7 +8,7 @@ These perform individual technical validations and return detailed results.
 import hashlib
 import logging
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -300,8 +300,17 @@ class TechnicalChecker:
             result["near_limit"] = True
             result["limit_type"] = "CEILING"
             symbol_tag = f"[{symbol}] " if symbol else ""
+            # Use helper function for price display
+            try:
+                from src.utils.vietnam_market import format_price_display
+                display_price = format_price_display(current_price, include_unit=False)
+                display_ceiling = format_price_display(ceiling_price, include_unit=False)
+            except ImportError:
+                # Fallback: vnstock returns price in thousands (17.05 = 17,050 VND)
+                display_price = f"{current_price * 1000 if current_price < 1000 else current_price:,.0f}"
+                display_ceiling = f"{ceiling_price * 1000 if ceiling_price < 1000 else ceiling_price:,.0f}"
             result["warning"] = (
-                f"{symbol_tag}Giá gần trần ({current_price:,.0f} / {ceiling_price:,.0f}), "
+                f"{symbol_tag}Giá gần trần ({display_price} / {display_ceiling} VND), "
                 f"chỉ còn {distance_to_ceiling:.2f}% - RỦI RO CAO, không thể mua thêm"
             )
             logger.warning(f"🚫 {result['warning']}")
@@ -310,8 +319,17 @@ class TechnicalChecker:
             result["near_limit"] = True
             result["limit_type"] = "FLOOR"
             symbol_tag = f"[{symbol}] " if symbol else ""
+            # Use helper function for price display
+            try:
+                from src.utils.vietnam_market import format_price_display
+                display_price = format_price_display(current_price, include_unit=False)
+                display_floor = format_price_display(floor_price, include_unit=False)
+            except ImportError:
+                # Fallback: vnstock returns price in thousands (17.05 = 17,050 VND)
+                display_price = f"{current_price * 1000 if current_price < 1000 else current_price:,.0f}"
+                display_floor = f"{floor_price * 1000 if floor_price < 1000 else floor_price:,.0f}"
             result["warning"] = (
-                f"{symbol_tag}Giá gần sàn ({current_price:,.0f} / {floor_price:,.0f}), "
+                f"{symbol_tag}Giá gần sàn ({display_price} / {display_floor} VND), "
                 f"chỉ còn {distance_to_floor:.2f}% - Có thể là panic selling"
             )
             logger.warning(f"⚠️ {result['warning']}")
@@ -863,11 +881,17 @@ class TechnicalChecker:
             too_high = max_correlation > 0.70
             good_diversification = max_correlation < 0.30 and avg_correlation < 0.25
 
+            # FIXED v11.0: Add sector diversification check
+            # Prevent buying multiple stocks in same sector close together
+            sector_check = self._check_sector_concentration(symbol, existing_symbols)
+
             return {
-                "too_high": too_high,
-                "good_diversification": good_diversification,
+                "too_high": too_high or sector_check["blocked"],
+                "good_diversification": good_diversification and not sector_check["warning"],
                 "max_correlation": max_correlation,
                 "avg_correlation": avg_correlation,
+                "sector_concentration": sector_check.get("concentration", 0.0),
+                "sector_warning": sector_check.get("message", ""),
             }
         except Exception as e:
             logger.warning(f"⚠️ Error checking portfolio correlation: {e}")
@@ -876,6 +900,75 @@ class TechnicalChecker:
                 "good_diversification": False,
                 "max_correlation": 0.0,
             }
+
+    def _check_sector_concentration(self, new_symbol: str, existing_symbols: List[str]) -> Dict:
+        """
+        FIXED v11.0: Check if adding new symbol would create excessive sector concentration.
+
+        Rules:
+        - If already have 2+ positions in same sector → BLOCK new entry
+        - If already have 1 position in same sector → WARNING (reduce position size)
+        - Sensitive sectors (Banking, Real Estate, Securities) have stricter limits
+
+        Args:
+            new_symbol: Symbol being considered for entry
+            existing_symbols: Symbols already in portfolio
+
+        Returns:
+            Dict with blocked, warning, concentration, message
+        """
+        try:
+            from src.config.constants import SECTOR_MAP, get_sector_for_symbol
+
+            if not existing_symbols:
+                return {"blocked": False, "warning": False, "concentration": 0.0}
+
+            # Get sector of new symbol
+            new_sector = get_sector_for_symbol(new_symbol)
+
+            # Count existing positions in same sector
+            same_sector_count = 0
+            for sym in existing_symbols:
+                if get_sector_for_symbol(sym) == new_sector:
+                    same_sector_count += 1
+
+            concentration = same_sector_count / len(existing_symbols) if existing_symbols else 0.0
+
+            # Sensitive sectors have stricter limits
+            sensitive_sectors = ["BANKING", "REAL_ESTATE", "SECURITIES"]
+
+            # BLOCK if too concentrated
+            if new_sector in sensitive_sectors:
+                # For sensitive sectors: max 1 position
+                if same_sector_count >= 1:
+                    return {
+                        "blocked": True,
+                        "warning": False,
+                        "concentration": concentration,
+                        "message": f"❌ Already have {same_sector_count} position(s) in {new_sector} (sensitive sector)",
+                    }
+            else:
+                # For other sectors: max 2 positions
+                if same_sector_count >= 2:
+                    return {
+                        "blocked": True,
+                        "warning": False,
+                        "concentration": concentration,
+                        "message": f"❌ Already have {same_sector_count} positions in {new_sector} (max 2)",
+                    }
+                elif same_sector_count == 1:
+                    return {
+                        "blocked": False,
+                        "warning": True,
+                        "concentration": concentration,
+                        "message": f"⚠️ Already have 1 position in {new_sector}",
+                    }
+
+            return {"blocked": False, "warning": False, "concentration": concentration}
+
+        except Exception as e:
+            logger.debug(f"Sector concentration check error: {e}")
+            return {"blocked": False, "warning": False, "concentration": 0.0}
 
     def check_volume_manipulation(self, df: pd.DataFrame) -> Dict:
         """
